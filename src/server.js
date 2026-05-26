@@ -357,7 +357,7 @@ app.get('/api/jobs/search-now', async (req,res,next)=>{
   try{ 
     const keyword = req.query.keyword ? String(req.query.keyword) : null; 
     const result = await searchSeace(keyword);
-    await upsertOpportunities(result.items) || []);
+    await upsertOpportunities(result.items || []);
     res.json({
       ok:true, 
       test:true, 
