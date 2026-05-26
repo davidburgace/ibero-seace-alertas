@@ -9,7 +9,7 @@ const app = express();
 app.use(cors({ origin: process.env.FRONTEND_URL?.split(',') || '*' }));
 app.use(express.json());
 
-const VERSION = '0.9.0';
+const VERSION = '0.10.0';
 const MODE = 'opennegocio-safe-v2';
 
 const SUPABASE_KEY = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -95,27 +95,27 @@ function normalizeOpportunity(raw, keyword){
 
 function textToOpportunity(text, keyword, index=0){
   const joined = clean(text);
-  if(!joined || joined.length < 35) return null;
-  const lower = joined.toLowerCase();
-  const kw0 = String(keyword || '').toLowerCase().split(' ')[0];
-  if(kw0 && !lower.includes(kw0)) return null;
+  if(!joined || joined.length < 20) return null;
 
-  const parts = joined.split(/(?=Entidad|Objeto|Descripción|Monto|Fecha|Región|Departamento|Nomenclatura|Código)/i)
-    .map(clean).filter(Boolean);
+  // Acepta filas de tabla aunque el texto esté truncado o el primer término no aparezca completo.
+  const opportunityWords = /(adquisici[oó]n|contrataci[oó]n|mobiliario|silla|mesa|carpeta|locker|armario|estante|escritorio|bien|servicio|procedimiento|nomenclatura|gobierno|municipalidad|hospital|ministerio|ugel|regional|entidad)/i;
+  if(!opportunityWords.test(joined)) return null;
+
   const amountMatch = joined.match(/S\/?\s*([0-9][0-9.,]+)/i) || joined.match(/\b([0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]{2})?)\b/);
-  const dateMatch = joined.match(/\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\b/) || joined.match(/\b\d{4}\-\d{2}\-\d{2}\b/);
+  const dateMatch = joined.match(/\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?\b/) || joined.match(/\b\d{4}\-\d{2}\-\d{2}\b/);
 
-  const entityLine = parts.find(p=>/(municipalidad|gobierno regional|ministerio|hospital|universidad|ugel|direcci[oó]n|unidad ejecutora|instituto|entidad)/i.test(p));
-  const titleLine = parts.find(p=>/(mobiliario|silla|mesa|carpeta|locker|armario|hospital|melamine|estante|escritorio|adquisici[oó]n|contrataci[oó]n|bien)/i.test(p));
+  const lines = joined.split(/(?=GOBIERNO|MUNICIPALIDAD|MINISTERIO|HOSPITAL|UNIVERSIDAD|UGEL|DIRECCI[ÓO]N|ADQUISICI[ÓO]N|CONTRATACI[ÓO]N|LP-|AS-|SIE-|CP-)|\|/i).map(clean).filter(Boolean);
+  const entityLine = lines.find(p=>/(municipalidad|gobierno regional|ministerio|hospital|universidad|ugel|direcci[oó]n|unidad ejecutora|instituto|entidad)/i.test(p)) || lines[0];
+  const titleLine = lines.find(p=>/(mobiliario|silla|mesa|carpeta|locker|armario|hospital|melamine|estante|escritorio|adquisici[oó]n|contrataci[oó]n|bien|servicio)/i.test(p)) || joined.slice(0,260);
 
   return normalizeOpportunity({
     external_id: makeId(['openegocio', keyword, index, entityLine || '', titleLine || joined.slice(0,120), dateMatch?.[0] || new Date().toISOString().slice(0,10)]),
-    title: titleLine || joined.slice(0,220),
+    title: titleLine || joined.slice(0,260),
     entity: entityLine || 'Entidad no identificada',
     region: 'No especificada',
     amount: amountMatch?.[1] || null,
     published_date: dateMatch?.[0] || new Date().toISOString().slice(0,10),
-    source_url: SEACE_URLS.openNegocioBuscar
+    source_url: SEACE_URLS.openNegocio
   }, keyword);
 }
 
@@ -150,8 +150,19 @@ async function launchBrowser(){
 }
 
 async function fillBestInput(page, keyword, diagnostics){
+  // OpenNegocio tiene varios campos. Llenamos los campos de texto visibles para reproducir la búsqueda manual.
+  try{
+    const advanced = page.getByText(/Búsqueda avanzada|Busqueda avanzada/i).first();
+    if(await advanced.isVisible({ timeout:1500 })){
+      await advanced.click({ timeout:2000 }).catch(()=>{});
+      diagnostics.push('Se intentó abrir Búsqueda avanzada.');
+      await page.waitForTimeout(800);
+    }
+  }catch{}
+
   const inputs = await page.locator('input:not([type=hidden]), textarea').all();
   diagnostics.push(`Inputs detectados: ${inputs.length}`);
+  let filled = 0;
 
   for(const input of inputs){
     try{
@@ -160,38 +171,59 @@ async function fillBestInput(page, keyword, diagnostics){
         const placeholder = await input.getAttribute('placeholder').catch(()=>null);
         const aria = await input.getAttribute('aria-label').catch(()=>null);
         const type = await input.getAttribute('type').catch(()=>null);
-        diagnostics.push(`Input visible: ${JSON.stringify({placeholder, aria, type, box})}`);
-        if(box && box.width > 40 && box.height > 10){
+        const value = await input.inputValue().catch(()=>null);
+        diagnostics.push(`Input visible: ${JSON.stringify({placeholder, aria, type, value, box})}`);
+        if(box && box.width > 40 && box.height > 10 && (!type || ['text','search',''].includes(String(type).toLowerCase()))){
           await input.click({ timeout:1500 });
           await input.fill(keyword, { timeout:2500 });
-          await page.waitForTimeout(800);
-          diagnostics.push('Se llenó campo de búsqueda.');
-          return true;
+          filled++;
+          await page.waitForTimeout(250);
         }
       }
     }catch(e){
       diagnostics.push(`No se pudo llenar input: ${e.message}`);
     }
   }
-  diagnostics.push('No se encontró campo de búsqueda visible.');
-  return false;
+
+  // También intenta insertar en campos con label Descripción si el framework no reaccionó al fill normal.
+  try{
+    await page.evaluate((kw)=>{
+      const els = Array.from(document.querySelectorAll('input:not([type=hidden]), textarea'));
+      for(const el of els){
+        const rect = el.getBoundingClientRect();
+        if(rect.width > 40 && rect.height > 10){
+          el.value = kw;
+          el.dispatchEvent(new Event('input', { bubbles:true }));
+          el.dispatchEvent(new Event('change', { bubbles:true }));
+        }
+      }
+    }, keyword);
+    diagnostics.push('Se dispararon eventos input/change manuales.');
+  }catch(e){ diagnostics.push(`No se pudieron disparar eventos manuales: ${e.message}`); }
+
+  diagnostics.push(`Campos llenados: ${filled}`);
+  return filled > 0;
 }
 
 async function clickSearch(page, diagnostics){
   const labels = ['Buscar','Consultar','Filtrar','Aplicar','Search'];
   for(const label of labels){
     try{
-      const btn = page.getByText(label, { exact:false }).first();
-      if(await btn.isVisible({ timeout:1000 })){
-        await btn.click({ timeout:2500 });
-        diagnostics.push(`Click en botón: ${label}`);
-        return true;
+      const btns = await page.getByText(label, { exact:false }).all();
+      for(const btn of btns){
+        if(await btn.isVisible({ timeout:800 })){
+          await btn.click({ timeout:2500 });
+          diagnostics.push(`Click en botón: ${label}`);
+          await page.waitForTimeout(2500);
+          return true;
+        }
       }
     }catch{}
   }
   try{
     await page.keyboard.press('Enter');
     diagnostics.push('Se presionó Enter.');
+    await page.waitForTimeout(2500);
     return true;
   }catch(e){
     diagnostics.push(`No se pudo presionar Enter: ${e.message}`);
@@ -200,33 +232,42 @@ async function clickSearch(page, diagnostics){
 }
 
 async function extractRows(page, keyword, diagnostics){
-  await page.waitForTimeout(8000);
+  // Espera explícitamente texto típico de resultado en OpenNegocio.
+  await page.waitForTimeout(12000);
 
   const result = await page.evaluate((kw) => {
     const clean = s => String(s||'').replace(/\s+/g,' ').trim();
-    const kw0 = String(kw||'').toLowerCase().split(' ')[0];
-    const selectors = [
-      'tr','[role=row]','.card','.mat-row','.MuiTableRow-root',
-      '.ant-table-row','li','article','.resultado','.result','.item',
-      '.p-card','.ui-card','.ng-star-inserted'
-    ];
-
+    const body = clean(document.body.innerText || '');
     const out = [];
-    for(const sel of selectors){
+
+    // 1) Extrae filas de tabla reales.
+    document.querySelectorAll('table tbody tr, table tr, [role=row]').forEach((tr)=>{
+      const cells = Array.from(tr.querySelectorAll('td, th, [role=cell], [role=gridcell]')).map(td=>clean(td.innerText || td.textContent || '')).filter(Boolean);
+      const text = cells.length ? cells.join(' | ') : clean(tr.innerText || tr.textContent || '');
+      if(text.length > 35) out.push({ selector:'row', cells, text:text.slice(0,1500) });
+    });
+
+    // 2) Extrae bloques visuales si no hay tabla estándar.
+    ['.ng-star-inserted','.mat-row','.p-datatable-tbody tr','.ui-table-tbody tr','.card','.item','li'].forEach(sel=>{
       document.querySelectorAll(sel).forEach((el)=>{
         const text = clean(el.innerText || el.textContent || '');
-        if(text.length > 35 && (!kw0 || text.toLowerCase().includes(kw0))) {
-          out.push({ selector: sel, text: text.slice(0,1200) });
-        }
+        if(text.length > 45) out.push({ selector:sel, cells:[], text:text.slice(0,1500) });
       });
+    });
+
+    // 3) Si todo falla, corta el cuerpo por entidades/procedimientos.
+    if(!out.length){
+      body.split(/(?=GOBIERNO|MUNICIPALIDAD|MINISTERIO|HOSPITAL|UNIVERSIDAD|UGEL|DIRECCI[ÓO]N|ADQUISICI[ÓO]N|CONTRATACI[ÓO]N|LP-|AS-|SIE-|CP-)/i)
+        .map(clean)
+        .filter(x=>x.length>50)
+        .forEach(x=>out.push({selector:'body-chunk', cells:[], text:x.slice(0,1500)}));
     }
 
-    const body = clean(document.body.innerText || '');
     return {
       url: location.href,
       title: document.title,
-      bodyStart: body.slice(0,900),
-      matches: [...new Map(out.map(x=>[x.text,x])).values()].slice(0,30)
+      bodyStart: body.slice(0,1200),
+      matches: [...new Map(out.map(x=>[x.text,x])).values()].slice(0,50)
     };
   }, keyword);
 
@@ -235,7 +276,12 @@ async function extractRows(page, keyword, diagnostics){
   diagnostics.push(`Texto inicial: ${result.bodyStart}`);
   diagnostics.push(`Bloques extraídos: ${result.matches.length}`);
 
-  return result.matches.map((m,i)=>textToOpportunity(m.text, keyword, i)).filter(Boolean);
+  const rows = result.matches
+    .map((m,i)=>textToOpportunity(m.text, keyword, i))
+    .filter(Boolean);
+
+  diagnostics.push(`Oportunidades normalizadas: ${rows.length}`);
+  return rows;
 }
 
 async function searchOpenNegocioWithBrowser(keyword){
@@ -244,26 +290,27 @@ async function searchOpenNegocioWithBrowser(keyword){
   const { browser, page } = await launchBrowser();
 
   try{
-    // En algunas SPA, navegar directamente al hash puede devolver error desde servidor.
-    // Por eso se abre la base y luego se cambia el hash dentro del navegador.
-    diagnostics.push(`Abriendo base: ${SEACE_URLS.openNegocioBase}`);
-    await page.goto(SEACE_URLS.openNegocioBase, { waitUntil:'domcontentloaded', timeout:45000 });
-    await page.waitForTimeout(3000);
+    diagnostics.push(`Abriendo OpenNegocio directo: ${SEACE_URLS.openNegocio}`);
+    await page.goto(SEACE_URLS.openNegocio, { waitUntil:'domcontentloaded', timeout:60000 });
+    await page.waitForTimeout(8000);
 
-    let bodyText = await page.locator('body').innerText({ timeout:5000 }).catch(()=>'');
-    diagnostics.push(`Base texto inicial: ${clean(bodyText).slice(0,500)}`);
+    let bodyText = await page.locator('body').innerText({ timeout:8000 }).catch(()=>'');
+    diagnostics.push(`Texto inicial directo: ${clean(bodyText).slice(0,800)}`);
 
+    // Si el servidor responde ruta no válida antes de cargar la SPA, reintenta cargando base sin depender del hash.
     if(/ruta no v[aá]lida|invalid path/i.test(bodyText)){
-      diagnostics.push('La base devolvió ruta no válida. Intentando contratos menores como respaldo.');
-    }else{
-      await page.evaluate(() => { window.location.hash = '#/buscar'; });
+      diagnostics.push('Directo devolvió ruta no válida. Reintentando base y luego hash.');
+      await page.goto('https://prod4.seace.gob.pe/openegocio/', { waitUntil:'domcontentloaded', timeout:60000 });
       await page.waitForTimeout(4000);
-      diagnostics.push(`Hash aplicado: ${await page.url()}`);
-
-      await fillBestInput(page, keyword, diagnostics);
-      await clickSearch(page, diagnostics);
-      rows.push(...await extractRows(page, keyword, diagnostics));
+      await page.evaluate(() => { window.location.hash = '#/buscar'; });
+      await page.waitForTimeout(8000);
+      bodyText = await page.locator('body').innerText({ timeout:8000 }).catch(()=>'');
+      diagnostics.push(`Texto luego de base/hash: ${clean(bodyText).slice(0,800)}`);
     }
+
+    await fillBestInput(page, keyword, diagnostics);
+    await clickSearch(page, diagnostics);
+    rows.push(...await extractRows(page, keyword, diagnostics));
   }catch(e){
     diagnostics.push(`OpenNegocio error: ${e.message}`);
   }finally{
