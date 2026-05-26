@@ -303,8 +303,8 @@ async function getActiveKeywords(){
   return [...new Set(words.length ? words : demo.keywords.map(k=>k.keyword))].slice(0,30);
 }
 
-async function searchSeace(){
-  const keywords = await getActiveKeywords();
+async function searchSeace(keywordOverride=null){
+  const keywords = keywordOverride ? [keywordOverride] : await getActiveKeywords();
   const found = [];
   const errors = [];
   for(const keyword of keywords){
@@ -350,27 +350,28 @@ app.get('/api/health', (_,res)=>res.json({ ok:true, supabase:!!supabase, mode:'s
 app.get('/api/bootstrap', async (_,res,next)=>{ try{ res.json({ keywords:await table('keywords'), vendors:await table('vendors'), opportunities:await table('opportunities') }); } catch(e){ next(e); } });
 app.post('/api/jobs/search', async (_,res,next)=>{ try{ const result = await searchSeace(); const opportunities = await upsertOpportunities(result.items); res.json({ ok:true, found:result.items.length, errors:result.errors, opportunities }); } catch(e){ next(e); } });
 // Ruta GET para probar desde navegador sin Postman ni terminal.
-app.get('/api/jobs/search-now', async (req,res,next)=>{ 
+app.get('/api/jobs/search-now', async (req,res,next)=>{
   console.log("ENTRO A SEARCH NOW");
   console.log(req.query);
-  
-  try{ 
-    const keyword = req.query.keyword ? String(req.query.keyword) : null; 
+
+  try{
+    const keyword = req.query.keyword ? String(req.query.keyword) : null;
     const result = await searchSeace(keyword);
     await upsertOpportunities(result.items || []);
     res.json({
-      ok:true, 
-      test:true, 
-      keyword, 
-      found:result.items ? result.items.length : 0, 
-      items: result.items || []
+      ok:true,
+      test:true,
+      keyword,
+      found: result.items ? result.items.length : 0,
+      items: result.items || [],
+      errors: result.errors || []
     });
   }catch(err){
     next(err);
   }
 });
 app.post('/api/jobs/send-digest', async (_,res,next)=>{ try{ res.json(await sendDigest()); } catch(e){ next(e); } });
-app.use((err,_,res,__)=>res.status(500).json({ error:err.message }));
+app.use((err,_,res,__)=>{ console.error('API ERROR:', err); res.status(500).json({ error:err.message }); });
 
 const schedule = process.env.CRON_SCHEDULE || '0 7 * * *';
 cron.schedule(schedule, async()=>{ try{ const result = await searchSeace(); await upsertOpportunities(result.items); await sendDigest(); console.log('cron ok', result.items.length); } catch(e){ console.error('cron error', e); } });
