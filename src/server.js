@@ -114,18 +114,18 @@ async function fetchJson(url, options={}, timeoutMs=20000){
   } finally { clearTimeout(timer); }
 }
 
+
 async function discoverApiEndpoints(){
-  // Descubre endpoints JSON publicados por el buscador moderno de contratos menores.
-  // Si SEACE cambia su frontend, esta función evita tener URLs internas quemadas en el código.
+  // Mantiene el descubrimiento JSON como primer intento, pero ya no depende de que SEACE exponga una ruta fija.
   const htmlRes = await fetchJson(SEACE_URLS.contratosMenores, { headers:{ accept:'text/html,*/*' } }, 20000);
   const html = htmlRes.html || '';
   const scripts = [...html.matchAll(/<script[^>]+src=["']([^"']+\.js[^"']*)["']/gi)].map(m=>new URL(m[1], SEACE_URLS.contratosMenores).href);
   const endpoints = new Set();
-  for(const script of scripts.slice(-8)){
+  for(const script of scripts.slice(-12)){
     try{
       const jsRes = await fetchJson(script, { headers:{ accept:'application/javascript,text/plain,*/*' } }, 20000);
       const js = jsRes.html || '';
-      const matches = [...js.matchAll(/["'`]([^"'`]{0,120}(?:api|contrat|requerim|busc)[^"'`]{0,160})["'`]/gi)].map(m=>m[1]);
+      const matches = [...js.matchAll(/["'`]([^"'`]{0,160}(?:api|contrat|requerim|busc|convoc)[^"'`]{0,220})["'`]/gi)].map(m=>m[1]);
       for(const raw of matches){
         if(raw.includes('http') || raw.startsWith('/')) {
           try { endpoints.add(new URL(raw, SEACE_URLS.contratosMenores).href); } catch {}
@@ -133,13 +133,13 @@ async function discoverApiEndpoints(){
       }
     } catch(e){ console.warn('No se pudo leer asset SEACE', script, e.message); }
   }
-  return [...endpoints].filter(u=>/api|contrat|requerim|busc/i.test(u)).slice(0,20);
+  return [...endpoints].filter(u=>/api|contrat|requerim|busc|convoc/i.test(u)).slice(0,40);
 }
 
 async function tryEndpoint(endpoint, keyword){
   const candidates = [];
   const u = new URL(endpoint);
-  for(const qName of ['q','query','search','texto','descripcion','palabraClave','keyword']){
+  for(const qName of ['q','query','search','texto','descripcion','palabraClave','keyword','term','filter']){
     const x = new URL(u.href); x.searchParams.set(qName, keyword); x.searchParams.set('page','0'); x.searchParams.set('size','20');
     candidates.push({ url:x.href, options:{ method:'GET' }});
   }
@@ -148,13 +148,15 @@ async function tryEndpoint(endpoint, keyword){
     { descripcion:keyword, page:0, size:20 },
     { palabraClave:keyword, pagina:0, tamanio:20 },
     { search:keyword, page:0, size:20 },
-    { filtro:keyword, page:0, size:20 }
+    { filtro:keyword, page:0, size:20 },
+    { term:keyword, offset:0, limit:20 }
   ];
   for(const body of payloads) candidates.push({ url:u.href, options:{ method:'POST', body:JSON.stringify(body) }});
 
   for(const c of candidates){
     try{
       const json = await fetchJson(c.url, c.options, 15000);
+      if(json?.error || json?.mensaje?.toLowerCase?.().includes('ruta no')) continue;
       if(json.html) continue;
       const arrays = findArrays(json).sort((a,b)=>b.length-a.length);
       for(const arr of arrays){
@@ -166,29 +168,133 @@ async function tryEndpoint(endpoint, keyword){
   return [];
 }
 
-async function searchSeaceRealForKeyword(keyword){
-  // 1) Contratos menores moderno: se intenta descubrir y consumir endpoints JSON.
-  const endpoints = await discoverApiEndpoints();
-  const all = [];
-  for(const endpoint of endpoints){
-    const rows = await tryEndpoint(endpoint, keyword);
-    if(rows.length) all.push(...rows);
-    if(all.length >= 20) break;
+function textToOpportunity(text, keyword, index=0){
+  const lines = clean(text).split(/(?:\n|\r|\t|  +| \| )/).map(clean).filter(Boolean);
+  const joined = clean(lines.join(' '));
+  if(!joined || joined.length < 20) return null;
+  const lower = joined.toLowerCase();
+  if(keyword && !lower.includes(keyword.toLowerCase().split(' ')[0])) return null;
+  const amountMatch = joined.match(/S\/?\s*([0-9][0-9.,]+)/i) || joined.match(/\b([0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]{2})?)\b/);
+  const dateMatch = joined.match(/\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\b/) || joined.match(/\b\d{4}\-\d{2}\-\d{2}\b/);
+  let title = lines.find(l=>l.length > 18 && /(mobiliario|silla|mesa|carpeta|locker|armario|hospital|melamine|estante|escritorio|bien|servicio|adquisici[oó]n|contrataci[oó]n)/i.test(l)) || joined.slice(0,220);
+  let entity = lines.find(l=>/(municipalidad|gobierno regional|ministerio|hospital|universidad|ugel|direcci[oó]n|unidad ejecutora|proyecto especial|instituto)/i.test(l)) || 'Entidad no identificada';
+  return normalizeOpportunity({
+    external_id: makeId(['pw', keyword, index, entity, title, dateMatch?.[0] || new Date().toISOString().slice(0,10)]),
+    title,
+    entity,
+    region: 'No especificada',
+    amount: amountMatch?.[1] || null,
+    published_date: dateMatch?.[0] || new Date().toISOString().slice(0,10),
+    source_url: SEACE_URLS.contratosMenores
+  }, keyword);
+}
+
+async function searchWithBrowser(keyword){
+  let chromium;
+  try{
+    ({ chromium } = await import('playwright'));
+  } catch(e){
+    throw new Error('Playwright no está instalado en Render. Revisa que package.json versión 0.5.0 se haya desplegado.');
   }
 
-  // 2) Fallback conservador: si no se pudo extraer JSON, deja registro útil para revisar manualmente.
-  // No inventa oportunidades; solo guarda una referencia de búsqueda para que el vendedor entre al buscador público.
-  if(!all.length && process.env.SEACE_FALLBACK_LINKS === 'true'){
-    all.push(normalizeOpportunity({
-      external_id: `seace-link-${keyword}-${new Date().toISOString().slice(0,10)}`,
-      title: `Revisar SEACE: ${keyword}`,
-      entity: 'Buscador Público SEACE/OECE',
-      region: 'Nacional',
-      published_date: new Date().toISOString().slice(0,10),
-      source_url: SEACE_URLS.buscadorPublico
-    }, keyword));
+  const browser = await chromium.launch({ headless:true, args:['--no-sandbox','--disable-setuid-sandbox','--disable-dev-shm-usage'] });
+  const page = await browser.newPage({ userAgent:'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124 Safari/537.36' });
+  const rows = [];
+  try{
+    await page.goto(SEACE_URLS.contratosMenores, { waitUntil:'domcontentloaded', timeout:45000 });
+    await page.waitForTimeout(5000);
+
+    // Intenta escribir la palabra clave en el primer campo útil.
+    const inputs = await page.locator('input:not([type=hidden]), textarea').all();
+    for(const input of inputs){
+      try{
+        if(await input.isVisible({ timeout:1000 })){
+          const box = await input.boundingBox();
+          if(box && box.width > 40 && box.height > 12){
+            await input.fill(keyword, { timeout:2000 });
+            break;
+          }
+        }
+      } catch {}
+    }
+
+    // Intenta activar búsqueda con Enter y/o botones Buscar/Consultar.
+    try { await page.keyboard.press('Enter'); } catch {}
+    await page.waitForTimeout(1500);
+    for(const label of ['Buscar','Consultar','Filtrar','Search']){
+      try{
+        const btn = page.getByText(label, { exact:false }).first();
+        if(await btn.isVisible({ timeout:1000 })) { await btn.click({ timeout:2000 }); break; }
+      } catch {}
+    }
+    await page.waitForTimeout(7000);
+
+    const extracted = await page.evaluate((kw)=>{
+      const clean = s => String(s||'').replace(/\s+/g,' ').trim();
+      const kw0 = String(kw||'').toLowerCase().split(' ')[0];
+      const selectors = ['tr','[role=row]','.card','.mat-row','.MuiTableRow-root','.ant-table-row','li','article'];
+      const out=[];
+      for(const sel of selectors){
+        document.querySelectorAll(sel).forEach((el)=>{
+          const text = clean(el.innerText || el.textContent || '');
+          if(text.length > 25 && (!kw0 || text.toLowerCase().includes(kw0))) out.push(text);
+        });
+      }
+      if(!out.length){
+        const body = clean(document.body.innerText || '');
+        const chunks = body.split(/(?=\b(?:MUNICIPALIDAD|GOBIERNO|HOSPITAL|MINISTERIO|UNIVERSIDAD|UGEL|DIRECCI[ÓO]N|ADQUISICI[ÓO]N|CONTRATACI[ÓO]N)\b)/i);
+        chunks.forEach(c=>{ if(c.length>40 && (!kw0 || c.toLowerCase().includes(kw0))) out.push(c.slice(0,800)); });
+      }
+      return [...new Set(out)].slice(0,30);
+    }, keyword);
+
+    extracted.forEach((txt,i)=>{
+      const opp = textToOpportunity(txt, keyword, i);
+      if(opp) rows.push(opp);
+    });
+  } finally {
+    await browser.close();
   }
-  return all.filter(Boolean);
+  return rows;
+}
+
+async function searchSeaceRealForKeyword(keyword){
+  // 1) Intenta APIs internas JSON descubiertas dinámicamente.
+  const all = [];
+  try{
+    const endpoints = await discoverApiEndpoints();
+    for(const endpoint of endpoints){
+      const rows = await tryEndpoint(endpoint, keyword);
+      if(rows.length) all.push(...rows);
+      if(all.length >= 20) break;
+    }
+  } catch(e){
+    console.warn('Descubrimiento JSON no disponible:', e.message);
+  }
+
+  // 2) Si el JSON no funcionó, usa navegador automatizado para la SPA de SEACE.
+  if(!all.length){
+    try{
+      const browserRows = await searchWithBrowser(keyword);
+      all.push(...browserRows);
+    } catch(e){
+      console.error('Browser scraping error:', e.message);
+      if(!process.env.SEACE_STRICT || process.env.SEACE_STRICT !== 'true'){
+        all.push(normalizeOpportunity({
+          external_id: `seace-pending-${keyword}-${new Date().toISOString().slice(0,10)}`,
+          title: `Pendiente validar en SEACE: ${keyword}`,
+          entity: 'Buscador Público SEACE/OECE',
+          region: 'Nacional',
+          published_date: new Date().toISOString().slice(0,10),
+          source_url: SEACE_URLS.contratosMenores
+        }, keyword));
+      }
+    }
+  }
+
+  const byId = new Map();
+  all.filter(Boolean).forEach(o=>byId.set(o.external_id, o));
+  return [...byId.values()].slice(0,25);
 }
 
 async function getActiveKeywords(){
@@ -240,7 +346,7 @@ async function sendDigest(){
 }
 
 app.get('/', (_,res)=>res.json({ ok:true, app:'SEACE Alertas Grupo Ibero', endpoints:['/api/health','/api/bootstrap','/api/jobs/search-now'] }));
-app.get('/api/health', (_,res)=>res.json({ ok:true, supabase:!!supabase, mode:'seace-real-v2', version:'0.4.0' }));
+app.get('/api/health', (_,res)=>res.json({ ok:true, supabase:!!supabase, mode:'seace-browser-v1', version:'0.5.0' }));
 app.get('/api/bootstrap', async (_,res,next)=>{ try{ res.json({ keywords:await table('keywords'), vendors:await table('vendors'), opportunities:await table('opportunities') }); } catch(e){ next(e); } });
 app.post('/api/jobs/search', async (_,res,next)=>{ try{ const result = await searchSeace(); const opportunities = await upsertOpportunities(result.items); res.json({ ok:true, found:result.items.length, errors:result.errors, opportunities }); } catch(e){ next(e); } });
 // Ruta GET para probar desde navegador sin Postman ni terminal.
