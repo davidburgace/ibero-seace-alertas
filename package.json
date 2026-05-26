@@ -1,0 +1,1 @@
+{"name":"seace-alertas-backend","version":"0.2.0","type":"module","scripts":{"start":"node src/server.js","dev":"node src/server.js"},"dependencies":{"@supabase/supabase-js":"latest","cors":"latest","dotenv":"latest","express":"latest","node-cron":"latest","nodemailer":"latest"}}
