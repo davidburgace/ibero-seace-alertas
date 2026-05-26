@@ -14,10 +14,9 @@ const supabase = process.env.SUPABASE_URL && SUPABASE_KEY
   ? createClient(process.env.SUPABASE_URL, SUPABASE_KEY)
   : null;
 
-const VERSION = '0.7.0';
-
 const SEACE_URLS = {
-  buscadorPublico: 'https://prodapp2.seace.gob.pe/seacebus-uiwd-pub/buscadorPublico/buscadorPublico.xhtml',
+  openNegocio: 'https://prod4.seace.gob.pe/openegocio/#/buscar',
+  openNegocioBase: 'https://prod4.seace.gob.pe/openegocio/',
   contratosMenores: 'https://prod6.seace.gob.pe/buscador-publico/contrataciones'
 };
 
@@ -69,12 +68,12 @@ function moneyToNumber(value){
 }
 
 function normalizeOpportunity(raw, keyword){
-  const title = clean(raw.title || raw.descripcion || raw.descripcionObjeto || raw.descripcion_objeto || raw.objeto || raw.nombre || raw.requerimiento || raw.descripcionRequerimiento || raw.descripcion_de_requerimiento || raw.description);
-  const entity = clean(raw.entity || raw.entidad || raw.nombreEntidad || raw.nombre_entidad || raw.entidadContratante || raw.nombreSiglaEntidad || raw.razonSocial || 'Entidad no identificada');
-  const region = clean(raw.region || raw.departamento || raw.ubigeo || raw.lugar || raw.regionName || 'No especificada');
-  const published_date = clean(raw.published_date || raw.fechaPublicacion || raw.fecha_publicacion || raw.fecha || raw.fechaInicio || raw.fechaEmision || new Date().toISOString().slice(0,10));
-  const amount = moneyToNumber(raw.amount || raw.monto || raw.valorReferencial || raw.valor_referencial || raw.montoReferencial || raw.total);
-  const source_url = clean(raw.source_url || raw.url || raw.link || raw.enlace || SEACE_URLS.buscadorPublico);
+  const title = clean(raw.title || raw.descripcion || raw.descripcionObjeto || raw.descripcion_objeto || raw.objeto || raw.nombre || raw.requerimiento || raw.descripcionRequerimiento || raw.descripcion_de_requerimiento || raw.description || raw.texto || raw.text);
+  const entity = clean(raw.entity || raw.entidad || raw.nombreEntidad || raw.nombre_entidad || raw.entidadContratante || raw.nombreSiglaEntidad || raw.razonSocial || raw.organo || 'Entidad no identificada');
+  const region = clean(raw.region || raw.departamento || raw.ubigeo || raw.lugar || raw.regionName || raw.localidad || 'No especificada');
+  const published_date = clean(raw.published_date || raw.fechaPublicacion || raw.fecha_publicacion || raw.fecha || raw.fechaInicio || raw.fechaEmision || raw.fechaConvocatoria || new Date().toISOString().slice(0,10));
+  const amount = moneyToNumber(raw.amount || raw.monto || raw.valorReferencial || raw.valor_referencial || raw.montoReferencial || raw.valorEstimado || raw.total);
+  const source_url = clean(raw.source_url || raw.url || raw.link || raw.enlace || SEACE_URLS.openNegocio);
   if(!title || title.length < 5) return null;
   return {
     external_id: clean(raw.external_id || raw.id || raw.codigo || raw.numero || raw.nomenclatura || makeId([entity,title,published_date,keyword])),
@@ -90,144 +89,258 @@ function normalizeOpportunity(raw, keyword){
   };
 }
 
-function textToOpportunity(text, keyword, index=0, sourceUrl=SEACE_URLS.buscadorPublico){
-  const joined = clean(text);
-  if(!joined || joined.length < 30) return null;
-  const lower = joined.toLowerCase();
-  const k0 = String(keyword || '').toLowerCase().split(' ')[0];
-  if(k0 && !lower.includes(k0)) return null;
+function findArrays(obj, arrays=[]){
+  if(Array.isArray(obj)) {
+    if(obj.length && typeof obj[0] === 'object') arrays.push(obj);
+    obj.forEach(x=>findArrays(x, arrays));
+  } else if(obj && typeof obj === 'object') {
+    Object.values(obj).forEach(v=>findArrays(v, arrays));
+  }
+  return arrays;
+}
 
+function looksLikeOpportunity(o){
+  const text = Object.keys(o || {}).concat(Object.values(o || {}).map(v=>String(v).slice(0,80))).join(' ').toLowerCase();
+  return /(entidad|descripcion|objeto|requerimiento|monto|fecha|contratacion|contratación|nomenclatura|convocatoria|procedimiento|oportunidad)/.test(text);
+}
+
+function textToOpportunity(text, keyword, index=0, sourceUrl=SEACE_URLS.openNegocio){
+  const rawText = String(text || '').replace(/\r/g,'\n');
+  const lines = rawText.split(/\n|\t| {2,}| \| /).map(clean).filter(Boolean);
+  const joined = clean(lines.join(' '));
+  if(!joined || joined.length < 20) return null;
+  const kw0 = String(keyword || '').toLowerCase().split(' ')[0];
+  if(kw0 && !joined.toLowerCase().includes(kw0)) return null;
   const amountMatch = joined.match(/S\/?\s*([0-9][0-9.,]+)/i) || joined.match(/\b([0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]{2})?)\b/);
   const dateMatch = joined.match(/\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\b/) || joined.match(/\b\d{4}\-\d{2}\-\d{2}\b/);
-  const parts = joined.split(/(?= Municipalidad| Gobierno Regional| Ministerio| Hospital| Universidad| UGEL| Dirección| Adquisición| Contratación)/i).map(clean).filter(Boolean);
-  const title = parts.find(p=>/(mobiliario|silla|mesa|carpeta|locker|armario|hospital|melamine|estante|escritorio|adquisici[oó]n|contrataci[oó]n)/i.test(p)) || joined.slice(0,220);
-  const entity = parts.find(p=>/(municipalidad|gobierno regional|ministerio|hospital|universidad|ugel|direcci[oó]n|unidad ejecutora|instituto)/i.test(p)) || 'Entidad no identificada';
-
+  const title = lines.find(l=>l.length > 18 && /(mobiliario|silla|mesa|carpeta|locker|casillero|armario|hospital|melamine|estante|escritorio|bien|servicio|adquisici[oó]n|contrataci[oó]n|implementaci[oó]n)/i.test(l)) || joined.slice(0,220);
+  const entity = lines.find(l=>/(municipalidad|gobierno regional|ministerio|hospital|universidad|ugel|direcci[oó]n|unidad ejecutora|proyecto especial|instituto|ej[eé]rcito|polic[ií]a)/i.test(l)) || 'Entidad no identificada';
   return normalizeOpportunity({
-    external_id: makeId(['seace-browser', keyword, index, entity, title, dateMatch?.[0] || new Date().toISOString().slice(0,10)]),
+    external_id: makeId(['openegocio', keyword, index, entity, title, dateMatch?.[0] || new Date().toISOString().slice(0,10)]),
     title,
     entity,
-    region:'No especificada',
+    region: 'No especificada',
     amount: amountMatch?.[1] || null,
     published_date: dateMatch?.[0] || new Date().toISOString().slice(0,10),
     source_url: sourceUrl
   }, keyword);
 }
 
-async function searchWithBrowser(keyword){
+async function searchOpenNegocioWithBrowser(keyword){
   let chromium;
   try{
     ({ chromium } = await import('playwright'));
   } catch(e){
-    throw new Error('Playwright no está instalado en Render. Revisa package.json.');
+    throw new Error('Playwright no está instalado en Render. Revisa package.json y PLAYWRIGHT_BROWSERS_PATH=0.');
   }
 
-  const browser = await chromium.launch({ 
-    headless:true, 
-    args:[
+  console.log('[OPENNEGOCIO] iniciando búsqueda:', keyword);
+  const browser = await chromium.launch({
+    headless: true,
+    args: [
       '--no-sandbox',
       '--disable-setuid-sandbox',
       '--disable-dev-shm-usage',
       '--disable-blink-features=AutomationControlled'
-    ] 
-  });
-  const page = await browser.newPage({ 
-    userAgent:
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko ) Chrome/122.0.0.0 Safari/537.36' 
+    ]
   });
 
-  const diagnostics = [];
-  const rows = [];
+  const page = await browser.newPage({
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    viewport: { width: 1366, height: 768 },
+    locale: 'es-PE'
+  });
+
+  const apiItems = [];
+  const apiDebug = [];
+
+  page.on('response', async (response)=>{
+    try{
+      const url = response.url();
+      const ct = response.headers()['content-type'] || '';
+      const status = response.status();
+      if(/openegocio|seace|prod4/i.test(url) && /json|text|javascript/i.test(ct)){
+        apiDebug.push({ status, url:url.slice(0,250), contentType:ct });
+      }
+      if(status >= 200 && status < 300 && /json/i.test(ct)){
+        const json = await response.json().catch(()=>null);
+        if(json){
+          const arrays = findArrays(json).sort((a,b)=>b.length-a.length);
+          for(const arr of arrays){
+            const rows = arr.filter(looksLikeOpportunity).map(r=>normalizeOpportunity(r, keyword)).filter(Boolean);
+            if(rows.length) apiItems.push(...rows);
+          }
+        }
+      }
+    }catch(e){}
+  });
 
   try{
-    const urlsToTry = [SEACE_URLS.buscadorPublico, SEACE_URLS.contratosMenores];
+    await page.goto(SEACE_URLS.openNegocio, { waitUntil:'domcontentloaded', timeout:60000 });
+    console.log('[OPENNEGOCIO] URL cargada:', page.url());
+    await page.waitForTimeout(8000);
 
-    for(const url of urlsToTry){
+    // Llenar el campo más probable de búsqueda. Open Negocio es SPA, por eso intentamos varios selectores.
+    const selectorCandidates = [
+      'input[placeholder*="Buscar" i]',
+      'input[placeholder*="descrip" i]',
+      'input[placeholder*="palabra" i]',
+      'input[placeholder*="objeto" i]',
+      'input[type="text"]',
+      'textarea'
+    ];
+
+    let filled = false;
+    for(const sel of selectorCandidates){
       try{
-        diagnostics.push(`Abriendo: ${url}`);
-        await page.goto(url, { waitUntil:'domcontentloaded', timeout:45000 });
-        await page.waitForTimeout(4000);
-
-        const bodyText = await page.locator('body').innerText({ timeout:5000 }).catch(()=>'');
-
-        if(/ruta no v[aá]lida|invalid path/i.test(bodyText)){
-          diagnostics.push(`SEACE devolvió ruta inválida en: ${url}`);
-          continue;
+        const loc = page.locator(sel).first();
+        if(await loc.isVisible({ timeout:2500 })){
+          await loc.fill(keyword, { timeout:5000 });
+          filled = true;
+          console.log('[OPENNEGOCIO] campo llenado con selector:', sel);
+          break;
         }
+      }catch(e){}
+    }
 
-        diagnostics.push(`Página cargada. Texto inicial: ${clean(bodyText).slice(0,160)}`);
-
-        // Intenta llenar cualquier campo visible.
-        const inputs = await page.locator('input:not([type=hidden]), textarea').all();
-        let filled = false;
-        for(const input of inputs){
-          try{
-            if(await input.isVisible({ timeout:1000 })){
-              const box = await input.boundingBox();
-              if(box && box.width > 40 && box.height > 12){
-                await input.fill(keyword, { timeout:3000 });
-                filled = true;
-                break;
-              }
-            }
-          }catch{}
-        }
-        diagnostics.push(filled ? 'Se llenó campo de búsqueda.' : 'No se encontró campo de búsqueda visible.');
-
-        try { await page.keyboard.press('Enter'); } catch {}
-        await page.waitForTimeout(1500);
-
-        for(const label of ['Buscar','Consultar','Filtrar','Search']){
-          try{
-            const btn = page.getByText(label, { exact:false }).first();
-            if(await btn.isVisible({ timeout:1200 })){
-              await btn.click({ timeout:3000 });
-              diagnostics.push(`Click en botón: ${label}`);
+    if(!filled){
+      const inputs = await page.locator('input:not([type=hidden]), textarea').all();
+      for(const input of inputs){
+        try{
+          if(await input.isVisible({ timeout:1000 })){
+            const box = await input.boundingBox();
+            if(box && box.width > 60 && box.height > 12){
+              await input.fill(keyword, { timeout:3000 });
+              filled = true;
+              console.log('[OPENNEGOCIO] campo llenado por fallback');
               break;
             }
-          }catch{}
-        }
-
-        await page.waitForTimeout(7000);
-
-        const extracted = await page.evaluate((kw)=>{
-          const clean = s => String(s||'').replace(/\s+/g,' ').trim();
-          const kw0 = String(kw||'').toLowerCase().split(' ')[0];
-          const selectors = ['tr','[role=row]','.card','.mat-row','.MuiTableRow-root','.ant-table-row','li','article','div'];
-          const out=[];
-          for(const sel of selectors){
-            document.querySelectorAll(sel).forEach((el)=>{
-              const text = clean(el.innerText || el.textContent || '');
-              if(text.length > 45 && text.length < 1200 && (!kw0 || text.toLowerCase().includes(kw0))) out.push(text);
-            });
           }
-          return [...new Set(out)].slice(0,40);
-        }, keyword);
-
-        diagnostics.push(`Bloques extraídos: ${extracted.length}`);
-
-        extracted.forEach((txt,i)=>{
-          const opp = textToOpportunity(txt, keyword, i, url);
-          if(opp) rows.push(opp);
-        });
-
-        if(rows.length) break;
-      } catch(e){
-        diagnostics.push(`Error en ${url}: ${e.message}`);
+        }catch(e){}
       }
     }
+
+    // Ejecutar búsqueda.
+    try { await page.keyboard.press('Enter'); } catch {}
+    await page.waitForTimeout(1500);
+    const buttonLabels = ['Buscar','Consultar','Filtrar','Ver oportunidades','Aplicar'];
+    for(const label of buttonLabels){
+      try{
+        const btn = page.getByText(label, { exact:false }).first();
+        if(await btn.isVisible({ timeout:1500 })){
+          await btn.click({ timeout:5000 });
+          console.log('[OPENNEGOCIO] click botón:', label);
+          break;
+        }
+      }catch(e){}
+    }
+
+    await page.waitForTimeout(10000);
+    console.log('[OPENNEGOCIO] respuestas capturadas:', apiDebug.length);
+
+    if(apiItems.length){
+      console.log('[OPENNEGOCIO] resultados por API:', apiItems.length);
+      const byId = new Map();
+      apiItems.forEach(o=>byId.set(o.external_id, o));
+      return [...byId.values()].slice(0,25);
+    }
+
+    const extracted = await page.evaluate((kw)=>{
+      const clean = s => String(s||'').replace(/\s+/g,' ').trim();
+      const kw0 = String(kw||'').toLowerCase().split(' ')[0];
+      const selectors = [
+        'tr', '[role=row]', '.card', '.mat-row', '.MuiTableRow-root', '.ant-table-row',
+        'li', 'article', '.resultado', '.result', '.item', '.panel', '.table tbody tr',
+        'app-card', 'app-procedimiento', 'app-oportunidad'
+      ];
+      const out=[];
+      for(const sel of selectors){
+        document.querySelectorAll(sel).forEach((el)=>{
+          const text = clean(el.innerText || el.textContent || '');
+          if(text.length > 30 && (!kw0 || text.toLowerCase().includes(kw0))) out.push(text);
+        });
+      }
+      if(!out.length){
+        const body = clean(document.body.innerText || '');
+        const chunks = body.split(/(?=\b(?:MUNICIPALIDAD|GOBIERNO|HOSPITAL|MINISTERIO|UNIVERSIDAD|UGEL|DIRECCI[ÓO]N|ADQUISICI[ÓO]N|CONTRATACI[ÓO]N|BIENES|SERVICIOS)\b)/i);
+        chunks.forEach(c=>{ if(c.length>50 && (!kw0 || c.toLowerCase().includes(kw0))) out.push(c.slice(0,1000)); });
+      }
+      return [...new Set(out)].slice(0,40);
+    }, keyword);
+
+    console.log('[OPENNEGOCIO] textos extraídos:', extracted.length);
+    const rows = extracted.map((txt,i)=>textToOpportunity(txt, keyword, i, SEACE_URLS.openNegocio)).filter(Boolean);
+    return rows.slice(0,25);
   } finally {
     await browser.close();
   }
+}
 
-  return { rows, diagnostics };
+async function searchContratosMenoresFallback(keyword){
+  // Fallback simple: abre contratos menores y extrae texto si el portal responde.
+  let chromium;
+  ({ chromium } = await import('playwright'));
+  const browser = await chromium.launch({ headless:true, args:['--no-sandbox','--disable-setuid-sandbox','--disable-dev-shm-usage','--disable-blink-features=AutomationControlled'] });
+  const page = await browser.newPage({ userAgent:'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122 Safari/537.36' });
+  try{
+    await page.goto(SEACE_URLS.contratosMenores, { waitUntil:'domcontentloaded', timeout:45000 });
+    await page.waitForTimeout(6000);
+    const inputs = await page.locator('input:not([type=hidden]), textarea').all();
+    for(const input of inputs){
+      try{
+        if(await input.isVisible({ timeout:1000 })){
+          const box = await input.boundingBox();
+          if(box && box.width > 40 && box.height > 12){ await input.fill(keyword); break; }
+        }
+      }catch(e){}
+    }
+    try { await page.keyboard.press('Enter'); } catch {}
+    await page.waitForTimeout(6000);
+    const texts = await page.evaluate((kw)=>{
+      const clean=s=>String(s||'').replace(/\s+/g,' ').trim();
+      const kw0=String(kw||'').toLowerCase().split(' ')[0];
+      return [...document.querySelectorAll('tr,[role=row],.card,li,article')]
+        .map(el=>clean(el.innerText||el.textContent||''))
+        .filter(t=>t.length>30 && (!kw0 || t.toLowerCase().includes(kw0)))
+        .slice(0,30);
+    }, keyword);
+    return texts.map((txt,i)=>textToOpportunity(txt, keyword, i, SEACE_URLS.contratosMenores)).filter(Boolean);
+  }finally{ await browser.close(); }
 }
 
 async function searchSeaceRealForKeyword(keyword){
-  const { rows, diagnostics } = await searchWithBrowser(keyword);
+  const all = [];
+  try{
+    const rows = await searchOpenNegocioWithBrowser(keyword);
+    all.push(...rows);
+  }catch(e){
+    console.error('[OPENNEGOCIO] error:', e.message);
+  }
+
+  if(!all.length){
+    try{
+      console.log('[FALLBACK] intentando contratos menores:', keyword);
+      const rows = await searchContratosMenoresFallback(keyword);
+      all.push(...rows);
+    }catch(e){
+      console.error('[FALLBACK] error:', e.message);
+    }
+  }
+
+  if(!all.length && (!process.env.SEACE_STRICT || process.env.SEACE_STRICT !== 'true')){
+    all.push(normalizeOpportunity({
+      external_id: `opennegocio-pending-${keyword}-${new Date().toISOString().slice(0,10)}`,
+      title: `Pendiente validar en Open Negocio: ${keyword}`,
+      entity: 'Open Negocio SEACE/OECE',
+      region: 'Nacional',
+      published_date: new Date().toISOString().slice(0,10),
+      source_url: SEACE_URLS.openNegocio
+    }, keyword));
+  }
+
   const byId = new Map();
-  rows.filter(Boolean).forEach(o=>byId.set(o.external_id, o));
-  return { items:[...byId.values()].slice(0,25), diagnostics };
+  all.filter(Boolean).forEach(o=>byId.set(o.external_id, o));
+  return [...byId.values()].slice(0,25);
 }
 
 async function getActiveKeywords(){
@@ -236,16 +349,14 @@ async function getActiveKeywords(){
   return [...new Set(words.length ? words : demo.keywords.map(k=>k.keyword))].slice(0,30);
 }
 
-async function searchSeace(singleKeyword=null){
-  const keywords = singleKeyword ? [singleKeyword] : await getActiveKeywords();
+async function searchSeace(keywordOverride=null){
+  const keywords = keywordOverride ? [keywordOverride] : await getActiveKeywords();
   const found = [];
   const errors = [];
-  const diagnostics = [];
   for(const keyword of keywords){
     try{
-      const result = await searchSeaceRealForKeyword(keyword);
-      found.push(...(result.items || []));
-      diagnostics.push({ keyword, steps: result.diagnostics || [] });
+      const rows = await searchSeaceRealForKeyword(keyword);
+      found.push(...rows);
     } catch(e){
       errors.push({ keyword, error:e.message });
       console.error('SEACE keyword error', keyword, e.message);
@@ -253,11 +364,11 @@ async function searchSeace(singleKeyword=null){
   }
   const byId = new Map();
   found.forEach(o=>{ if(o?.external_id) byId.set(o.external_id, o); });
-  return { items:[...byId.values()], errors, diagnostics };
+  return { items:[...byId.values()], errors };
 }
 
 async function upsertOpportunities(items){
-  if(!items?.length) return [];
+  if(!items.length) return table('opportunities');
   if(!supabase){ demo.opportunities = items.concat(demo.opportunities).slice(0,100); return demo.opportunities; }
   const { error } = await supabase.from('opportunities').upsert(items, { onConflict:'external_id' });
   if(error) throw error;
@@ -280,61 +391,23 @@ async function sendDigest(){
   return { ok:true, recipients };
 }
 
-app.get('/', (_,res)=>res.json({ ok:true, app:'SEACE Alertas Grupo Ibero', version:VERSION, endpoints:['/api/health','/api/bootstrap','/api/jobs/search-now'] }));
-
-app.get('/api/health', (_,res)=>res.json({ ok:true, supabase:!!supabase, mode:'seace-browser-diagnostics-v1', version:VERSION }));
-
-app.get('/api/bootstrap', async (_,res,next)=>{
-  try{
-    res.json({
-      keywords: await table('keywords'),
-      vendors: await table('vendors'),
-      opportunities: await table('opportunities')
-    });
-  } catch(e){ next(e); }
-});
-
-app.post('/api/jobs/search', async (_,res,next)=>{
-  try{
-    const result = await searchSeace();
-    const opportunities = await upsertOpportunities(result.items || []);
-    res.json({ ok:true, found:result.items.length, errors:result.errors, diagnostics:result.diagnostics, opportunities });
-  } catch(e){ next(e); }
-});
-
+app.get('/', (_,res)=>res.json({ ok:true, app:'SEACE Alertas Grupo Ibero', endpoints:['/api/health','/api/bootstrap','/api/jobs/search-now'], source:'Open Negocio' }));
+app.get('/api/health', (_,res)=>res.json({ ok:true, supabase:!!supabase, mode:'opennegocio-browser-v1', version:'0.8.0' }));
+app.get('/api/bootstrap', async (_,res,next)=>{ try{ res.json({ keywords:await table('keywords'), vendors:await table('vendors'), opportunities:await table('opportunities') }); } catch(e){ next(e); } });
+app.post('/api/jobs/search', async (_,res,next)=>{ try{ const result = await searchSeace(); const opportunities = await upsertOpportunities(result.items || []); res.json({ ok:true, found:result.items.length, errors:result.errors, opportunities }); } catch(e){ next(e); } });
 app.get('/api/jobs/search-now', async (req,res,next)=>{
   console.log('ENTRO A SEARCH NOW', req.query);
   try{
     const keyword = req.query.keyword ? String(req.query.keyword) : 'mobiliario escolar';
     const result = await searchSeace(keyword);
-    const saved = await upsertOpportunities(result.items || []);
-    res.json({
-      ok:true,
-      version:VERSION,
-      keyword,
-      found: result.items.length,
-      saved_total: Array.isArray(saved) ? saved.length : null,
-      errors: result.errors,
-      diagnostics: result.diagnostics,
-      items: result.items || []
-    });
+    await upsertOpportunities(result.items || []);
+    res.json({ ok:true, source:'Open Negocio', keyword, found:result.items ? result.items.length : 0, errors:result.errors || [], items:result.items || [] });
   }catch(err){ next(err); }
 });
-
-app.post('/api/jobs/send-digest', async (_,res,next)=>{
-  try{ res.json(await sendDigest()); } catch(e){ next(e); }
-});
-
-app.use((err,_,res,__)=>res.status(500).json({ ok:false, error:err.message, version:VERSION }));
+app.post('/api/jobs/send-digest', async (_,res,next)=>{ try{ res.json(await sendDigest()); } catch(e){ next(e); } });
+app.use((err,_,res,__)=>res.status(500).json({ error:err.message, stack:process.env.NODE_ENV === 'production' ? undefined : err.stack }));
 
 const schedule = process.env.CRON_SCHEDULE || '0 7 * * *';
-cron.schedule(schedule, async()=>{
-  try{
-    const result = await searchSeace();
-    await upsertOpportunities(result.items || []);
-    await sendDigest();
-    console.log('cron ok', result.items.length);
-  } catch(e){ console.error('cron error', e); }
-});
+cron.schedule(schedule, async()=>{ try{ const result = await searchSeace(); await upsertOpportunities(result.items || []); await sendDigest(); console.log('cron ok', result.items.length); } catch(e){ console.error('cron error', e); } });
 
-app.listen(process.env.PORT || 3000, ()=>console.log(`SEACE backend v${VERSION} on ${process.env.PORT || 3000}`));
+app.listen(process.env.PORT || 3000, ()=>console.log(`SEACE backend Open Negocio v0.8.0 on ${process.env.PORT || 3000}`));
