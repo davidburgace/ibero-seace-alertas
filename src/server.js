@@ -9,13 +9,12 @@ const app = express();
 app.use(cors({ origin: process.env.FRONTEND_URL?.split(',') || '*' }));
 app.use(express.json());
 
-const VERSION = '0.6.0';
-const MODE = 'seace-browser-diagnostic-v2';
-
 const SUPABASE_KEY = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
 const supabase = process.env.SUPABASE_URL && SUPABASE_KEY
   ? createClient(process.env.SUPABASE_URL, SUPABASE_KEY)
   : null;
+
+const VERSION = '0.7.0';
 
 const SEACE_URLS = {
   buscadorPublico: 'https://prodapp2.seace.gob.pe/seacebus-uiwd-pub/buscadorPublico/buscadorPublico.xhtml',
@@ -93,24 +92,22 @@ function normalizeOpportunity(raw, keyword){
 
 function textToOpportunity(text, keyword, index=0, sourceUrl=SEACE_URLS.buscadorPublico){
   const joined = clean(text);
-  if(!joined || joined.length < 20) return null;
-  if(/invalid path specified/i.test(joined)) return null;
-
-  const kw0 = clean(keyword).toLowerCase().split(' ')[0];
+  if(!joined || joined.length < 30) return null;
   const lower = joined.toLowerCase();
-  if(kw0 && !lower.includes(kw0)) return null;
+  const k0 = String(keyword || '').toLowerCase().split(' ')[0];
+  if(k0 && !lower.includes(k0)) return null;
 
-  const lines = joined.split(/(?:\n|\r|\t|  +| \| )/).map(clean).filter(Boolean);
   const amountMatch = joined.match(/S\/?\s*([0-9][0-9.,]+)/i) || joined.match(/\b([0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]{2})?)\b/);
   const dateMatch = joined.match(/\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}\b/) || joined.match(/\b\d{4}\-\d{2}\-\d{2}\b/);
-  const title = lines.find(l=>l.length > 18 && /(mobiliario|silla|mesa|carpeta|locker|armario|hospital|melamine|estante|escritorio|bien|servicio|adquisici[oó]n|contrataci[oó]n|requerimiento)/i.test(l)) || joined.slice(0,220);
-  const entity = lines.find(l=>/(municipalidad|gobierno regional|ministerio|hospital|universidad|ugel|direcci[oó]n|unidad ejecutora|proyecto especial|instituto|gobierno)/i.test(l)) || 'Entidad no identificada';
+  const parts = joined.split(/(?= Municipalidad| Gobierno Regional| Ministerio| Hospital| Universidad| UGEL| Dirección| Adquisición| Contratación)/i).map(clean).filter(Boolean);
+  const title = parts.find(p=>/(mobiliario|silla|mesa|carpeta|locker|armario|hospital|melamine|estante|escritorio|adquisici[oó]n|contrataci[oó]n)/i.test(p)) || joined.slice(0,220);
+  const entity = parts.find(p=>/(municipalidad|gobierno regional|ministerio|hospital|universidad|ugel|direcci[oó]n|unidad ejecutora|instituto)/i.test(p)) || 'Entidad no identificada';
 
   return normalizeOpportunity({
-    external_id: makeId(['seace', keyword, index, entity, title, dateMatch?.[0] || new Date().toISOString().slice(0,10)]),
+    external_id: makeId(['seace-browser', keyword, index, entity, title, dateMatch?.[0] || new Date().toISOString().slice(0,10)]),
     title,
     entity,
-    region: 'No especificada',
+    region:'No especificada',
     amount: amountMatch?.[1] || null,
     published_date: dateMatch?.[0] || new Date().toISOString().slice(0,10),
     source_url: sourceUrl
@@ -122,43 +119,49 @@ async function searchWithBrowser(keyword){
   try{
     ({ chromium } = await import('playwright'));
   } catch(e){
-    throw new Error('Playwright no está instalado. Revisa package.json y deploy en Render.');
+    throw new Error('Playwright no está instalado en Render. Revisa package.json.');
   }
 
   const browser = await chromium.launch({ headless:true, args:['--no-sandbox','--disable-setuid-sandbox','--disable-dev-shm-usage'] });
-  const rows = [];
+  const page = await browser.newPage({ userAgent:'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124 Safari/537.36' });
+
   const diagnostics = [];
+  const rows = [];
 
   try{
-    const page = await browser.newPage({ userAgent:'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124 Safari/537.36' });
+    const urlsToTry = [SEACE_URLS.buscadorPublico, SEACE_URLS.contratosMenores];
 
-    for(const url of [SEACE_URLS.buscadorPublico, SEACE_URLS.contratosMenores]){
+    for(const url of urlsToTry){
       try{
-        console.log(`[SEACE] Abriendo: ${url}`);
+        diagnostics.push(`Abriendo: ${url}`);
         await page.goto(url, { waitUntil:'domcontentloaded', timeout:45000 });
-        await page.waitForTimeout(5000);
-        const bodyText = clean(await page.locator('body').innerText({ timeout:10000 }).catch(()=>''));
-        diagnostics.push({ url, bodyStart: bodyText.slice(0,180) });
+        await page.waitForTimeout(4000);
 
-        if(/invalid path specified/i.test(bodyText)){
-          console.warn(`[SEACE] URL inválida según SEACE: ${url}`);
+        const bodyText = await page.locator('body').innerText({ timeout:5000 }).catch(()=>'');
+
+        if(/ruta no v[aá]lida|invalid path/i.test(bodyText)){
+          diagnostics.push(`SEACE devolvió ruta inválida en: ${url}`);
           continue;
         }
 
-        // Intenta llenar campos de búsqueda visibles.
+        diagnostics.push(`Página cargada. Texto inicial: ${clean(bodyText).slice(0,160)}`);
+
+        // Intenta llenar cualquier campo visible.
         const inputs = await page.locator('input:not([type=hidden]), textarea').all();
+        let filled = false;
         for(const input of inputs){
           try{
             if(await input.isVisible({ timeout:1000 })){
               const box = await input.boundingBox();
               if(box && box.width > 40 && box.height > 12){
-                await input.fill(keyword, { timeout:2000 });
-                console.log(`[SEACE] Keyword escrito en input visible: ${keyword}`);
+                await input.fill(keyword, { timeout:3000 });
+                filled = true;
                 break;
               }
             }
-          } catch {}
+          }catch{}
         }
+        diagnostics.push(filled ? 'Se llenó campo de búsqueda.' : 'No se encontró campo de búsqueda visible.');
 
         try { await page.keyboard.press('Enter'); } catch {}
         await page.waitForTimeout(1500);
@@ -166,12 +169,12 @@ async function searchWithBrowser(keyword){
         for(const label of ['Buscar','Consultar','Filtrar','Search']){
           try{
             const btn = page.getByText(label, { exact:false }).first();
-            if(await btn.isVisible({ timeout:1000 })){
+            if(await btn.isVisible({ timeout:1200 })){
               await btn.click({ timeout:3000 });
-              console.log(`[SEACE] Click en botón: ${label}`);
+              diagnostics.push(`Click en botón: ${label}`);
               break;
             }
-          } catch {}
+          }catch{}
         }
 
         await page.waitForTimeout(7000);
@@ -179,21 +182,18 @@ async function searchWithBrowser(keyword){
         const extracted = await page.evaluate((kw)=>{
           const clean = s => String(s||'').replace(/\s+/g,' ').trim();
           const kw0 = String(kw||'').toLowerCase().split(' ')[0];
-          const selectors = ['tr','[role=row]','.card','.mat-row','.MuiTableRow-root','.ant-table-row','li','article','tbody tr'];
+          const selectors = ['tr','[role=row]','.card','.mat-row','.MuiTableRow-root','.ant-table-row','li','article','div'];
           const out=[];
           for(const sel of selectors){
             document.querySelectorAll(sel).forEach((el)=>{
               const text = clean(el.innerText || el.textContent || '');
-              if(text.length > 25 && (!kw0 || text.toLowerCase().includes(kw0))) out.push(text);
+              if(text.length > 45 && text.length < 1200 && (!kw0 || text.toLowerCase().includes(kw0))) out.push(text);
             });
           }
-          if(!out.length){
-            const body = clean(document.body.innerText || '');
-            const chunks = body.split(/(?=\b(?:MUNICIPALIDAD|GOBIERNO|HOSPITAL|MINISTERIO|UNIVERSIDAD|UGEL|DIRECCI[ÓO]N|ADQUISICI[ÓO]N|CONTRATACI[ÓO]N|REQUERIMIENTO)\b)/i);
-            chunks.forEach(c=>{ if(c.length>40 && (!kw0 || c.toLowerCase().includes(kw0))) out.push(c.slice(0,800)); });
-          }
-          return [...new Set(out)].slice(0,30);
+          return [...new Set(out)].slice(0,40);
         }, keyword);
+
+        diagnostics.push(`Bloques extraídos: ${extracted.length}`);
 
         extracted.forEach((txt,i)=>{
           const opp = textToOpportunity(txt, keyword, i, url);
@@ -202,8 +202,7 @@ async function searchWithBrowser(keyword){
 
         if(rows.length) break;
       } catch(e){
-        diagnostics.push({ url, error:e.message });
-        console.warn(`[SEACE] Error en ${url}: ${e.message}`);
+        diagnostics.push(`Error en ${url}: ${e.message}`);
       }
     }
   } finally {
@@ -215,24 +214,9 @@ async function searchWithBrowser(keyword){
 
 async function searchSeaceRealForKeyword(keyword){
   const { rows, diagnostics } = await searchWithBrowser(keyword);
-
-  if(rows.length){
-    const byId = new Map();
-    rows.filter(Boolean).forEach(o=>byId.set(o.external_id, o));
-    return { items:[...byId.values()].slice(0,25), diagnostics, fallback:false };
-  }
-
-  // Fallback controlado: permite validar que backend, Supabase y flujo funcionen mientras ajustamos selectores exactos de SEACE.
-  const fallback = normalizeOpportunity({
-    external_id: `seace-pending-${makeId([keyword, new Date().toISOString().slice(0,10)])}`,
-    title: `Pendiente validar en SEACE: ${keyword}`,
-    entity: 'Buscador Público SEACE/OECE',
-    region: 'Nacional',
-    published_date: new Date().toISOString().slice(0,10),
-    source_url: SEACE_URLS.buscadorPublico
-  }, keyword);
-
-  return { items: fallback ? [fallback] : [], diagnostics, fallback:true };
+  const byId = new Map();
+  rows.filter(Boolean).forEach(o=>byId.set(o.external_id, o));
+  return { items:[...byId.values()].slice(0,25), diagnostics };
 }
 
 async function getActiveKeywords(){
@@ -241,31 +225,28 @@ async function getActiveKeywords(){
   return [...new Set(words.length ? words : demo.keywords.map(k=>k.keyword))].slice(0,30);
 }
 
-async function searchSeace(keywordOverride=null){
-  const keywords = keywordOverride ? [keywordOverride] : await getActiveKeywords();
+async function searchSeace(singleKeyword=null){
+  const keywords = singleKeyword ? [singleKeyword] : await getActiveKeywords();
   const found = [];
   const errors = [];
   const diagnostics = [];
-
   for(const keyword of keywords){
     try{
-      console.log(`[SEACE] Buscando keyword: ${keyword}`);
       const result = await searchSeaceRealForKeyword(keyword);
-      found.push(...result.items);
-      diagnostics.push({ keyword, fallback:result.fallback, diagnostics:result.diagnostics });
+      found.push(...(result.items || []));
+      diagnostics.push({ keyword, steps: result.diagnostics || [] });
     } catch(e){
       errors.push({ keyword, error:e.message });
       console.error('SEACE keyword error', keyword, e.message);
     }
   }
-
   const byId = new Map();
   found.forEach(o=>{ if(o?.external_id) byId.set(o.external_id, o); });
   return { items:[...byId.values()], errors, diagnostics };
 }
 
 async function upsertOpportunities(items){
-  if(!items.length) return table('opportunities');
+  if(!items?.length) return [];
   if(!supabase){ demo.opportunities = items.concat(demo.opportunities).slice(0,100); return demo.opportunities; }
   const { error } = await supabase.from('opportunities').upsert(items, { onConflict:'external_id' });
   if(error) throw error;
@@ -290,7 +271,7 @@ async function sendDigest(){
 
 app.get('/', (_,res)=>res.json({ ok:true, app:'SEACE Alertas Grupo Ibero', version:VERSION, endpoints:['/api/health','/api/bootstrap','/api/jobs/search-now'] }));
 
-app.get('/api/health', (_,res)=>res.json({ ok:true, supabase:!!supabase, mode:MODE, version:VERSION }));
+app.get('/api/health', (_,res)=>res.json({ ok:true, supabase:!!supabase, mode:'seace-browser-diagnostics-v1', version:VERSION }));
 
 app.get('/api/bootstrap', async (_,res,next)=>{
   try{
@@ -315,25 +296,22 @@ app.get('/api/jobs/search-now', async (req,res,next)=>{
   try{
     const keyword = req.query.keyword ? String(req.query.keyword) : 'mobiliario escolar';
     const result = await searchSeace(keyword);
-    await upsertOpportunities(result.items || []);
+    const saved = await upsertOpportunities(result.items || []);
     res.json({
       ok:true,
-      test:true,
+      version:VERSION,
       keyword,
-      found: result.items ? result.items.length : 0,
-      items: result.items || [],
-      errors: result.errors || [],
-      diagnostics: result.diagnostics || []
+      found: result.items.length,
+      saved_total: Array.isArray(saved) ? saved.length : null,
+      errors: result.errors,
+      diagnostics: result.diagnostics,
+      items: result.items || []
     });
-  } catch(err){
-    console.error('SEARCH NOW ERROR', err);
-    next(err);
-  }
+  }catch(err){ next(err); }
 });
 
 app.post('/api/jobs/send-digest', async (_,res,next)=>{
-  try{ res.json(await sendDigest()); }
-  catch(e){ next(e); }
+  try{ res.json(await sendDigest()); } catch(e){ next(e); }
 });
 
 app.use((err,_,res,__)=>res.status(500).json({ ok:false, error:err.message, version:VERSION }));
@@ -348,4 +326,4 @@ cron.schedule(schedule, async()=>{
   } catch(e){ console.error('cron error', e); }
 });
 
-app.listen(process.env.PORT || 3000, ()=>console.log(`SEACE backend ${VERSION} on ${process.env.PORT || 3000}`));
+app.listen(process.env.PORT || 3000, ()=>console.log(`SEACE backend v${VERSION} on ${process.env.PORT || 3000}`));
