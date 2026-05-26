@@ -239,9 +239,12 @@ async function sendDigest(){
   return { ok:true, recipients };
 }
 
-app.get('/api/health', (_,res)=>res.json({ ok:true, supabase:!!supabase, mode:'seace-real-v1' }));
+app.get('/', (_,res)=>res.json({ ok:true, app:'SEACE Alertas Grupo Ibero', endpoints:['/api/health','/api/bootstrap','/api/jobs/search-now'] }));
+app.get('/api/health', (_,res)=>res.json({ ok:true, supabase:!!supabase, mode:'seace-real-v2', version:'0.4.0' }));
 app.get('/api/bootstrap', async (_,res,next)=>{ try{ res.json({ keywords:await table('keywords'), vendors:await table('vendors'), opportunities:await table('opportunities') }); } catch(e){ next(e); } });
 app.post('/api/jobs/search', async (_,res,next)=>{ try{ const result = await searchSeace(); const opportunities = await upsertOpportunities(result.items); res.json({ ok:true, found:result.items.length, errors:result.errors, opportunities }); } catch(e){ next(e); } });
+// Ruta GET para probar desde navegador sin Postman ni terminal.
+app.get('/api/jobs/search-now', async (req,res,next)=>{ try{ const keyword = req.query.keyword ? String(req.query.keyword) : null; const result = keyword ? { items: await searchSeaceRealForKeyword(keyword), errors: [] } : await searchSeace(); const opportunities = await upsertOpportunities(result.items); res.json({ ok:true, test:true, keyword, found:result.items.length, saved_total:Array.isArray(opportunities)?opportunities.length:null, errors:result.errors, sample:result.items.slice(0,5) }); } catch(e){ next(e); } });
 app.post('/api/jobs/send-digest', async (_,res,next)=>{ try{ res.json(await sendDigest()); } catch(e){ next(e); } });
 app.use((err,_,res,__)=>res.status(500).json({ error:err.message }));
 
