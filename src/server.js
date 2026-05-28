@@ -41,11 +41,15 @@ const demo = {
 
 async function table(name){
   if(!supabase) return demo[name] || [];
-  const { data, error } = await supabase.from(name).select('*').order('created_at', { ascending:false });
+
+  const { data, error } = await supabase
+    .from(name)
+    .select('*');
+
   if(error) throw error;
+
   return data || [];
 }
-
 function clean(value){
   return String(value ?? '').replace(/\s+/g,' ').trim();
 }
