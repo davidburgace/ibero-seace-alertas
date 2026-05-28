@@ -406,18 +406,23 @@ async function upsertOpportunities(items){
 }
 
 function renderEmail(opportunities) {
-  const baseUrl = process.env.PUBLIC_BASE_URL || 'https://ibero-seace-alertas.onrender.com';
+  return '<div style="font-family:Arial,sans-serif;background:#f6f7fb;padding:16px;">' +
+    '<h2>Radar SEACE - Nuevas oportunidades</h2>' +
+    opportunities.slice(0, 10).map(o => {
+      const baseUrl = process.env.PUBLIC_BASE_URL || 'https://ibero-seace-alertas.onrender.com';
+      const key = encodeURIComponent(o.nomenclature || o.external_id || o.title || '');
+      const link = baseUrl + '/dashboard.html?q=' + key;
 
-  const cards = opportunities.slice(0, 10).map(o => {
-    const key = encodeURIComponent(o.nomenclature || o.external_id || o.title || '');
-    const link = baseUrl + '/dashboard.html?q=' + key;
-
-    return '<div style="border:1px solid #e7eaf0;border-radius:12px;padding:16px;margin-bottom:12px;font-family:Arial,sans-serif;">' +
-      '<h3 style="margin:0 0 8px 0;">' + (o.title || 'Oportunidad SEACE') + '</h3>' +
-      '<p><strong>Nomenclatura:</strong> ' + (o.nomenclature || o.external_id || '-') + '</p>' +
-      '<p><strong>Entidad:</strong> ' + (o.entity || '-') + '</p>' +
-      '<p><strong>Línea:</strong> ' + (o.business_lin…
-
+      return '<div style="border:1px solid #e7eaf0;border-radius:12px;padding:16px;margin-bottom:12px;background:white;">' +
+        '<h3>' + (o.title || 'Oportunidad SEACE') + '</h3>' +
+        '<p><b>Nomenclatura:</b> ' + (o.nomenclature || o.external_id || '-') + '</p>' +
+        '<p><b>Entidad:</b> ' + (o.entity || '-') + '</p>' +
+        '<p><b>Línea:</b> ' + (o.business_line || '-') + '</p>' +
+        '<p><a href="' + link + '" target="_blank">Ver oportunidad en Radar Ibero</a></p>' +
+      '</div>';
+    }).join('') +
+  '</div>';
+}
 async function sendDigest(){
   const opportunities = await table('opportunities');
   const vendors = await table('vendors');
