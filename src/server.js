@@ -405,9 +405,29 @@ async function upsertOpportunities(items){
   return table('opportunities');
 }
 
-function renderEmail(opportunities){
-  const cards = opportunities.slice(0,10).map(o=>`<div style="border:1px solid #e7eaf0;border-radius:14px;padding:14px;margin:0 0 12px;background:#fff"><h3 style="margin:0 0 8px;font-size:16px">${o.title}</h3><p style="margin:0 0 10px;color:#475467;line-height:1.45"><b>Entidad:</b> ${o.entity}<br><b>Región:</b> ${o.region}<br><b>Monto:</b> ${o.amount ? 'S/ '+Number(o.amount).toLocaleString('es-PE') : 'Sin monto'}<br><b>Línea:</b> ${o.business_line}</p><a href="${o.source_url}" style="display:block;background:#0f766e;color:#fff;text-align:center;text-decoration:none;border-radius:12px;padding:12px;font-weight:700">Ver oportunidad</a></div>`).join('');
-  return `<div style="font-family:Arial,sans-serif;background:#f6f7fb;padding:16px"><div style="max-width:480px;margin:auto"><div style="background:#174e8f;color:#fff;border-radius:16px 16px 0 0;padding:18px"><h2 style="margin:0">Alertas SEACE</h2><p style="margin:6px 0 0">${opportunities.length} oportunidades detectadas</p></div><div style="background:#fff;padding:14px;border:1px solid #e7eaf0;border-top:0;border-radius:0 0 16px 16px">${cards || '<p>No hay oportunidades nuevas para enviar.</p>'}<p style="font-size:12px;color:#667085">Sistema de Alertas Comerciales - Grupo Ibero</p></div></div></div>`;
+function renderEmail(opportunities) {
+  const baseUrl = process.env.PUBLIC_BASE_URL || 'https://ibero-seace-alertas.onrender.com';
+
+  const cards = opportunities.slice(0, 10).map(o => {
+    const link = ${baseUrl}/dashboard.html?q=${encodeURIComponent(o.nomenclature || o.external_id || o.title || '')};
+
+    return `
+      <div style="border:1px solid #e7eaf0;border-radius:12px;padding:16px;margin-bottom:12px;font-family:Arial,sans-serif;">
+        <h3 style="margin:0 0 8px 0;">${o.title || 'Oportunidad SEACE'}</h3>
+        <p><strong>Nomenclatura:</strong> ${o.nomenclature || o.external_id || '-'}</p>
+        <p><strong>Entidad:</strong> ${o.entity || '-'}</p>
+        <p><strong>Línea:</strong> ${o.business_line || '-'}</p>
+        <p><a href="${link}" target="_blank">Ver oportunidad en Radar Ibero</a></p>
+      </div>
+    `;
+  }).join('');
+
+  return `
+    <div style="font-family:Arial,sans-serif;background:#f6f7fb;padding:16px;">
+      <h2>Radar SEACE - Nuevas oportunidades</h2>
+      ${cards}
+    </div>
+  `;
 }
 
 async function sendDigest(){
