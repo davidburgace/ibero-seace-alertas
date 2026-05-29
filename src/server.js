@@ -9,6 +9,7 @@ import OpenAI from 'openai';
 const app = express();
 app.use(cors({ origin: process.env.FRONTEND_URL?.split(',') || '*' }));
 app.use(express.json());
+app.use(express.static('src/public'));
 
 const VERSION = '0.10.0';
 const MODE = 'opennegocio-safe-v2';
