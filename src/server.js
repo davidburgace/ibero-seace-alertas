@@ -372,10 +372,18 @@ async function getActiveKeywords(){
   return [...new Set(words.length ? words : demo.keywords.map(k=>k.keyword))].slice(0,30);
 }
 
-async function searchSeace(keyword=null){
-  if(keyword){
-    return await searchKeyword(keyword);
-  }
+if(keyword){
+  const existing = await table('opportunities');
+  return {
+    items: existing.filter(o =>
+      String(o.title || '').toLowerCase().includes(keyword.toLowerCase()) ||
+      String(o.external_id || o.nomenclature || '').toLowerCase().includes(keyword.toLowerCase()) ||
+      String(o.business_line || '').toLowerCase().includes(keyword.toLowerCase())
+    ).slice(0, 10),
+    errors: [],
+    diagnostics: ['Render free: búsqueda desde oportunidades guardadas']
+  };
+}
 
   const keywords = await getActiveKeywords();
   const found = [];
