@@ -434,14 +434,18 @@ async function sendDigest(){
   const recipients = vendors.map(v=>v.email).filter(Boolean).join(',');
   if(!recipients) return { ok:false, message:'No hay vendedores configurados' };
 
-  await transport.sendMail({
-    from:process.env.MAIL_FROM || process.env.SMTP_USER,
-    to:recipients,
-    subject:`${opportunities.length} oportunidades SEACE detectadas`,
-    html:renderEmail(opportunities)
-  });
+  console.log('ENVIANDO DIGEST A:', recipients);
 
-  return { ok:true, recipients };
+const info = await transport.sendMail({
+  from: process.env.MAIL_FROM || process.env.SMTP_USER,
+  to: recipients,
+  subject: `${opportunities.length} oportunidades SEACE detectadas`,
+  html: renderEmail(opportunities)
+});
+
+console.log('DIGEST ENVIADO:', info.messageId || info.response);
+
+return { ok:true, recipients, messageId: info.messageId || null, response: info.response || null };
 }
 
 app.get('/', (_,res)=>res.json({
