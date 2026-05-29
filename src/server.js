@@ -47,13 +47,37 @@ Descripción: ${opportunity.description || ''}
 Línea: ${opportunity.business_line || ''}
 
 Devuelve únicamente JSON con este formato:
+Considera que Grupo Ibero Perú fabrica:
+
+- mobiliario escolar
+- mobiliario de oficina
+- mobiliario hospitalario
+- mobiliario metálico
+
+La recomendación debe ser únicamente:
+
+"PARTICIPAR"
+"REVISAR"
+"NO PARTICIPAR"
+
+Genera 3 riesgos concretos y 3 acciones concretas.
 
 {
   "summary":"",
   "business_line":"",
   "fit_for_ibero":"",
   "score":0,
-  "recommendation":""
+  "recommendation":"",
+  "risks":[
+    "",
+    "",
+    ""
+  ],
+  "actions":[
+    "",
+    "",
+    ""
+  ]
 }
 `;
 
