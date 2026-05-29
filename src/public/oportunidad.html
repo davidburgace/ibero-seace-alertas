@@ -75,6 +75,53 @@ button{
 <div class="card">
 
     <h2>🤖 Análisis IA</h2>
+    <div id="executiveCard"
+style="
+background:#f8fafc;
+border:1px solid #e5e7eb;
+border-radius:12px;
+padding:15px;
+margin-bottom:15px;
+">
+
+<h3>🏢 Resumen Ejecutivo</h3>
+
+<div id="decisionBadge"
+style="
+display:inline-block;
+padding:8px 15px;
+border-radius:20px;
+font-weight:bold;
+margin-bottom:10px;
+">
+Cargando...
+</div>
+
+<div style="display:flex;gap:30px;flex-wrap:wrap;">
+
+<div>
+<b>Puntaje</b><br>
+<span id="scoreText">--</span>
+</div>
+
+<div>
+<b>Línea de negocio</b><br>
+<span id="businessLineText">--</span>
+</div>
+
+<div>
+<b>Entidad</b><br>
+<span id="entityText">--</span>
+</div>
+
+<div>
+<b>Región</b><br>
+<span id="regionText">--</span>
+</div>
+
+</div>
+
+</div>
 
     <div id="scoreBox">
     <div id="score" style="font-size:32px;font-weight:bold;"></div>
@@ -156,6 +203,17 @@ async function loadOpportunity(){
     document.getElementById('process').innerText = opportunity.external_id || opportunity.nomenclature || '-';
     const score =
 Number(opportunity.ai_score || opportunity.puntuacion_ai || 0);
+    document.getElementById('scoreText').innerText =
+score + ' / 100';
+
+document.getElementById('businessLineText').innerText =
+opportunity.business_line || '-';
+
+document.getElementById('entityText').innerText =
+opportunity.entity || '-';
+
+document.getElementById('regionText').innerText =
+opportunity.region || '-';
 
     document.getElementById('score').innerText =
     score + ' puntos / 100';
