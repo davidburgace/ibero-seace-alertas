@@ -135,8 +135,27 @@ async function loadOpportunity(){
     document.getElementById('summary').innerText = opportunity.ai_summary || opportunity.resumen_ai || 'Análisis pendiente';
     document.getElementById('recommendation').innerText = opportunity.ai_recommendation || opportunity.recomendacion_ai || '';
 
-    document.getElementById('risks').innerHTML = '<li>Pendiente</li>';
-    document.getElementById('actions').innerHTML = '<li>Pendiente</li>';
+    const risks = Array.isArray(opportunity.ai_risks)
+  ? opportunity.ai_risks
+  : Array.isArray(opportunity.risks)
+    ? opportunity.risks
+    : [];
+
+const actions = Array.isArray(opportunity.ai_actions)
+  ? opportunity.ai_actions
+  : Array.isArray(opportunity.actions)
+    ? opportunity.actions
+    : [];
+
+document.getElementById('risks').innerHTML =
+  risks.length
+    ? risks.map(r => <li>${r}</li>).join('')
+    : '<li>Pendiente</li>';
+
+document.getElementById('actions').innerHTML =
+  actions.length
+    ? actions.map(a => <li>${a}</li>).join('')
+    : '<li>Pendiente</li>'
 
   }catch(e){
     document.getElementById('title').innerText = 'Error cargando oportunidad';
