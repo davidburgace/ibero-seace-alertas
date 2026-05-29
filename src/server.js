@@ -788,7 +788,11 @@ res.json({
     ...opportunity,
     ai_summary: analysis?.summary || null,
     ai_score: analysis?.score || null,
-    ai_recommendation: analysis?.recommendation || null
+    ai_recommendation: analysis?.recommendation || analysis?.decision || null,
+    ai_decision: analysis?.decision || analysis?.recommendation || null,
+    ai_risks: analysis?.risks || [],
+    ai_actions: analysis?.actions || [],
+    ai_criteria: analysis?.criteria || []
   }
 });
 
