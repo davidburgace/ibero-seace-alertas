@@ -701,6 +701,34 @@ Responde de forma clara, práctica y orientada a decisión comercial.
     });
   }
 });
+app.get('/api/opportunities/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const opportunities = await table('opportunities');
+    const opportunity = opportunities.find(
+      o => String(o.id) === String(id)
+    );
+
+    if (!opportunity) {
+      return res.status(404).json({
+        ok: false,
+        error: 'Oportunidad no encontrada'
+      });
+    }
+
+    res.json({
+      ok: true,
+      opportunity
+    });
+
+  } catch (e) {
+    res.status(500).json({
+      ok: false,
+      error: e.message
+    });
+  }
+});
 app.use((err,_,res,__)=>{
   console.error('API error:', err);
   res.status(500).json({ error:err.message, version:VERSION });
