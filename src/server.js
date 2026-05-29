@@ -61,6 +61,10 @@ La recomendación debe ser únicamente:
 "NO PARTICIPAR"
 
 Genera 3 riesgos concretos y 3 acciones concretas.
+La suma de los criterios debe ser igual al score.
+decision debe ser: "PARTICIPAR", "REVISAR" o "DESCARTAR".
+risks debe ser un arreglo de riesgos.
+actions debe ser un arreglo de acciones recomendadas.
 
 {
   "summary":"",
@@ -68,16 +72,41 @@ Genera 3 riesgos concretos y 3 acciones concretas.
   "fit_for_ibero":"",
   "score":0,
   "recommendation":"",
-  "risks":[
-    "",
-    "",
-    ""
+  "decision":"",
+  "criteria":[
+    {
+      "name":"Coincidencia línea de negocio",
+      "score":0,
+      "max":30
+    },
+    {
+      "name":"Experiencia sectorial",
+      "score":0,
+      "max":20
+    },
+    {
+      "name":"Logística",
+      "score":0,
+      "max":15
+    },
+    {
+      "name":"Información disponible",
+      "score":0,
+      "max":15
+    },
+    {
+      "name":"Capacidad técnica",
+      "score":0,
+      "max":10
+    },
+    {
+      "name":"Complejidad",
+      "score":0,
+      "max":10
+    }
   ],
-  "actions":[
-    "",
-    "",
-    ""
-  ]
+  "risks":[],
+  "actions":[]
 }
 `;
 
