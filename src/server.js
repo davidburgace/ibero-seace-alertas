@@ -717,10 +717,27 @@ app.get('/api/opportunities/:id', async (req, res) => {
       });
     }
 
-    res.json({
-      ok: true,
-      opportunity
-    });
+    let analysis = null;
+
+if (!opportunity.ai_summary && !opportunity.resumen_ai) {
+  analysis = await analyzeOpportunity(opportunity);
+} else {
+  analysis = {
+    summary: opportunity.ai_summary || opportunity.resumen_ai,
+    score: opportunity.ai_score || opportunity.puntuacion_ai,
+    recommendation: opportunity.ai_recommendation || opportunity.recomendacion_ai
+  };
+}
+
+res.json({
+  ok: true,
+  opportunity: {
+    ...opportunity,
+    ai_summary: analysis?.summary || null,
+    ai_score: analysis?.score || null,
+    ai_recommendation: analysis?.recommendation || null
+  }
+});
 
   } catch (e) {
     res.status(500).json({
