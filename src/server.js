@@ -405,7 +405,23 @@ if(keyword){
   found.forEach(o=>{ if(o?.external_id) byId.set(o.external_id, o); });
   return { items:[...byId.values()], errors, diagnostics };
 }
+async function searchSeaceLite(keyword=null){
+  const existing = await table('opportunities');
+  const k = String(keyword || '').toLowerCase();
 
+  const items = existing.filter(o => {
+    if(!k) return true;
+    return String(o.title || '').toLowerCase().includes(k) ||
+      String(o.external_id || o.nomenclature || '').toLowerCase().includes(k) ||
+      String(o.business_line || '').toLowerCase().includes(k);
+  }).slice(0, 10);
+
+  return {
+    items,
+    errors: [],
+    diagnostics: ['Render free: búsqueda desde oportunidades guardadas']
+  };
+}
 async function upsertOpportunities(items){
   if(!items?.length) return table('opportunities');
   if(!supabase){
@@ -487,8 +503,8 @@ app.get('/api/bootstrap', async (_,res,next)=>{
 
 app.post('/api/jobs/search', async (_,res,next)=>{
   try{
-    const result = await searchSeace();
-    const opportunities = await upsertOpportunities(result.items || []);
+    const result = await searchSeaceLite();
+    const opportunities = await ortunities(result.items || []);
     res.json({ ok:true, found:result.items.length, errors:result.errors, diagnostics:result.diagnostics, opportunities });
   }catch(e){ next(e); }
 });
@@ -497,7 +513,7 @@ app.get('/api/jobs/search-now', async (req,res,next)=>{
   console.log('ENTRO A SEARCH NOW', req.query);
   try{
     const keyword = req.query.keyword ? String(req.query.keyword) : 'mobiliario escolar';
-    const result = await searchSeace(keyword);
+    const result = await searchSeaceLite(keyword);
     const saved = await upsertOpportunities(result.items || []);
     res.json({
       ok:true,
@@ -525,7 +541,7 @@ app.use((err,_,res,__)=>{
 const schedule = process.env.CRON_SCHEDULE || '0 7 * * *';
 cron.schedule(schedule, async()=>{
   try{
-    const result = await searchSeace();
+    const result = await searchSeaceLite();
     await upsertOpportunities(result.items || []);
     await sendDigest();
     console.log('cron ok', result.items.length);
