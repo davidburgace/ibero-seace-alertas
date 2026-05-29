@@ -27,6 +27,14 @@ const SEACE_URLS = {
   contratosMenores: 'https://prod6.seace.gob.pe/buscador-publico/contrataciones'
 };
 
+async function testAI() {
+  const response = await openai.responses.create({
+    model: "gpt-5-mini",
+    input: "Resume en una frase qué es una licitación pública."
+  });
+
+  return response.output_text;
+}
 const demo = {
   keywords: [
     { keyword:'mobiliario escolar', active:true, business_line:'Educación' },
@@ -522,7 +530,22 @@ app.get('/api/jobs/send-digest', async (_req,res,next)=>{
   try { res.json(await sendDigest()); }
   catch(e){ next(e); }
 });
+app.get('/api/ai-test', async (req, res) => {
+  try {
+    const result = await testAI();
 
+    res.json({
+      ok: true,
+      result
+    });
+
+  } catch (e) {
+    res.status(500).json({
+      ok: false,
+      error: e.message
+    });
+  }
+});
 app.use((err,_,res,__)=>{
   console.error('API error:', err);
   res.status(500).json({ error:err.message, version:VERSION });
