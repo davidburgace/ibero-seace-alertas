@@ -606,6 +606,33 @@ app.get('/api/ai-demo', async (req,res) => {
   }
 
 });
+
+app.get('/api/ask-test', async (req,res) => {
+
+  try {
+
+    const opportunities = await table('opportunities');
+
+    const opportunity = opportunities[0];
+
+    const analysis = await analyzeOpportunity(opportunity);
+
+    res.json({
+      ok:true,
+      opportunity: opportunity.title,
+      analysis
+    });
+
+  } catch(e){
+
+    res.status(500).json({
+      ok:false,
+      error:e.message
+    });
+
+  }
+
+});
 app.post('/api/opportunities/:id/ask', async (req, res) => {
   try {
     const { id } = req.params;
