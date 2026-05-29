@@ -440,7 +440,11 @@ async function sendDigest(){
   const recipients = vendors.map(v=>v.email).filter(Boolean).join(',');
   if(!recipients) return { ok:false, message:'No hay vendedores configurados' };
 
-  console.log('ENVIANDO DIGEST A:', recipients);
+  console.log('VERIFICANDO SMTP...');
+await transport.verify();
+console.log('SMTP OK');
+
+console.log('ENVIANDO DIGEST A:', recipients);
 
 const info = await transport.sendMail({
   from: process.env.MAIL_FROM || process.env.SMTP_USER,
