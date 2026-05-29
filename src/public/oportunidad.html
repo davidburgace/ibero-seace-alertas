@@ -103,16 +103,7 @@ button{
     <p id="recommendation"></p>
     <h3>📊 Criterios de puntuación</h3>
 
-<table id="criteriaTable" border="1" width="100%">
-  <thead>
-    <tr>
-      <th>Criterio</th>
-      <th>Puntaje</th>
-      <th>Máximo</th>
-    </tr>
-  </thead>
-  <tbody></tbody>
-</table>
+<div id="criteriaCards"></div>
     <h3>⚠️ Riesgos</h3>
 <ul id="risks"></ul>
 
@@ -205,18 +196,52 @@ Array.isArray(opportunity.ai_criteria)
     ? opportunity.criteria
     : [];
 
-const tbody =
-document.querySelector('#criteriaTable tbody');
+const criteriaCards =
+document.getElementById('criteriaCards');
 
-if (tbody) {
-  tbody.innerHTML = criteria.map(c => `
-    <tr>
-      <td>${c.name}</td>
-      <td>${c.score}</td>
-      <td>${c.max}</td>
-    </tr>
-  `).join('');
-}  
+if(criteriaCards){
+
+    criteriaCards.innerHTML =
+    criteria.map(c => {
+
+        const pct =
+        Math.round((c.score / c.max) * 100);
+
+        return `
+        <div style="
+            margin-bottom:14px;
+            padding:10px;
+            border:1px solid #e5e7eb;
+            border-radius:8px;
+            background:#fafafa;
+        ">
+            <div style="
+                display:flex;
+                justify-content:space-between;
+                margin-bottom:6px;
+                font-weight:bold;
+            ">
+                <span>${c.name}</span>
+                <span>${c.score}/${c.max}</span>
+            </div>
+
+            <div style="
+                background:#e5e7eb;
+                height:12px;
+                border-radius:6px;
+            ">
+                <div style="
+                    width:${pct}%;
+                    height:12px;
+                    background:#22c55e;
+                    border-radius:6px;
+                ">
+                </div>
+            </div>
+        </div>
+        `;
+    }).join('');
+}
 
     const risks = Array.isArray(opportunity.ai_risks)
   ? opportunity.ai_risks
