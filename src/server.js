@@ -606,6 +606,73 @@ app.get('/api/ai-demo', async (req,res) => {
   }
 
 });
+app.post('/api/opportunities/:id/ask', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { question } = req.body;
+
+    if (!question || !question.trim()) {
+      return res.status(400).json({
+        ok: false,
+        error: 'La pregunta es requerida'
+      });
+    }
+
+    const opportunities = await table('opportunities');
+    const opportunity = opportunities.find(o => String(o.id) === String(id));
+
+    if (!opportunity) {
+      return res.status(404).json({
+        ok: false,
+        error: 'Oportunidad no encontrada'
+      });
+    }
+
+    const prompt = `
+Eres un asistente comercial experto en licitaciones públicas para Grupo Ibero Perú.
+
+Analiza esta oportunidad:
+
+Título: ${opportunity.title || ''}
+Entidad: ${opportunity.entity || ''}
+Proceso: ${opportunity.external_id || opportunity.nomenclature || ''}
+Región: ${opportunity.region || ''}
+Línea: ${opportunity.business_line || ''}
+Descripción: ${opportunity.description || opportunity.title || ''}
+
+Pregunta del usuario:
+${question}
+
+Responde de forma clara, práctica y orientada a decisión comercial.
+`;
+
+    const response = await openai.responses.create({
+      model: "gpt-5-mini",
+      input: prompt
+    });
+
+    const answer = response.output_text;
+
+    await supabase
+      .from('ai_chats')
+      .insert({
+        opportunity_id: id,
+        question,
+        answer
+      });
+
+    res.json({
+      ok: true,
+      answer
+    });
+
+  } catch (e) {
+    res.status(500).json({
+      ok: false,
+      error: e.message
+    });
+  }
+});
 app.use((err,_,res,__)=>{
   console.error('API error:', err);
   res.status(500).json({ error:err.message, version:VERSION });
