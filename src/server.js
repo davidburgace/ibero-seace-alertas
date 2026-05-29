@@ -504,7 +504,7 @@ app.get('/api/bootstrap', async (_,res,next)=>{
 app.post('/api/jobs/search', async (_,res,next)=>{
   try{
     const result = await searchSeaceLite();
-    const opportunities = await ortunities(result.items || []);
+    const opportunities = await upsertOpportunities(result.items || []);
     res.json({ ok:true, found:result.items.length, errors:result.errors, diagnostics:result.diagnostics, opportunities });
   }catch(e){ next(e); }
 });
