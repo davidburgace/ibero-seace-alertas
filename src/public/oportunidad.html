@@ -148,6 +148,26 @@ async function loadOpportunity(){
     document.getElementById('summary').innerText = opportunity.ai_summary || opportunity.resumen_ai || 'Análisis pendiente';
     document.getElementById('recommendation').innerText = opportunity.ai_recommendation || opportunity.recomendacion_ai || '';
 
+    const criteria =
+Array.isArray(opportunity.ai_criteria)
+  ? opportunity.ai_criteria
+  : Array.isArray(opportunity.criteria)
+    ? opportunity.criteria
+    : [];
+
+const tbody =
+document.querySelector('#criteriaTable tbody');
+
+if (tbody) {
+  tbody.innerHTML = criteria.map(c => `
+    <tr>
+      <td>${c.name}</td>
+      <td>${c.score}</td>
+      <td>${c.max}</td>
+    </tr>
+  `).join('');
+}  
+
     const risks = Array.isArray(opportunity.ai_risks)
   ? opportunity.ai_risks
   : Array.isArray(opportunity.risks)
