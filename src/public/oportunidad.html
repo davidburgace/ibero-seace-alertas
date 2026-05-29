@@ -104,12 +104,62 @@ button{
 </div>
 
 <script>
-function copyProcess(){
-    navigator.clipboard.writeText(
-        document.getElementById('process').innerText
-    );
-    alert('Proceso copiado');
+const params = new URLSearchParams(window.location.search);
+const id = params.get('id');
+let opportunity = null;
+
+async function loadOpportunity(){
+  try{
+    const res = await fetch('/api/opportunities/' + id);
+    const data = await res.json();
+
+    if(!data.ok){
+      document.getElementById('title').innerText = 'Oportunidad no encontrada';
+      return;
+    }
+
+    opportunity = data.opportunity;
+
+    document.getElementById('title').innerText = opportunity.title || 'Oportunidad SEACE';
+    document.getElementById('entity').innerText = opportunity.entity || '-';
+    document.getElementById('region').innerText = opportunity.region || '-';
+    document.getElementById('line').innerText = opportunity.business_line || '-';
+    document.getElementById('process').innerText = opportunity.external_id || opportunity.nomenclature || '-';
+
+    document.getElementById('score').innerText = opportunity.ai_score || opportunity.puntuacion_ai || '--';
+    document.getElementById('summary').innerText = opportunity.ai_summary || opportunity.resumen_ai || 'Análisis pendiente';
+    document.getElementById('recommendation').innerText = opportunity.ai_recommendation || opportunity.recomendacion_ai || '';
+
+  }catch(e){
+    document.getElementById('title').innerText = 'Error cargando oportunidad';
+  }
 }
+
+function copyProcess(){
+  navigator.clipboard.writeText(
+    document.getElementById('process').innerText
+  );
+  alert('Proceso copiado');
+}
+
+async function askAI(){
+  const question = document.getElementById('question').value;
+  const answerDiv = document.getElementById('answer');
+
+  answerDiv.innerText = 'Consultando IA...';
+
+  const res = await fetch('/api/opportunities/' + id + '/ask', {
+    method:'POST',
+    headers:{ 'Content-Type':'application/json' },
+    body: JSON.stringify({ question })
+  });
+
+  const data = await res.json();
+
+  answerDiv.innerText = data.answer || data.error || 'No se obtuvo respuesta';
+}
+
+loadOpportunity();
 </script>
 
 </body>
