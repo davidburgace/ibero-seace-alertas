@@ -4,6 +4,7 @@ import cors from 'cors';
 import cron from 'node-cron';
 import { createClient } from '@supabase/supabase-js';
 import nodemailer from 'nodemailer';
+import OpenAI from 'openai';
 
 const app = express();
 app.use(cors({ origin: process.env.FRONTEND_URL?.split(',') || '*' }));
@@ -16,6 +17,9 @@ const SUPABASE_KEY = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SER
 const supabase = process.env.SUPABASE_URL && SUPABASE_KEY
   ? createClient(process.env.SUPABASE_URL, SUPABASE_KEY)
   : null;
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
+});
 
 const SEACE_URLS = {
   openNegocioBase: 'https://prod4.seace.gob.pe/openegocio/',
