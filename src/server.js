@@ -496,12 +496,13 @@ app.get('/api/jobs/search-now', async (req,res,next)=>{
   }catch(err){ next(err); }
 });
 
-app.post('/api/jobs/send-digest', async (_,res,next)=>{
-  
-  try{ res.json(await sendDigest()); }
+app.post('/api/jobs/send-digest', async (_req,res,next)=>{
+  try { res.json(await sendDigest()); }
   catch(e){ next(e); }
 });
-  try{ res.json(await sendDigest()); }
+
+app.get('/api/jobs/send-digest', async (_req,res,next)=>{
+  try { res.json(await sendDigest()); }
   catch(e){ next(e); }
 });
 
