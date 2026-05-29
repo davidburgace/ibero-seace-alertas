@@ -135,8 +135,14 @@ async function loadOpportunity(){
     document.getElementById('summary').innerText = opportunity.ai_summary || opportunity.resumen_ai || 'Análisis pendiente';
     document.getElementById('recommendation').innerText = opportunity.ai_recommendation || opportunity.recomendacion_ai || '';
 
-    const risks = opportunity.ai_risks || opportunity.risks || [];
-const actions = opportunity.ai_actions || opportunity.actions || [];
+    const risks = Array.isArray(opportunity.ai_risks) ? opportunity.ai_risks : [];
+const actions = Array.isArray(opportunity.ai_actions) ? opportunity.ai_actions : [];
+
+document.getElementById('risks').innerHTML =
+  risks.length ? risks.map(r => <li>${r}</li>).join('') : '<li>Pendiente</li>';
+
+document.getElementById('actions').innerHTML =
+  actions.length ? actions.map(a => <li>${a}</li>).join('') : '<li>Pendiente</li>';
 
 document.getElementById('risks').innerHTML = Array.isArray(risks)
   ? risks.map(r => <li>${r}</li>).join('')
