@@ -124,6 +124,7 @@ async function loadOpportunity(){
     }
 
     opportunity = data.opportunity;
+    console.log(opportunity);
 
     document.getElementById('title').innerText = opportunity.title || 'Oportunidad SEACE';
     document.getElementById('entity').innerText = opportunity.entity || '-';
