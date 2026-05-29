@@ -150,12 +150,12 @@ const actions = Array.isArray(opportunity.ai_actions)
 
 document.getElementById('risks').innerHTML =
   risks.length
-    ? risks.map(r => <li>${r}</li>).join('')
+    ? risks.map(r =>  `<li>${r}</li>`).join('')
     : '<li>Pendiente</li>';
 
 document.getElementById('actions').innerHTML =
   actions.length
-    ? actions.map(a => <li>${a}</li>).join('')
+    ? actions.map(a =>  `<li>${a}</li>`).join('')
     : '<li>Pendiente</li>'
 
   }catch(e){
