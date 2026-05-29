@@ -425,11 +425,17 @@ async function sendDigest(){
   if(!process.env.SMTP_HOST) return { ok:false, message:'SMTP no configurado' };
 
   const transport = nodemailer.createTransport({
-    host:process.env.SMTP_HOST,
-    port:Number(process.env.SMTP_PORT || 587),
-    secure:String(process.env.SMTP_SECURE || 'false') === 'true',
-    auth:{ user:process.env.SMTP_USER, pass:process.env.SMTP_PASS }
-  });
+  host: process.env.SMTP_HOST,
+  port: Number(process.env.SMTP_PORT || 587),
+  secure: String(process.env.SMTP_SECURE || 'false') === 'true',
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS
+  },
+  connectionTimeout: 10000,
+  greetingTimeout: 10000,
+  socketTimeout: 15000
+});
 
   const recipients = vendors.map(v=>v.email).filter(Boolean).join(',');
   if(!recipients) return { ok:false, message:'No hay vendedores configurados' };
