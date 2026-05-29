@@ -76,7 +76,19 @@ button{
 
     <h2>🤖 Análisis IA</h2>
 
-    <div class="score" id="score">--</div>
+    <div id="scoreBox">
+    <div id="score" style="font-size:32px;font-weight:bold;"></div>
+
+    <div style="background:#e5e7eb;border-radius:8px;height:18px;margin-top:8px;">
+        <div id="scoreBar"
+             style="height:18px;width:0%;border-radius:8px;background:#f59e0b;">
+        </div>
+    </div>
+
+    <div id="decisionBadge"
+         style="margin-top:10px;font-weight:bold;">
+    </div>
+</div>
 
     <p id="summary"></p>
 
@@ -145,6 +157,32 @@ async function loadOpportunity(){
     document.getElementById('process').innerText = opportunity.external_id || opportunity.nomenclature || '-';
 
     document.getElementById('score').innerText = opportunity.ai_score || opportunity.puntuacion_ai || '--';
+    const score =
+Number(opportunity.ai_score || opportunity.puntuacion_ai || 0);
+
+document.getElementById('scoreBar').style.width =
+score + '%';
+
+let color = '#ef4444';
+let texto = '🔴 NO PARTICIPAR';
+
+if(score >= 80){
+    color = '#22c55e';
+    texto = '🟢 PARTICIPAR';
+}
+else if(score >= 60){
+    color = '#f59e0b';
+    texto = '🟡 REVISAR';
+}
+
+document.getElementById('scoreBar').style.background =
+color;
+
+document.getElementById('decisionBadge').innerText =
+texto;
+
+document.getElementById('decisionBadge').style.color =
+color;  
     document.getElementById('summary').innerText = opportunity.ai_summary || opportunity.resumen_ai || 'Análisis pendiente';
     document.getElementById('recommendation').innerText = opportunity.ai_recommendation || opportunity.recomendacion_ai || '';
 
