@@ -372,27 +372,7 @@ async function getActiveKeywords(){
   return [...new Set(words.length ? words : demo.keywords.map(k=>k.keyword))].slice(0,30);
 }
 
-
-  const keywords = await getActiveKeywords();
-  const found = [];
-  const errors = [];
-  const diagnostics = [];
-
-  for(const kw of keywords){
-    try{
-      const result = await searchKeyword(kw);
-      found.push(...result.items);
-      diagnostics.push({ keyword:kw, diagnostics:result.diagnostics });
-      if(found.length >= 50) break;
-    }catch(e){
-      errors.push({ keyword:kw, error:e.message });
-    }
-  }
-
-  const byId = new Map();
-  found.forEach(o=>{ if(o?.external_id) byId.set(o.external_id, o); });
-  return { items:[...byId.values()], errors, diagnostics };
-}
+  
 async function searchSeaceLite(keyword=null){
   const existing = await table('opportunities');
   const k = String(keyword || '').toLowerCase();
