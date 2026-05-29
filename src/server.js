@@ -497,6 +497,10 @@ app.get('/api/jobs/search-now', async (req,res,next)=>{
 });
 
 app.post('/api/jobs/send-digest', async (_,res,next)=>{
+  
+  try{ res.json(await sendDigest()); }
+  catch(e){ next(e); }
+});
   try{ res.json(await sendDigest()); }
   catch(e){ next(e); }
 });
