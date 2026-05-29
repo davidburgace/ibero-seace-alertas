@@ -86,8 +86,16 @@ button{
     </div>
 
     <div id="decisionBadge"
-         style="margin-top:10px;font-weight:bold;">
-    </div>
+     style="
+        margin-top:12px;
+        padding:12px;
+        border-radius:10px;
+        font-size:22px;
+        font-weight:bold;
+        text-align:center;
+        color:white;
+     ">
+</div>
 </div>
 
     <p id="summary"></p>
@@ -155,11 +163,12 @@ async function loadOpportunity(){
     document.getElementById('region').innerText = opportunity.region || '-';
     document.getElementById('line').innerText = opportunity.business_line || '-';
     document.getElementById('process').innerText = opportunity.external_id || opportunity.nomenclature || '-';
-
-    document.getElementById('score').innerText = opportunity.ai_score || opportunity.puntuacion_ai || '--';
     const score =
 Number(opportunity.ai_score || opportunity.puntuacion_ai || 0);
 
+    document.getElementById('score').innerText =
+    score + ' puntos / 100';
+    
 document.getElementById('scoreBar').style.width =
 score + '%';
 
@@ -181,8 +190,11 @@ color;
 document.getElementById('decisionBadge').innerText =
 texto;
 
+document.getElementById('decisionBadge').style.background =
+color;
+
 document.getElementById('decisionBadge').style.color =
-color;  
+'white';  
     document.getElementById('summary').innerText = opportunity.ai_summary || opportunity.resumen_ai || 'Análisis pendiente';
     document.getElementById('recommendation').innerText = opportunity.ai_recommendation || opportunity.recomendacion_ai || '';
 
