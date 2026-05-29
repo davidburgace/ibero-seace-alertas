@@ -35,6 +35,34 @@ async function testAI() {
 
   return response.output_text;
 }
+async function analyzeOpportunity(opportunity) {
+
+  const prompt = `
+Analiza la siguiente oportunidad de contratación pública:
+
+Título: ${opportunity.title || ''}
+Entidad: ${opportunity.entity || ''}
+Descripción: ${opportunity.description || ''}
+Línea: ${opportunity.business_line || ''}
+
+Devuelve únicamente JSON con este formato:
+
+{
+  "summary":"",
+  "business_line":"",
+  "fit_for_ibero":"",
+  "score":0,
+  "recommendation":""
+}
+`;
+
+  const response = await openai.responses.create({
+    model: "gpt-5-mini",
+    input: prompt
+  });
+
+  return JSON.parse(response.output_text);
+}
 const demo = {
   keywords: [
     { keyword:'mobiliario escolar', active:true, business_line:'Educación' },
@@ -545,6 +573,38 @@ app.get('/api/ai-test', async (req, res) => {
       error: e.message
     });
   }
+});
+app.get('/api/ai-demo', async (req,res) => {
+
+  try {
+
+    const opportunities = await table('opportunities');
+
+    if(!opportunities.length){
+      return res.json({
+        ok:false,
+        message:'No hay oportunidades'
+      });
+    }
+
+    const analysis =
+      await analyzeOpportunity(opportunities[0]);
+
+    res.json({
+      ok:true,
+      opportunity: opportunities[0],
+      analysis
+    });
+
+  } catch(e){
+
+    res.status(500).json({
+      ok:false,
+      error:e.message
+    });
+
+  }
+
 });
 app.use((err,_,res,__)=>{
   console.error('API error:', err);
