@@ -135,22 +135,8 @@ async function loadOpportunity(){
     document.getElementById('summary').innerText = opportunity.ai_summary || opportunity.resumen_ai || 'Análisis pendiente';
     document.getElementById('recommendation').innerText = opportunity.ai_recommendation || opportunity.recomendacion_ai || '';
 
-    const risks = Array.isArray(opportunity.ai_risks) ? opportunity.ai_risks : [];
-const actions = Array.isArray(opportunity.ai_actions) ? opportunity.ai_actions : [];
-
-document.getElementById('risks').innerHTML =
-  risks.length ? risks.map(r => <li>${r}</li>).join('') : '<li>Pendiente</li>';
-
-document.getElementById('actions').innerHTML =
-  actions.length ? actions.map(a => <li>${a}</li>).join('') : '<li>Pendiente</li>';
-
-document.getElementById('risks').innerHTML = Array.isArray(risks)
-  ? risks.map(r => <li>${r}</li>).join('')
-  : '';
-
-document.getElementById('actions').innerHTML = Array.isArray(actions)
-  ? actions.map(a => <li>${a}</li>).join('')
-  : '';
+    document.getElementById('risks').innerHTML = '<li>Pendiente</li>';
+    document.getElementById('actions').innerHTML = '<li>Pendiente</li>';
 
   }catch(e){
     document.getElementById('title').innerText = 'Error cargando oportunidad';
@@ -158,9 +144,7 @@ document.getElementById('actions').innerHTML = Array.isArray(actions)
 }
 
 function copyProcess(){
-  navigator.clipboard.writeText(
-    document.getElementById('process').innerText
-  );
+  navigator.clipboard.writeText(document.getElementById('process').innerText);
   alert('Proceso copiado');
 }
 
@@ -177,7 +161,6 @@ async function askAI(){
   });
 
   const data = await res.json();
-
   answerDiv.innerText = data.answer || data.error || 'No se obtuvo respuesta';
 }
 
