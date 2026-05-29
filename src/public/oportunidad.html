@@ -81,6 +81,11 @@ button{
     <p id="summary"></p>
 
     <p id="recommendation"></p>
+    <h3>⚠️ Riesgos</h3>
+<ul id="risks"></ul>
+
+<h3>✅ Acciones recomendadas</h3>
+<ul id="actions"></ul>
 
 </div>
 
@@ -129,6 +134,17 @@ async function loadOpportunity(){
     document.getElementById('score').innerText = opportunity.ai_score || opportunity.puntuacion_ai || '--';
     document.getElementById('summary').innerText = opportunity.ai_summary || opportunity.resumen_ai || 'Análisis pendiente';
     document.getElementById('recommendation').innerText = opportunity.ai_recommendation || opportunity.recomendacion_ai || '';
+
+    const risks = opportunity.ai_risks || opportunity.risks || [];
+const actions = opportunity.ai_actions || opportunity.actions || [];
+
+document.getElementById('risks').innerHTML = Array.isArray(risks)
+  ? risks.map(r => <li>${r}</li>).join('')
+  : '';
+
+document.getElementById('actions').innerHTML = Array.isArray(actions)
+  ? actions.map(a => <li>${a}</li>).join('')
+  : '';
 
   }catch(e){
     document.getElementById('title').innerText = 'Error cargando oportunidad';
