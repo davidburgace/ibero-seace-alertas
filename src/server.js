@@ -968,23 +968,21 @@ app.post('/api/opportunities/:id/download-documents', async (req, res) => {
     const opportunity = opportunities.find(o => String(o.id) === String(id));
 
     if (!opportunity) {
-      return res.status(404).json({
-        ok: false,
-        error: 'Oportunidad no encontrada'
-      });
+      return res.status(404).json({ ok: false, error: 'Oportunidad no encontrada' });
+    }
+
+    if (!opportunity.detail_url) {
+      return res.status(400).json({ ok: false, error: 'La oportunidad no tiene detail_url' });
     }
 
     return res.json({
       ok: true,
-      files: [],
-      detail_url: opportunity.detail_url || null
+      files: [{ name: 'SEACE_RAR_detectado', url: opportunity.detail_url }],
+      detail_url: opportunity.detail_url
     });
 
   } catch (e) {
-    return res.status(500).json({
-      ok: false,
-      error: e.message
-    });
+    return res.status(500).json({ ok: false, error: e.message });
   }
 });
 app.get('/api/opportunities/:id/documents', async (req, res) => {
