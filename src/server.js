@@ -959,6 +959,7 @@ app.post('/api/opportunities/:id/documents', async (req, res) => {
       error: e.message
     });
   }
+});
 app.post('/api/opportunities/:id/download-documents', async (req, res) => {
   try {
     const { id } = req.params;
