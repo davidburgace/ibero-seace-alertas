@@ -944,10 +944,38 @@ app.post('/api/opportunities/:id/documents', async (req, res) => {
   }
 });
 app.post('/api/opportunities/:id/download-documents', async (req, res) => {
-  return res.status(501).json({
-    ok: false,
-    error: 'Descarga automática desde SEACE pendiente de implementar'
-  });
+  try {
+    const { id } = req.params;
+
+    const opportunities = await table('opportunities');
+    const opportunity = opportunities.find(
+      o => String(o.id) === String(id)
+    );
+
+    if (!opportunity) {
+      return res.status(404).json({
+        ok: false,
+        error: 'Oportunidad no encontrada'
+      });
+    }
+
+    return res.json({
+      ok: false,
+      error: 'Oportunidad encontrada. Falta implementar descarga real desde SEACE.',
+      opportunity: {
+        id: opportunity.id,
+        title: opportunity.title,
+        source_url: opportunity.source_url,
+        external_id: opportunity.external_id
+      }
+    });
+
+  } catch (e) {
+    return res.status(500).json({
+      ok: false,
+      error: e.message
+    });
+  }
 });
 app.get('/api/opportunities/:id/documents', async (req, res) => {
   try {
