@@ -177,7 +177,7 @@ function normalizeOpportunity(raw, keyword){
 
 if (published_date && published_date.includes('/')) {
   const [d, m, y] = published_date.split(' ')[0].split('/');
-  published_date = ${y}-${m}-${d};
+  published_date = `${y}-${m}-${d}`;
 }
 
 if (!published_date) {
