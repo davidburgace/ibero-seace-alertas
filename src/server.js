@@ -961,6 +961,8 @@ app.post('/api/opportunities/:id/documents', async (req, res) => {
   }
 });
 app.post('/api/opportunities/:id/download-documents', async (req, res) => {
+  let browser;
+
   try {
     const { id } = req.params;
 
@@ -975,13 +977,67 @@ app.post('/api/opportunities/:id/download-documents', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'La oportunidad no tiene detail_url' });
     }
 
+    const launched = await launchBrowser();
+    browser = launched.browser;
+    const page = launched.page;
+
+    await page.goto(opportunity.detail_url, {
+      waitUntil: 'domcontentloaded',
+      timeout: 60000
+    });
+
+    await page.waitForTimeout(8000);
+
+    const downloads = [];
+
+    const selectors = [
+      'a:has(img)',
+      'img[src*="rar"]',
+      'img[src*="RAR"]',
+      'img[alt*="rar"]',
+      'img[title*="rar"]',
+      'img[src*="pdf"]',
+      'img[src*="PDF"]',
+      'a[href*="download"]',
+      'a[href*="archivo"]',
+      'a[href*="documento"]'
+    ];
+
+    for (const selector of selectors) {
+      const count = await page.locator(selector).count().catch(() => 0);
+
+      for (let i = 0; i < count; i++) {
+        try {
+          const item = page.locator(selector).nth(i);
+
+          const downloadPromise = page.waitForEvent('download', { timeout: 12000 });
+          await item.click({ timeout: 8000 });
+
+          const download = await downloadPromise;
+
+          downloads.push({
+            name: download.suggestedFilename()
+          });
+
+          break;
+        } catch (e) {
+          // intenta con el siguiente ícono/enlace
+        }
+      }
+
+      if (downloads.length > 0) break;
+    }
+
+    await browser.close();
+
     return res.json({
       ok: true,
-      files: [{ name: 'Icono RAR ubicado en SEACE', url: opportunity.detail_url }],
+      files: downloads,
       detail_url: opportunity.detail_url
     });
 
   } catch (e) {
+    if (browser) await browser.close().catch(() => {});
     return res.status(500).json({ ok: false, error: e.message });
   }
 });
