@@ -976,7 +976,9 @@ app.post('/api/opportunities/:id/download-documents', async (req, res) => {
     if (!opportunity.detail_url) {
       return res.status(400).json({ ok: false, error: 'La oportunidad no tiene detail_url' });
     }
-
+console.log('DESCARGA SEACE INICIADA');
+console.log('OPPORTUNITY ID:', id);
+console.log('DETAIL URL:', opportunity.detail_url);
     const launched = await launchBrowser();
     browser = launched.browser;
     const page = launched.page;
@@ -1029,7 +1031,10 @@ app.post('/api/opportunities/:id/download-documents', async (req, res) => {
     }
 
     await browser.close();
-
+    
+    console.log('DESCARGAS ENCONTRADAS:', downloads.length);
+    console.log(JSON.stringify(downloads, null, 2));
+    
     return res.json({
       ok: true,
       files: downloads,
