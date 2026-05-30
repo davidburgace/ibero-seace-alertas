@@ -990,6 +990,10 @@ console.log('DETAIL URL:', opportunity.detail_url);
 
     await page.waitForTimeout(8000);
 
+    const html = await page.content();
+    console.log('HTML_LENGTH:', html.length);
+    console.log(html.substring(0, 3000));
+
     const downloads = [];
 
     const selectors = [
