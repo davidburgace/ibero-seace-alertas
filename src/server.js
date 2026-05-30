@@ -249,7 +249,7 @@ const entityLine = clean(
  
 
 const entidadRealMatch = joined.match(
-  /(MUNICIPALIDAD.?|GOBIERNO REGIONAL.?|UGEL.?|HOSPITAL.?|ESSALUD.?|MINISTERIO.?)(?:\s{2,}|Bien:|Fecha|Cotizaciones:|$)/i
+  /(MUNICIPALIDAD(?:\s+DISTRITAL|\s+PROVINCIAL)?\s+DE\s+[^:]+?|GOBIERNO\s+REGIONAL\s+DE\s+[^:]+?|DIRECCION\s+REGIONAL\s+DE\s+[^:]+?|UGEL\s+[^:]+?|HOSPITAL\s+[^:]+?|ESSALUD\s+[^:]+?|MINISTERIO\s+DE\s+[^:]+?)(?:\s+Cotizaciones:|\s+Bien:|\s+Fecha|\s+SELECCIONAR|$)/i
 );
 
 const entidadReal =
