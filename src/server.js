@@ -211,6 +211,7 @@ if (isGarbage || !looksLikeOpportunity) return null;
     region,
     amount,
     published_date,
+    closing_date: raw.closing_date || null,
     business_line: classify(`${title} ${keyword}`),
     status: 'Nuevo',
     source_url,
