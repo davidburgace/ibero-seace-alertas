@@ -229,7 +229,8 @@ function textToOpportunity(text, keyword, index=0){
 
   const amountMatch = joined.match(/S\/?\s*([0-9][0-9.,]+)/i) || joined.match(/\b([0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]{2})?)\b/);
   const dateMatch = joined.match(/\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?\b/) || joined.match(/\b\d{4}\-\d{2}\-\d{2}\b/);
-  const closingMatch = joined.match(/(\d{2}\/\d{2}\/\d{4})\s+\d{2}:\d{2}:\d{2}\s+Fecha de cierre/i);
+  const closingMatch =
+    joined.match(/Cotizaciones:\s*[\d\/:\s]+-\s*(\d{2}\/\d{2}\/\d{4})/i);
 
   const bienMatch = joined.match(/Bien:\s*(.*?)(?:Cotizaciones:|Fecha de publicación|open_in_new|Descargar|$)/i);
 const tituloMatch = joined.match(/Título:\s*(.*?)(?:Entidad|Región|Fecha|$)/i);
