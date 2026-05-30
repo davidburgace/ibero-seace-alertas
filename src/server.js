@@ -644,6 +644,16 @@ const info = await transport.sendMail({
 });
 
 console.log('DIGEST ENVIADO:', info.messageId || info.response);
+const ids = opportunities.map(o => o.id).filter(Boolean);
+
+if (ids.length && supabase) {
+  const { error } = await supabase
+    .from('opportunities')
+    .update({ alert_sent: true })
+    .in('id', ids);
+
+  if (error) console.error('Error actualizando alert_sent:', error);
+}
 
 return { ok:true, recipients, messageId: info.messageId || null, response: info.response || null };
 }
