@@ -220,7 +220,9 @@ if (isGarbage || !looksLikeOpportunity) return null;
 }
 
 function textToOpportunity(text, keyword, index=0){
-  const joined = clean(text);
+  
+  const raw = typeof text === 'object' ? text : { text };
+  const joined = clean(raw.text);
   if(!joined || joined.length < 20) return null;
 
   // Acepta filas de tabla aunque el texto esté truncado o el primer término no aparezca completo.
@@ -267,7 +269,8 @@ const entidadReal =
     published_date: dateMatch?.[0] || new Date().toISOString().slice(0,10),
     closing_date: closingMatch?.[1]?.split('/').reverse().join('-') || null,
     
-   source_url: SEACE_URLS.openNegocio
+   source_url: SEACE_URLS.openNegocio,
+   detail_url: raw.detail_url || null
   }, keyword);
 }
 
@@ -459,7 +462,10 @@ async function extractRows(page, keyword, diagnostics){
   diagnostics.push(`Bloques extraídos: ${result.matches.length}`);
 
   const rows = result.matches
-    .map((m,i)=>textToOpportunity(m.text, keyword, i))
+    .map((m,i)=>textToOpportunity({
+      text: m.text,
+      detail_url: m.detail_url
+}, keyword, i))
     .filter(Boolean);
 
   diagnostics.push(`Oportunidades normalizadas: ${rows.length}`);
