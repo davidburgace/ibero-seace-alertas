@@ -187,6 +187,7 @@ if (!published_date) {
   const source_url = clean(raw.source_url || raw.url || raw.link || SEACE_URLS.openNegocioBuscar);
   if(!title || title.length < 5) return null;
   const titleUpper = title.toUpperCase();
+  const titleNorm = titleUpper.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
 const isGarbage =
   titleUpper.includes('BUSCADOR') ||
@@ -200,7 +201,7 @@ const isGarbage =
   titleUpper.includes('SELECCIONAR');
 
 const looksLikeOpportunity =
-  /LP-|AS-|CP-|SIE-|DIRECTA|ADJUDICACION|ADQUISICION|CONTRATACION|SERVICIO|SUMINISTRO/.test(titleUpper);
+  /LP-|AS-|CP-|SIE-|DIRECTA|ADJUDICACION|ADQUISICION|CONTRATACION|SERVICIO|SUMINISTRO|SILLA|SILLAS|MOBILIARIO|CARPETA|CARPETAS|MUEBLE|MUEBLES/.test(titleNorm);
 
 if (isGarbage || !looksLikeOpportunity) return null;
   return {
