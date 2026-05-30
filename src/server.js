@@ -977,7 +977,7 @@ app.post('/api/opportunities/:id/download-documents', async (req, res) => {
 
     return res.json({
       ok: true,
-      files: [{ name: 'SEACE_RAR_detectado_V1', url: opportunity.detail_url }],
+      files: [{ name: 'Icono RAR ubicado en SEACE', url: opportunity.detail_url }],
       detail_url: opportunity.detail_url
     });
 
