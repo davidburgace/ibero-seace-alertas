@@ -808,7 +808,7 @@ app.use((err,_,res,__)=>{
   res.status(500).json({ error:err.message, version:VERSION });
 });
 
-const schedule = process.env.CRON_SCHEDULE || '0 7 * * *';
+const schedule = process.env.CRON_SCHEDULE || '0 8,17 * * *';
 cron.schedule(schedule, async()=>{
   try{
     const result = await searchSeaceLite();
