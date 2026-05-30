@@ -190,6 +190,9 @@ if (!published_date) {
 
 const isGarbage =
   titleUpper.includes('BUSCADOR') ||
+  titleUpper.includes('CONTRATOS MENORES') ||
+  titleUpper.includes('SEARCH') ||
+  titleUpper.includes('BUSCAR POR DESCRIPCION') ||
   titleUpper.includes('CONTRATOS MENORES 8 A UIT') ||
   titleUpper.includes('NO SE ENCONTRARON DATOS') ||
   titleUpper.includes('REGISTROS POR PAGINA') ||
