@@ -71,6 +71,25 @@ button{
         Copiar Proceso Activo
     </button>
 </div>
+    <div class="card">
+  <h2>📁 Documentos del expediente</h2>
+
+  <input type="file" id="docFile" accept=".pdf,.doc,.docx,.xls,.xlsx,.zip" />
+
+  <select id="docType">
+    <option value="bases">Bases</option>
+    <option value="especificaciones">Especificaciones técnicas</option>
+    <option value="anexos">Anexos</option>
+    <option value="cronograma">Cronograma</option>
+    <option value="otro">Otro</option>
+  </select>
+
+  <button onclick="uploadDocument()">Subir documento</button>
+
+  <div id="documentsList" style="margin-top:12px;">
+    Sin documentos cargados.
+  </div>
+</div>
 
 <div class="card">
 
@@ -325,6 +344,44 @@ document.getElementById('actions').innerHTML =
 
   }catch(e){
     document.getElementById('title').innerText = 'Error cargando oportunidad';
+  }
+}
+    async function uploadDocument() {
+  const fileInput = document.getElementById('docFile');
+  const docType = document.getElementById('docType');
+  const list = document.getElementById('documentsList');
+
+  if (!id) {
+    alert('No se encontró el ID de la oportunidad');
+    return;
+  }
+
+  if (!fileInput.files.length) {
+    alert('Selecciona un archivo');
+    return;
+  }
+
+  const file = fileInput.files[0];
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('document_type', docType.value);
+
+  list.innerHTML = 'Subiendo documento...';
+
+  try {
+    const res = await fetch('/api/opportunities/' + id + '/documents', {
+      method: 'POST',
+      body: formData
+    });
+
+    const data = await res.json();
+
+    if (!data.ok) throw new Error(data.error || 'No se pudo subir el documento');
+
+    list.innerHTML = '✅ Documento subido: ' + file.name;
+    fileInput.value = '';
+  } catch (e) {
+    list.innerHTML = '❌ Error subiendo documento: ' + e.message;
   }
 }
 
