@@ -407,7 +407,9 @@ async function downloadSeaceDocuments() {
 
     if (!data.ok) throw new Error(data.error || 'No se pudo descargar');
 
-    status.innerHTML = '✅ Expediente descargado: ' + (data.files?.length || 0) + ' archivo(s)';
+    status.innerHTML =
+      '✅ Expediente descargado: ' + (data.files?.length || 0) + ' archivo(s)<br>' +
+      'URL SEACE: ' + (data.detail_url || 'sin detail_url');
   } catch (e) {
     status.innerHTML = '❌ Error: ' + e.message;
   }
