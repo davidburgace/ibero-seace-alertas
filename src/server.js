@@ -468,20 +468,44 @@ async function getActiveKeywords(){
 
   
 async function searchSeaceLite(keyword=null){
-  const existing = await table('opportunities');
-  const k = String(keyword || '').toLowerCase();
+  const errors = [];
+  const diagnostics = [];
+  const all = [];
 
-  const items = existing.filter(o => {
-    if(!k) return true;
-    return String(o.title || '').toLowerCase().includes(k) ||
-      String(o.external_id || o.nomenclature || '').toLowerCase().includes(k) ||
-      String(o.business_line || '').toLowerCase().includes(k);
-  }).slice(0, 10);
+  const keywords = keyword
+    ? [keyword]
+    : await getActiveKeywords();
+
+  for (const k of keywords.slice(0,5)) {
+    try {
+      const result = await searchKeyword(k);
+
+      all.push(...(result.items || []));
+
+      diagnostics.push({
+        keyword: k,
+        found: result.items?.length || 0,
+        diagnostics: result.diagnostics || []
+      });
+
+    } catch (e) {
+      errors.push({
+        keyword: k,
+        error: e.message
+      });
+    }
+  }
+
+  const byId = new Map();
+
+  all.filter(Boolean).forEach(o => {
+    byId.set(o.external_id, o);
+  });
 
   return {
-    items,
-    errors: [],
-    diagnostics: ['Render free: búsqueda desde oportunidades guardadas']
+    items: [...byId.values()].slice(0,25),
+    errors,
+    diagnostics
   };
 }
 async function upsertOpportunities(items){
