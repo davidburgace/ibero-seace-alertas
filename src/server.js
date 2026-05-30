@@ -365,7 +365,26 @@ async function extractRows(page, keyword, diagnostics){
       url: location.href,
       title: document.title,
       bodyStart: body.slice(0,1200),
-      matches: [...new Map(out.map(x=>[x.text,x])).values()].slice(0,50)
+      matches: [...new Map(
+  out
+    .filter(x => {
+      const t = String(x.text || '').toUpperCase();
+
+      const hasProcessCode =
+        /LP-|AS-|CP-|SIE-|DIRECTA|CONCURSO|ADJUDICACION|ADQUISICION|CONTRATACION/.test(t);
+
+      const isGarbage =
+        t.includes('BUSCADOR') ||
+        t.includes('CONTRATOS MENORES 8 A UIT') ||
+        t.includes('NO SE ENCONTRARON DATOS') ||
+        t.includes('REGISTROS POR PAGINA') ||
+        t.includes('FILTROS DE BUSQUEDA') ||
+        t.includes('SELECCIONAR');
+
+      return hasProcessCode && !isGarbage;
+    })
+    .map(x => [x.text, x])
+).values()].slice(0,50)
     };
   }, keyword);
 
