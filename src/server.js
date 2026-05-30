@@ -977,15 +977,10 @@ app.post('/api/opportunities/:id/download-documents', async (req, res) => {
     }
 
     return res.json({
-      ok: false,
-      error: 'Oportunidad encontrada. Falta implementar descarga real desde SEACE.',
-      opportunity: {
-        id: opportunity.id,
-        title: opportunity.title,
-        source_url: opportunity.source_url,
-        external_id: opportunity.external_id
-      }
-    });
+  ok: true,
+  message: 'detail_url encontrado',
+  detail_url: opportunity.detail_url
+});
 
   } catch (e) {
     return res.status(500).json({
