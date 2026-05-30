@@ -85,6 +85,11 @@ button{
   </select>
 
   <button onclick="uploadDocument()">Subir documento</button>
+  <button onclick="downloadSeaceDocuments()" style="margin-top:10px;">
+  Descargar expediente desde SEACE
+</button>
+
+<div id="downloadStatus" style="margin-top:12px;"></div>
 
   <div id="documentsList" style="margin-top:12px;">
     Sin documentos cargados.
@@ -388,6 +393,24 @@ document.getElementById('actions').innerHTML =
 function copyProcess(){
   navigator.clipboard.writeText(document.getElementById('process').innerText);
   alert('Proceso copiado');
+}
+async function downloadSeaceDocuments() {
+  const status = document.getElementById('downloadStatus');
+  status.innerHTML = 'Descargando expediente desde SEACE...';
+
+  try {
+    const res = await fetch('/api/opportunities/' + id + '/download-documents', {
+      method: 'POST'
+    });
+
+    const data = await res.json();
+
+    if (!data.ok) throw new Error(data.error || 'No se pudo descargar');
+
+    status.innerHTML = '✅ Expediente descargado: ' + (data.files?.length || 0) + ' archivo(s)';
+  } catch (e) {
+    status.innerHTML = '❌ Error: ' + e.message;
+  }
 }
 
 async function askAI(){
