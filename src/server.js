@@ -960,8 +960,6 @@ app.post('/api/opportunities/:id/documents', async (req, res) => {
     });
   }
 app.post('/api/opportunities/:id/download-documents', async (req, res) => {
-  let browser;
-
   try {
     const { id } = req.params;
 
@@ -969,72 +967,19 @@ app.post('/api/opportunities/:id/download-documents', async (req, res) => {
     const opportunity = opportunities.find(o => String(o.id) === String(id));
 
     if (!opportunity) {
-      return res.status(404).json({ ok: false, error: 'Oportunidad no encontrada' });
+      return res.status(404).json({
+        ok: false,
+        error: 'Oportunidad no encontrada'
+      });
     }
-
-    if (!opportunity.detail_url) {
-      return res.status(400).json({ ok: false, error: 'La oportunidad no tiene detail_url de SEACE' });
-    }
-
-    const launched = await launchBrowser();
-    browser = launched.browser;
-    const page = launched.page;
-
-    await page.goto(opportunity.detail_url, {
-      waitUntil: 'domcontentloaded',
-      timeout: 60000
-    });
-
-    await page.waitForTimeout(8000);
-
-    const downloads = [];
-
-    const candidates = [
-      'text=Descargar',
-      'a[title*="Descargar"]',
-      'button[title*="Descargar"]',
-      'a:has-text("Descargar")',
-      'button:has-text("Descargar")',
-      'mat-icon:has-text("download")',
-      'mat-icon:has-text("file_download")',
-      'i[class*="download"]',
-      'span[class*="download"]',
-      'img[src*="download"]',
-      'a[href*="download"]'
-    ];
-
-    for (const selector of candidates) {
-      const count = await page.locator(selector).count().catch(() => 0);
-
-      for (let i = 0; i < count; i++) {
-        try {
-          const item = page.locator(selector).nth(i);
-
-          const downloadPromise = page.waitForEvent('download', { timeout: 10000 });
-
-          await item.click({ timeout: 5000 });
-
-          const download = await downloadPromise;
-          downloads.push({
-            name: download.suggestedFilename()
-          });
-
-        } catch (e) {
-          // continúa con el siguiente candidato
-        }
-      }
-    }
-
-    await browser.close();
 
     return res.json({
       ok: true,
-      files: downloads,
-      detail_url: opportunity.detail_url
+      files: [],
+      detail_url: opportunity.detail_url || null
     });
 
   } catch (e) {
-    if (browser) await browser.close().catch(() => {});
     return res.status(500).json({
       ok: false,
       error: e.message
