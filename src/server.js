@@ -229,10 +229,20 @@ function textToOpportunity(text, keyword, index=0){
   const amountMatch = joined.match(/S\/?\s*([0-9][0-9.,]+)/i) || joined.match(/\b([0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]{2})?)\b/);
   const dateMatch = joined.match(/\b\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}(?:\s+\d{1,2}:\d{2}(?::\d{2})?)?\b/) || joined.match(/\b\d{4}\-\d{2}\-\d{2}\b/);
 
-  const lines = joined.split(/(?=GOBIERNO|MUNICIPALIDAD|MINISTERIO|HOSPITAL|UNIVERSIDAD|UGEL|DIRECCI[ÓO]N|ADQUISICI[ÓO]N|CONTRATACI[ÓO]N|LP-|AS-|SIE-|CP-)|\|/i).map(clean).filter(Boolean);
-  const entityLine = lines.find(p=>/(municipalidad|gobierno regional|ministerio|hospital|universidad|ugel|direcci[oó]n|unidad ejecutora|instituto|entidad)/i.test(p)) || lines[0];
-  const titleLine = lines.find(p=>/(mobiliario|silla|mesa|carpeta|locker|armario|hospital|melamine|estante|escritorio|adquisici[oó]n|contrataci[oó]n|bien|servicio)/i.test(p)) || joined.slice(0,260);
+  const bienMatch = joined.match(/Bien:\s*(.*?)(?:Cotizaciones:|Fecha de publicación|open_in_new|Descargar|$)/i);
+const tituloMatch = joined.match(/Título:\s*(.*?)(?:Entidad|Región|Fecha|$)/i);
+const entidadMatch = joined.match(/Entidad\s+(.+?)(?:Cotizaciones:|Bien:|Fecha|$)/i);
 
+const titleLine = clean(
+  (bienMatch && bienMatch[1]) ||
+  (tituloMatch && tituloMatch[1]) ||
+  joined.slice(0, 180)
+);
+
+const entityLine = clean(
+  (entidadMatch && entidadMatch[1]) ||
+  'Entidad no identificada'
+);
   return normalizeOpportunity({
     external_id: makeId(['openegocio', keyword, index, entityLine || '', titleLine || joined.slice(0,120), dateMatch?.[0] || new Date().toISOString().slice(0,10)]),
     title: titleLine || joined.slice(0,260),
