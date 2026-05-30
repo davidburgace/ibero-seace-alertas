@@ -994,6 +994,11 @@ console.log('DETAIL URL:', opportunity.detail_url);
     console.log('HTML_LENGTH:', html.length);
     console.log(html.substring(0, 3000));
 
+    console.log('PAGE URL:', page.url());
+
+    const bodyText = await page.locator('body').innerText().catch(()=> '');
+    console.log('BODY:', bodyText);
+
     const downloads = [];
 
     const selectors = [
