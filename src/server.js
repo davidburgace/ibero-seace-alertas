@@ -177,6 +177,20 @@ function normalizeOpportunity(raw, keyword){
   const amount = moneyToNumber(raw.amount || raw.monto || raw.valorReferencial || raw.montoReferencial || raw.total);
   const source_url = clean(raw.source_url || raw.url || raw.link || SEACE_URLS.openNegocioBuscar);
   if(!title || title.length < 5) return null;
+  const titleUpper = title.toUpperCase();
+
+const isGarbage =
+  titleUpper.includes('BUSCADOR') ||
+  titleUpper.includes('CONTRATOS MENORES 8 A UIT') ||
+  titleUpper.includes('NO SE ENCONTRARON DATOS') ||
+  titleUpper.includes('REGISTROS POR PAGINA') ||
+  titleUpper.includes('FILTROS DE BUSQUEDA') ||
+  titleUpper.includes('SELECCIONAR');
+
+const looksLikeOpportunity =
+  /LP-|AS-|CP-|SIE-|DIRECTA|ADJUDICACION|ADQUISICION|CONTRATACION|SERVICIO|SUMINISTRO/.test(titleUpper);
+
+if (isGarbage || !looksLikeOpportunity) return null;
   return {
     external_id: clean(raw.external_id || raw.id || raw.codigo || makeId([entity,title,published_date,keyword])),
     title,
