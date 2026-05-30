@@ -173,7 +173,16 @@ function normalizeOpportunity(raw, keyword){
   const title = clean(raw.title || raw.descripcion || raw.objeto || raw.nombre || raw.requerimiento || raw.description);
   const entity = clean(raw.entity || raw.entidad || raw.nombreEntidad || raw.entidadContratante || 'Entidad no identificada');
   const region = clean(raw.region || raw.departamento || raw.lugar || 'No especificada');
-  const published_date = clean(raw.published_date || raw.fecha || raw.fechaPublicacion || new Date().toISOString().slice(0,10));
+ let published_date = clean(raw.published_date || raw.fecha || raw.fechaPublicacion || '');
+
+if (published_date && published_date.includes('/')) {
+  const [d, m, y] = published_date.split(' ')[0].split('/');
+  published_date = ${y}-${m}-${d};
+}
+
+if (!published_date) {
+  published_date = new Date().toISOString().slice(0,10);
+}
   const amount = moneyToNumber(raw.amount || raw.monto || raw.valorReferencial || raw.montoReferencial || raw.total);
   const source_url = clean(raw.source_url || raw.url || raw.link || SEACE_URLS.openNegocioBuscar);
   if(!title || title.length < 5) return null;
