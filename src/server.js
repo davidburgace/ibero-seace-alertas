@@ -930,6 +930,19 @@ res.json({
     });
   }
 });
+app.post('/api/opportunities/:id/documents', async (req, res) => {
+  try {
+    return res.status(501).json({
+      ok: false,
+      error: 'Endpoint de subida pendiente de implementar'
+    });
+  } catch (e) {
+    return res.status(500).json({
+      ok: false,
+      error: e.message
+    });
+  }
+});
 app.get('/api/opportunities/:id/documents', async (req, res) => {
   try {
     const { id } = req.params;
