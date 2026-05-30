@@ -265,12 +265,7 @@ const entidadReal =
       ? Number(amountMatch[1].replace(/\./g,'').replace(',','.'))
       : null,
     published_date: dateMatch?.[0] || new Date().toISOString().slice(0,10),
-    closing_date: closingMatch?.[1]
-      ? (() => {
-         const [d, m, y] = closingMatch[1].split('/');
-         return ${y}-${m}-${d};
-      })()
-   : null,
+    closing_date: closingMatch?.[1]?.split('/').reverse().join('-') || null,
     
    source_url: SEACE_URLS.openNegocio
   }, keyword);
