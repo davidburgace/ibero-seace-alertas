@@ -943,6 +943,12 @@ app.post('/api/opportunities/:id/documents', async (req, res) => {
     });
   }
 });
+app.post('/api/opportunities/:id/download-documents', async (req, res) => {
+  return res.status(501).json({
+    ok: false,
+    error: 'Descarga automática desde SEACE pendiente de implementar'
+  });
+});
 app.get('/api/opportunities/:id/documents', async (req, res) => {
   try {
     const { id } = req.params;
