@@ -244,13 +244,7 @@ const entityLine = clean(
   (entidadMatch && entidadMatch[1]) ||
   'Entidad no identificada'
 );
-  const closingMatch = joined.match(
-  /Cotizaciones:\s*.?-\s(\d{2}\/\d{2}\/\d{4})/i
-);
-
-const amountMatch = joined.match(
-  /S\/\s*([0-9.,]+)/i
-);
+ 
 
 const entidadRealMatch = joined.match(
   /(MUNICIPALIDAD.?|GOBIERNO REGIONAL.?|UGEL.?|HOSPITAL.?|ESSALUD.?|MINISTERIO.?)(?:\s{2,}|Bien:|Fecha|Cotizaciones:|$)/i
