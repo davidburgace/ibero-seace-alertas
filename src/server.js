@@ -701,6 +701,21 @@ app.post('/api/opportunities/:id/ask', async (req, res) => {
 
     const opportunities = await table('opportunities');
     const opportunity = opportunities.find(o => String(o.id) === String(id));
+    const allDocuments = await table('opportunity_documents');
+
+const documents = allDocuments.filter(
+  d => String(d.opportunity_id) === String(id)
+);
+
+const documentsText = documents.length
+  ? documents.map(d => `
+DOCUMENTO: ${d.title || 'Sin título'}
+TIPO: ${d.document_type || '-'}
+URL: ${d.url || '-'}
+CONTENIDO:
+${d.content || ''}
+`).join('\n\n---\n\n')
+  : 'No hay documentos del expediente cargados para esta oportunidad.';
 
     if (!opportunity) {
       return res.status(404).json({
@@ -720,6 +735,9 @@ Proceso: ${opportunity.external_id || opportunity.nomenclature || ''}
 Región: ${opportunity.region || ''}
 Línea: ${opportunity.business_line || ''}
 Descripción: ${opportunity.description || opportunity.title || ''}
+
+DOCUMENTOS DEL EXPEDIENTE:
+${documentsText}
 
 Pregunta del usuario:
 ${question}
