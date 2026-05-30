@@ -803,6 +803,27 @@ res.json({
     });
   }
 });
+app.get('/api/opportunities/:id/documents', async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const documents = await table('opportunity_documents');
+    const items = documents.filter(
+      d => String(d.opportunity_id) === String(id)
+    );
+
+    res.json({
+      ok: true,
+      documents: items
+    });
+
+  } catch (e) {
+    res.status(500).json({
+      ok: false,
+      error: e.message
+    });
+  }
+});
 app.use((err,_,res,__)=>{
   console.error('API error:', err);
   res.status(500).json({ error:err.message, version:VERSION });
