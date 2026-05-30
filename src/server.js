@@ -396,7 +396,18 @@ async function extractRows(page, keyword, diagnostics){
     document.querySelectorAll('table tbody tr, table tr, [role=row]').forEach((tr)=>{
       const cells = Array.from(tr.querySelectorAll('td, th, [role=cell], [role=gridcell]')).map(td=>clean(td.innerText || td.textContent || '')).filter(Boolean);
       const text = cells.length ? cells.join(' | ') : clean(tr.innerText || tr.textContent || '');
-      if(text.length > 35) out.push({ selector:'row', cells, text:text.slice(0,1500) });
+      const link = tr.querySelector('a[href*="idProceso"]');
+
+      const detailUrl = link
+        ? link.href
+        : null;
+      if(text.length > 35)
+        out.push({
+          selector:'row',
+          cells,
+          text:text.slice(0,1500),
+          detail_url: detailUrl
+});
     });
 
     // 2) Extrae bloques visuales si no hay tabla estándar.
