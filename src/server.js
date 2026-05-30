@@ -596,8 +596,10 @@ function renderEmail(opportunities) {
   return '<div style="font-family:Arial,sans-serif;background:#f6f7fb;padding:16px;">' +
     '<h2>Radar SEACE - Nuevas oportunidades</h2>' +
     opportunities.slice(0, 10).map(o => {
-      const q = encodeURIComponent(o.external_id || o.nomenclatura || o.title || '');
-      const link = 'https://prod4.seace.gob.pe/openegocio/#/buscar?search=' + q;
+      
+      const link =
+'https://ibero-seace-alertas.onrender.com/oportunidad.html?id=' +
+encodeURIComponent(o.id);
 
       return '<div style="border:1px solid #e7eaf0;border-radius:12px;padding:16px;margin-bottom:12px;background:white;">' +
         '<h3>' + (o.title || 'Oportunidad SEACE') + '</h3>' +
