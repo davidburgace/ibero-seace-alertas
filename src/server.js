@@ -268,7 +268,7 @@ const entidadReal =
       const [d,m,y] = closingMatch[1].split('/');
       return ${y}-${m}-${d};
     })()
-  : null
+  : null,
     
     source_url: SEACE_URLS.openNegocio
   }, keyword);
