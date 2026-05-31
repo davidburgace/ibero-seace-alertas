@@ -3,436 +3,1076 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-
-<title>Radar Ibero - Oportunidad</title>
-
+<title>Radar Ibero — Análisis de Oportunidad</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
-body{
-    font-family:Arial,sans-serif;
-    margin:0;
-    padding:20px;
-    background:#f5f7fa;
-}
+  :root {
+    --bg: #0a0d14;
+    --surface: #111520;
+    --surface2: #161b28;
+    --border: rgba(255,255,255,0.07);
+    --border2: rgba(255,255,255,0.12);
+    --text: #e8eaf0;
+    --muted: #7a8099;
+    --accent: #4f7dff;
+    --accent2: #7c5cfc;
+    --green: #22d3a0;
+    --amber: #f5a623;
+    --red: #f05252;
+    --font-display: 'Syne', sans-serif;
+    --font-body: 'DM Sans', sans-serif;
+  }
 
-.card{
-    background:white;
-    border-radius:12px;
-    padding:20px;
-    margin-bottom:20px;
-    box-shadow:0 2px 8px rgba(0,0,0,.08);
-}
+  * { box-sizing: border-box; margin: 0; padding: 0; }
 
-h1{
-    margin-top:0;
-}
+  body {
+    font-family: var(--font-body);
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    font-size: 14px;
+    line-height: 1.6;
+  }
 
-.score{
-    font-size:32px;
-    font-weight:bold;
-    color:#0d6efd;
-}
+  /* ── Topbar ── */
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 32px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    backdrop-filter: blur(12px);
+  }
 
-textarea{
-    width:100%;
-    height:100px;
-    padding:10px;
-}
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: var(--font-display);
+    font-size: 17px;
+    font-weight: 700;
+    color: var(--text);
+    text-decoration: none;
+  }
 
-button{
-    padding:10px 16px;
-    border:none;
-    border-radius:6px;
-    cursor:pointer;
-    background:#0d6efd;
-    color:white;
-}
+  .logo-dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 10px var(--accent);
+    animation: pulse 2s infinite;
+  }
 
-#answer{
-    margin-top:15px;
-    white-space:pre-wrap;
-}
+  @keyframes pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.6; transform: scale(0.8); }
+  }
+
+  .back-btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--muted);
+    font-size: 13px;
+    cursor: pointer;
+    transition: color 0.2s;
+    background: none;
+    border: none;
+    font-family: var(--font-body);
+  }
+  .back-btn:hover { color: var(--text); }
+
+  /* ── Layout ── */
+  .layout {
+    display: grid;
+    grid-template-columns: 1fr 340px;
+    gap: 0;
+    min-height: calc(100vh - 57px);
+  }
+
+  .main-col {
+    padding: 28px 32px;
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+  }
+
+  .side-col {
+    padding: 28px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  /* ── Loading ── */
+  .loading-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 60vh;
+    gap: 16px;
+    color: var(--muted);
+  }
+
+  .spinner {
+    width: 36px; height: 36px;
+    border: 2px solid var(--border2);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Header de oportunidad ── */
+  .opp-header { margin-bottom: 24px; }
+
+  .opp-tags {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 14px;
+    flex-wrap: wrap;
+  }
+
+  .tag {
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .tag-line-educacion  { background: rgba(79,125,255,0.15); color: #7aa3ff; border: 1px solid rgba(79,125,255,0.25); }
+  .tag-line-hospitalario { background: rgba(240,82,82,0.15); color: #f88; border: 1px solid rgba(240,82,82,0.25); }
+  .tag-line-metalmecanica { background: rgba(124,92,252,0.15); color: #a98fff; border: 1px solid rgba(124,92,252,0.25); }
+  .tag-line-oficina    { background: rgba(34,211,160,0.15); color: #22d3a0; border: 1px solid rgba(34,211,160,0.25); }
+  .tag-line-general    { background: rgba(245,166,35,0.15); color: #f5a623; border: 1px solid rgba(245,166,35,0.25); }
+
+  .tag-type {
+    background: var(--surface2);
+    color: var(--muted);
+    border: 1px solid var(--border2);
+  }
+
+  .opp-title {
+    font-family: var(--font-display);
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1.3;
+    color: var(--text);
+    margin-bottom: 16px;
+  }
+
+  .opp-meta {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 12px;
+  }
+
+  .meta-item {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+  }
+
+  .meta-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+
+  .meta-value {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text);
+  }
+
+  .meta-value.amount {
+    font-family: var(--font-display);
+    font-size: 17px;
+    color: var(--green);
+  }
+
+  /* ── Decisión IA ── */
+  .decision-banner {
+    border-radius: 14px;
+    padding: 20px 24px;
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    position: relative;
+    overflow: hidden;
+  }
+
+  .decision-banner::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    opacity: 0.06;
+    background: radial-gradient(circle at 20% 50%, white, transparent 60%);
+  }
+
+  .decision-banner.participar { background: linear-gradient(135deg, rgba(34,211,160,0.2), rgba(34,211,160,0.05)); border: 1px solid rgba(34,211,160,0.3); }
+  .decision-banner.revisar    { background: linear-gradient(135deg, rgba(245,166,35,0.2), rgba(245,166,35,0.05)); border: 1px solid rgba(245,166,35,0.3); }
+  .decision-banner.descartar  { background: linear-gradient(135deg, rgba(240,82,82,0.2), rgba(240,82,82,0.05)); border: 1px solid rgba(240,82,82,0.3); }
+
+  .decision-icon { font-size: 36px; flex-shrink: 0; }
+
+  .decision-text h2 {
+    font-family: var(--font-display);
+    font-size: 20px;
+    font-weight: 800;
+    margin-bottom: 4px;
+  }
+
+  .decision-banner.participar .decision-text h2 { color: var(--green); }
+  .decision-banner.revisar    .decision-text h2 { color: var(--amber); }
+  .decision-banner.descartar  .decision-text h2 { color: var(--red); }
+
+  .decision-text p { color: var(--muted); font-size: 13px; }
+
+  .decision-score {
+    margin-left: auto;
+    text-align: center;
+    flex-shrink: 0;
+  }
+
+  .score-circle {
+    width: 72px; height: 72px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    font-family: var(--font-display);
+    font-size: 22px;
+    font-weight: 800;
+    border: 3px solid currentColor;
+    position: relative;
+  }
+
+  .score-circle.participar { color: var(--green); }
+  .score-circle.revisar    { color: var(--amber); }
+  .score-circle.descartar  { color: var(--red); }
+
+  .score-circle small { font-size: 10px; font-weight: 400; display: block; opacity: 0.7; }
+
+  /* ── Secciones ── */
+  .section { margin-bottom: 24px; }
+
+  .section-title {
+    font-family: var(--font-display);
+    font-size: 13px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .section-title::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  /* ── Criterios ── */
+  .criteria-grid { display: flex; flex-direction: column; gap: 10px; }
+
+  .criteria-item {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+  }
+
+  .criteria-header {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    font-size: 13px;
+  }
+
+  .criteria-name { color: var(--text); font-weight: 500; }
+  .criteria-score { color: var(--muted); font-size: 12px; }
+
+  .progress-bg {
+    height: 6px;
+    background: var(--border2);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+
+  .progress-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 1s cubic-bezier(.4,0,.2,1);
+    background: linear-gradient(90deg, var(--accent), var(--accent2));
+  }
+
+  /* ── Listas ── */
+  .item-list { display: flex; flex-direction: column; gap: 8px; }
+
+  .item-list-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text);
+    animation: fadeUp 0.4s ease both;
+  }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  .item-list-item .icon { flex-shrink: 0; margin-top: 1px; }
+
+  /* ── Sidebar ── */
+  .side-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+  }
+
+  .side-card-title {
+    font-family: var(--font-display);
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    margin-bottom: 14px;
+  }
+
+  /* ── Links externos ── */
+  .ext-links { display: flex; flex-direction: column; gap: 8px; }
+
+  .ext-link {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    text-decoration: none;
+    font-size: 12px;
+    font-weight: 500;
+    transition: all 0.2s;
+    cursor: pointer;
+  }
+
+  .ext-link:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    transform: translateX(2px);
+  }
+
+  .ext-link svg { flex-shrink: 0; }
+
+  /* ── Chat IA ── */
+  .chat-box {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .chat-messages {
+    max-height: 260px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 4px 0;
+  }
+
+  .chat-msg {
+    padding: 10px 12px;
+    border-radius: 8px;
+    font-size: 12px;
+    line-height: 1.6;
+    animation: fadeUp 0.3s ease;
+  }
+
+  .chat-msg.user {
+    background: rgba(79,125,255,0.12);
+    border: 1px solid rgba(79,125,255,0.2);
+    color: #a0b4ff;
+    align-self: flex-end;
+    max-width: 90%;
+  }
+
+  .chat-msg.ai {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+  }
+
+  .chat-msg.thinking {
+    color: var(--muted);
+    font-style: italic;
+  }
+
+  .chat-input-row {
+    display: flex;
+    gap: 6px;
+  }
+
+  .chat-input {
+    flex: 1;
+    background: var(--surface2);
+    border: 1px solid var(--border2);
+    border-radius: 8px;
+    padding: 8px 12px;
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: 12px;
+    resize: none;
+    outline: none;
+    transition: border-color 0.2s;
+    height: 72px;
+  }
+
+  .chat-input:focus { border-color: var(--accent); }
+  .chat-input::placeholder { color: var(--muted); }
+
+  .chat-send {
+    background: var(--accent);
+    border: none;
+    border-radius: 8px;
+    color: white;
+    padding: 0 14px;
+    cursor: pointer;
+    font-size: 16px;
+    transition: all 0.2s;
+    align-self: stretch;
+  }
+
+  .chat-send:hover { background: #3d6bff; transform: scale(1.05); }
+  .chat-send:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+  /* ── Docs ── */
+  .doc-upload {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .doc-select {
+    background: var(--surface2);
+    border: 1px solid var(--border2);
+    border-radius: 8px;
+    padding: 7px 10px;
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: 12px;
+    outline: none;
+    width: 100%;
+  }
+
+  .file-drop {
+    border: 1px dashed var(--border2);
+    border-radius: 8px;
+    padding: 14px;
+    text-align: center;
+    font-size: 12px;
+    color: var(--muted);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .file-drop:hover { border-color: var(--accent); color: var(--accent); }
+
+  .btn-primary {
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 9px 14px;
+    font-family: var(--font-body);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    width: 100%;
+  }
+
+  .btn-primary:hover { background: #3d6bff; }
+
+  .btn-ghost {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--border2);
+    border-radius: 8px;
+    padding: 9px 14px;
+    font-family: var(--font-body);
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    width: 100%;
+  }
+
+  .btn-ghost:hover { border-color: var(--text); color: var(--text); }
+
+  .doc-status {
+    font-size: 11px;
+    color: var(--muted);
+    min-height: 16px;
+  }
+
+  /* ── Nomenclature copy ── */
+  .nomc-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 12px;
+    font-family: monospace;
+    color: var(--accent);
+  }
+
+  .nomc-row button {
+    margin-left: auto;
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 13px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    transition: all 0.2s;
+  }
+
+  .nomc-row button:hover { color: var(--text); background: var(--border); }
+
+  /* ── Sumario IA ── */
+  .summary-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 10px 10px 0;
+    padding: 14px 16px;
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--text);
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 768px) {
+    .layout { grid-template-columns: 1fr; }
+    .side-col { border-top: 1px solid var(--border); }
+    .main-col { padding: 20px 16px; }
+    .side-col { padding: 20px 16px; }
+    .topbar { padding: 12px 16px; }
+  }
+
+  .ai-loading-text {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--muted);
+    font-size: 13px;
+    padding: 12px 0;
+  }
+
+  .dots span {
+    animation: blink 1.2s infinite;
+    opacity: 0;
+  }
+  .dots span:nth-child(2) { animation-delay: 0.2s; }
+  .dots span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes blink { 0%,100%{opacity:0} 50%{opacity:1} }
+
+  .hidden { display: none; }
 </style>
 </head>
-
 <body>
 
-<div class="card">
-    <h1 id="title">Cargando...</h1>
-
-    <p><b>Entidad:</b> <span id="entity"></span></p>
-
-    <p><b>Región:</b> <span id="region"></span></p>
-
-    <p><b>Línea:</b> <span id="line"></span></p>
-
-    <p><b>Proceso:</b> <span id="process"></span></p>
-
-    <button onclick="copyProcess()">
-        Copiar Proceso Activo
-    </button>
-</div>
-    <div class="card">
-  <h2>📁 Documentos del expediente</h2>
-
-  <input type="file" id="docFile" accept=".pdf,.doc,.docx,.xls,.xlsx,.zip,.rar" />
-
-  <select id="docType">
-    <option value="bases">Bases</option>
-    <option value="especificaciones">Especificaciones técnicas</option>
-    <option value="anexos">Anexos</option>
-    <option value="cronograma">Cronograma</option>
-    <option value="otro">Otro</option>
-  </select>
-
-  <button onclick="uploadDocument()">Subir documento</button>
-  <button onclick="downloadSeaceDocuments()" style="margin-top:10px;">
-  Descargar expediente desde SEACE
-</button>
-
-<div id="downloadStatus" style="margin-top:12px;"></div>
-
-  <div id="documentsList" style="margin-top:12px;">
-    Sin documentos cargados.
-  </div>
+<!-- Topbar -->
+<div class="topbar">
+  <a class="logo" href="/">
+    <div class="logo-dot"></div>
+    Radar Ibero
+  </a>
+  <button class="back-btn" onclick="history.back()">
+    ← Volver
+  </button>
 </div>
 
-<div class="card">
+<!-- Layout principal -->
+<div class="layout">
 
-    <h2>🤖 Análisis IA</h2>
-    <div id="executiveCard"
-style="
-background:#f8fafc;
-border:1px solid #e5e7eb;
-border-radius:12px;
-padding:15px;
-margin-bottom:15px;
-">
+  <!-- Columna principal -->
+  <div class="main-col">
 
-<h3>🏢 Resumen Ejecutivo</h3>
-
-<div id="decisionBadge"
-style="
-display:inline-block;
-padding:8px 15px;
-border-radius:20px;
-font-weight:bold;
-margin-bottom:10px;
-">
-Cargando...
-</div>
-
-<div style="display:flex;gap:30px;flex-wrap:wrap;">
-
-<div>
-<b>Puntaje</b><br>
-<span id="scoreText">--</span>
-</div>
-
-<div>
-<b>Línea de negocio</b><br>
-<span id="businessLineText">--</span>
-</div>
-
-<div>
-<b>Entidad</b><br>
-<span id="entityText">--</span>
-</div>
-
-<div>
-<b>Región</b><br>
-<span id="regionText">--</span>
-</div>
-
-</div>
-
-</div>
-
-    <div id="scoreBox">
-    <div id="score" style="font-size:32px;font-weight:bold;"></div>
-
-    <div style="background:#e5e7eb;border-radius:8px;height:18px;margin-top:8px;">
-        <div id="scoreBar"
-             style="height:18px;width:0%;border-radius:8px;background:#f59e0b;">
-        </div>
+    <!-- Estado de carga -->
+    <div class="loading-state" id="loadingState">
+      <div class="spinner"></div>
+      <span>Cargando oportunidad y análisis IA...</span>
     </div>
 
-    <div id="decisionBadge"
-     style="
-        margin-top:12px;
-        padding:12px;
-        border-radius:10px;
-        font-size:22px;
-        font-weight:bold;
-        text-align:center;
-        color:white;
-     ">
-</div>
-</div>
+    <!-- Contenido (oculto hasta cargar) -->
+    <div id="content" class="hidden">
 
-    <p id="summary"></p>
+      <!-- Header -->
+      <div class="opp-header">
+        <div class="opp-tags">
+          <span class="tag" id="tagLine">General</span>
+          <span class="tag tag-type" id="tagType"></span>
+        </div>
+        <h1 class="opp-title" id="title">—</h1>
+        <div class="opp-meta">
+          <div class="meta-item">
+            <div class="meta-label">Entidad</div>
+            <div class="meta-value" id="entity">—</div>
+          </div>
+          <div class="meta-item">
+            <div class="meta-label">Monto referencial</div>
+            <div class="meta-value amount" id="amount">—</div>
+          </div>
+          <div class="meta-item">
+            <div class="meta-label">Cierre participantes</div>
+            <div class="meta-value" id="closing">—</div>
+          </div>
+          <div class="meta-item">
+            <div class="meta-label">Presentación prop.</div>
+            <div class="meta-value" id="submission">—</div>
+          </div>
+          <div class="meta-item">
+            <div class="meta-label">Convocatoria</div>
+            <div class="meta-value" id="published">—</div>
+          </div>
+          <div class="meta-item">
+            <div class="meta-label">Región</div>
+            <div class="meta-value" id="region">—</div>
+          </div>
+        </div>
+      </div>
 
-    <p id="recommendation"></p>
-    <h3>📊 Criterios de puntuación</h3>
+      <!-- Decisión IA -->
+      <div class="decision-banner" id="decisionBanner">
+        <div class="decision-icon" id="decisionIcon">⏳</div>
+        <div class="decision-text">
+          <h2 id="decisionLabel">Analizando...</h2>
+          <p id="decisionRec">La IA está evaluando esta oportunidad</p>
+        </div>
+        <div class="decision-score">
+          <div class="score-circle" id="scoreCircle">
+            <span id="scoreNum">—</span>
+            <small>/100</small>
+          </div>
+        </div>
+      </div>
 
-<div id="criteriaCards"></div>
-    <h3>⚠️ Riesgos</h3>
-<ul id="risks"></ul>
+      <!-- Resumen IA -->
+      <div class="section">
+        <div class="section-title">Resumen ejecutivo</div>
+        <div class="summary-box" id="summary">Analizando con IA...</div>
+      </div>
 
-<h3>✅ Acciones recomendadas</h3>
-<ul id="actions"></ul>
+      <!-- Criterios -->
+      <div class="section">
+        <div class="section-title">Criterios de evaluación</div>
+        <div class="criteria-grid" id="criteriaGrid">
+          <div class="ai-loading-text">
+            <div class="spinner" style="width:18px;height:18px;border-width:2px;"></div>
+            Calculando criterios<span class="dots"><span>.</span><span>.</span><span>.</span></span>
+          </div>
+        </div>
+      </div>
 
-</div>
+      <!-- Riesgos y Acciones -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;" id="risksActionsGrid">
+        <div class="section">
+          <div class="section-title">⚠ Riesgos</div>
+          <div class="item-list" id="risksList">
+            <div class="ai-loading-text">
+              <div class="spinner" style="width:18px;height:18px;border-width:2px;"></div> Evaluando<span class="dots"><span>.</span><span>.</span><span>.</span></span>
+            </div>
+          </div>
+        </div>
+        <div class="section">
+          <div class="section-title">✓ Acciones</div>
+          <div class="item-list" id="actionsList">
+            <div class="ai-loading-text">
+              <div class="spinner" style="width:18px;height:18px;border-width:2px;"></div> Evaluando<span class="dots"><span>.</span><span>.</span><span>.</span></span>
+            </div>
+          </div>
+        </div>
+      </div>
 
-<div class="card">
+    </div><!-- /content -->
+  </div><!-- /main-col -->
 
-    <h2>💬 Preguntar a la IA</h2>
+  <!-- Sidebar -->
+  <div class="side-col">
 
-    <textarea
-      id="question"
-      placeholder="Ejemplo: ¿Conviene participar?"
-    ></textarea>
+    <!-- Nomenclatura -->
+    <div class="side-card">
+      <div class="side-card-title">Código del proceso</div>
+      <div class="nomc-row">
+        <span id="nomenclature">—</span>
+        <button onclick="copyNomenclature()" title="Copiar">⧉</button>
+      </div>
+    </div>
 
-    <br><br>
+    <!-- Links -->
+    <div class="side-card">
+      <div class="side-card-title">Ver en SEACE</div>
+      <div class="ext-links">
+        <a class="ext-link" id="linkSeace" href="#" target="_blank">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+          Ficha del proceso
+        </a>
+        <a class="ext-link" id="linkBases" href="#" target="_blank">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          Bases integradas
+        </a>
+      </div>
+    </div>
 
-    <button onclick="askAI()">
-        Consultar
-    </button>
+    <!-- Chat IA -->
+    <div class="side-card" style="flex:1;">
+      <div class="side-card-title">💬 Consultar a la IA</div>
+      <div class="chat-box">
+        <div class="chat-messages" id="chatMessages">
+          <div class="chat-msg ai">¡Hola! Soy tu asistente de licitaciones. Puedes preguntarme sobre esta oportunidad: requisitos, estrategia, documentos necesarios, o si conviene participar.</div>
+        </div>
+        <div class="chat-input-row">
+          <textarea
+            class="chat-input"
+            id="chatInput"
+            placeholder="¿Qué documentos necesito para postular?&#10;¿Es viable para Grupo Ibero?&#10;¿Cuál es el riesgo principal?"
+          ></textarea>
+          <button class="chat-send" id="chatSend" onclick="sendChat()">↑</button>
+        </div>
+      </div>
+    </div>
 
-    <div id="answer"></div>
+    <!-- Documentos -->
+    <div class="side-card">
+      <div class="side-card-title">📁 Expediente</div>
+      <div class="doc-upload">
+        <select class="doc-select" id="docType">
+          <option value="bases">Bases integradas</option>
+          <option value="especificaciones">Especificaciones técnicas</option>
+          <option value="anexos">Anexos</option>
+          <option value="cronograma">Cronograma</option>
+          <option value="otro">Otro documento</option>
+        </select>
+        <div class="file-drop" onclick="document.getElementById('docFile').click()">
+          <input type="file" id="docFile" accept=".pdf,.doc,.docx,.zip,.rar" style="display:none" onchange="updateFileLabel()">
+          <span id="fileLabel">＋ Seleccionar archivo</span>
+        </div>
+        <button class="btn-primary" onclick="uploadDocument()">Subir documento</button>
+        <div class="doc-status" id="docStatus"></div>
+      </div>
+    </div>
 
-</div>
+  </div><!-- /side-col -->
+</div><!-- /layout -->
 
 <script>
 const params = new URLSearchParams(window.location.search);
 const id = params.get('id');
 let opportunity = null;
 
-async function loadOpportunity(){
-  try{
+// ── Helpers ──────────────────────────────────────────────────────────────────
+function fmt(date) {
+  if (!date) return '—';
+  try {
+    return new Date(date + 'T00:00:00').toLocaleDateString('es-PE', { day:'2-digit', month:'short', year:'numeric' });
+  } catch { return date; }
+}
+
+function fmtAmount(n) {
+  if (!n) return '—';
+  return 'S/ ' + Number(n).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function lineClass(line = '') {
+  const l = line.toLowerCase();
+  if (l.includes('educ') || l.includes('escolar')) return 'tag-line-educacion';
+  if (l.includes('hospit')) return 'tag-line-hospitalario';
+  if (l.includes('metal') || l.includes('mec')) return 'tag-line-metalmecanica';
+  if (l.includes('ofic') || l.includes('melamine')) return 'tag-line-oficina';
+  return 'tag-line-general';
+}
+
+// ── Cargar oportunidad ────────────────────────────────────────────────────────
+async function loadOpportunity() {
+  if (!id) {
+    document.getElementById('loadingState').innerHTML =
+      '<p style="color:var(--red)">No se especificó ID de oportunidad.</p>';
+    return;
+  }
+
+  try {
     const res = await fetch('/api/opportunities/' + id);
     const data = await res.json();
 
-    if(!data.ok){
-      document.getElementById('title').innerText = 'Oportunidad no encontrada';
+    if (!data.ok || !data.opportunity) {
+      document.getElementById('loadingState').innerHTML =
+        '<p style="color:var(--red)">Oportunidad no encontrada.</p>';
       return;
     }
 
     opportunity = data.opportunity;
-    console.log(opportunity);
 
-    document.getElementById('title').innerText = opportunity.title || 'Oportunidad SEACE';
-    document.getElementById('entity').innerText = opportunity.entity || '-';
-    document.getElementById('region').innerText = opportunity.region || '-';
-    document.getElementById('line').innerText = opportunity.business_line || '-';
-    document.getElementById('process').innerText = opportunity.external_id || opportunity.nomenclature || '-';
-    const score =
-Number(opportunity.ai_score || opportunity.puntuacion_ai || 0);
-    document.getElementById('scoreText').innerText =
-score + ' / 100';
+    // Ocultar loading, mostrar contenido
+    document.getElementById('loadingState').classList.add('hidden');
+    document.getElementById('content').classList.remove('hidden');
 
-document.getElementById('businessLineText').innerText =
-opportunity.business_line || '-';
+    // Metadatos
+    document.title = 'Radar Ibero — ' + (opportunity.title || 'Oportunidad').slice(0, 60);
+    document.getElementById('title').textContent = opportunity.title || '—';
+    document.getElementById('entity').textContent = opportunity.entity || '—';
+    document.getElementById('region').textContent = opportunity.region || '—';
+    document.getElementById('amount').textContent = fmtAmount(opportunity.amount);
+    document.getElementById('closing').textContent = fmt(opportunity.closing_date);
+    document.getElementById('submission').textContent = fmt(opportunity.submission_date);
+    document.getElementById('published').textContent = fmt(opportunity.published_date);
+    document.getElementById('nomenclature').textContent = opportunity.nomenclature || opportunity.external_id || '—';
 
-document.getElementById('entityText').innerText =
-opportunity.entity || '-';
+    // Tags
+    const tagLine = document.getElementById('tagLine');
+    tagLine.textContent = opportunity.business_line || 'General';
+    tagLine.className = 'tag ' + lineClass(opportunity.business_line);
 
-document.getElementById('regionText').innerText =
-opportunity.region || '-';
+    document.getElementById('tagType').textContent = opportunity.process_type || opportunity.object_type || 'Proceso';
 
-    document.getElementById('score').innerText =
-    score + ' puntos / 100';
-    
-document.getElementById('scoreBar').style.width =
-score + '%';
+    // Links SEACE
+    const linkSeace = document.getElementById('linkSeace');
+    if (opportunity.source_url && opportunity.source_url !== '#') {
+      linkSeace.href = opportunity.source_url;
+    } else {
+      linkSeace.style.opacity = '0.4';
+      linkSeace.onclick = e => { e.preventDefault(); alert('URL no disponible en este proceso'); };
+    }
 
-let color = '#ef4444';
-let texto = '🔴 NO PARTICIPAR';
+    const linkBases = document.getElementById('linkBases');
+    if (opportunity.bases_url) {
+      linkBases.href = opportunity.bases_url;
+    } else {
+      linkBases.style.opacity = '0.4';
+      linkBases.onclick = e => { e.preventDefault(); alert('Bases no disponibles directamente — buscar en SEACE por nomenclatura'); };
+    }
 
-if(score >= 80){
-    color = '#22c55e';
-    texto = '🟢 PARTICIPAR';
+    // ── Análisis IA ──
+    renderAI(opportunity);
+
+  } catch (e) {
+    document.getElementById('loadingState').innerHTML =
+      '<p style="color:var(--red)">Error cargando: ' + e.message + '</p>';
+  }
 }
-else if(score >= 60){
-    color = '#f59e0b';
-    texto = '🟡 REVISAR';
-}
 
-document.getElementById('scoreBar').style.background =
-color;
+function renderAI(opp) {
+  const score    = Number(opp.ai_score || 0);
+  const decision = String(opp.ai_decision || opp.ai_recommendation || '').toUpperCase();
+  const summary  = opp.ai_summary || 'Análisis no disponible.';
+  const criteria = Array.isArray(opp.ai_criteria) ? opp.ai_criteria : [];
+  const risks    = Array.isArray(opp.ai_risks)    ? opp.ai_risks    : [];
+  const actions  = Array.isArray(opp.ai_actions)  ? opp.ai_actions  : [];
 
-document.getElementById('decisionBadge').innerText =
-texto;
+  // Banner de decisión
+  const banner = document.getElementById('decisionBanner');
+  const decisionIcon  = document.getElementById('decisionIcon');
+  const decisionLabel = document.getElementById('decisionLabel');
+  const decisionRec   = document.getElementById('decisionRec');
+  const scoreCircle   = document.getElementById('scoreCircle');
+  const scoreNum      = document.getElementById('scoreNum');
 
-document.getElementById('decisionBadge').style.background =
-color;
+  scoreNum.textContent = score || '—';
 
-document.getElementById('decisionBadge').style.color =
-'white';  
-    document.getElementById('summary').innerText = opportunity.ai_summary || opportunity.resumen_ai || 'Análisis pendiente';
-    document.getElementById('recommendation').innerText = opportunity.ai_recommendation || opportunity.recomendacion_ai || '';
+  if (decision.includes('PARTICIPAR')) {
+    banner.className = 'decision-banner participar';
+    decisionIcon.textContent = '🎯';
+    decisionLabel.textContent = 'PARTICIPAR';
+    scoreCircle.className = 'score-circle participar';
+  } else if (decision.includes('REVISAR')) {
+    banner.className = 'decision-banner revisar';
+    decisionIcon.textContent = '🔍';
+    decisionLabel.textContent = 'REVISAR';
+    scoreCircle.className = 'score-circle revisar';
+  } else if (decision.includes('DESCARTAR')) {
+    banner.className = 'decision-banner descartar';
+    decisionIcon.textContent = '✖';
+    decisionLabel.textContent = 'DESCARTAR';
+    scoreCircle.className = 'score-circle descartar';
+  } else {
+    decisionLabel.textContent = 'PENDIENTE';
+  }
 
-    const criteria =
-Array.isArray(opportunity.ai_criteria)
-  ? opportunity.ai_criteria
-  : Array.isArray(opportunity.criteria)
-    ? opportunity.criteria
-    : [];
+  decisionRec.textContent = opp.ai_recommendation || 'Ver resumen ejecutivo más abajo';
 
-const criteriaCards =
-document.getElementById('criteriaCards');
+  // Resumen
+  document.getElementById('summary').textContent = summary;
 
-if(criteriaCards){
-
-    criteriaCards.innerHTML =
-    criteria.map(c => {
-
-        const pct =
-        Math.round((c.score / c.max) * 100);
-
-        return `
-        <div style="
-            margin-bottom:14px;
-            padding:10px;
-            border:1px solid #e5e7eb;
-            border-radius:8px;
-            background:#fafafa;
-        ">
-            <div style="
-                display:flex;
-                justify-content:space-between;
-                margin-bottom:6px;
-                font-weight:bold;
-            ">
-                <span>${c.name}</span>
-                <span>${c.score}/${c.max}</span>
-            </div>
-
-            <div style="
-                background:#e5e7eb;
-                height:12px;
-                border-radius:6px;
-            ">
-                <div style="
-                    width:${pct}%;
-                    height:12px;
-                    background:#22c55e;
-                    border-radius:6px;
-                ">
-                </div>
-            </div>
-        </div>
-        `;
+  // Criterios
+  const criteriaGrid = document.getElementById('criteriaGrid');
+  if (criteria.length) {
+    criteriaGrid.innerHTML = criteria.map(c => {
+      const pct = c.max ? Math.round((c.score / c.max) * 100) : 0;
+      return `
+        <div class="criteria-item">
+          <div class="criteria-header">
+            <span class="criteria-name">${c.name}</span>
+            <span class="criteria-score">${c.score}/${c.max} pts</span>
+          </div>
+          <div class="progress-bg">
+            <div class="progress-fill" style="width:${pct}%"></div>
+          </div>
+        </div>`;
     }).join('');
-}
-
-    const risks = Array.isArray(opportunity.ai_risks)
-  ? opportunity.ai_risks
-  : Array.isArray(opportunity.risks)
-    ? opportunity.risks
-    : [];
-
-const actions = Array.isArray(opportunity.ai_actions)
-  ? opportunity.ai_actions
-  : Array.isArray(opportunity.actions)
-    ? opportunity.actions
-    : [];
-
-document.getElementById('risks').innerHTML =
-  risks.length
-    ? risks.map(r =>  `<li>${r}</li>`).join('')
-    : '<li>Pendiente</li>';
-
-document.getElementById('actions').innerHTML =
-  actions.length
-    ? actions.map(a =>  `<li>${a}</li>`).join('')
-    : '<li>Pendiente</li>'
-
-  }catch(e){
-    document.getElementById('title').innerText = 'Error cargando oportunidad';
+  } else {
+    criteriaGrid.innerHTML = '<p style="color:var(--muted);font-size:13px;">No disponible</p>';
   }
+
+  // Riesgos
+  const risksList = document.getElementById('risksList');
+  risksList.innerHTML = risks.length
+    ? risks.map((r, i) => `
+        <div class="item-list-item" style="animation-delay:${i*0.08}s">
+          <span class="icon" style="color:var(--amber)">⚠</span>
+          <span>${r}</span>
+        </div>`).join('')
+    : '<p style="color:var(--muted);font-size:13px;">No identificados</p>';
+
+  // Acciones
+  const actionsList = document.getElementById('actionsList');
+  actionsList.innerHTML = actions.length
+    ? actions.map((a, i) => `
+        <div class="item-list-item" style="animation-delay:${i*0.08}s">
+          <span class="icon" style="color:var(--green)">✓</span>
+          <span>${a}</span>
+        </div>`).join('')
+    : '<p style="color:var(--muted);font-size:13px;">No disponibles</p>';
 }
-    async function uploadDocument() {
+
+// ── Chat ──────────────────────────────────────────────────────────────────────
+async function sendChat() {
+  const input = document.getElementById('chatInput');
+  const question = input.value.trim();
+  if (!question || !id) return;
+
+  const msgs = document.getElementById('chatMessages');
+  const btn  = document.getElementById('chatSend');
+
+  // Mensaje usuario
+  msgs.innerHTML += `<div class="chat-msg user">${question}</div>`;
+  input.value = '';
+  btn.disabled = true;
+
+  // Pensando...
+  const thinkId = 'think_' + Date.now();
+  msgs.innerHTML += `<div class="chat-msg thinking" id="${thinkId}">Analizando<span class="dots"><span>.</span><span>.</span><span>.</span></span></div>`;
+  msgs.scrollTop = msgs.scrollHeight;
+
+  try {
+    const res = await fetch('/api/opportunities/' + id + '/ask', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question })
+    });
+    const data = await res.json();
+    document.getElementById(thinkId)?.remove();
+    msgs.innerHTML += `<div class="chat-msg ai">${(data.answer || data.error || 'Sin respuesta').replace(/\n/g, '<br>')}</div>`;
+  } catch (e) {
+    document.getElementById(thinkId)?.remove();
+    msgs.innerHTML += `<div class="chat-msg ai" style="color:var(--red)">Error: ${e.message}</div>`;
+  }
+
+  msgs.scrollTop = msgs.scrollHeight;
+  btn.disabled = false;
+  input.focus();
+}
+
+// Enter para enviar (Shift+Enter = nueva línea)
+document.getElementById('chatInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    sendChat();
+  }
+});
+
+// ── Documentos ───────────────────────────────────────────────────────────────
+function updateFileLabel() {
+  const f = document.getElementById('docFile').files[0];
+  document.getElementById('fileLabel').textContent = f ? f.name : '＋ Seleccionar archivo';
+}
+
+async function uploadDocument() {
   const fileInput = document.getElementById('docFile');
-  const docType = document.getElementById('docType');
-  const list = document.getElementById('documentsList');
-
-  if (!id) {
-    alert('No se encontró el ID de la oportunidad');
-    return;
-  }
+  const docType   = document.getElementById('docType').value;
+  const status    = document.getElementById('docStatus');
 
   if (!fileInput.files.length) {
-    alert('Selecciona un archivo');
+    status.textContent = 'Selecciona un archivo primero.';
     return;
   }
 
   const file = fileInput.files[0];
   const formData = new FormData();
   formData.append('file', file);
-  formData.append('document_type', docType.value);
+  formData.append('document_type', docType);
 
-  list.innerHTML = 'Subiendo documento...';
+  status.textContent = 'Subiendo...';
 
   try {
     const res = await fetch('/api/opportunities/' + id + '/documents', {
       method: 'POST',
       body: formData
     });
-
     const data = await res.json();
-
-    if (!data.ok) throw new Error(data.error || 'No se pudo subir el documento');
-
-    list.innerHTML = '✅ Documento subido: ' + file.name;
+    if (!data.ok) throw new Error(data.error);
+    status.textContent = '✓ Subido: ' + file.name;
     fileInput.value = '';
+    document.getElementById('fileLabel').textContent = '＋ Seleccionar archivo';
   } catch (e) {
-    list.innerHTML = '❌ Error subiendo documento: ' + e.message;
+    status.textContent = '✖ Error: ' + e.message;
   }
 }
 
-function copyProcess(){
-  navigator.clipboard.writeText(document.getElementById('process').innerText);
-  alert('Proceso copiado');
-}
-async function downloadSeaceDocuments() {
-  const status = document.getElementById('downloadStatus');
-  status.innerHTML = 'Descargando expediente desde SEACE...';
-
-  try {
-    const res = await fetch('/api/opportunities/' + id + '/download-documents', {
-      method: 'POST'
-    });
-
-    const data = await res.json();
-
-    if (!data.ok) throw new Error(data.error || 'No se pudo descargar');
-
-    status.innerHTML =
-      '✅ Expediente descargado: ' + (data.files?.length || 0) + ' archivo(s)<br>' +
-      'URL SEACE: ' + (data.detail_url || 'sin detail_url');
-  } catch (e) {
-    status.innerHTML = '❌ Error: ' + e.message;
-  }
-}
-
-async function askAI(){
-  const question = document.getElementById('question').value;
-  const answerDiv = document.getElementById('answer');
-
-  answerDiv.innerText = 'Consultando IA...';
-
-  const res = await fetch('/api/opportunities/' + id + '/ask', {
-    method:'POST',
-    headers:{ 'Content-Type':'application/json' },
-    body: JSON.stringify({ question })
+// ── Copiar nomenclatura ───────────────────────────────────────────────────────
+function copyNomenclature() {
+  const text = document.getElementById('nomenclature').textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.querySelector('.nomc-row button');
+    btn.textContent = '✓';
+    setTimeout(() => btn.textContent = '⧉', 1500);
   });
-
-  const data = await res.json();
-  answerDiv.innerText = data.answer || data.error || 'No se obtuvo respuesta';
 }
 
+// ── Init ─────────────────────────────────────────────────────────────────────
 loadOpportunity();
 </script>
-
 </body>
 </html>
