@@ -1,1 +1,20 @@
-{"name":"seace-alertas-backend","version":"0.5.0","type":"module","scripts":{"start":"node src/server.js","dev":"node src/server.js","postinstall":"npx playwright install chromium"},"dependencies":{"@supabase/supabase-js":"latest","cors":"latest","dotenv":"latest","express":"latest","node-cron":"latest","nodemailer":"latest","playwright":"latest","openai": "^6.0.0"}}
+{
+  "name": "ibero-seace-alertas",
+  "version": "1.0.0",
+  "description": "Radar de oportunidades SEACE para Grupo Ibero Perú",
+  "type": "module",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "node-cron": "^3.0.3",
+    "nodemailer": "^6.9.8",
+    "openai": "^4.28.0"
+  }
+}
