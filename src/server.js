@@ -5,14 +5,17 @@ import cron from 'node-cron';
 import { createClient } from '@supabase/supabase-js';
 import nodemailer from 'nodemailer';
 import OpenAI from 'openai';
+import multer from 'multer';
+import pdfParse from 'pdf-parse/lib/pdf-parse.js';
 
 const app = express();
 app.use(cors({ origin: process.env.FRONTEND_URL?.split(',') || '*' }));
 app.use(express.json());
 app.use(express.static('src/public'));
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const MODE = 'seace-api-direct';
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
 // ─── Clientes externos ────────────────────────────────────────────────────────
 const SUPABASE_KEY = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -23,8 +26,6 @@ const supabase = process.env.SUPABASE_URL && SUPABASE_KEY
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // ─── SEACE API ────────────────────────────────────────────────────────────────
-// API interna descubierta via DevTools en prod4.seace.gob.pe/openegocio
-// Estructura: /api/oportunidades/codObjeto/codDepartamento/sintesisProceso/codTipoProceso/{page}/{size}/{keyword}/{ubigeo}
 const SEACE_API = 'https://prod4.seace.gob.pe:8086/api/oportunidades/codObjeto/codDepartamento/sintesisProceso/codTipoProceso';
 const SEACE_HEADERS = {
   'Accept': 'application/json, text/plain, */*',
@@ -34,7 +35,6 @@ const SEACE_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
 };
 
-// Keywords de búsqueda para Grupo Ibero Perú
 const IBERO_KEYWORDS = [
   { keyword: 'MOBILIARIO',              business_line: 'General' },
   { keyword: 'MOBILIARIO ESCOLAR',      business_line: 'Educación' },
@@ -62,7 +62,6 @@ function classify(text = '') {
   return 'General';
 }
 
-// Convierte fecha SEACE "DD/MM/YYYY HH:MM:SS" → "YYYY-MM-DD"
 function parseSeaceDate(raw) {
   if (!raw) return null;
   const s = clean(raw);
@@ -74,14 +73,11 @@ function parseSeaceDate(raw) {
       return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
     }
   }
-  // ya viene en formato ISO
   if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
   return null;
 }
 
-// Normaliza un item crudo de la API SEACE al esquema de nuestra BD
 function normalizeSeaceItem(item, keyword) {
-  // Campos confirmados via DevTools:
   const idProcedimiento = clean(item.idProcedimiento || '');
   const nomenclatura    = clean(item.nomenclatura || item.siglaProceso || '');
   const entidad         = clean(item.detEntidad || 'Entidad no identificada');
@@ -92,24 +88,13 @@ function normalizeSeaceItem(item, keyword) {
   const objeto          = clean(item.detObjeto || '');
   const documentoBase   = clean(item.documentoBase || '');
 
-  const fechaConvocatoria      = parseSeaceDate(item.fechaConvocatoria);
-  const fechaFin               = parseSeaceDate(item.fechaFin || item.fecFinParticipantes);
-  const fechaInicio            = parseSeaceDate(item.fechaInicio || item.fecInicioParticipantes);
-  const fechaPresentacion      = parseSeaceDate(item.fechaPresentacionPropuestas);
-
-  // Filtrar registros sin datos útiles
   if (!titulo || titulo.length < 10) return null;
   if (!idProcedimiento && !nomenclatura) return null;
 
   const external_id = idProcedimiento || nomenclatura;
-
-  // URL de detalle en OpenNegocio
-  const source_url = item.urlProceso ||
-    `https://prod4.seace.gob.pe/openegocio/#/ficha/idProceso/${idProcedimiento}`;
-
-  // URL de bases integradas (si existe documentoBase UUID)
+  const source_url = `https://prod4.seace.gob.pe/openegocio/#/ficha/idProceso/${idProcedimiento}`;
   const bases_url = documentoBase
-    ? `https://prod4.seace.gob.pe:8086/api/documentos/${documentoBase}`
+    ? `https://prod1.seace.gob.pe/SeaceWeb-PRO/SdescargarArchivoAlfresco?fileCode=${documentoBase}`
     : null;
 
   return {
@@ -117,17 +102,14 @@ function normalizeSeaceItem(item, keyword) {
     nomenclature: nomenclatura,
     title: titulo,
     entity: entidad,
-    region: 'No especificada', // la API no devuelve departamento en este endpoint
+    region: 'No especificada',
     amount: monto,
     currency: moneda,
     process_type: tipoProceso,
-    object_type: objeto,
-    published_date: fechaConvocatoria || new Date().toISOString().slice(0, 10),
-    start_date: fechaInicio,
-    closing_date: fechaFin,
-    submission_date: fechaPresentacion,
+    published_date: parseSeaceDate(item.fechaConvocatoria) || new Date().toISOString().slice(0, 10),
+    closing_date: parseSeaceDate(item.fechaFin || item.fecFinParticipantes),
+    submission_date: parseSeaceDate(item.fechaPresentacionPropuestas),
     business_line: classify(`${titulo} ${keyword}`),
-    status: 'Nuevo',
     source_url,
     bases_url,
     documento_base_id: documentoBase || null,
@@ -135,31 +117,15 @@ function normalizeSeaceItem(item, keyword) {
   };
 }
 
-// ─── Búsqueda en SEACE API ────────────────────────────────────────────────────
 async function fetchSeaceKeyword(keyword, page = 0, size = 100) {
   const encoded = encodeURIComponent(keyword.toUpperCase());
   const url = `${SEACE_API}/${page}/${size}/${encoded}/0`;
-
-  console.log(`[SEACE] Buscando: "${keyword}" → ${url}`);
-
-  const response = await fetch(url, {
-    headers: SEACE_HEADERS,
-    signal: AbortSignal.timeout(25000)
-  });
-
-  if (!response.ok) {
-    throw new Error(`SEACE respondió HTTP ${response.status} para "${keyword}"`);
-  }
-
+  console.log(`[SEACE] Buscando: "${keyword}"`);
+  const response = await fetch(url, { headers: SEACE_HEADERS, signal: AbortSignal.timeout(25000) });
+  if (!response.ok) throw new Error(`SEACE HTTP ${response.status} para "${keyword}"`);
   const data = await response.json();
   const items = Array.isArray(data) ? data : (data.data || data.items || data.lista || []);
-
-  console.log(`[SEACE] "${keyword}": ${items.length} registros crudos`);
-
-  const normalized = items.map(item => normalizeSeaceItem(item, keyword)).filter(Boolean);
-  console.log(`[SEACE] "${keyword}": ${normalized.length} oportunidades normalizadas`);
-
-  return normalized;
+  return items.map(item => normalizeSeaceItem(item, keyword)).filter(Boolean);
 }
 
 async function searchSeaceAPI(customKeywords = null) {
@@ -167,7 +133,6 @@ async function searchSeaceAPI(customKeywords = null) {
   const all = [];
   const errors = [];
   const diagnostics = [];
-
   for (const { keyword } of keywords) {
     try {
       const items = await fetchSeaceKeyword(keyword);
@@ -176,31 +141,16 @@ async function searchSeaceAPI(customKeywords = null) {
     } catch (e) {
       errors.push({ keyword, error: e.message });
       diagnostics.push({ keyword, found: 0, ok: false, error: e.message });
-      console.error(`[SEACE] Error en "${keyword}":`, e.message);
     }
-    // Pausa entre requests para no saturar el servidor
     await new Promise(r => setTimeout(r, 600));
   }
-
-  // Deduplicar por external_id
   const byId = new Map();
   all.forEach(o => byId.set(o.external_id, o));
-
-  const unique = [...byId.values()];
-  console.log(`[SEACE] Total único: ${unique.length} oportunidades`);
-
-  return { items: unique, errors, diagnostics };
+  return { items: [...byId.values()], errors, diagnostics };
 }
 
 // ─── Base de datos ─────────────────────────────────────────────────────────────
-const demo = {
-  keywords: IBERO_KEYWORDS.map(k => ({ keyword: k.keyword, active: true, business_line: k.business_line })),
-  vendors: [
-    { name: 'Vendedor Educación',    email: 'educacion@grupoibero.com',    line: 'Educación' },
-    { name: 'Vendedor Hospitalario', email: 'hospitalario@grupoibero.com', line: 'Hospitalario' }
-  ],
-  opportunities: []
-};
+const demo = { keywords: [], vendors: [], opportunities: [] };
 
 async function table(name) {
   if (!supabase) return demo[name] || [];
@@ -217,9 +167,7 @@ async function upsertOpportunities(items) {
     demo.opportunities = [...map.values()].slice(0, 500);
     return demo.opportunities;
   }
-  const { error } = await supabase
-    .from('opportunities')
-    .upsert(items, { onConflict: 'external_id' });
+  const { error } = await supabase.from('opportunities').upsert(items, { onConflict: 'external_id' });
   if (error) throw error;
   return table('opportunities');
 }
@@ -237,15 +185,12 @@ async function callAI(prompt) {
 async function analyzeOpportunity(opportunity) {
   const prompt = `
 Analiza esta oportunidad de contratación pública para Grupo Ibero Perú (fabricante de mobiliario escolar, hospitalario, de oficina y metálico):
-
 Título: ${opportunity.title || ''}
 Entidad: ${opportunity.entity || ''}
 Tipo: ${opportunity.process_type || ''}
-Objeto: ${opportunity.object_type || ''}
 Monto: ${opportunity.amount ? `S/ ${Number(opportunity.amount).toLocaleString('es-PE')}` : 'No especificado'}
 Línea: ${opportunity.business_line || ''}
 Cierre: ${opportunity.closing_date || 'No especificado'}
-
 Responde ÚNICAMENTE con JSON válido, sin texto adicional:
 {
   "summary": "resumen ejecutivo en 2 oraciones",
@@ -264,12 +209,9 @@ Responde ÚNICAMENTE con JSON válido, sin texto adicional:
   ],
   "risks": ["riesgo 1","riesgo 2","riesgo 3"],
   "actions": ["acción 1","acción 2","acción 3"]
-}
-La suma de criteria.score debe ser igual a score.`;
-
+}`;
   const raw = await callAI(prompt);
-  const clean_json = raw.replace(/```json|```/g, '').trim();
-  return JSON.parse(clean_json);
+  return JSON.parse(raw.replace(/```json|```/g, '').trim());
 }
 
 // ─── Email ─────────────────────────────────────────────────────────────────────
@@ -280,14 +222,7 @@ function renderEmail(opportunities) {
     const link = `${FRONTEND_URL}/oportunidad.html?id=${encodeURIComponent(o.id)}`;
     const monto = o.amount ? `S/ ${Number(o.amount).toLocaleString('es-PE')}` : 'No especificado';
     const cierre = o.closing_date || o.submission_date || 'Ver detalle';
-    const badge = {
-      'Educación':     '#2563eb',
-      'Hospitalario':  '#dc2626',
-      'Metalmecánica': '#7c3aed',
-      'Oficina':       '#059669',
-      'General':       '#d97706'
-    }[o.business_line] || '#6b7280';
-
+    const badge = { 'Educación': '#2563eb', 'Hospitalario': '#dc2626', 'Metalmecánica': '#7c3aed', 'Oficina': '#059669', 'General': '#d97706' }[o.business_line] || '#6b7280';
     return `
 <div style="border:1px solid #e7eaf0;border-radius:12px;padding:16px;margin-bottom:12px;background:white;">
   <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
@@ -297,22 +232,17 @@ function renderEmail(opportunities) {
   <h3 style="margin:0 0 8px;font-size:15px;color:#111827;">${o.title || 'Oportunidad SEACE'}</h3>
   <p style="margin:2px 0;color:#4b5563;font-size:13px;"><b>Entidad:</b> ${o.entity || '-'}</p>
   <p style="margin:2px 0;color:#4b5563;font-size:13px;"><b>Monto:</b> ${monto}</p>
-  <p style="margin:2px 0;color:#4b5563;font-size:13px;"><b>Cierre participantes:</b> ${cierre}</p>
-  <a href="${link}" style="display:inline-block;margin-top:10px;background:#1d4ed8;color:white;padding:8px 16px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:600;">
-    Analizar con IA →
-  </a>
+  <p style="margin:2px 0;color:#4b5563;font-size:13px;"><b>Cierre:</b> ${cierre}</p>
+  <a href="${link}" style="display:inline-block;margin-top:10px;background:#1d4ed8;color:white;padding:8px 16px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:600;">Analizar con IA →</a>
 </div>`;
   }).join('');
-
   return `
 <div style="font-family:Arial,sans-serif;background:#f6f7fb;padding:20px;max-width:680px;margin:0 auto;">
   <div style="background:#1d4ed8;color:white;padding:20px;border-radius:12px 12px 0 0;text-align:center;">
     <h1 style="margin:0;font-size:22px;">🎯 Radar SEACE — Grupo Ibero Perú</h1>
     <p style="margin:6px 0 0;opacity:0.85;">${opportunities.length} oportunidades detectadas hoy</p>
   </div>
-  <div style="padding:16px 0;">
-    ${rows}
-  </div>
+  <div style="padding:16px 0;">${rows}</div>
   <p style="text-align:center;color:#9ca3af;font-size:12px;">Generado automáticamente · Radar SEACE v${VERSION}</p>
 </div>`;
 }
@@ -320,22 +250,16 @@ function renderEmail(opportunities) {
 async function sendDigest() {
   const opportunities = await table('opportunities');
   const vendors = await table('vendors');
-
   if (!process.env.SMTP_HOST) return { ok: false, message: 'SMTP no configurado' };
-
   const transport = nodemailer.createTransport({
     host: process.env.SMTP_HOST,
     port: Number(process.env.SMTP_PORT || 587),
     secure: String(process.env.SMTP_SECURE || 'false') === 'true',
     auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-    connectionTimeout: 10000,
-    greetingTimeout: 10000,
-    socketTimeout: 15000
+    connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 15000
   });
-
   const recipients = vendors.map(v => v.email).filter(Boolean).join(',');
   if (!recipients) return { ok: false, message: 'No hay vendedores configurados' };
-
   await transport.verify();
   const info = await transport.sendMail({
     from: process.env.MAIL_FROM || process.env.SMTP_USER,
@@ -343,66 +267,28 @@ async function sendDigest() {
     subject: `🎯 ${opportunities.length} oportunidades SEACE — Radar Ibero`,
     html: renderEmail(opportunities)
   });
-
-  console.log('Digest enviado:', info.messageId || info.response);
-
-  // Marcar como enviadas
   const ids = opportunities.map(o => o.id).filter(Boolean);
-  if (ids.length && supabase) {
-    await supabase.from('opportunities').update({ alert_sent: true }).in('id', ids);
-  }
-
+  if (ids.length && supabase) await supabase.from('opportunities').update({ alert_sent: true }).in('id', ids);
   return { ok: true, recipients, messageId: info.messageId || null };
 }
 
 // ─── Rutas ─────────────────────────────────────────────────────────────────────
-app.get('/', (_, res) => res.json({
-  ok: true,
-  app: 'SEACE Radar — Grupo Ibero Perú',
-  mode: MODE,
-  version: VERSION,
-  endpoints: ['/api/health', '/api/bootstrap', '/api/jobs/search-now', '/api/jobs/send-digest']
-}));
+app.get('/', (_, res) => res.json({ ok: true, app: 'SEACE Radar — Grupo Ibero Perú', mode: MODE, version: VERSION }));
 
-app.get('/api/health', (_, res) => res.json({
-  ok: true,
-  supabase: !!supabase,
-  openai: !!process.env.OPENAI_API_KEY,
-  smtp: !!process.env.SMTP_HOST,
-  mode: MODE,
-  version: VERSION
-}));
+app.get('/api/health', (_, res) => res.json({ ok: true, supabase: !!supabase, openai: !!process.env.OPENAI_API_KEY, smtp: !!process.env.SMTP_HOST, mode: MODE, version: VERSION }));
 
 app.get('/api/bootstrap', async (_, res, next) => {
-  try {
-    res.json({
-      keywords: await table('keywords'),
-      vendors: await table('vendors'),
-      opportunities: await table('opportunities')
-    });
-  } catch (e) { next(e); }
+  try { res.json({ keywords: await table('keywords'), vendors: await table('vendors'), opportunities: await table('opportunities') }); }
+  catch (e) { next(e); }
 });
 
-// Búsqueda manual (trigger inmediato)
 app.get('/api/jobs/search-now', async (req, res, next) => {
   try {
     const keyword = req.query.keyword ? String(req.query.keyword) : null;
-    const customKeywords = keyword
-      ? [{ keyword: keyword.toUpperCase(), business_line: 'General' }]
-      : null;
-
+    const customKeywords = keyword ? [{ keyword: keyword.toUpperCase(), business_line: 'General' }] : null;
     const result = await searchSeaceAPI(customKeywords);
     const saved = await upsertOpportunities(result.items || []);
-
-    res.json({
-      ok: true,
-      version: VERSION,
-      found: result.items.length,
-      saved_total: Array.isArray(saved) ? saved.length : null,
-      errors: result.errors || [],
-      diagnostics: result.diagnostics || [],
-      items: result.items || []
-    });
+    res.json({ ok: true, version: VERSION, found: result.items.length, saved_total: Array.isArray(saved) ? saved.length : null, errors: result.errors || [], diagnostics: result.diagnostics || [] });
   } catch (e) { next(e); }
 });
 
@@ -414,73 +300,49 @@ app.post('/api/jobs/search', async (_, res, next) => {
   } catch (e) { next(e); }
 });
 
-app.get('/api/jobs/send-digest', async (_, res, next) => {
-  try { res.json(await sendDigest()); } catch (e) { next(e); }
-});
+app.get('/api/jobs/send-digest', async (_, res, next) => { try { res.json(await sendDigest()); } catch (e) { next(e); } });
+app.post('/api/jobs/send-digest', async (_, res, next) => { try { res.json(await sendDigest()); } catch (e) { next(e); } });
 
-app.post('/api/jobs/send-digest', async (_, res, next) => {
-  try { res.json(await sendDigest()); } catch (e) { next(e); }
-});
-
-// Detalle de oportunidad + análisis IA
 app.get('/api/opportunities/:id', async (req, res, next) => {
   try {
     const { id } = req.params;
     const opportunities = await table('opportunities');
     const opportunity = opportunities.find(o => String(o.id) === String(id));
-
-    if (!opportunity) {
-      return res.status(404).json({ ok: false, error: 'Oportunidad no encontrada' });
-    }
+    if (!opportunity) return res.status(404).json({ ok: false, error: 'Oportunidad no encontrada' });
 
     let analysis = null;
     if (!opportunity.ai_summary) {
       try {
         analysis = await analyzeOpportunity(opportunity);
-        // Guardar análisis en Supabase para no regenerar
         if (supabase && analysis) {
-          await supabase.from('opportunities').update({
-            ai_summary: analysis.summary,
-            ai_score: analysis.score,
-            ai_recommendation: analysis.decision
-          }).eq('id', id);
+          await supabase.from('opportunities').update({ ai_summary: analysis.summary, ai_score: analysis.score, ai_recommendation: analysis.decision }).eq('id', id);
         }
-      } catch (e) {
-        console.error('Error analizando con IA:', e.message);
-      }
+      } catch (e) { console.error('Error IA:', e.message); }
     } else {
-      analysis = {
-        summary: opportunity.ai_summary,
-        score: opportunity.ai_score,
-        decision: opportunity.ai_recommendation
-      };
+      analysis = { summary: opportunity.ai_summary, score: opportunity.ai_score, decision: opportunity.ai_recommendation };
     }
 
     res.json({
       ok: true,
       opportunity: {
         ...opportunity,
-        ai_summary:        analysis?.summary || null,
-        ai_score:          analysis?.score || null,
-        ai_decision:       analysis?.decision || null,
+        ai_summary: analysis?.summary || null,
+        ai_score: analysis?.score || null,
+        ai_decision: analysis?.decision || null,
         ai_recommendation: analysis?.recommendation || analysis?.decision || null,
-        ai_risks:          analysis?.risks || [],
-        ai_actions:        analysis?.actions || [],
-        ai_criteria:       analysis?.criteria || []
+        ai_risks: analysis?.risks || [],
+        ai_actions: analysis?.actions || [],
+        ai_criteria: analysis?.criteria || []
       }
     });
   } catch (e) { next(e); }
 });
 
-// Chat IA por oportunidad
 app.post('/api/opportunities/:id/ask', async (req, res, next) => {
   try {
     const { id } = req.params;
     const { question } = req.body;
-
-    if (!question?.trim()) {
-      return res.status(400).json({ ok: false, error: 'La pregunta es requerida' });
-    }
+    if (!question?.trim()) return res.status(400).json({ ok: false, error: 'La pregunta es requerida' });
 
     const opportunities = await table('opportunities');
     const opportunity = opportunities.find(o => String(o.id) === String(id));
@@ -491,11 +353,10 @@ app.post('/api/opportunities/:id/ask', async (req, res, next) => {
       : [];
 
     const docsText = documents.length
-      ? documents.map(d => `DOCUMENTO: ${d.title || 'Sin título'}\n${d.content || ''}`).join('\n\n---\n\n')
+      ? documents.map(d => `DOCUMENTO: ${d.document_type || 'Sin título'}\n${d.content || ''}`).join('\n\n---\n\n')
       : 'No hay documentos del expediente cargados.';
 
-    const prompt = `
-Eres un asistente comercial experto en licitaciones públicas para Grupo Ibero Perú (fabrica mobiliario escolar, hospitalario, de oficina y metálico).
+    const prompt = `Eres un asistente comercial experto en licitaciones públicas para Grupo Ibero Perú (fabrica mobiliario escolar, hospitalario, de oficina y metálico).
 
 OPORTUNIDAD:
 Título: ${opportunity.title || ''}
@@ -503,27 +364,22 @@ Entidad: ${opportunity.entity || ''}
 Nomenclatura: ${opportunity.nomenclature || opportunity.external_id || ''}
 Monto: ${opportunity.amount ? `S/ ${Number(opportunity.amount).toLocaleString('es-PE')}` : 'No especificado'}
 Tipo: ${opportunity.process_type || ''}
-Cierre: ${opportunity.closing_date || opportunity.submission_date || 'No especificado'}
+Cierre: ${opportunity.closing_date || 'No especificado'}
 Línea: ${opportunity.business_line || ''}
 
-DOCUMENTOS:
+DOCUMENTOS DEL EXPEDIENTE:
 ${docsText}
 
 PREGUNTA: ${question}
 
-Responde de forma clara, práctica y orientada a decisión comercial.`;
+Responde de forma clara, práctica y orientada a decisión comercial. Si hay documentos cargados, úsalos para responder con precisión.`;
 
     const answer = await callAI(prompt);
-
-    if (supabase) {
-      await supabase.from('ai_chats').insert({ opportunity_id: id, question, answer });
-    }
-
+    if (supabase) await supabase.from('ai_chats').insert({ opportunity_id: id, question, answer }).catch(() => {});
     res.json({ ok: true, answer });
   } catch (e) { next(e); }
 });
 
-// Documentos de oportunidad
 app.get('/api/opportunities/:id/documents', async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -534,27 +390,66 @@ app.get('/api/opportunities/:id/documents', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// Subida de documentos (pendiente implementar storage)
-app.post('/api/opportunities/:id/documents', async (req, res) => {
-  res.status(501).json({ ok: false, error: 'Subida de documentos pendiente — próxima versión' });
-});
-
-// Test de IA
-app.get('/api/ai-test', async (_, res, next) => {
+// ─── Subida de documentos PDF con extracción de texto ────────────────────────
+app.post('/api/opportunities/:id/documents', upload.single('file'), async (req, res, next) => {
   try {
-    const result = await callAI('Resume en una frase qué es una licitación pública en Perú.');
-    res.json({ ok: true, result });
+    const { id } = req.params;
+    const { document_type } = req.body;
+
+    if (!req.file) return res.status(400).json({ ok: false, error: 'No se recibió ningún archivo' });
+    if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
+
+    // Extraer texto del PDF
+    let content = '';
+    if (req.file.mimetype === 'application/pdf') {
+      try {
+        const parsed = await pdfParse(req.file.buffer);
+        content = parsed.text.slice(0, 50000); // máximo 50k caracteres
+        console.log(`PDF extraído: ${content.length} caracteres`);
+      } catch (e) {
+        console.error('Error extrayendo PDF:', e.message);
+        content = 'No se pudo extraer el texto del PDF.';
+      }
+    }
+
+    // Subir archivo a Supabase Storage
+    const fileName = `${id}/${Date.now()}_${req.file.originalname}`;
+    const { error: uploadError } = await supabase.storage
+      .from('opportunities_documents')
+      .upload(fileName, req.file.buffer, { contentType: req.file.mimetype });
+
+    if (uploadError) console.error('Error Storage:', uploadError.message);
+
+    // Obtener URL pública
+    const { data: urlData } = supabase.storage.from('opportunities_documents').getPublicUrl(fileName);
+
+    // Guardar en tabla opportunity_documents
+    const { data, error } = await supabase.from('opportunity_documents').insert({
+      opportunity_id: id,
+      document_type: document_type || 'otro',
+      file_name: req.file.originalname,
+      file_url: urlData?.publicUrl || null,
+      content,
+      file_size: req.file.size
+    }).select().single();
+
+    if (error) throw error;
+
+    res.json({ ok: true, document: data, content_length: content.length });
   } catch (e) { next(e); }
 });
 
-// Error handler
+app.get('/api/ai-test', async (_, res, next) => {
+  try { res.json({ ok: true, result: await callAI('Resume en una frase qué es una licitación pública en Perú.') }); }
+  catch (e) { next(e); }
+});
+
 app.use((err, _, res, __) => {
   console.error('API error:', err);
   res.status(500).json({ error: err.message, version: VERSION });
 });
 
 // ─── Cron ──────────────────────────────────────────────────────────────────────
-// Por defecto: 8am y 5pm cada día
 const schedule = process.env.CRON_SCHEDULE || '0 8,17 * * *';
 cron.schedule(schedule, async () => {
   try {
@@ -563,9 +458,7 @@ cron.schedule(schedule, async () => {
     await upsertOpportunities(result.items || []);
     await sendDigest();
     console.log(`[CRON] Completado: ${result.items.length} oportunidades`);
-  } catch (e) {
-    console.error('[CRON] Error:', e.message);
-  }
+  } catch (e) { console.error('[CRON] Error:', e.message); }
 });
 
 app.listen(process.env.PORT || 3000, () =>
