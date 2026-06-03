@@ -504,7 +504,44 @@ app.get('/api/ai-test', async (_, res, next) => {
   try { res.json({ ok: true, result: await callAI('Resume en una frase qué es una licitación pública en Perú.') }); }
   catch (e) { next(e); }
 });
+// ─── Admin endpoints ──────────────────────────────────────────────────────────
+app.post('/api/admin/vendors', async (req, res, next) => {
+  try {
+    const { name, email, line } = req.body;
+    if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
+    const { data, error } = await supabase.from('vendors').insert({ name, email, line }).select().single();
+    if (error) throw error;
+    res.json({ ok: true, vendor: data });
+  } catch(e) { next(e); }
+});
 
+app.delete('/api/admin/vendors/:id', async (req, res, next) => {
+  try {
+    if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
+    const { error } = await supabase.from('vendors').delete().eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch(e) { next(e); }
+});
+
+app.post('/api/admin/keywords', async (req, res, next) => {
+  try {
+    const { keyword, business_line, active } = req.body;
+    if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
+    const { data, error } = await supabase.from('keywords').insert({ keyword, business_line, active }).select().single();
+    if (error) throw error;
+    res.json({ ok: true, keyword: data });
+  } catch(e) { next(e); }
+});
+
+app.delete('/api/admin/keywords/:id', async (req, res, next) => {
+  try {
+    if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
+    const { error } = await supabase.from('keywords').delete().eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch(e) { next(e); }
+});
 app.use((err, _, res, __) => {
   console.error('API error:', err);
   res.status(500).json({ error: err.message, version: VERSION });
