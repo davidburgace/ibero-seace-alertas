@@ -885,7 +885,8 @@ async function loadOpportunity() {
       linkSeace.onclick = e => { e.preventDefault(); alert('URL no disponible en este proceso'); };
     }
 
-    // Función para cargar documento a la app automáticamente
+    // Función para cargar documento a la app
+    // El navegador (IP peruana) descarga el PDF de SEACE y lo envía al backend
     function setupDocLink(elementId, docUrl, docType) {
       const link = document.getElementById(elementId);
       if (!docUrl) {
@@ -896,24 +897,35 @@ async function loadOpportunity() {
       link.onclick = async function(e) {
         e.preventDefault();
         const original = link.innerHTML;
-        link.innerHTML = link.innerHTML.replace(/[^<]*$/, ' Cargando...').replace(/Bases.*|Absolución.*/, 'Cargando...');
         link.style.opacity = '0.6';
         link.style.pointerEvents = 'none';
+        link.innerHTML = link.innerHTML.replace(/svg>.*/, 'svg> Descargando...');
+
         try {
-          const res = await fetch('/api/opportunities/' + id + '/fetch-document', {
+          // Paso 1: el navegador descarga el PDF desde SEACE (IP peruana)
+          const seaceRes = await fetch(docUrl);
+          if (!seaceRes.ok) throw new Error('SEACE no disponible (' + seaceRes.status + ')');
+          const blob = await seaceRes.blob();
+
+          // Paso 2: enviar el PDF al backend para extracción y guardado
+          link.innerHTML = link.innerHTML.replace('Descargando...', 'Procesando...');
+          const formData = new FormData();
+          formData.append('file', blob, docType + '.pdf');
+          formData.append('document_type', docType);
+
+          const backendRes = await fetch('/api/opportunities/' + id + '/documents', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ document_url: docUrl, document_type: docType })
+            body: formData
           });
-          const data = await res.json();
+          const data = await backendRes.json();
+
           if (data.ok) {
-            link.innerHTML = original.replace(/Bases.*|Absolución.*/, '✓ Cargado a la app');
+            link.innerHTML = link.innerHTML.replace('Procesando...', '✓ Cargado');
             link.style.opacity = '1';
             link.style.color = 'var(--green)';
             link.style.pointerEvents = 'none';
-            // Agregar mensaje en el chat
             const msgs = document.getElementById('chatMessages');
-            msgs.innerHTML += '<div class="chat-msg ai">✓ Documento cargado (' + data.content_length + ' caracteres extraídos). Ya puedo responder preguntas sobre su contenido.</div>';
+            msgs.innerHTML += '<div class="chat-msg ai">✓ Documento cargado (' + data.content_length + ' caracteres). Ya puedo responder preguntas sobre su contenido.</div>';
             msgs.scrollTop = msgs.scrollHeight;
           } else {
             throw new Error(data.error);
@@ -922,7 +934,7 @@ async function loadOpportunity() {
           link.innerHTML = original;
           link.style.opacity = '1';
           link.style.pointerEvents = 'auto';
-          alert('Error cargando documento: ' + err.message);
+          alert('Error: ' + err.message);
         }
       };
     }
