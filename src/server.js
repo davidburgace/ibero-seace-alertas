@@ -375,7 +375,7 @@ PREGUNTA: ${question}
 Responde de forma clara, práctica y orientada a decisión comercial. Si hay documentos cargados, úsalos para responder con precisión.`;
 
     const answer = await callAI(prompt);
-    if (supabase) await supabase.from('ai_chats').insert({ opportunity_id: id, question, answer }).catch(() => {});
+    if (supabase) { try { await supabase.from('ai_chats').insert({ opportunity_id: id, question, answer }); } catch(e) {} }
     res.json({ ok: true, answer });
   } catch (e) { next(e); }
 });
