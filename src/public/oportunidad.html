@@ -89,7 +89,7 @@
   /* ── Layout ── */
   .layout {
     display: grid;
-    grid-template-columns: 1fr 340px;
+    grid-template-columns: 1fr 420px;
     gap: 0;
     min-height: calc(100vh - 57px);
   }
@@ -401,7 +401,7 @@
   }
 
   .chat-messages {
-    max-height: 260px;
+    max-height: 380px;
     overflow-y: auto;
     display: flex;
     flex-direction: column;
@@ -789,10 +789,9 @@
       <div class="side-card-title">📁 Expediente</div>
       <div class="doc-upload">
         <select class="doc-select" id="docType">
-          <option value="bases">Bases integradas</option>
-          <option value="especificaciones">Especificaciones técnicas</option>
-          <option value="anexos">Anexos</option>
-          <option value="cronograma">Cronograma</option>
+          <option value="bases_administrativas">Bases administrativas</option>
+          <option value="bases_integradas">Bases integradas</option>
+          <option value="absolucion_consultas">Absolución de consultas</option>
           <option value="otro">Otro documento</option>
         </select>
         <div class="file-drop" onclick="document.getElementById('docFile').click()">
