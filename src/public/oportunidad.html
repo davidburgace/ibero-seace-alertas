@@ -745,15 +745,23 @@
 
     <!-- Links -->
     <div class="side-card">
-      <div class="side-card-title">Ver en SEACE</div>
+      <div class="side-card-title">Documentos SEACE</div>
       <div class="ext-links">
         <a class="ext-link" id="linkSeace" href="#" target="_blank">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
           Ficha del proceso
         </a>
+        <a class="ext-link" id="linkBasesAdmin" href="#" target="_blank">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          Bases administrativas
+        </a>
         <a class="ext-link" id="linkBases" href="#" target="_blank">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
           Bases integradas
+        </a>
+        <a class="ext-link" id="linkAbsolucion" href="#" target="_blank">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          Absolución de consultas
         </a>
       </div>
     </div>
@@ -877,16 +885,33 @@ async function loadOpportunity() {
       linkSeace.onclick = e => { e.preventDefault(); alert('URL no disponible en este proceso'); };
     }
 
-   const linkBases = document.getElementById('linkBases');
+    // Bases administrativas
+    const linkBasesAdmin = document.getElementById('linkBasesAdmin');
+    if (opportunity.bases_admin_url) {
+      linkBasesAdmin.href = opportunity.bases_admin_url;
+    } else {
+      linkBasesAdmin.style.opacity = '0.4';
+      linkBasesAdmin.onclick = e => { e.preventDefault(); alert('Bases administrativas no disponibles'); };
+    }
+
+    // Bases integradas
+    const linkBases = document.getElementById('linkBases');
     if (opportunity.bases_url) {
       linkBases.href = opportunity.bases_url;
-      linkBases.target = '_blank';
     } else if (opportunity.documento_base_id) {
       linkBases.href = 'https://prod1.seace.gob.pe/SeaceWeb-PRO/SdescargarArchivoAlfresco?fileCode=' + opportunity.documento_base_id;
-      linkBases.target = '_blank';
     } else {
       linkBases.style.opacity = '0.4';
-      linkBases.onclick = e => { e.preventDefault(); alert('Bases no disponibles para este proceso'); };
+      linkBases.onclick = e => { e.preventDefault(); alert('Bases integradas no disponibles'); };
+    }
+
+    // Absolución de consultas
+    const linkAbsolucion = document.getElementById('linkAbsolucion');
+    if (opportunity.absolucion_url) {
+      linkAbsolucion.href = opportunity.absolucion_url;
+    } else {
+      linkAbsolucion.style.opacity = '0.4';
+      linkAbsolucion.onclick = e => { e.preventDefault(); alert('Absolución no disponible aún'); };
     }
 
     // ── Análisis IA ──
