@@ -877,12 +877,16 @@ async function loadOpportunity() {
       linkSeace.onclick = e => { e.preventDefault(); alert('URL no disponible en este proceso'); };
     }
 
-    const linkBases = document.getElementById('linkBases');
+   const linkBases = document.getElementById('linkBases');
     if (opportunity.bases_url) {
       linkBases.href = opportunity.bases_url;
+      linkBases.target = '_blank';
+    } else if (opportunity.documento_base_id) {
+      linkBases.href = 'https://prod1.seace.gob.pe/SeaceWeb-PRO/SdescargarArchivoAlfresco?fileCode=' + opportunity.documento_base_id;
+      linkBases.target = '_blank';
     } else {
       linkBases.style.opacity = '0.4';
-      linkBases.onclick = e => { e.preventDefault(); alert('Bases no disponibles directamente — buscar en SEACE por nomenclatura'); };
+      linkBases.onclick = e => { e.preventDefault(); alert('Bases no disponibles para este proceso'); };
     }
 
     // ── Análisis IA ──
