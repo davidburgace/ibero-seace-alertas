@@ -438,7 +438,68 @@ app.post('/api/opportunities/:id/documents', upload.single('file'), async (req, 
     res.json({ ok: true, document: data, content_length: content.length });
   } catch (e) { next(e); }
 });
+// ─── Descarga automática de documentos desde SEACE ───────────────────────────
+app.post('/api/opportunities/:id/fetch-document', async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { document_url, document_type } = req.body;
 
+    if (!document_url) return res.status(400).json({ ok: false, error: 'URL requerida' });
+    if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
+
+    // Descargar PDF desde SEACE
+    console.log(`Descargando: ${document_url}`);
+    const response = await fetch(document_url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0',
+        'Referer': 'https://prod4.seace.gob.pe/'
+      },
+      signal: AbortSignal.timeout(30000)
+    });
+
+    if (!response.ok) throw new Error(`SEACE respondió ${response.status}`);
+
+    const buffer = Buffer.from(await response.arrayBuffer());
+    const contentType = response.headers.get('content-type') || 'application/pdf';
+    const fileName = `${id}/${document_type || 'documento'}_${Date.now()}.pdf`;
+
+    // Extraer texto del PDF
+    let content = '';
+    try {
+      const parsed = await pdfParse(buffer);
+      content = parsed.text.slice(0, 50000);
+      console.log(`Texto extraído: ${content.length} caracteres`);
+    } catch(e) {
+      console.error('Error PDF:', e.message);
+      content = 'No se pudo extraer el texto.';
+    }
+
+    // Subir a Supabase Storage
+    const { error: uploadError } = await supabase.storage
+      .from('opportunities_documents')
+      .upload(fileName, buffer, { contentType });
+
+    if (uploadError) console.error('Storage error:', uploadError.message);
+
+    const { data: urlData } = supabase.storage
+      .from('opportunities_documents')
+      .getPublicUrl(fileName);
+
+    // Guardar en tabla
+    const { data, error } = await supabase.from('opportunity_documents').insert({
+      opportunity_id: id,
+      document_type: document_type || 'bases',
+      file_name: fileName.split('/').pop(),
+      file_url: urlData?.publicUrl || null,
+      content,
+      file_size: buffer.length
+    }).select().single();
+
+    if (error) throw error;
+
+    res.json({ ok: true, document: data, content_length: content.length });
+  } catch (e) { next(e); }
+});
 app.get('/api/ai-test', async (_, res, next) => {
   try { res.json({ ok: true, result: await callAI('Resume en una frase qué es una licitación pública en Perú.') }); }
   catch (e) { next(e); }
