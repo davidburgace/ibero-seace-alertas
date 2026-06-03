@@ -105,7 +105,7 @@ function normalizeSeaceItem(item, keyword) {
 
   // URL de detalle en OpenNegocio
   const source_url = item.urlProceso ||
-    `https://prod4.seace.gob.pe/openegocio/#/ficha-proceso/${idProcedimiento}`;
+    `https://prod4.seace.gob.pe/openegocio/#/ficha/idProceso/${idProcedimiento}`;
 
   // URL de bases integradas (si existe documentoBase UUID)
   const bases_url = documentoBase
