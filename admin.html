@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Radar Ibero — Administración</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0d14;
+    --surface: #111520;
+    --surface2: #161b28;
+    --border: rgba(255,255,255,0.07);
+    --border2: rgba(255,255,255,0.12);
+    --text: #e8eaf0;
+    --muted: #7a8099;
+    --accent: #4f7dff;
+    --green: #22d3a0;
+    --red: #f05252;
+    --amber: #f5a623;
+    --font-display: 'Syne', sans-serif;
+    --font-body: 'DM Sans', sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: var(--font-body); background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; }
+
+  /* Login */
+  .login-wrap {
+    display: flex; align-items: center; justify-content: center;
+    min-height: 100vh; padding: 20px;
+  }
+  .login-card {
+    background: var(--surface); border: 1px solid var(--border2);
+    border-radius: 16px; padding: 40px; width: 100%; max-width: 380px;
+  }
+  .login-logo {
+    font-family: var(--font-display); font-size: 22px; font-weight: 700;
+    margin-bottom: 32px; display: flex; align-items: center; gap: 10px;
+  }
+  .logo-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 10px var(--accent); }
+  .login-title { font-family: var(--font-display); font-size: 20px; margin-bottom: 6px; }
+  .login-sub { color: var(--muted); font-size: 13px; margin-bottom: 28px; }
+  .input-field {
+    width: 100%; background: var(--surface2); border: 1px solid var(--border2);
+    border-radius: 8px; padding: 11px 14px; color: var(--text);
+    font-family: var(--font-body); font-size: 14px; outline: none;
+    transition: border-color 0.2s; margin-bottom: 12px;
+  }
+  .input-field:focus { border-color: var(--accent); }
+  .btn-primary {
+    width: 100%; background: var(--accent); color: white; border: none;
+    border-radius: 8px; padding: 12px; font-family: var(--font-display);
+    font-size: 14px; font-weight: 700; cursor: pointer; transition: all 0.2s;
+  }
+  .btn-primary:hover { background: #3d6bff; }
+  .login-error { color: var(--red); font-size: 13px; margin-top: 10px; min-height: 20px; }
+
+  /* App */
+  .app { display: none; }
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 32px; border-bottom: 1px solid var(--border);
+    background: var(--surface); position: sticky; top: 0; z-index: 100;
+  }
+  .logo { display: flex; align-items: center; gap: 10px; font-family: var(--font-display); font-size: 17px; font-weight: 700; }
+  .logout-btn {
+    background: transparent; border: 1px solid var(--border2); color: var(--muted);
+    border-radius: 8px; padding: 7px 14px; font-family: var(--font-body);
+    font-size: 13px; cursor: pointer; transition: all 0.2s;
+  }
+  .logout-btn:hover { border-color: var(--red); color: var(--red); }
+
+  .content { max-width: 900px; margin: 0 auto; padding: 32px 24px; }
+
+  .section-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 16px;
+  }
+  .section-title {
+    font-family: var(--font-display); font-size: 18px; font-weight: 700;
+  }
+  .section-sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
+
+  .btn-add {
+    background: var(--accent); color: white; border: none; border-radius: 8px;
+    padding: 8px 16px; font-family: var(--font-body); font-size: 13px;
+    font-weight: 600; cursor: pointer; transition: all 0.2s; display: flex;
+    align-items: center; gap: 6px;
+  }
+  .btn-add:hover { background: #3d6bff; }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; margin-bottom: 32px; overflow: hidden;
+  }
+
+  .item-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 20px; border-bottom: 1px solid var(--border);
+    transition: background 0.15s;
+  }
+  .item-row:last-child { border-bottom: none; }
+  .item-row:hover { background: var(--surface2); }
+
+  .item-info { display: flex; flex-direction: column; gap: 3px; }
+  .item-name { font-size: 14px; font-weight: 500; color: var(--text); }
+  .item-meta { font-size: 12px; color: var(--muted); }
+
+  .badge {
+    padding: 3px 10px; border-radius: 20px; font-size: 11px;
+    font-weight: 600; letter-spacing: 0.04em;
+  }
+  .badge-blue { background: rgba(79,125,255,0.15); color: #7aa3ff; }
+  .badge-green { background: rgba(34,211,160,0.15); color: var(--green); }
+  .badge-amber { background: rgba(245,166,35,0.15); color: var(--amber); }
+  .badge-purple { background: rgba(124,92,252,0.15); color: #a98fff; }
+  .badge-gray { background: rgba(122,128,153,0.15); color: var(--muted); }
+
+  .btn-delete {
+    background: transparent; border: 1px solid transparent; color: var(--muted);
+    border-radius: 6px; padding: 5px 10px; font-size: 12px; cursor: pointer;
+    transition: all 0.2s;
+  }
+  .btn-delete:hover { border-color: var(--red); color: var(--red); background: rgba(240,82,82,0.08); }
+
+  /* Modal */
+  .modal-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+    display: none; align-items: center; justify-content: center;
+    z-index: 200; padding: 20px;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--surface); border: 1px solid var(--border2);
+    border-radius: 16px; padding: 28px; width: 100%; max-width: 420px;
+  }
+  .modal-title { font-family: var(--font-display); font-size: 18px; margin-bottom: 20px; }
+  .form-group { margin-bottom: 14px; }
+  .form-label { font-size: 12px; color: var(--muted); margin-bottom: 6px; display: block; text-transform: uppercase; letter-spacing: 0.06em; }
+  .form-select {
+    width: 100%; background: var(--surface2); border: 1px solid var(--border2);
+    border-radius: 8px; padding: 10px 14px; color: var(--text);
+    font-family: var(--font-body); font-size: 14px; outline: none;
+  }
+  .modal-actions { display: flex; gap: 10px; margin-top: 20px; }
+  .btn-cancel {
+    flex: 1; background: transparent; border: 1px solid var(--border2);
+    color: var(--muted); border-radius: 8px; padding: 10px;
+    font-family: var(--font-body); font-size: 14px; cursor: pointer; transition: all 0.2s;
+  }
+  .btn-cancel:hover { border-color: var(--text); color: var(--text); }
+  .btn-save {
+    flex: 2; background: var(--accent); color: white; border: none;
+    border-radius: 8px; padding: 10px; font-family: var(--font-display);
+    font-size: 14px; font-weight: 700; cursor: pointer; transition: all 0.2s;
+  }
+  .btn-save:hover { background: #3d6bff; }
+
+  .empty-state {
+    padding: 32px; text-align: center; color: var(--muted); font-size: 13px;
+  }
+
+  .loading-row { padding: 24px; text-align: center; color: var(--muted); font-size: 13px; }
+
+  /* Stats */
+  .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 32px; }
+  .stat-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 12px; padding: 20px;
+  }
+  .stat-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; }
+  .stat-value { font-family: var(--font-display); font-size: 28px; font-weight: 700; }
+
+  .divider { height: 1px; background: var(--border); margin: 8px 0; }
+</style>
+</head>
+<body>
+
+<!-- Login -->
+<div class="login-wrap" id="loginWrap">
+  <div class="login-card">
+    <div class="login-logo"><div class="logo-dot"></div> Radar Ibero</div>
+    <div class="login-title">Panel de administración</div>
+    <div class="login-sub">Acceso restringido — solo administradores</div>
+    <input type="password" class="input-field" id="passwordInput" placeholder="Contraseña" onkeydown="if(event.key==='Enter')login()">
+    <button class="btn-primary" onclick="login()">Ingresar</button>
+    <div class="login-error" id="loginError"></div>
+  </div>
+</div>
+
+<!-- App -->
+<div class="app" id="appWrap">
+  <div class="topbar">
+    <div class="logo"><div class="logo-dot"></div> Radar Ibero — Admin</div>
+    <button class="logout-btn" onclick="logout()">Cerrar sesión</button>
+  </div>
+
+  <div class="content">
+
+    <!-- Stats -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-label">Oportunidades</div>
+        <div class="stat-value" id="statOpps">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Vendedores</div>
+        <div class="stat-value" id="statVendors">—</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Keywords</div>
+        <div class="stat-value" id="statKeywords">—</div>
+      </div>
+    </div>
+
+    <!-- Vendedores -->
+    <div class="section-header">
+      <div>
+        <div class="section-title">Vendedores</div>
+        <div class="section-sub">Reciben el email diario con oportunidades</div>
+      </div>
+      <button class="btn-add" onclick="openModal('vendor')">＋ Agregar</button>
+    </div>
+    <div class="card" id="vendorsList">
+      <div class="loading-row">Cargando...</div>
+    </div>
+
+    <!-- Keywords -->
+    <div class="section-header">
+      <div>
+        <div class="section-title">Palabras clave</div>
+        <div class="section-sub">Términos de búsqueda en SEACE</div>
+      </div>
+      <button class="btn-add" onclick="openModal('keyword')">＋ Agregar</button>
+    </div>
+    <div class="card" id="keywordsList">
+      <div class="loading-row">Cargando...</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Modal Vendedor -->
+<div class="modal-overlay" id="modalVendor">
+  <div class="modal">
+    <div class="modal-title">Agregar vendedor</div>
+    <div class="form-group">
+      <label class="form-label">Nombre</label>
+      <input type="text" class="input-field" id="vendorName" placeholder="Ej: Juan Pérez" style="margin-bottom:0">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Email</label>
+      <input type="email" class="input-field" id="vendorEmail" placeholder="juan@grupoibero.com" style="margin-bottom:0">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Línea de negocio</label>
+      <select class="form-select" id="vendorLine">
+        <option value="Todas">Todas</option>
+        <option value="Educación">Educación</option>
+        <option value="Hospitalario">Hospitalario</option>
+        <option value="Metalmecánica">Metalmecánica</option>
+        <option value="Oficina">Oficina</option>
+        <option value="General">General</option>
+      </select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal('vendor')">Cancelar</button>
+      <button class="btn-save" onclick="saveVendor()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Keyword -->
+<div class="modal-overlay" id="modalKeyword">
+  <div class="modal">
+    <div class="modal-title">Agregar palabra clave</div>
+    <div class="form-group">
+      <label class="form-label">Keyword</label>
+      <input type="text" class="input-field" id="keywordText" placeholder="Ej: SILLAS ESCOLARES" style="margin-bottom:0">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Línea de negocio</label>
+      <select class="form-select" id="keywordLine">
+        <option value="General">General</option>
+        <option value="Educación">Educación</option>
+        <option value="Hospitalario">Hospitalario</option>
+        <option value="Metalmecánica">Metalmecánica</option>
+        <option value="Oficina">Oficina</option>
+      </select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal('keyword')">Cancelar</button>
+      <button class="btn-save" onclick="saveKeyword()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const ADMIN_PASSWORD = 'ibero2024';
+const API = '';
+
+const BADGE_COLORS = {
+  'Educación': 'badge-blue', 'Hospitalario': 'badge-blue',
+  'Metalmecánica': 'badge-purple', 'Oficina': 'badge-green',
+  'General': 'badge-amber', 'Todas': 'badge-gray'
+};
+
+function login() {
+  const pwd = document.getElementById('passwordInput').value;
+  if (pwd === ADMIN_PASSWORD) {
+    document.getElementById('loginWrap').style.display = 'none';
+    document.getElementById('appWrap').style.display = 'block';
+    loadAll();
+  } else {
+    document.getElementById('loginError').textContent = 'Contraseña incorrecta';
+  }
+}
+
+function logout() {
+  document.getElementById('loginWrap').style.display = 'flex';
+  document.getElementById('appWrap').style.display = 'none';
+  document.getElementById('passwordInput').value = '';
+}
+
+async function loadAll() {
+  try {
+    const res = await fetch(API + '/api/bootstrap');
+    const data = await res.json();
+    renderVendors(data.vendors || []);
+    renderKeywords(data.keywords || []);
+    document.getElementById('statOpps').textContent = (data.opportunities || []).length;
+    document.getElementById('statVendors').textContent = (data.vendors || []).length;
+    document.getElementById('statKeywords').textContent = (data.keywords || []).length;
+  } catch(e) {
+    console.error(e);
+  }
+}
+
+function renderVendors(vendors) {
+  const el = document.getElementById('vendorsList');
+  if (!vendors.length) { el.innerHTML = '<div class="empty-state">No hay vendedores. Agrega el primero.</div>'; return; }
+  el.innerHTML = vendors.map(v => `
+    <div class="item-row">
+      <div class="item-info">
+        <div class="item-name">${v.name || '—'}</div>
+        <div class="item-meta">${v.email || '—'}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span class="badge ${BADGE_COLORS[v.line] || 'badge-gray'}">${v.line || 'General'}</span>
+        <button class="btn-delete" onclick="deleteVendor('${v.id}')">Eliminar</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function renderKeywords(keywords) {
+  const el = document.getElementById('keywordsList');
+  if (!keywords.length) { el.innerHTML = '<div class="empty-state">No hay keywords. Agrega la primera.</div>'; return; }
+  el.innerHTML = keywords.map(k => `
+    <div class="item-row">
+      <div class="item-info">
+        <div class="item-name">${k.keyword || '—'}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <span class="badge ${BADGE_COLORS[k.business_line] || 'badge-gray'}">${k.business_line || 'General'}</span>
+        <button class="btn-delete" onclick="deleteKeyword('${k.id}')">Eliminar</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function openModal(type) { document.getElementById('modal' + (type === 'vendor' ? 'Vendor' : 'Keyword')).classList.add('open'); }
+function closeModal(type) { document.getElementById('modal' + (type === 'vendor' ? 'Vendor' : 'Keyword')).classList.remove('open'); }
+
+async function saveVendor() {
+  const name = document.getElementById('vendorName').value.trim();
+  const email = document.getElementById('vendorEmail').value.trim();
+  const line = document.getElementById('vendorLine').value;
+  if (!name || !email) { alert('Nombre y email son requeridos'); return; }
+  try {
+    const res = await fetch(API + '/api/admin/vendors', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, email, line })
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error);
+    closeModal('vendor');
+    document.getElementById('vendorName').value = '';
+    document.getElementById('vendorEmail').value = '';
+    loadAll();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function saveKeyword() {
+  const keyword = document.getElementById('keywordText').value.trim().toUpperCase();
+  const business_line = document.getElementById('keywordLine').value;
+  if (!keyword) { alert('La keyword es requerida'); return; }
+  try {
+    const res = await fetch(API + '/api/admin/keywords', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keyword, business_line, active: true })
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error);
+    closeModal('keyword');
+    document.getElementById('keywordText').value = '';
+    loadAll();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function deleteVendor(id) {
+  if (!confirm('¿Eliminar este vendedor?')) return;
+  try {
+    const res = await fetch(API + '/api/admin/vendors/' + id, { method: 'DELETE' });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error);
+    loadAll();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function deleteKeyword(id) {
+  if (!confirm('¿Eliminar esta keyword?')) return;
+  try {
+    const res = await fetch(API + '/api/admin/keywords/' + id, { method: 'DELETE' });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error);
+    loadAll();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+// Cerrar modal clickando fuera
+document.querySelectorAll('.modal-overlay').forEach(m => {
+  m.addEventListener('click', function(e) { if (e.target === m) m.classList.remove('open'); });
+});
+</script>
+</body>
+</html>
