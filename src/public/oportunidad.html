@@ -876,7 +876,7 @@ async function loadOpportunity() {
 
     document.getElementById('tagType').textContent = opportunity.process_type || opportunity.object_type || 'Proceso';
 
-    // Links SEACE
+    // Ficha del proceso
     const linkSeace = document.getElementById('linkSeace');
     if (opportunity.source_url && opportunity.source_url !== '#') {
       linkSeace.href = opportunity.source_url;
@@ -885,34 +885,51 @@ async function loadOpportunity() {
       linkSeace.onclick = e => { e.preventDefault(); alert('URL no disponible en este proceso'); };
     }
 
-    // Bases administrativas
-    const linkBasesAdmin = document.getElementById('linkBasesAdmin');
-    if (opportunity.bases_admin_url) {
-      linkBasesAdmin.href = opportunity.bases_admin_url;
-    } else {
-      linkBasesAdmin.style.opacity = '0.4';
-      linkBasesAdmin.onclick = e => { e.preventDefault(); alert('Bases administrativas no disponibles'); };
+    // Función para cargar documento a la app automáticamente
+    function setupDocLink(elementId, docUrl, docType) {
+      const link = document.getElementById(elementId);
+      if (!docUrl) {
+        link.style.opacity = '0.4';
+        link.onclick = e => { e.preventDefault(); alert('Documento no disponible aún'); };
+        return;
+      }
+      link.onclick = async function(e) {
+        e.preventDefault();
+        const original = link.innerHTML;
+        link.innerHTML = link.innerHTML.replace(/[^<]*$/, ' Cargando...').replace(/Bases.*|Absolución.*/, 'Cargando...');
+        link.style.opacity = '0.6';
+        link.style.pointerEvents = 'none';
+        try {
+          const res = await fetch('/api/opportunities/' + id + '/fetch-document', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ document_url: docUrl, document_type: docType })
+          });
+          const data = await res.json();
+          if (data.ok) {
+            link.innerHTML = original.replace(/Bases.*|Absolución.*/, '✓ Cargado a la app');
+            link.style.opacity = '1';
+            link.style.color = 'var(--green)';
+            link.style.pointerEvents = 'none';
+            // Agregar mensaje en el chat
+            const msgs = document.getElementById('chatMessages');
+            msgs.innerHTML += '<div class="chat-msg ai">✓ Documento cargado (' + data.content_length + ' caracteres extraídos). Ya puedo responder preguntas sobre su contenido.</div>';
+            msgs.scrollTop = msgs.scrollHeight;
+          } else {
+            throw new Error(data.error);
+          }
+        } catch(err) {
+          link.innerHTML = original;
+          link.style.opacity = '1';
+          link.style.pointerEvents = 'auto';
+          alert('Error cargando documento: ' + err.message);
+        }
+      };
     }
 
-    // Bases integradas
-    const linkBases = document.getElementById('linkBases');
-    if (opportunity.bases_url) {
-      linkBases.href = opportunity.bases_url;
-    } else if (opportunity.documento_base_id) {
-      linkBases.href = 'https://prod1.seace.gob.pe/SeaceWeb-PRO/SdescargarArchivoAlfresco?fileCode=' + opportunity.documento_base_id;
-    } else {
-      linkBases.style.opacity = '0.4';
-      linkBases.onclick = e => { e.preventDefault(); alert('Bases integradas no disponibles'); };
-    }
-
-    // Absolución de consultas
-    const linkAbsolucion = document.getElementById('linkAbsolucion');
-    if (opportunity.absolucion_url) {
-      linkAbsolucion.href = opportunity.absolucion_url;
-    } else {
-      linkAbsolucion.style.opacity = '0.4';
-      linkAbsolucion.onclick = e => { e.preventDefault(); alert('Absolución no disponible aún'); };
-    }
+    setupDocLink('linkBasesAdmin', opportunity.bases_admin_url, 'bases_administrativas');
+    setupDocLink('linkBases', opportunity.bases_url, 'bases_integradas');
+    setupDocLink('linkAbsolucion', opportunity.absolucion_url, 'absolucion_consultas');
 
     // ── Análisis IA ──
     renderAI(opportunity);
