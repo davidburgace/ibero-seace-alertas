@@ -326,8 +326,15 @@ app.get('/api/opportunities/:id', async (req, res, next) => {
         }
       } catch (e) { console.error('Error IA:', e.message); }
     } else {
-      analysis = { summary: opportunity.ai_summary, score: opportunity.ai_score, decision: opportunity.ai_recommendation };
-    }
+  analysis = {
+    summary: opportunity.ai_summary,
+    score: opportunity.ai_score,
+    decision: opportunity.ai_recommendation,
+    criteria: opportunity.ai_criteria || [],
+    risks: opportunity.ai_risks || [],
+    actions: opportunity.ai_actions || []
+  };
+}
 
     res.json({
       ok: true,
