@@ -15,7 +15,7 @@ app.use(express.static('src/public'));
 
 const VERSION = '1.1.0';
 const MODE = 'seace-api-direct';
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 80 * 1024 * 1024 } });
 
 // ─── Clientes externos ────────────────────────────────────────────────────────
 const SUPABASE_KEY = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
