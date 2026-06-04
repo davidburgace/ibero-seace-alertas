@@ -171,7 +171,21 @@
   .stat-label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; }
   .stat-value { font-family: var(--font-display); font-size: 28px; font-weight: 700; }
 
-  .divider { height: 1px; background: var(--border); margin: 8px 0; }
+  .toggle {
+    position: relative; width: 40px; height: 22px; cursor: pointer;
+    flex-shrink: 0;
+  }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .toggle-slider {
+    position: absolute; inset: 0; background: var(--border2);
+    border-radius: 22px; transition: 0.3s;
+  }
+  .toggle-slider:before {
+    content: ''; position: absolute; width: 16px; height: 16px;
+    left: 3px; top: 3px; background: white; border-radius: 50%; transition: 0.3s;
+  }
+  .toggle input:checked + .toggle-slider { background: var(--green); }
+  .toggle input:checked + .toggle-slider:before { transform: translateX(18px); }
 </style>
 </head>
 <body>
@@ -235,6 +249,28 @@
     </div>
     <div class="card" id="keywordsList">
       <div class="loading-row">Cargando...</div>
+    </div>
+
+    <!-- Cambiar contraseña -->
+    <div class="section-header">
+      <div>
+        <div class="section-title">Seguridad</div>
+        <div class="section-sub">Cambiar contraseña de administrador</div>
+      </div>
+    </div>
+    <div class="card" style="padding:20px;">
+      <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:12px;align-items:end;">
+        <div>
+          <div class="form-label" style="margin-bottom:6px;">Nueva contraseña</div>
+          <input type="password" class="input-field" id="newPassword" placeholder="Nueva contraseña" style="margin-bottom:0">
+        </div>
+        <div>
+          <div class="form-label" style="margin-bottom:6px;">Confirmar contraseña</div>
+          <input type="password" class="input-field" id="confirmPassword" placeholder="Confirmar" style="margin-bottom:0">
+        </div>
+        <button class="btn-add" onclick="changePassword()" style="height:44px;">Cambiar</button>
+      </div>
+      <div id="passwordMsg" style="font-size:12px;margin-top:10px;min-height:16px;"></div>
     </div>
 
   </div>
@@ -307,7 +343,8 @@ const BADGE_COLORS = {
 
 function login() {
   const pwd = document.getElementById('passwordInput').value;
-  if (pwd === ADMIN_PASSWORD) {
+  const savedPwd = localStorage.getItem('ibero_admin_pwd') || 'ibero2024';
+  if (pwd === savedPwd) {
     document.getElementById('loginWrap').style.display = 'none';
     document.getElementById('appWrap').style.display = 'block';
     loadAll();
@@ -359,14 +396,45 @@ function renderKeywords(keywords) {
   el.innerHTML = keywords.map(k => `
     <div class="item-row">
       <div class="item-info">
-        <div class="item-name">${k.keyword || '—'}</div>
+        <div class="item-name" style="${k.active === false ? 'opacity:0.4;text-decoration:line-through' : ''}">${k.keyword || '—'}</div>
       </div>
-      <div style="display:flex;align-items:center;gap:10px;">
+      <div style="display:flex;align-items:center;gap:12px;">
         <span class="badge ${BADGE_COLORS[k.business_line] || 'badge-gray'}">${k.business_line || 'General'}</span>
+        <label class="toggle" title="${k.active !== false ? 'Activa — clic para desactivar' : 'Inactiva — clic para activar'}">
+          <input type="checkbox" ${k.active !== false ? 'checked' : ''} onchange="toggleKeyword('${k.id}', this.checked)">
+          <span class="toggle-slider"></span>
+        </label>
         <button class="btn-delete" onclick="deleteKeyword('${k.id}')">Eliminar</button>
       </div>
     </div>
   `).join('');
+}
+
+async function toggleKeyword(id, active) {
+  try {
+    const res = await fetch(API + '/api/admin/keywords/' + id, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active })
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error);
+    loadAll();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+function changePassword() {
+  const newPwd = document.getElementById('newPassword').value.trim();
+  const confirmPwd = document.getElementById('confirmPassword').value.trim();
+  const msg = document.getElementById('passwordMsg');
+  if (!newPwd) { msg.style.color = 'var(--red)'; msg.textContent = 'Ingresa una contraseña'; return; }
+  if (newPwd.length < 6) { msg.style.color = 'var(--red)'; msg.textContent = 'Mínimo 6 caracteres'; return; }
+  if (newPwd !== confirmPwd) { msg.style.color = 'var(--red)'; msg.textContent = 'Las contraseñas no coinciden'; return; }
+  localStorage.setItem('ibero_admin_pwd', newPwd);
+  document.getElementById('newPassword').value = '';
+  document.getElementById('confirmPassword').value = '';
+  msg.style.color = 'var(--green)';
+  msg.textContent = '✓ Contraseña actualizada';
+  setTimeout(() => msg.textContent = '', 3000);
 }
 
 function openModal(type) { document.getElementById('modal' + (type === 'vendor' ? 'Vendor' : 'Keyword')).classList.add('open'); }
