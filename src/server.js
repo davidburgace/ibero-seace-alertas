@@ -418,7 +418,7 @@ app.post('/api/opportunities/:id/documents', upload.single('file'), async (req, 
     if (req.file.mimetype === 'application/pdf') {
       try {
         const parsed = await pdfParse(req.file.buffer);
-        content = parsed.text.slice(0, 50000); // máximo 50k caracteres
+        content = parsed.text.slice(0, 200000); // máximo 200k caracteres
         console.log(`PDF extraído: ${content.length} caracteres`);
       } catch (e) {
         console.error('Error extrayendo PDF:', e.message);
@@ -481,7 +481,7 @@ app.post('/api/opportunities/:id/fetch-document', async (req, res, next) => {
     let content = '';
     try {
       const parsed = await pdfParse(buffer);
-      content = parsed.text.slice(0, 50000);
+      content = parsed.text.slice(0, 200000);
       console.log(`Texto extraído: ${content.length} caracteres`);
     } catch(e) {
       console.error('Error PDF:', e.message);
