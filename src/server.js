@@ -315,7 +315,14 @@ app.get('/api/opportunities/:id', async (req, res, next) => {
       try {
         analysis = await analyzeOpportunity(opportunity);
         if (supabase && analysis) {
-          await supabase.from('opportunities').update({ ai_summary: analysis.summary, ai_score: analysis.score, ai_recommendation: analysis.decision }).eq('id', id);
+         await supabase.from('opportunities').update({
+  ai_summary: analysis.summary,
+  ai_score: analysis.score,
+  ai_recommendation: analysis.decision,
+  ai_criteria: analysis.criteria || [],
+  ai_risks: analysis.risks || [],
+  ai_actions: analysis.actions || []
+}).eq('id', id);
         }
       } catch (e) { console.error('Error IA:', e.message); }
     } else {
