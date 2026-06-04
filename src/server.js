@@ -533,7 +533,15 @@ app.post('/api/admin/keywords', async (req, res, next) => {
     res.json({ ok: true, keyword: data });
   } catch(e) { next(e); }
 });
-
+app.patch('/api/admin/keywords/:id', async (req, res, next) => {
+  try {
+    const { active } = req.body;
+    if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
+    const { error } = await supabase.from('keywords').update({ active }).eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch(e) { next(e); }
+});
 app.delete('/api/admin/keywords/:id', async (req, res, next) => {
   try {
     if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
