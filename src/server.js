@@ -462,7 +462,7 @@ if (content.length > 3000) {
     });
   }
   await supabase.from('document_chunks').insert(chunks).catch(e => console.error('Chunks error:', e.message));
-  console.log(Chunks creados: ${chunks.length});
+  console.log('Chunks creados: ' + chunks.length);
 }
     res.json({ ok: true, document: data, content_length: content.length });
   } catch (e) { next(e); }
@@ -539,7 +539,7 @@ if (content.length > 3000) {
     });
   }
   await supabase.from('document_chunks').insert(chunks).catch(e => console.error('Chunks error:', e.message));
-  console.log(Chunks creados: ${chunks.length});
+  console.log('Chunks creados: ' + chunks.length);
 }
     res.json({ ok: true, document: data, content_length: content.length });
   } catch (e) { next(e); }
