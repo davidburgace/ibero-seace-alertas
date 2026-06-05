@@ -448,7 +448,22 @@ app.post('/api/opportunities/:id/documents', upload.single('file'), async (req, 
     }).select().single();
 
     if (error) throw error;
-
+// Dividir en chunks para RAG
+if (content.length > 3000) {
+  const chunkSize = 3000;
+  const overlap = 300;
+  const chunks = [];
+  for (let i = 0; i < content.length; i += chunkSize - overlap) {
+    chunks.push({
+      document_id: data.id,
+      opportunity_id: id,
+      chunk_index: chunks.length,
+      content: content.slice(i, i + chunkSize)
+    });
+  }
+  await supabase.from('document_chunks').insert(chunks).catch(e => console.error('Chunks error:', e.message));
+  console.log(Chunks creados: ${chunks.length});
+}
     res.json({ ok: true, document: data, content_length: content.length });
   } catch (e) { next(e); }
 });
@@ -510,7 +525,22 @@ app.post('/api/opportunities/:id/fetch-document', async (req, res, next) => {
     }).select().single();
 
     if (error) throw error;
-
+// Dividir en chunks para RAG
+if (content.length > 3000) {
+  const chunkSize = 3000;
+  const overlap = 300;
+  const chunks = [];
+  for (let i = 0; i < content.length; i += chunkSize - overlap) {
+    chunks.push({
+      document_id: data.id,
+      opportunity_id: id,
+      chunk_index: chunks.length,
+      content: content.slice(i, i + chunkSize)
+    });
+  }
+  await supabase.from('document_chunks').insert(chunks).catch(e => console.error('Chunks error:', e.message));
+  console.log(Chunks creados: ${chunks.length});
+}
     res.json({ ok: true, document: data, content_length: content.length });
   } catch (e) { next(e); }
 });
