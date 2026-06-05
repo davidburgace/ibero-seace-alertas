@@ -479,7 +479,7 @@ if (content.length > 3000) {
       content: content.slice(i, i + chunkSize)
     });
   }
-  await supabase.from('document_chunks').insert(chunks).catch(e => console.error('Chunks error:', e.message));
+ try { await supabase.from('document_chunks').insert(chunks); } catch(e) { console.error('Chunks error:', e.message); }
   console.log('Chunks creados: ' + chunks.length);
 }
     res.json({ ok: true, document: data, content_length: content.length });
@@ -556,7 +556,7 @@ if (content.length > 3000) {
       content: content.slice(i, i + chunkSize)
     });
   }
-  await supabase.from('document_chunks').insert(chunks).catch(e => console.error('Chunks error:', e.message));
+ try { await supabase.from('document_chunks').insert(chunks); } catch(e) { console.error('Chunks error:', e.message); }
   console.log('Chunks creados: ' + chunks.length);
 }
     res.json({ ok: true, document: data, content_length: content.length });
