@@ -362,14 +362,32 @@ app.post('/api/opportunities/:id/ask', async (req, res, next) => {
     const opportunity = opportunities.find(o => String(o.id) === String(id));
     if (!opportunity) return res.status(404).json({ ok: false, error: 'Oportunidad no encontrada' });
 
-    const documents = supabase
-      ? (await supabase.from('opportunity_documents').select('*').eq('opportunity_id', id)).data || []
-      : [];
-
-    const docsText = documents.length
-      ? documents.map(d => `DOCUMENTO: ${d.document_type || 'Sin título'}\n${d.content || ''}`).join('\n\n---\n\n')
-      : 'No hay documentos del expediente cargados.';
-
+    // RAG: buscar chunks relevantes según la pregunta
+let docsText = 'No hay documentos del expediente cargados.';
+if (supabase) {
+  const { data: chunks } = await supabase
+    .from('document_chunks')
+    .select('content, chunk_index')
+    .eq('opportunity_id', id)
+    .order('chunk_index');
+  
+  if (chunks && chunks.length > 0) {
+    // Filtrar chunks que contengan palabras de la pregunta
+    const words = question.toLowerCase().split(' ').filter(w => w.length > 3);
+    const relevant = chunks.filter(c => 
+      words.some(w => c.content.toLowerCase().includes(w))
+    );
+    const selected = relevant.length > 0 ? relevant.slice(0, 5) : chunks.slice(0, 5);
+    docsText = 'FRAGMENTOS RELEVANTES DEL EXPEDIENTE:\n\n' + 
+      selected.map((c, i) => `[Fragmento ${i+1}]\n${c.content}`).join('\n\n---\n\n');
+  } else {
+    // Fallback a documentos completos si no hay chunks
+    const { data: documents } = await supabase.from('opportunity_documents').select('*').eq('opportunity_id', id);
+    if (documents && documents.length > 0) {
+      docsText = documents.map(d => `DOCUMENTO: ${d.document_type || 'Sin título'}\n${d.content ? d.content.slice(0, 15000) : ''}`).join('\n\n---\n\n');
+    }
+  }
+}
     const prompt = `Eres un asistente comercial experto en licitaciones públicas para Grupo Ibero Perú (fabrica mobiliario escolar, hospitalario, de oficina y metálico).
 
 OPORTUNIDAD:
