@@ -374,6 +374,16 @@ if (supabase) {
   if (chunks && chunks.length > 0) {
     // Filtrar chunks que contengan palabras de la pregunta
     const words = question.toLowerCase().split(' ').filter(w => w.length > 3);
+// Agregar sinónimos comunes en licitaciones peruanas
+const synonyms = {
+  'plazo': ['plazo', 'días', 'calendario', 'entrega', 'fecha', 'cronograma', 'ejecución'],
+  'precio': ['precio', 'monto', 'costo', 'valor', 'soles', 'igv'],
+  'requisito': ['requisito', 'experiencia', 'capacidad', 'habilitación', 'ruc'],
+  'garantia': ['garantia', 'fiel', 'adelanto', 'caución']
+};
+Object.entries(synonyms).forEach(([key, vals]) => {
+  if (words.includes(key)) words.push(...vals);
+});
     const relevant = chunks.filter(c => 
       words.some(w => c.content.toLowerCase().includes(w))
     );
