@@ -478,17 +478,22 @@ app.post('/api/opportunities/:id/documents', upload.single('file'), async (req, 
     if (error) throw error;
 // Dividir en chunks para RAG
 if (content.length > 3000) {
-  const chunkSize = 3000;
-  const overlap = 300;
-  const chunks = [];
-  for (let i = 0; i < content.length; i += chunkSize - overlap) {
+  const chunkSize = 4000;
+const chunks = [];
+const seen = new Set();
+for (let i = 0; i < content.length; i += chunkSize) {
+  const text = content.slice(i, i + chunkSize).trim();
+  const key = text.slice(0, 100);
+  if (text.length > 100 && !seen.has(key)) {
+    seen.add(key);
     chunks.push({
       document_id: data.id,
       opportunity_id: id,
       chunk_index: chunks.length,
-      content: content.slice(i, i + chunkSize)
+      content: text
     });
   }
+}
  try { await supabase.from('document_chunks').insert(chunks); } catch(e) { console.error('Chunks error:', e.message); }
   console.log('Chunks creados: ' + chunks.length);
 }
@@ -555,17 +560,22 @@ app.post('/api/opportunities/:id/fetch-document', async (req, res, next) => {
     if (error) throw error;
 // Dividir en chunks para RAG
 if (content.length > 3000) {
-  const chunkSize = 3000;
-  const overlap = 300;
-  const chunks = [];
-  for (let i = 0; i < content.length; i += chunkSize - overlap) {
+  const chunkSize = 4000;
+const chunks = [];
+const seen = new Set();
+for (let i = 0; i < content.length; i += chunkSize) {
+  const text = content.slice(i, i + chunkSize).trim();
+  const key = text.slice(0, 100);
+  if (text.length > 100 && !seen.has(key)) {
+    seen.add(key);
     chunks.push({
       document_id: data.id,
       opportunity_id: id,
       chunk_index: chunks.length,
-      content: content.slice(i, i + chunkSize)
+      content: text
     });
   }
+}
  try { await supabase.from('document_chunks').insert(chunks); } catch(e) { console.error('Chunks error:', e.message); }
   console.log('Chunks creados: ' + chunks.length);
 }
