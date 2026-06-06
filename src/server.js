@@ -24,7 +24,14 @@ const supabase = process.env.SUPABASE_URL && SUPABASE_KEY
   : null;
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
+// Generar embedding de un texto
+async function getEmbedding(text) {
+  const response = await openai.embeddings.create({
+    model: 'text-embedding-3-small',
+    input: text.slice(0, 8000)
+  });
+  return response.data[0].embedding;
+}
 // ─── SEACE API ────────────────────────────────────────────────────────────────
 const SEACE_API = 'https://prod4.seace.gob.pe:8086/api/oportunidades/codObjeto/codDepartamento/sintesisProceso/codTipoProceso';
 const SEACE_HEADERS = {
