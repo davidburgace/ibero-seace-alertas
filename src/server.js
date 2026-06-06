@@ -372,37 +372,17 @@ app.post('/api/opportunities/:id/ask', async (req, res, next) => {
     // RAG: buscar chunks relevantes según la pregunta
 let docsText = 'No hay documentos del expediente cargados.';
 if (supabase) {
-  const { data: chunks } = await supabase
-    .from('document_chunks')
-    .select('content, chunk_index')
-    .eq('opportunity_id', id)
-    .order('chunk_index');
-  
-  if (chunks && chunks.length > 0) {
-    // Filtrar chunks que contengan palabras de la pregunta
-    const words = question.toLowerCase().split(' ').filter(w => w.length > 3);
-// Agregar sinónimos comunes en licitaciones peruanas
-const synonyms = {
-  'plazo': ['plazo', 'días', 'calendario', 'entrega', 'fecha', 'cronograma', 'ejecución'],
-  'precio': ['precio', 'monto', 'costo', 'valor', 'soles', 'igv'],
-  'requisito': ['requisito', 'experiencia', 'capacidad', 'habilitación', 'ruc'],
-  'garantia': ['garantia', 'fiel', 'adelanto', 'caución']
-};
-Object.entries(synonyms).forEach(([key, vals]) => {
-  if (words.includes(key)) words.push(...vals);
+  const questionEmbedding = await getEmbedding(question);
+const { data: chunks } = await supabase.rpc('match_chunks', {
+  query_embedding: questionEmbedding,
+  match_opportunity_id: id,
+  match_count: 6
 });
-    const relevant = chunks.filter(c => 
-      words.some(w => c.content.toLowerCase().includes(w))
-    );
-    const selected = relevant.length > 0 ? relevant.slice(0, 5) : chunks.slice(0, 5);
-    docsText = 'FRAGMENTOS RELEVANTES DEL EXPEDIENTE:\n\n' + 
-      selected.map((c, i) => `[Fragmento ${i+1}]\n${c.content}`).join('\n\n---\n\n');
-  } else {
-    // Fallback a documentos completos si no hay chunks
-    const { data: documents } = await supabase.from('opportunity_documents').select('*').eq('opportunity_id', id);
-    if (documents && documents.length > 0) {
-      docsText = documents.map(d => `DOCUMENTO: ${d.document_type || 'Sin título'}\n${d.content ? d.content.slice(0, 15000) : ''}`).join('\n\n---\n\n');
-    }
+
+if (chunks && chunks.length > 0) {
+  docsText = 'FRAGMENTOS RELEVANTES DEL EXPEDIENTE:\n\n' +
+    chunks.map((c, i) => `[Fragmento ${i+1}]\n${c.content}`).join('\n\n---\n\n');
+}
   }
 }
     const prompt = `Eres un asistente comercial experto en licitaciones públicas para Grupo Ibero Perú (fabrica mobiliario escolar, hospitalario, de oficina y metálico).
