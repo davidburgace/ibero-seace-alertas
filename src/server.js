@@ -501,7 +501,13 @@ for (let i = 0; i < content.length; i += chunkSize) {
     });
   }
 }
- try { await supabase.from('document_chunks').insert(chunks); } catch(e) { console.error('Chunks error:', e.message); }
+ try {
+  for (const chunk of chunks) {
+    chunk.embedding = await getEmbedding(chunk.content);
+  }
+  await supabase.from('document_chunks').insert(chunks);
+  console.log('Chunks con embeddings creados: ' + chunks.length);
+} catch(e) { console.error('Chunks error:', e.message); }
   console.log('Chunks creados: ' + chunks.length);
 }
     res.json({ ok: true, document: data, content_length: content.length });
@@ -583,7 +589,13 @@ for (let i = 0; i < content.length; i += chunkSize) {
     });
   }
 }
- try { await supabase.from('document_chunks').insert(chunks); } catch(e) { console.error('Chunks error:', e.message); }
+ try {
+  for (const chunk of chunks) {
+    chunk.embedding = await getEmbedding(chunk.content);
+  }
+  await supabase.from('document_chunks').insert(chunks);
+  console.log('Chunks con embeddings creados: ' + chunks.length);
+} catch(e) { console.error('Chunks error:', e.message); }
   console.log('Chunks creados: ' + chunks.length);
 }
     res.json({ ok: true, document: data, content_length: content.length });
