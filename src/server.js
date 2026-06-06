@@ -401,7 +401,13 @@ PREGUNTA: ${question}
 
 Responde de forma clara, práctica y orientada a decisión comercial. Si hay documentos cargados, úsalos para responder con precisión.`;
 
-    const answer = await callAI(prompt);
+    const response = await openai.chat.completions.create({
+  model: 'gpt-4o',
+  messages: [{ role: 'user', content: prompt }],
+  temperature: 0.3,
+  max_tokens: 2000
+});
+const answer = response.choices[0].message.content;
     if (supabase) { try { await supabase.from('ai_chats').insert({ opportunity_id: id, question, answer }); } catch(e) {} }
     res.json({ ok: true, answer });
   } catch (e) { next(e); }
