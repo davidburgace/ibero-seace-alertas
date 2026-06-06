@@ -373,16 +373,14 @@ app.post('/api/opportunities/:id/ask', async (req, res, next) => {
 let docsText = 'No hay documentos del expediente cargados.';
 if (supabase) {
   const questionEmbedding = await getEmbedding(question);
-const { data: chunks } = await supabase.rpc('match_chunks', {
-  query_embedding: questionEmbedding,
-  match_opportunity_id: id,
-  match_count: 6
-});
-
-if (chunks && chunks.length > 0) {
-  docsText = 'FRAGMENTOS RELEVANTES DEL EXPEDIENTE:\n\n' +
-    chunks.map((c, i) => `[Fragmento ${i+1}]\n${c.content}`).join('\n\n---\n\n');
-}
+  const { data: chunks } = await supabase.rpc('match_chunks', {
+    query_embedding: questionEmbedding,
+    match_opportunity_id: id,
+    match_count: 6
+  });
+  if (chunks && chunks.length > 0) {
+    docsText = 'FRAGMENTOS RELEVANTES DEL EXPEDIENTE:\n\n' +
+      chunks.map((c, i) => `[Fragmento ${i+1}]\n${c.content}`).join('\n\n---\n\n');
   }
 }
     const prompt = `Eres un asistente comercial experto en licitaciones públicas para Grupo Ibero Perú (fabrica mobiliario escolar, hospitalario, de oficina y metálico).
