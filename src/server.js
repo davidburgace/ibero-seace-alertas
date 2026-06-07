@@ -457,16 +457,25 @@ app.post('/api/opportunities/:id/documents', upload.single('file'), async (req, 
 
     // Extraer texto del PDF
     let content = '';
-    if (req.file.mimetype === 'application/pdf') {
-      try {
-        const parsed = await pdfParse(req.file.buffer);
-        content = parsed.text;
-        console.log(`PDF extraído: ${content.length} caracteres`);
-      } catch (e) {
-        console.error('Error extrayendo PDF:', e.message);
-        content = 'No se pudo extraer el texto del PDF.';
+if (req.file.mimetype === 'application/pdf') {
+  try {
+    const parsed = await pdfParse(buffer);
+    content = parsed.text;
+    console.log(`pdf-parse: ${content.length} caracteres`);
+    // Si extrae poco texto, intentar con pdfjs
+    if (content.trim().length < 1000) {
+      console.log('Poco texto detectado, intentando con pdfjs...');
+      const pdfjsText = await extractTextWithPdfjs(buffer);
+      if (pdfjsText.length > content.length) {
+        content = pdfjsText;
+        console.log(`pdfjs: ${content.length} caracteres`);
       }
     }
+  } catch(e) {
+    console.error('Error PDF:', e.message);
+    content = 'No se pudo extraer el texto.';
+  }
+}
 
     // Subir archivo a Supabase Storage
     const fileName = `${id}/${Date.now()}_${req.file.originalname}`;
@@ -550,14 +559,25 @@ app.post('/api/opportunities/:id/fetch-document', async (req, res, next) => {
 
     // Extraer texto del PDF
     let content = '';
-    try {
-      const parsed = await pdfParse(buffer);
-      content = parsed;
-      console.log(`Texto extraído: ${content.length} caracteres`);
-    } catch(e) {
-      console.error('Error PDF:', e.message);
-      content = 'No se pudo extraer el texto.';
+if (req.file.mimetype === 'application/pdf') {
+  try {
+    const parsed = await pdfParse(buffer);
+    content = parsed.text;
+    console.log(`pdf-parse: ${content.length} caracteres`);
+    // Si extrae poco texto, intentar con pdfjs
+    if (content.trim().length < 1000) {
+      console.log('Poco texto detectado, intentando con pdfjs...');
+      const pdfjsText = await extractTextWithPdfjs(buffer);
+      if (pdfjsText.length > content.length) {
+        content = pdfjsText;
+        console.log(`pdfjs: ${content.length} caracteres`);
+      }
     }
+  } catch(e) {
+    console.error('Error PDF:', e.message);
+    content = 'No se pudo extraer el texto.';
+  }
+}
 
     // Subir a Supabase Storage
     const { error: uploadError } = await supabase.storage
