@@ -457,9 +457,24 @@ app.post('/api/opportunities/:id/documents', upload.single('file'), async (req, 
 
    // Extraer texto del PDF
     let content = '';
-if (true) {
+if (req.file && req.file.buffer) {
   try {
-    const parsed = await pdfParse(buffer);
+    const parsed = await pdfParse(req.file.buffer);
+    content = parsed.text;
+    console.log(`pdf-parse: ${content.length} caracteres`);
+    if (content.trim().length < 1000) {
+      console.log('Poco texto detectado, intentando con pdfjs...');
+      const pdfjsText = await extractTextWithPdfjs(req.file.buffer);
+      if (pdfjsText.length > content.length) {
+        content = pdfjsText;
+        console.log(`pdfjs: ${content.length} caracteres`);
+      }
+    }
+  } catch(e) {
+    console.error('Error PDF:', e.message);
+    content = 'No se pudo extraer el texto.';
+  }
+}
     content = parsed.text;
     console.log(`pdf-parse: ${content.length} caracteres`);
     // Si extrae poco texto, intentar con pdfjs
