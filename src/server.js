@@ -7,7 +7,7 @@ import nodemailer from 'nodemailer';
 import OpenAI from 'openai';
 import multer from 'multer';
 import pdfParse from 'pdf-parse/lib/pdf-parse.js';
-
+import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 const app = express();
 app.use(cors({ origin: process.env.FRONTEND_URL?.split(',') || '*' }));
 app.use(express.json());
