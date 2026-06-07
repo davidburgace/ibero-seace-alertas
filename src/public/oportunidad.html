@@ -1103,6 +1103,7 @@ async function uploadDocument() {
     });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error);
+    console.log('Document content:', data.document?.content?.slice(0,50));
     if (data.document && data.document.content === 'PDF_ESCANEADO') {
   status.innerHTML = '⚠ PDF escaneado — la IA no puede leer este documento. Descárgalo manualmente desde los botones de documentos.';
   status.style.color = 'var(--amber)';
