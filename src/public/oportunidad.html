@@ -89,7 +89,7 @@
   /* ── Layout ── */
   .layout {
     display: grid;
-   grid-template-columns: 1fr 620px;
+    grid-template-columns: 1.2fr 500px;
     gap: 0;
     min-height: calc(100vh - 57px);
   }
@@ -803,11 +803,43 @@
         </div>
         <button class="btn-primary" onclick="uploadDocument()">Subir documento</button>
         <div class="doc-status" id="docStatus"></div>
+        <div id="docsList" style="margin-top:8px;"></div>
       </div>
     </div>
 
   </div><!-- /side-col -->
 </div><!-- /layout -->
+
+<!-- Visor de documento + Chat -->
+<div id="docViewer" style="display:none; border-top: 1px solid var(--border);">
+  <div style="display:flex; align-items:center; justify-content:space-between; padding:14px 32px; background:var(--surface); border-bottom:1px solid var(--border);">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <span style="font-family:var(--font-display); font-size:15px; font-weight:700;">📄</span>
+      <span id="viewerDocName" style="font-size:14px; font-weight:500; color:var(--text);">Documento</span>
+      <span id="viewerDocType" class="tag tag-type" style="font-size:11px;"></span>
+    </div>
+    <div style="display:flex; gap:8px;">
+      <button onclick="closeViewer()" style="background:transparent;border:1px solid var(--border2);color:var(--muted);border-radius:8px;padding:6px 14px;font-family:var(--font-body);font-size:13px;cursor:pointer;">✕ Cerrar</button>
+    </div>
+  </div>
+  <div style="display:grid; grid-template-columns:1fr 500px; height:calc(100vh - 57px - 57px);">
+    <!-- PDF -->
+    <div style="border-right:1px solid var(--border); overflow:hidden;">
+      <iframe id="pdfFrame" src="" style="width:100%; height:100%; border:none; background:white;"></iframe>
+    </div>
+    <!-- Chat para el documento -->
+    <div style="display:flex; flex-direction:column; padding:20px; gap:12px; background:var(--surface2);">
+      <div style="font-family:var(--font-display); font-size:13px; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:var(--muted);">💬 Consultar sobre este documento</div>
+      <div id="viewerChatMessages" style="flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:8px; min-height:0;">
+        <div class="chat-msg ai">Documento cargado. Puedes preguntarme cualquier cosa sobre su contenido — requisitos, plazos, especificaciones técnicas, condiciones del contrato, etc.</div>
+      </div>
+      <div style="display:flex; gap:6px;">
+        <textarea id="viewerChatInput" class="chat-input" placeholder="¿Cuál es el plazo de entrega?&#10;¿Qué experiencia requieren?&#10;¿Cuáles son las especificaciones técnicas?" style="height:80px;"></textarea>
+        <button class="chat-send" onclick="sendViewerChat()">↑</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <script>
 const params = new URLSearchParams(window.location.search);
@@ -1074,10 +1106,69 @@ async function uploadDocument() {
     status.textContent = '✓ Subido: ' + file.name;
     fileInput.value = '';
     document.getElementById('fileLabel').textContent = '＋ Seleccionar archivo';
+    // Abrir visor automáticamente
+    if (data.document && data.document.file_url) {
+      openViewer(data.document.file_url, file.name, docType);
+    }
   } catch (e) {
     status.textContent = '✖ Error: ' + e.message;
   }
 }
+
+// ── Visor de documento ────────────────────────────────────────────────────────
+function openViewer(fileUrl, fileName, docType) {
+  document.getElementById('pdfFrame').src = fileUrl;
+  document.getElementById('viewerDocName').textContent = fileName || 'Documento';
+  document.getElementById('viewerDocType').textContent = (docType || '').replace(/_/g, ' ');
+  document.getElementById('docViewer').style.display = 'block';
+  document.getElementById('docViewer').scrollIntoView({ behavior: 'smooth' });
+  // Limpiar chat del visor
+  document.getElementById('viewerChatMessages').innerHTML = '<div class="chat-msg ai">Documento cargado. Puedes preguntarme cualquier cosa sobre su contenido — requisitos, plazos, especificaciones técnicas, condiciones del contrato, etc.</div>';
+}
+
+function closeViewer() {
+  document.getElementById('docViewer').style.display = 'none';
+  document.getElementById('pdfFrame').src = '';
+}
+
+async function sendViewerChat() {
+  const input = document.getElementById('viewerChatInput');
+  const question = input.value.trim();
+  if (!question || !id) return;
+
+  const msgs = document.getElementById('viewerChatMessages');
+  const btn = document.querySelector('#docViewer .chat-send');
+
+  msgs.innerHTML += '<div class="chat-msg user">' + question + '</div>';
+  input.value = '';
+  if (btn) btn.disabled = true;
+
+  const thinkId = 'vthink_' + Date.now();
+  msgs.innerHTML += '<div class="chat-msg thinking" id="' + thinkId + '">Analizando<span class="dots"><span>.</span><span>.</span><span>.</span></span></div>';
+  msgs.scrollTop = msgs.scrollHeight;
+
+  try {
+    const res = await fetch('/api/opportunities/' + id + '/ask', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question })
+    });
+    const data = await res.json();
+    document.getElementById(thinkId)?.remove();
+    msgs.innerHTML += '<div class="chat-msg ai">' + (data.answer || data.error || 'Sin respuesta').replace(/\n/g, '<br>') + '</div>';
+  } catch (e) {
+    document.getElementById(thinkId)?.remove();
+    msgs.innerHTML += '<div class="chat-msg ai" style="color:var(--red)">Error: ' + e.message + '</div>';
+  }
+
+  msgs.scrollTop = msgs.scrollHeight;
+  if (btn) btn.disabled = false;
+  input.focus();
+}
+
+document.getElementById('viewerChatInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendViewerChat(); }
+});
 
 // ── Copiar nomenclatura ───────────────────────────────────────────────────────
 function copyNomenclature() {
@@ -1091,6 +1182,24 @@ function copyNomenclature() {
 
 // ── Init ─────────────────────────────────────────────────────────────────────
 loadOpportunity();
+loadDocuments();
+
+async function loadDocuments() {
+  if (!id) return;
+  try {
+    const res = await fetch('/api/opportunities/' + id + '/documents');
+    const data = await res.json();
+    const docs = data.documents || [];
+    const el = document.getElementById('docsList');
+    if (!docs.length) { el.innerHTML = ''; return; }
+    el.innerHTML = docs.map(d => `
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;margin-bottom:6px;">
+        <span style="font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px;" title="${d.file_name || ''}">${d.document_type?.replace(/_/g,' ') || 'Documento'}</span>
+        ${d.file_url ? `<button onclick="openViewer('${d.file_url}','${d.file_name || ''}','${d.document_type || ''}')" style="background:var(--accent);border:none;color:white;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;flex-shrink:0;">Ver</button>` : ''}
+      </div>
+    `).join('');
+  } catch(e) {}
+}
 </script>
 </body>
 </html>
