@@ -32,6 +32,25 @@ async function getEmbedding(text) {
   });
   return response.data[0].embedding;
 }
+// Extraer texto de PDF escaneado usando pdfjs-dist
+async function extractTextWithPdfjs(buffer) {
+  try {
+    const pdfDoc = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
+    const numPages = pdfDoc.numPages;
+    console.log(`Extrayendo texto de ${numPages} páginas con pdfjs...`);
+    let fullText = '';
+    for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+      const page = await pdfDoc.getPage(pageNum);
+      const textContent = await page.getTextContent();
+      const pageText = textContent.items.map(item => item.str).join(' ');
+      fullText += pageText + '\n';
+    }
+    return fullText.trim();
+  } catch(e) {
+    console.error('Error pdfjs:', e.message);
+    return '';
+  }
+}
 // ─── SEACE API ────────────────────────────────────────────────────────────────
 const SEACE_API = 'https://prod4.seace.gob.pe:8086/api/oportunidades/codObjeto/codDepartamento/sintesisProceso/codTipoProceso';
 const SEACE_HEADERS = {
