@@ -452,13 +452,13 @@ app.post('/api/opportunities/:id/documents', upload.single('file'), async (req, 
     // Subir archivo a Supabase Storage
     const fileName = `${id}/${Date.now()}_${req.file.originalname}`;
     const { error: uploadError } = await supabase.storage
-      .from('opportunities_documents')
+      .from('opportunity-documents')
       .upload(fileName, req.file.buffer, { contentType: req.file.mimetype });
 
     if (uploadError) console.error('Error Storage:', uploadError.message);
 
     // Obtener URL pública
-    const { data: urlData } = supabase.storage.from('opportunities_documents').getPublicUrl(fileName);
+    const { data: urlData } = supabase.storage.from('opportunity-documents').getPublicUrl(fileName);
 
     // Guardar en tabla opportunity_documents
     const { data, error } = await supabase.from('opportunity_documents').insert({
@@ -539,13 +539,13 @@ app.post('/api/opportunities/:id/fetch-document', async (req, res, next) => {
 
     // Subir a Supabase Storage
     const { error: uploadError } = await supabase.storage
-      .from('opportunities_documents')
+      .from('opportunity-documents')
       .upload(fileName, buffer, { contentType });
 
     if (uploadError) console.error('Storage error:', uploadError.message);
 
     const { data: urlData } = supabase.storage
-      .from('opportunities_documents')
+      .from('opportunity-documents')
       .getPublicUrl(fileName);
 
     // Guardar en tabla
