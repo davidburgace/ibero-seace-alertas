@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: ibero-seace-alertas
+    env: node
+    buildCommand: apt-get install -y ghostscript && npm install
+    startCommand: npm start
