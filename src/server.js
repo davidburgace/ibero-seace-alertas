@@ -475,22 +475,7 @@ if (req.file && req.file.buffer) {
     content = 'No se pudo extraer el texto.';
   }
 }
-    content = parsed.text;
-    console.log(`pdf-parse: ${content.length} caracteres`);
-    // Si extrae poco texto, intentar con pdfjs
-    if (content.trim().length < 1000) {
-      console.log('Poco texto detectado, intentando con pdfjs...');
-      const pdfjsText = await extractTextWithPdfjs(buffer);
-      if (pdfjsText.length > content.length) {
-        content = pdfjsText;
-        console.log(`pdfjs: ${content.length} caracteres`);
-      }
-    }
-  } catch(e) {
-    console.error('Error PDF:', e.message);
-    content = 'No se pudo extraer el texto.';
-  }
-}
+    
 
     // Subir archivo a Supabase Storage
     const fileName = `${id}/${Date.now()}_${req.file.originalname}`;
