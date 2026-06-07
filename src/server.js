@@ -220,7 +220,9 @@ Responde ÚNICAMENTE con JSON válido, sin texto adicional. Los valores numéric
 IMPORTANTE: Reemplaza todos los números con valores reales del análisis. El score total debe ser la suma de todos los criteria.score.
 `;
   const raw = await callAI(prompt);
-  return JSON.parse(raw.replace(/```json|```/g, '').trim());
+  const parsed = JSON.parse(raw.replace(/```json|```/g, '').trim());
+console.log('AI score:', parsed.score, 'criteria:', JSON.stringify(parsed.criteria));
+return parsed;
 }
 
 // ─── Email ─────────────────────────────────────────────────────────────────────
