@@ -198,25 +198,27 @@ Tipo: ${opportunity.process_type || ''}
 Monto: ${opportunity.amount ? `S/ ${Number(opportunity.amount).toLocaleString('es-PE')}` : 'No especificado'}
 Línea: ${opportunity.business_line || ''}
 Cierre: ${opportunity.closing_date || 'No especificado'}
-Responde ÚNICAMENTE con JSON válido, sin texto adicional:
+Responde ÚNICAMENTE con JSON válido, sin texto adicional. Los valores numéricos son ejemplos, debes calcular los reales:
 {
   "summary": "resumen ejecutivo en 2 oraciones",
   "business_line": "línea de negocio más probable",
   "fit_for_ibero": "explicación de adecuación",
-  "score": 0,
+  "score": 75,
   "decision": "PARTICIPAR|REVISAR|DESCARTAR",
   "recommendation": "recomendación breve",
   "criteria": [
-    {"name":"Coincidencia línea de negocio","score":0,"max":30},
-    {"name":"Experiencia sectorial","score":0,"max":20},
-    {"name":"Logística y región","score":0,"max":15},
-    {"name":"Información disponible","score":0,"max":15},
-    {"name":"Capacidad técnica","score":0,"max":10},
-    {"name":"Complejidad del proceso","score":0,"max":10}
+    {"name":"Coincidencia línea de negocio","score":25,"max":30},
+    {"name":"Experiencia sectorial","score":15,"max":20},
+    {"name":"Logística y región","score":12,"max":15},
+    {"name":"Información disponible","score":10,"max":15},
+    {"name":"Capacidad técnica","score":8,"max":10},
+    {"name":"Complejidad del proceso","score":5,"max":10}
   ],
-  "risks": ["riesgo 1","riesgo 2","riesgo 3"],
-  "actions": ["acción 1","acción 2","acción 3"]
-}`;
+  "risks": ["riesgo identificado 1","riesgo identificado 2","riesgo identificado 3"],
+  "actions": ["acción recomendada 1","acción recomendada 2","acción recomendada 3"]
+}
+IMPORTANTE: Reemplaza todos los números con valores reales del análisis. El score total debe ser la suma de todos los criteria.score.
+`;
   const raw = await callAI(prompt);
   return JSON.parse(raw.replace(/```json|```/g, '').trim());
 }
