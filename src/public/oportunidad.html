@@ -1103,7 +1103,13 @@ async function uploadDocument() {
     });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error);
-    status.textContent = '✓ Subido: ' + file.name;
+    if (data.document && data.document.content === 'PDF_ESCANEADO') {
+  status.innerHTML = '⚠ PDF escaneado — la IA no puede leer este documento. Descárgalo manualmente desde los botones de documentos.';
+  status.style.color = 'var(--amber)';
+} else {
+  status.textContent = '✓ Subido: ' + file.name;
+  status.style.color = 'var(--green)';
+}
     fileInput.value = '';
     document.getElementById('fileLabel').textContent = '＋ Seleccionar archivo';
     // Abrir visor automáticamente
