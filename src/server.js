@@ -455,7 +455,10 @@ app.post('/api/opportunities/:id/documents', upload.single('file'), async (req, 
       .from('opportunity-documents')
       .upload(fileName, req.file.buffer, { contentType: req.file.mimetype });
 
-    if (uploadError) console.error('Error Storage:', uploadError.message);
+    if (uploadError) {
+  console.error('Storage error completo:', JSON.stringify(uploadError));
+  throw new Error('Storage: ' + uploadError.message);
+}
 
     // Obtener URL pública
     const { data: urlData } = supabase.storage.from('opportunity-documents').getPublicUrl(fileName);
@@ -542,8 +545,10 @@ app.post('/api/opportunities/:id/fetch-document', async (req, res, next) => {
       .from('opportunity-documents')
       .upload(fileName, buffer, { contentType });
 
-    if (uploadError) console.error('Storage error:', uploadError.message);
-
+    if (uploadError) {
+  console.error('Storage error completo:', JSON.stringify(uploadError));
+  throw new Error('Storage: ' + uploadError.message);
+}
     const { data: urlData } = supabase.storage
       .from('opportunity-documents')
       .getPublicUrl(fileName);
