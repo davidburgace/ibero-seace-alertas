@@ -455,9 +455,9 @@ app.post('/api/opportunities/:id/documents', upload.single('file'), async (req, 
     if (!req.file) return res.status(400).json({ ok: false, error: 'No se recibió ningún archivo' });
     if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
 
-    // Extraer texto del PDF
+   // Extraer texto del PDF
     let content = '';
-if (req.file.mimetype === 'application/pdf') {
+if (true) {
   try {
     const parsed = await pdfParse(buffer);
     content = parsed.text;
@@ -559,7 +559,7 @@ app.post('/api/opportunities/:id/fetch-document', async (req, res, next) => {
 
     // Extraer texto del PDF
     let content = '';
-if (req.file.mimetype === 'application/pdf') {
+if (true) {
   try {
     const parsed = await pdfParse(buffer);
     content = parsed.text;
