@@ -1117,7 +1117,7 @@ async function uploadDocument() {
     if (data.document && data.document.file_url && data.document.content !== 'PDF_ESCANEADO') {
   openViewer(data.document.file_url, file.name, docType);
 }
-¿Puedes hacer ese cambio en GitHub?
+
   } catch (e) {
     status.textContent = '✖ Error: ' + e.message;
   }
