@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Radar Infra — Grupo Ibero</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:#0a0d14; --surface:#111520; --surface2:#161b28;
+    --border:rgba(255,255,255,0.07); --border2:rgba(255,255,255,0.12);
+    --text:#e8eaf0; --muted:#7a8099;
+    --accent:#4f7dff; --accent2:#0f766e;
+    --green:#22d3a0; --amber:#f5a623; --red:#f05252;
+    --font-display:'Syne',sans-serif; --font-body:'DM Sans',sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:var(--font-body);background:var(--bg);color:var(--text);min-height:100vh;font-size:14px;line-height:1.6;}
+  a{color:inherit;}
+
+  .topbar{display:flex;align-items:center;justify-content:space-between;padding:14px 28px;border-bottom:1px solid var(--border);background:var(--surface);position:sticky;top:0;z-index:100;backdrop-filter:blur(12px);}
+  .logo{display:flex;align-items:center;gap:10px;font-family:var(--font-display);font-size:17px;font-weight:700;text-decoration:none;}
+  .logo-dot{width:8px;height:8px;border-radius:50%;background:var(--accent2);box-shadow:0 0 10px var(--accent2);animation:pulse 2s infinite;}
+  @keyframes pulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.6;transform:scale(.8);}}
+  .topbar a.alt{color:var(--muted);font-size:13px;text-decoration:none;}
+  .topbar a.alt:hover{color:var(--text);}
+
+  .wrap{max-width:1180px;margin:0 auto;padding:24px 28px 80px;}
+
+  /* Toolbar */
+  .toolbar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:20px;}
+  .btn{display:inline-flex;align-items:center;gap:8px;background:var(--accent2);color:#fff;border:none;border-radius:10px;padding:10px 16px;font-family:var(--font-body);font-weight:600;font-size:13px;cursor:pointer;transition:.15s;}
+  .btn:hover{filter:brightness(1.1);}
+  .btn.ghost{background:transparent;border:1px solid var(--border2);color:var(--text);}
+  .btn:disabled{opacity:.5;cursor:not-allowed;}
+  input,select{background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:9px;padding:9px 12px;font-family:var(--font-body);font-size:13px;outline:none;}
+  input::placeholder{color:var(--muted);}
+  .spacer{flex:1;}
+
+  /* Stats */
+  .stats{display:flex;flex-wrap:wrap;gap:14px;margin-bottom:22px;}
+  .stat{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px 18px;min-width:130px;}
+  .stat .n{font-family:var(--font-display);font-size:24px;font-weight:800;}
+  .stat .l{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em;}
+
+  /* Filters */
+  .filters{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:18px;}
+  .chk{display:inline-flex;align-items:center;gap:7px;color:var(--muted);font-size:13px;cursor:pointer;}
+
+  /* List */
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px 18px;margin-bottom:12px;cursor:pointer;transition:.15s;display:flex;gap:16px;align-items:flex-start;}
+  .card:hover{border-color:var(--border2);background:var(--surface2);}
+  .score{flex-shrink:0;width:54px;height:54px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-weight:800;font-size:20px;}
+  .score.high{background:rgba(34,211,160,.13);color:var(--green);}
+  .score.mid{background:rgba(245,166,35,.13);color:var(--amber);}
+  .score.low{background:rgba(240,82,82,.12);color:var(--red);}
+  .score.none{background:var(--surface2);color:var(--muted);font-size:13px;}
+  .card-body{flex:1;min-width:0;}
+  .card h3{font-size:14.5px;font-weight:600;margin-bottom:6px;line-height:1.4;}
+  .meta{color:var(--muted);font-size:12.5px;display:flex;flex-wrap:wrap;gap:4px 14px;}
+  .meta b{color:var(--text);font-weight:500;}
+  .tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px;}
+  .tag{font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px;border:1px solid var(--border2);color:var(--muted);}
+  .tag.mob{background:rgba(79,125,255,.13);color:var(--accent);border-color:transparent;}
+  .tag.dec-perseguir{background:rgba(34,211,160,.13);color:var(--green);border-color:transparent;}
+  .tag.dec-revisar{background:rgba(245,166,35,.13);color:var(--amber);border-color:transparent;}
+  .tag.dec-descartar{background:rgba(240,82,82,.12);color:var(--red);border-color:transparent;}
+
+  .empty{text-align:center;color:var(--muted);padding:60px 20px;}
+
+  /* Drawer */
+  .drawer-bg{position:fixed;inset:0;background:rgba(0,0,0,.55);opacity:0;pointer-events:none;transition:.2s;z-index:200;}
+  .drawer-bg.open{opacity:1;pointer-events:auto;}
+  .drawer{position:fixed;top:0;right:0;height:100%;width:min(540px,94vw);background:var(--surface);border-left:1px solid var(--border2);transform:translateX(100%);transition:.25s;z-index:201;overflow-y:auto;padding:26px;}
+  .drawer.open{transform:translateX(0);}
+  .drawer h2{font-family:var(--font-display);font-size:18px;font-weight:700;line-height:1.35;margin-bottom:6px;padding-right:30px;}
+  .closeX{position:absolute;top:20px;right:22px;background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;}
+  .section{margin-top:20px;}
+  .section .t{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:8px;}
+  .crit{margin-bottom:9px;}
+  .crit .row{display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:3px;}
+  .bar{height:6px;background:var(--surface2);border-radius:6px;overflow:hidden;}
+  .bar span{display:block;height:100%;background:var(--accent2);}
+  .li{display:flex;gap:8px;font-size:13px;margin-bottom:6px;color:var(--text);}
+  .li .dot{color:var(--accent2);flex-shrink:0;}
+  .loading{color:var(--muted);font-size:13px;padding:20px 0;}
+
+  /* Toast */
+  #toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(120px);background:var(--surface2);border:1px solid var(--border2);color:var(--text);padding:12px 20px;border-radius:12px;font-size:13px;transition:.25s;z-index:300;max-width:90vw;}
+  #toast.show{transform:translateX(-50%) translateY(0);}
+  input[type=file]{display:none;}
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <a class="logo" href="/infra.html"><span class="logo-dot"></span>Radar Infra · Ibero</a>
+    <a class="alt" href="/admin.html">← Radar SEACE</a>
+  </div>
+
+  <div class="wrap">
+    <div class="toolbar">
+      <label class="btn"><input type="file" id="file" accept=".xlsx"> ⬆ Subir base MEF (.xlsx)</label>
+      <button class="btn ghost" id="btnScore">✦ Puntuar pendientes</button>
+      <select id="scoreLimit" title="Cuántas puntuar por lote">
+        <option value="10">10</option><option value="25">25</option>
+        <option value="50" selected>50</option><option value="100">100</option>
+      </select>
+      <div class="spacer"></div>
+      <button class="btn ghost" id="btnReload">↻ Recargar</button>
+    </div>
+
+    <div class="stats" id="stats"></div>
+
+    <div class="filters">
+      <input id="q" placeholder="Buscar nombre o financista…" style="min-width:240px;flex:1;">
+      <select id="fSector"><option value="">Todos los sectores</option></select>
+      <select id="fDepto"><option value="">Todos los departamentos</option></select>
+      <select id="fDec">
+        <option value="">Toda decisión</option>
+        <option value="PERSEGUIR">Perseguir</option>
+        <option value="REVISAR">Revisar</option>
+        <option value="DESCARTAR">Descartar</option>
+      </select>
+      <label class="chk"><input type="checkbox" id="fMob" style="accent-color:var(--accent2);"> Solo con mobiliario</label>
+    </div>
+
+    <div id="list"></div>
+  </div>
+
+  <div class="drawer-bg" id="drawerBg"></div>
+  <div class="drawer" id="drawer"></div>
+  <div id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+let DATA = [];
+
+const money = v => v ? 'S/ ' + Number(v).toLocaleString('es-PE') : 'No especificado';
+const scoreClass = s => s == null ? 'none' : s >= 70 ? 'high' : s >= 40 ? 'mid' : 'low';
+
+function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),3500); }
+
+async function load(){
+  $('#list').innerHTML = '<div class="loading">Cargando…</div>';
+  try{
+    const r = await fetch('/api/infra/opportunities');
+    const j = await r.json();
+    DATA = j.opportunities || [];
+    buildFilters(); render(); renderStats();
+  }catch(e){ $('#list').innerHTML = '<div class="empty">Error cargando: '+e.message+'</div>'; }
+}
+
+function renderStats(){
+  const scored = DATA.filter(o=>o.ai_score!=null).length;
+  const mob = DATA.filter(o=>o.incluye_mobiliario).length;
+  const perseguir = DATA.filter(o=>o.ai_recommendation==='PERSEGUIR').length;
+  $('#stats').innerHTML = [
+    ['Oportunidades', DATA.length],
+    ['Puntuadas', scored],
+    ['Con mobiliario', mob],
+    ['A perseguir', perseguir]
+  ].map(([l,n])=>`<div class="stat"><div class="n">${n}</div><div class="l">${l}</div></div>`).join('');
+}
+
+function buildFilters(){
+  const sectors = [...new Set(DATA.map(o=>o.sector).filter(Boolean))].sort();
+  const deptos  = [...new Set(DATA.map(o=>o.departamento).filter(Boolean))].sort();
+  fillSelect('#fSector', sectors); fillSelect('#fDepto', deptos);
+}
+function fillSelect(sel, items){
+  const el=$(sel); const first=el.querySelector('option').outerHTML;
+  el.innerHTML = first + items.map(i=>`<option value="${i}">${i}</option>`).join('');
+}
+
+function filtered(){
+  const q=$('#q').value.toLowerCase().trim();
+  const sec=$('#fSector').value, dep=$('#fDepto').value, dec=$('#fDec').value, mob=$('#fMob').checked;
+  return DATA.filter(o=>{
+    if(q && !((o.nombre||'').toLowerCase().includes(q) || (o.financista||'').toLowerCase().includes(q))) return false;
+    if(sec && o.sector!==sec) return false;
+    if(dep && o.departamento!==dep) return false;
+    if(dec && o.ai_recommendation!==dec) return false;
+    if(mob && !o.incluye_mobiliario) return false;
+    return true;
+  }).sort((a,b)=>(b.ai_score??-1)-(a.ai_score??-1));
+}
+
+function render(){
+  const items = filtered();
+  if(!items.length){ $('#list').innerHTML = '<div class="empty">Sin resultados con estos filtros.</div>'; return; }
+  $('#list').innerHTML = items.map(o=>{
+    const loc = [o.distrito,o.provincia,o.departamento].filter(Boolean).join(', ');
+    const dec = o.ai_recommendation ? `<span class="tag dec-${o.ai_recommendation.toLowerCase()}">${o.ai_recommendation}</span>` : '';
+    const mob = o.incluye_mobiliario ? '<span class="tag mob">Mobiliario</span>' : '';
+    return `<div class="card" onclick="openDetail('${o.id}')">
+      <div class="score ${scoreClass(o.ai_score)}">${o.ai_score??'—'}</div>
+      <div class="card-body">
+        <h3>${o.nombre||'(sin nombre)'}</h3>
+        <div class="meta">
+          <span><b>Financista:</b> ${o.financista||'—'}</span>
+          <span><b>Monto:</b> ${money(o.monto_inversion)}</span>
+          ${loc?`<span><b>Ubicación:</b> ${loc}</span>`:''}
+          ${o.estado_convenio?`<span><b>Estado:</b> ${o.estado_convenio}</span>`:''}
+        </div>
+        <div class="tags">${dec}${mob}<span class="tag">${o.sector||o.business_line||''}</span></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function openDetail(id){
+  const o = DATA.find(x=>x.id===id);
+  $('#drawerBg').classList.add('open'); $('#drawer').classList.add('open');
+  $('#drawer').innerHTML = `<button class="closeX" onclick="closeDetail()">×</button>
+    <h2>${o.nombre||'Oportunidad'}</h2>
+    <div class="meta"><span><b>Financista:</b> ${o.financista||'—'}</span></div>
+    <div class="loading">Analizando con IA…</div>`;
+  try{
+    const r = await fetch('/api/infra/opportunities/'+id);
+    const j = await r.json();
+    const op = j.opportunity; Object.assign(o, op); // refresca cache
+    drawDetail(o, j.senales||[], j.ejecutores||[]);
+    renderStats(); // por si recién se puntuó
+  }catch(e){ $('#drawer').querySelector('.loading').textContent='Error: '+e.message; }
+}
+
+function drawDetail(o, senales, ejecutores){
+  const loc=[o.distrito,o.provincia,o.departamento].filter(Boolean).join(', ');
+  const crit=(o.ai_criteria||[]).map(c=>`<div class="crit"><div class="row"><span>${c.name}</span><span>${c.score}/${c.max}</span></div><div class="bar"><span style="width:${Math.round(100*c.score/(c.max||1))}%"></span></div></div>`).join('');
+  const risks=(o.ai_risks||[]).map(x=>`<div class="li"><span class="dot">▸</span>${x}</div>`).join('');
+  const actions=(o.ai_actions||[]).map(x=>`<div class="li"><span class="dot">✓</span>${x}</div>`).join('');
+  const sen=senales.length?senales.map(s=>`<div class="li"><span class="dot">⚑</span>${s.tipo} — ${s.descripcion||''}</div>`).join(''):'<div class="meta">Sin señales registradas.</div>';
+  const ejec=ejecutores.length?ejecutores.map(e=>`<div class="li"><span class="dot">●</span>${e.consorcio_nombre||'(por confirmar)'} · ${e.estado_verificacion}</div>`).join(''):'<div class="meta">Ejecutor no identificado todavía.</div>';
+  $('#drawer').innerHTML = `<button class="closeX" onclick="closeDetail()">×</button>
+    <h2>${o.nombre||'Oportunidad'}</h2>
+    <div class="tags" style="margin:6px 0 2px;">
+      <span class="score ${scoreClass(o.ai_score)}" style="width:auto;height:auto;padding:2px 12px;border-radius:20px;font-size:14px;">${o.ai_score??'—'}</span>
+      ${o.ai_recommendation?`<span class="tag dec-${o.ai_recommendation.toLowerCase()}">${o.ai_recommendation}</span>`:''}
+      ${o.incluye_mobiliario?'<span class="tag mob">Mobiliario</span>':''}
+    </div>
+    <div class="section"><div class="t">Resumen</div><div>${o.ai_summary||'—'}</div></div>
+    <div class="section"><div class="t">Datos</div>
+      <div class="meta" style="flex-direction:column;gap:4px;">
+        <span><b>Financista:</b> ${o.financista||'—'}</span>
+        <span><b>Entidad:</b> ${o.entidad_publica||'—'}</span>
+        <span><b>Monto inversión:</b> ${money(o.monto_inversion)}</span>
+        ${loc?`<span><b>Ubicación:</b> ${loc}</span>`:''}
+        <span><b>Estado:</b> ${o.estado_convenio||'—'}</span>
+        <span><b>CUI:</b> ${o.external_id||'—'}</span>
+      </div></div>
+    ${crit?`<div class="section"><div class="t">Criterios</div>${crit}</div>`:''}
+    ${o.recommendation?`<div class="section"><div class="t">Recomendación</div><div>${o.recommendation}</div></div>`:''}
+    ${risks?`<div class="section"><div class="t">Riesgos</div>${risks}</div>`:''}
+    ${actions?`<div class="section"><div class="t">Acciones</div>${actions}</div>`:''}
+    <div class="section"><div class="t">Señales</div>${sen}</div>
+    <div class="section"><div class="t">Ejecutor</div>${ejec}</div>`;
+}
+function closeDetail(){ $('#drawerBg').classList.remove('open'); $('#drawer').classList.remove('open'); }
+
+// Upload base MEF
+$('#file').addEventListener('change', async e=>{
+  const f=e.target.files[0]; if(!f) return;
+  toast('Subiendo y procesando ' + f.name + '…');
+  const fd=new FormData(); fd.append('file', f);
+  try{
+    const r=await fetch('/api/infra/ingest-upload',{method:'POST',body:fd});
+    const j=await r.json();
+    if(j.ok) toast(`Listo: ${j.relevantes} oportunidades de ${j.total_filas} filas.`);
+    else toast('Error: '+(j.error||'desconocido'));
+    load();
+  }catch(err){ toast('Error: '+err.message); }
+  e.target.value='';
+});
+
+// Puntuar pendientes
+$('#btnScore').addEventListener('click', async ()=>{
+  const lim=$('#scoreLimit').value;
+  $('#btnScore').disabled=true; toast('Puntuando hasta '+lim+' oportunidades…');
+  try{
+    const r=await fetch('/api/infra/score-pending?limit='+lim,{method:'POST'});
+    const j=await r.json();
+    toast(`Puntuadas: ${j.scored}.`); load();
+  }catch(e){ toast('Error: '+e.message); }
+  $('#btnScore').disabled=false;
+});
+
+$('#btnReload').addEventListener('click', load);
+['#q','#fSector','#fDepto','#fDec','#fMob'].forEach(s=>$(s).addEventListener('input', render));
+$('#drawerBg').addEventListener('click', closeDetail);
+
+load();
+// Si llega ?id=… (desde el correo), abre ese detalle
+const pid=new URLSearchParams(location.search).get('id');
+if(pid) setTimeout(()=>openDetail(pid), 800);
+</script>
+</body>
+</html>
