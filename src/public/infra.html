@@ -124,6 +124,7 @@
       <select id="fSector"><option value="">Todos los sectores</option></select>
       <select id="fDepto"><option value="">Todos los departamentos</option></select>
       <select id="fEstado"><option value="">Todo estado</option></select>
+      <select id="fAnio"><option value="">Todo año buena pro</option></select>
       <select id="fDec">
         <option value="">Toda decisión</option>
         <option value="PERSEGUIR">Perseguir</option>
@@ -132,6 +133,8 @@
       </select>
       <select id="fSort">
         <option value="score">Orden: mayor score</option>
+        <option value="fecha_asc">Orden: más antiguos</option>
+        <option value="fecha_desc">Orden: más recientes</option>
         <option value="monto_desc">Orden: mayor monto</option>
         <option value="monto_asc">Orden: menor monto</option>
         <option value="nombre">Orden: nombre (A–Z)</option>
@@ -182,16 +185,18 @@ function buildFilters(){
   const sectors = [...new Set(DATA.map(o=>o.sector).filter(Boolean))].sort();
   const deptos  = [...new Set(DATA.map(o=>o.departamento).filter(Boolean))].sort();
   const estados = [...new Set(DATA.map(o=>o.estado_convenio).filter(Boolean))].sort();
-  fillSelect('#fSector', sectors); fillSelect('#fDepto', deptos); fillSelect('#fEstado', estados);
+  const anios = [...new Set(DATA.map(o=>o.anio_buena_pro).filter(Boolean))].sort((a,b)=>b-a);
+  fillSelect('#fSector', sectors); fillSelect('#fDepto', deptos); fillSelect('#fEstado', estados); fillSelect('#fAnio', anios);
 }
 function fillSelect(sel, items){
   const el=$(sel); const first=el.querySelector('option').outerHTML;
   el.innerHTML = first + items.map(i=>`<option value="${i}">${i}</option>`).join('');
 }
 
+const dateKey = o => o.fecha_convenio || (o.anio_buena_pro ? o.anio_buena_pro+'-01-01' : '');
 function filtered(){
   const q=$('#q').value.toLowerCase().trim();
-  const sec=$('#fSector').value, dep=$('#fDepto').value, dec=$('#fDec').value, est=$('#fEstado').value, mob=$('#fMob').checked;
+  const sec=$('#fSector').value, dep=$('#fDepto').value, dec=$('#fDec').value, est=$('#fEstado').value, ano=$('#fAnio').value, mob=$('#fMob').checked;
   const sort=$('#fSort').value;
   const list = DATA.filter(o=>{
     if(q && !((o.nombre||'').toLowerCase().includes(q) || (o.financista||'').toLowerCase().includes(q))) return false;
@@ -199,11 +204,14 @@ function filtered(){
     if(dep && o.departamento!==dep) return false;
     if(dec && o.ai_recommendation!==dec) return false;
     if(est && o.estado_convenio!==est) return false;
+    if(ano && String(o.anio_buena_pro)!==ano) return false;
     if(mob && !o.incluye_mobiliario) return false;
     return true;
   });
   const cmp = {
     score:      (a,b)=>(b.ai_score??-1)-(a.ai_score??-1),
+    fecha_asc:  (a,b)=>{const x=dateKey(a)||'9999',y=dateKey(b)||'9999';return x<y?-1:x>y?1:0;},
+    fecha_desc: (a,b)=>{const x=dateKey(a)||'',y=dateKey(b)||'';return x<y?1:x>y?-1:0;},
     monto_desc: (a,b)=>(b.monto_inversion??0)-(a.monto_inversion??0),
     monto_asc:  (a,b)=>(a.monto_inversion??0)-(b.monto_inversion??0),
     nombre:     (a,b)=>String(a.nombre||'').localeCompare(String(b.nombre||''))
@@ -228,6 +236,8 @@ function render(){
           <span><b>Monto:</b> ${money(o.monto_inversion)}</span>
           ${loc?`<span><b>Ubicación:</b> ${loc}</span>`:''}
           ${o.estado_convenio?`<span><b>Estado:</b> ${o.estado_convenio}</span>`:''}
+          ${o.anio_buena_pro?`<span><b>Buena pro:</b> ${o.anio_buena_pro}</span>`:''}
+          ${o.fecha_convenio?`<span><b>Convenio:</b> ${o.fecha_convenio}</span>`:''}
         </div>
         <div class="tags">${dec}${mob}<span class="tag">${o.sector||o.business_line||''}</span></div>
       </div>
@@ -274,6 +284,8 @@ function drawDetail(o, senales, ejecutores){
         <span><b>Monto inversión:</b> ${money(o.monto_inversion)}</span>
         ${loc?`<span><b>Ubicación:</b> ${loc}</span>`:''}
         <span><b>Estado:</b> ${o.estado_convenio||'—'}</span>
+        ${o.anio_buena_pro?`<span><b>Año buena pro:</b> ${o.anio_buena_pro}</span>`:''}
+        ${o.fecha_convenio?`<span><b>Fecha convenio:</b> ${o.fecha_convenio}</span>`:''}
         <span><b>CUI:</b> ${o.external_id||'—'}</span>
       </div></div>
     ${crit?`<div class="section"><div class="t">Criterios</div>${crit}</div>`:''}
@@ -339,7 +351,7 @@ $('#btnScore').addEventListener('click', async ()=>{
 });
 
 $('#btnReload').addEventListener('click', load);
-['#q','#fSector','#fDepto','#fEstado','#fDec','#fSort','#fMob'].forEach(s=>$(s).addEventListener('input', render));
+['#q','#fSector','#fDepto','#fEstado','#fAnio','#fDec','#fSort','#fMob'].forEach(s=>$(s).addEventListener('input', render));
 $('#drawerBg').addEventListener('click', closeDetail);
 
 load();
