@@ -53,9 +53,23 @@ function classify(text = '') {
 
 // ─── Ingesta: base OxI del MEF ───────────────────────────────────────────────
 async function fetchMefRows() {
-  const res = await fetch(MEF_OXI_XLSX_URL, { signal: AbortSignal.timeout(60000) });
+  const res = await fetch(MEF_OXI_XLSX_URL, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      'Accept': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/octet-stream,*/*',
+      'Accept-Language': 'es-PE,es;q=0.9',
+      'Referer': 'https://www.mef.gob.pe/'
+    },
+    redirect: 'follow',
+    signal: AbortSignal.timeout(60000)
+  });
   if (!res.ok) throw new Error(`MEF HTTP ${res.status}`);
   const buf = Buffer.from(await res.arrayBuffer());
+  // Validar que sea un .xlsx real (los .xlsx son ZIP y empiezan con "PK").
+  if (buf.length < 4 || buf[0] !== 0x50 || buf[1] !== 0x4B) {
+    const preview = buf.toString('utf8', 0, 300).replace(/\s+/g, ' ');
+    throw new Error(`El MEF no devolvió un .xlsx. content-type=${res.headers.get('content-type')} inicio="${preview}"`);
+  }
   const wb = XLSX.read(buf, { type: 'buffer' });
   const sheet = wb.Sheets[wb.SheetNames[0]];
 
