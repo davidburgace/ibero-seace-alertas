@@ -140,6 +140,7 @@
         <option value="nombre">Orden: nombre (A–Z)</option>
       </select>
       <label class="chk"><input type="checkbox" id="fMob" style="accent-color:var(--accent2);"> Solo con mobiliario</label>
+      <label class="chk"><input type="checkbox" id="fNoEjec" style="accent-color:var(--accent2);"> Sin ejecutor</label>
     </div>
 
     <div id="list"></div>
@@ -194,9 +195,10 @@ function fillSelect(sel, items){
 }
 
 const dateKey = o => o.fecha_convenio || (o.anio_buena_pro ? o.anio_buena_pro+'-01-01' : '');
+const hasEjec = o => Array.isArray(o.infra_ejecutores) && o.infra_ejecutores.some(e=>e && e.consorcio_nombre);
 function filtered(){
   const q=$('#q').value.toLowerCase().trim();
-  const sec=$('#fSector').value, dep=$('#fDepto').value, dec=$('#fDec').value, est=$('#fEstado').value, ano=$('#fAnio').value, mob=$('#fMob').checked;
+  const sec=$('#fSector').value, dep=$('#fDepto').value, dec=$('#fDec').value, est=$('#fEstado').value, ano=$('#fAnio').value, mob=$('#fMob').checked, noEjec=$('#fNoEjec').checked;
   const sort=$('#fSort').value;
   const list = DATA.filter(o=>{
     if(q && !((o.nombre||'').toLowerCase().includes(q) || (o.financista||'').toLowerCase().includes(q))) return false;
@@ -206,6 +208,7 @@ function filtered(){
     if(est && o.estado_convenio!==est) return false;
     if(ano && String(o.anio_buena_pro)!==ano) return false;
     if(mob && !o.incluye_mobiliario) return false;
+    if(noEjec && hasEjec(o)) return false;
     return true;
   });
   const cmp = {
@@ -227,6 +230,7 @@ function render(){
     const loc = [o.distrito,o.provincia,o.departamento].filter(Boolean).join(', ');
     const dec = o.ai_recommendation ? `<span class="tag dec-${o.ai_recommendation.toLowerCase()}">${o.ai_recommendation}</span>` : '';
     const mob = o.incluye_mobiliario ? '<span class="tag mob">Mobiliario</span>' : '';
+    const noej = hasEjec(o) ? '' : '<span class="tag" style="color:var(--amber);border-color:transparent;background:rgba(245,166,35,.12);">Sin ejecutor</span>';
     return `<div class="card" onclick="openDetail('${o.id}')">
       <div class="score ${scoreClass(o.ai_score)}">${o.ai_score??'—'}</div>
       <div class="card-body">
@@ -239,7 +243,7 @@ function render(){
           ${o.anio_buena_pro?`<span><b>Buena pro:</b> ${o.anio_buena_pro}</span>`:''}
           ${o.fecha_convenio?`<span><b>Convenio:</b> ${o.fecha_convenio}</span>`:''}
         </div>
-        <div class="tags">${dec}${mob}<span class="tag">${o.sector||o.business_line||''}</span></div>
+        <div class="tags">${dec}${mob}${noej}<span class="tag">${o.sector||o.business_line||''}</span></div>
       </div>
     </div>`;
   }).join('');
@@ -268,7 +272,24 @@ function drawDetail(o, senales, ejecutores){
   const risks=(o.ai_risks||[]).map(x=>`<div class="li"><span class="dot">▸</span>${x}</div>`).join('');
   const actions=(o.ai_actions||[]).map(x=>`<div class="li"><span class="dot">✓</span>${x}</div>`).join('');
   const sen=senales.length?senales.map(s=>`<div class="li"><span class="dot">⚑</span>${s.tipo} — ${s.descripcion||''}</div>`).join(''):'<div class="meta">Sin señales registradas.</div>';
-  const ejec=ejecutores.length?ejecutores.map(e=>`<div class="li"><span class="dot">●</span>${e.consorcio_nombre||'(por confirmar)'} · ${e.estado_verificacion}</div>`).join(''):'<div class="meta">Ejecutor no identificado todavía.</div>';
+  const ej = ejecutores[0] || {};
+  const gQuery = encodeURIComponent(`${o.nombre||''} ${o.external_id||''} ejecutor consorcio contratista infobras`);
+  const gUrl = 'https://www.google.com/search?q='+gQuery;
+  const ejContactoVal = (ej.contacto && ej.contacto.nota ? ej.contacto.nota : '');
+  const ejecHtml = `
+    <div style="display:flex;gap:8px;margin-bottom:10px;">
+      <a class="btn" href="${gUrl}" target="_blank" rel="noopener" style="text-decoration:none;">🔎 Buscar ejecutor</a>
+      <a class="btn ghost" href="https://apps.contraloria.gob.pe/ciudadano/" target="_blank" rel="noopener" style="text-decoration:none;">INFOBRAS</a>
+    </div>
+    <input id="ejNombre" placeholder="Consorcio / constructora" value="${(ej.consorcio_nombre||'').replace(/"/g,'&quot;')}" style="width:100%;margin-bottom:7px;">
+    <div style="display:flex;gap:7px;margin-bottom:7px;">
+      <input id="ejRuc" placeholder="RUC" value="${(ej.ruc||'').replace(/"/g,'&quot;')}" style="flex:1;">
+      <select id="ejEstado" style="flex:1;">
+        ${['pendiente','en_revision','confirmado','descartado'].map(s=>`<option value="${s}" ${(ej.estado_verificacion||'en_revision')===s?'selected':''}>${s}</option>`).join('')}
+      </select>
+    </div>
+    <input id="ejContacto" placeholder="Contacto (teléfono / correo / nombre)" value="${ejContactoVal.replace(/"/g,'&quot;')}" style="width:100%;margin-bottom:8px;">
+    <button class="btn" onclick="saveEjecutor()">Guardar ejecutor</button>`;
   $('#drawer').innerHTML = `<button class="closeX" onclick="closeDetail()">×</button>
     <h2>${o.nombre||'Oportunidad'}</h2>
     <div class="tags" style="margin:6px 0 2px;">
@@ -293,7 +314,7 @@ function drawDetail(o, senales, ejecutores){
     ${risks?`<div class="section"><div class="t">Riesgos</div>${risks}</div>`:''}
     ${actions?`<div class="section"><div class="t">Acciones</div>${actions}</div>`:''}
     <div class="section"><div class="t">Señales</div>${sen}</div>
-    <div class="section"><div class="t">Ejecutor</div>${ejec}</div>
+    <div class="section"><div class="t">Ejecutor</div>${ejecHtml}</div>
     <div class="section"><div class="t">Consultar a la IA</div>
       <div id="chatLog"></div>
       <div class="chatbox">
@@ -321,6 +342,29 @@ async function sendChat(){
     wait.textContent = j.ok ? j.answer : ('Error: '+(j.error||'desconocido'));
   }catch(e){ wait.textContent='Error: '+e.message; }
   inp.disabled=false; inp.focus(); log.scrollTop=log.scrollHeight;
+}
+
+async function saveEjecutor(){
+  if(!CURRENT_ID) return;
+  const nota=$('#ejContacto').value.trim();
+  const body={
+    consorcio_nombre: $('#ejNombre').value.trim(),
+    ruc: $('#ejRuc').value.trim(),
+    contacto: nota ? { nota } : null,
+    estado_verificacion: $('#ejEstado').value,
+    fuente: 'manual'
+  };
+  try{
+    const r=await fetch('/api/infra/opportunities/'+CURRENT_ID+'/ejecutor',{
+      method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)
+    });
+    const j=await r.json();
+    if(j.ok){
+      toast('Ejecutor guardado.');
+      const o=DATA.find(x=>x.id===CURRENT_ID);
+      if(o){ o.infra_ejecutores=[{consorcio_nombre:body.consorcio_nombre, estado_verificacion:body.estado_verificacion}]; render(); }
+    } else toast('Error: '+(j.error||'desconocido'));
+  }catch(e){ toast('Error: '+e.message); }
 }
 
 // Upload base MEF
@@ -351,7 +395,7 @@ $('#btnScore').addEventListener('click', async ()=>{
 });
 
 $('#btnReload').addEventListener('click', load);
-['#q','#fSector','#fDepto','#fEstado','#fAnio','#fDec','#fSort','#fMob'].forEach(s=>$(s).addEventListener('input', render));
+['#q','#fSector','#fDepto','#fEstado','#fAnio','#fDec','#fSort','#fMob','#fNoEjec'].forEach(s=>$(s).addEventListener('input', render));
 $('#drawerBg').addEventListener('click', closeDetail);
 
 load();
