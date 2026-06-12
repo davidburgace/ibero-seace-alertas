@@ -312,7 +312,7 @@ router.post('/api/infra/ingest', async (_, res, next) => {
 router.get('/api/infra/opportunities', async (req, res, next) => {
   try {
     if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
-    let q = supabase.from('infra_oportunidades').select('id,fuente,external_id,nombre,entidad_publica,financista,sector,departamento,provincia,distrito,monto_inversion,etapa,estado_convenio,estado_ejecucion,incluye_mobiliario,business_line,ai_summary,ai_score,ai_recommendation,ai_criteria,ai_risks,ai_actions,fecha_deteccion,anio_buena_pro,fecha_convenio')
+    let q = supabase.from('infra_oportunidades').select('id,fuente,external_id,nombre,entidad_publica,financista,sector,departamento,provincia,distrito,monto_inversion,etapa,estado_convenio,estado_ejecucion,incluye_mobiliario,business_line,ai_summary,ai_score,ai_recommendation,ai_criteria,ai_risks,ai_actions,fecha_deteccion,anio_buena_pro,fecha_convenio,infra_ejecutores(consorcio_nombre,estado_verificacion)')
       .order('ai_score', { ascending: false, nullsFirst: false }).limit(500);
     if (req.query.sector)       q = q.ilike('sector', `%${req.query.sector}%`);
     if (req.query.financista)   q = q.ilike('financista', `%${req.query.financista}%`);
@@ -335,6 +335,31 @@ router.get('/api/infra/opportunities/:id', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 // Chat sobre una oportunidad (grounded en sus datos + análisis IA; sin RAG porque OxI no trae documentos)
+// Guardar/actualizar el ejecutor de una oportunidad (cola de enriquecimiento)
+router.put('/api/infra/opportunities/:id/ejecutor', async (req, res, next) => {
+  try {
+    if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
+    const { consorcio_nombre, ruc, contacto, estado_verificacion, fuente } = req.body;
+    const payload = {
+      oportunidad_id: req.params.id,
+      consorcio_nombre: consorcio_nombre || null,
+      ruc: ruc || null,
+      contacto: contacto || null,
+      estado_verificacion: estado_verificacion || 'en_revision',
+      fuente: fuente || 'infobras',
+      updated_at: new Date().toISOString()
+    };
+    const { data: existing } = await supabase.from('infra_ejecutores').select('id').eq('oportunidad_id', req.params.id).limit(1);
+    let result;
+    if (existing && existing.length) {
+      result = await supabase.from('infra_ejecutores').update(payload).eq('id', existing[0].id).select().single();
+    } else {
+      result = await supabase.from('infra_ejecutores').insert(payload).select().single();
+    }
+    if (result.error) throw result.error;
+    res.json({ ok: true, ejecutor: result.data });
+  } catch (e) { next(e); }
+});
 router.post('/api/infra/opportunities/:id/ask', async (req, res, next) => {
   try {
     if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
