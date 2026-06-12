@@ -1,17 +1,23 @@
 // ============================================================================
-// src/infra.js  —  Módulo Infra-Radar (Fase A: ingesta MEF OxI + scoring)
-// Se monta en server.js con dos líneas (ver instrucciones al final del archivo).
-// Reutiliza el mismo stack: Supabase (service key), OpenAI gpt-4o-mini,
-// embeddings text-embedding-3-small, Nodemailer. No toca lo existente.
+// src/infra.js  —  Módulo Infra-Radar  (Fase A, v2)
+// v2: el MEF está detrás de Incapsula (anti-bots) y bloquea la descarga desde
+// Render. Como la base se actualiza ~mensual, el flujo robusto es subir el .xlsx
+// a mano (bajado desde el navegador, que sí pasa Incapsula).
+//   - POST /api/infra/ingest-upload   (multipart, campo "file")  ← USAR ESTE
+//   - POST /api/infra/ingest          (intenta por URL; suele bloquearse)
+// Reutiliza el stack: Supabase (service key), OpenAI gpt-4o-mini, embeddings
+// text-embedding-3-small, Nodemailer, multer. No toca lo existente.
 // ============================================================================
 
 import express from 'express';
 import { createClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
 import nodemailer from 'nodemailer';
+import multer from 'multer';
 import * as XLSX from 'xlsx';
 
 const router = express.Router();
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 80 * 1024 * 1024 } });
 
 // ─── Clientes (mismos env que server.js) ────────────────────────────────────
 const SUPABASE_KEY = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -20,8 +26,6 @@ const supabase = process.env.SUPABASE_URL && SUPABASE_KEY
   : null;
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-// URL de la base de adjudicaciones OxI del MEF. Cambia la fecha de corte vía env
-// MEF_OXI_XLSX_URL cuando el MEF publique un corte nuevo.
 const MEF_OXI_XLSX_URL = process.env.MEF_OXI_XLSX_URL
   || 'https://www.mef.gob.pe/contenidos/inv_privada/obras_impuestos/base_adjudicaciones_OXI_31032026.xlsx';
 
@@ -34,14 +38,11 @@ function normaliza(v) {
     .toUpperCase().replace(/\s+/g, ' ').trim();
 }
 
-// Detección tolerante de columnas: devuelve la primera cuyo encabezado
-// contiene TODAS las claves dadas (sin tildes, mayúsculas).
 function findCol(headers, ...claves) {
   const c = claves.map(normaliza);
   return headers.find(h => { const n = normaliza(h); return c.every(k => n.includes(k)); }) || null;
 }
 
-// Misma clasificación de línea de negocio que server.js
 function classify(text = '') {
   const t = text.toLowerCase();
   if (t.includes('hospital') || t.includes('clínic') || t.includes('clinic') || t.includes('salud') || t.includes('cama')) return 'Hospitalario';
@@ -51,8 +52,92 @@ function classify(text = '') {
   return 'General';
 }
 
-// ─── Ingesta: base OxI del MEF ───────────────────────────────────────────────
-async function fetchMefRows() {
+// ─── Parseo del workbook (compartido por URL y por upload) ───────────────────
+function rowsFromBuffer(buf) {
+  // Validar que sea un .xlsx real (ZIP → empieza con "PK"). Si no, es HTML/bloqueo.
+  if (!buf || buf.length < 4 || buf[0] !== 0x50 || buf[1] !== 0x4B) {
+    const preview = Buffer.from(buf || []).toString('utf8', 0, 300).replace(/\s+/g, ' ');
+    throw new Error(`No es un .xlsx válido (¿bloqueo Incapsula o archivo equivocado?). inicio="${preview}"`);
+  }
+  const wb = XLSX.read(buf, { type: 'buffer' });
+  const sheet = wb.Sheets[wb.SheetNames[0]];
+  // La base suele tener filas de título antes del encabezado real.
+  for (let hdr = 0; hdr < 6; hdr++) {
+    const rows = XLSX.utils.sheet_to_json(sheet, { range: hdr, defval: null });
+    if (rows.length && findCol(Object.keys(rows[0]), 'FINANCISTA')) {
+      return { rows, headers: Object.keys(rows[0]) };
+    }
+  }
+  throw new Error('No se detectó el encabezado (columna FINANCISTA) en la base del MEF.');
+}
+
+function normalizeMefRow(row, cols) {
+  const cui = row[cols.cui];
+  const nombre = row[cols.nombre];
+  if (!cui || !nombre) return null;
+  const texto = `${nombre} ${row[cols.sector] || ''}`;
+  return {
+    fuente: 'oxi_mef',
+    external_id: String(cui).trim(),
+    nombre: String(nombre).trim(),
+    entidad_publica: cols.entidad ? row[cols.entidad] : null,
+    financista: cols.financista && row[cols.financista] ? String(row[cols.financista]).trim() : null,
+    sector: cols.sector ? row[cols.sector] : null,
+    departamento: cols.depto ? row[cols.depto] : null,
+    provincia: cols.prov ? row[cols.prov] : null,
+    distrito: cols.dist ? row[cols.dist] : null,
+    monto_inversion: cols.monto && row[cols.monto] != null ? Number(String(row[cols.monto]).replace(/[^\d.-]/g, '')) || null : null,
+    estado_convenio: cols.estado ? row[cols.estado] : null,
+    business_line: classify(texto),
+    incluye_mobiliario: /MOBILIARI|EQUIPAMIENT|CARPETA/.test(normaliza(texto)),
+    raw: row,
+    alert_sent: false
+  };
+}
+
+function esRelevante(item) {
+  const t = normaliza(`${item.nombre} ${item.sector || ''}`);
+  return t.includes('EDUCAC') || t.includes('COLEGIO') || t.includes('INSTITUCION EDUCATIVA')
+      || t.includes('I.E') || item.business_line === 'Educación';
+}
+
+function detectCols(headers) {
+  return {
+    cui:        findCol(headers, 'CODIGO', 'UNICO') || findCol(headers, 'CUI') || findCol(headers, 'SNIP'),
+    nombre:     findCol(headers, 'INTERVENCION') || findCol(headers, 'NOMBRE', 'PROYECTO') || findCol(headers, 'NOMBRE'),
+    financista: findCol(headers, 'FINANCISTA'),
+    sector:     findCol(headers, 'SECTOR') || findCol(headers, 'MATERIA') || findCol(headers, 'FUNCION'),
+    entidad:    findCol(headers, 'ENTIDAD', 'PUBLICA') || findCol(headers, 'ENTIDAD'),
+    depto:      findCol(headers, 'DEPARTAMENTO'),
+    prov:       findCol(headers, 'PROVINCIA'),
+    dist:       findCol(headers, 'DISTRITO'),
+    monto:      findCol(headers, 'MONTO', 'INVERSION') || findCol(headers, 'MONTO', 'ADJUDICACION'),
+    estado:     findCol(headers, 'ESTADO', 'CONVENIO') || findCol(headers, 'ESTADO')
+  };
+}
+
+// Núcleo: parsea un buffer .xlsx y hace upsert. Lo usan URL y upload.
+async function ingestFromBuffer(buf) {
+  if (!supabase) throw new Error('Supabase no configurado');
+  const { rows, headers } = rowsFromBuffer(buf);
+  const cols = detectCols(headers);
+  console.log('[INFRA] Columnas detectadas:', cols);
+
+  const items = rows.map(r => normalizeMefRow(r, cols)).filter(Boolean).filter(esRelevante);
+  const byId = new Map();
+  items.forEach(i => byId.set(i.external_id, i));
+  const unique = [...byId.values()];
+
+  if (unique.length) {
+    const { error } = await supabase.from('infra_oportunidades')
+      .upsert(unique, { onConflict: 'fuente,external_id', ignoreDuplicates: false });
+    if (error) throw error;
+  }
+  return { total_filas: rows.length, relevantes: unique.length, columnas: cols };
+}
+
+// Intento por URL (suele bloquearse por Incapsula desde Render)
+async function ingestOxiMefURL() {
   const res = await fetch(MEF_OXI_XLSX_URL, {
     headers: {
       'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -65,107 +150,16 @@ async function fetchMefRows() {
   });
   if (!res.ok) throw new Error(`MEF HTTP ${res.status}`);
   const buf = Buffer.from(await res.arrayBuffer());
-  // Validar que sea un .xlsx real (los .xlsx son ZIP y empiezan con "PK").
-  if (buf.length < 4 || buf[0] !== 0x50 || buf[1] !== 0x4B) {
-    const preview = buf.toString('utf8', 0, 300).replace(/\s+/g, ' ');
-    throw new Error(`El MEF no devolvió un .xlsx. content-type=${res.headers.get('content-type')} inicio="${preview}"`);
-  }
-  const wb = XLSX.read(buf, { type: 'buffer' });
-  const sheet = wb.Sheets[wb.SheetNames[0]];
-
-  // La base suele tener filas de título antes del encabezado real.
-  // Probamos varias filas de encabezado hasta hallar "financista".
-  for (let hdr = 0; hdr < 6; hdr++) {
-    const rows = XLSX.utils.sheet_to_json(sheet, { range: hdr, defval: null });
-    if (!rows.length) continue;
-    const headers = Object.keys(rows[0]);
-    if (findCol(headers, 'FINANCISTA')) {
-      return { rows, headers, headerRow: hdr };
-    }
-  }
-  throw new Error('No se detectó el encabezado (columna FINANCISTA) en la base del MEF.');
+  return ingestFromBuffer(buf);
 }
 
-function normalizeMefRow(row, cols) {
-  const cui      = row[cols.cui];
-  const nombre   = row[cols.nombre];
-  const financista = row[cols.financista];
-  if (!cui || !nombre) return null;
-
-  const texto = `${nombre} ${row[cols.sector] || ''}`;
-  const business_line = classify(texto);
-  const incluye_mobiliario = /MOBILIARI|EQUIPAMIENT|CARPETA/.test(normaliza(texto));
-
-  return {
-    fuente: 'oxi_mef',
-    external_id: String(cui).trim(),
-    nombre: String(nombre).trim(),
-    entidad_publica: cols.entidad ? row[cols.entidad] : null,
-    financista: financista ? String(financista).trim() : null,
-    sector: cols.sector ? row[cols.sector] : null,
-    departamento: cols.depto ? row[cols.depto] : null,
-    provincia: cols.prov ? row[cols.prov] : null,
-    distrito: cols.dist ? row[cols.dist] : null,
-    monto_inversion: cols.monto && row[cols.monto] != null ? Number(String(row[cols.monto]).replace(/[^\d.-]/g, '')) || null : null,
-    estado_convenio: cols.estado ? row[cols.estado] : null,
-    business_line,
-    incluye_mobiliario,
-    raw: row,
-    alert_sent: false
-  };
-}
-
-// Filtro de relevancia para Ibero: foco educación (colegios). Ajustable.
-function esRelevante(item) {
-  const t = normaliza(`${item.nombre} ${item.sector || ''}`);
-  return t.includes('EDUCAC') || t.includes('COLEGIO') || t.includes('INSTITUCION EDUCATIVA')
-      || t.includes('I.E') || item.business_line === 'Educación';
-}
-
-async function ingestOxiMef() {
-  if (!supabase) throw new Error('Supabase no configurado');
-  const { rows, headers } = await fetchMefRows();
-
-  const cols = {
-    cui:        findCol(headers, 'CODIGO', 'UNICO') || findCol(headers, 'CUI') || findCol(headers, 'SNIP'),
-    nombre:     findCol(headers, 'INTERVENCION') || findCol(headers, 'NOMBRE', 'PROYECTO') || findCol(headers, 'NOMBRE'),
-    financista: findCol(headers, 'FINANCISTA'),
-    sector:     findCol(headers, 'SECTOR') || findCol(headers, 'MATERIA') || findCol(headers, 'FUNCION'),
-    entidad:    findCol(headers, 'ENTIDAD', 'PUBLICA') || findCol(headers, 'ENTIDAD'),
-    depto:      findCol(headers, 'DEPARTAMENTO'),
-    prov:       findCol(headers, 'PROVINCIA'),
-    dist:       findCol(headers, 'DISTRITO'),
-    monto:      findCol(headers, 'MONTO', 'INVERSION') || findCol(headers, 'MONTO', 'ADJUDICACION'),
-    estado:     findCol(headers, 'ESTADO', 'CONVENIO') || findCol(headers, 'ESTADO')
-  };
-  console.log('[INFRA] Columnas detectadas:', cols);
-
-  const items = rows.map(r => normalizeMefRow(r, cols)).filter(Boolean).filter(esRelevante);
-
-  // Dedup por (fuente, external_id)
-  const byId = new Map();
-  items.forEach(i => byId.set(i.external_id, i));
-  const unique = [...byId.values()];
-
-  if (unique.length) {
-    const { error } = await supabase
-      .from('infra_oportunidades')
-      .upsert(unique, { onConflict: 'fuente,external_id', ignoreDuplicates: false });
-    if (error) throw error;
-  }
-  return { total_filas: rows.length, relevantes: unique.length, columnas: cols };
-}
-
-// ─── IA: scoring de oportunidad de infraestructura ───────────────────────────
+// ─── IA: scoring ─────────────────────────────────────────────────────────────
 async function callAI(prompt) {
   const r = await openai.chat.completions.create({
-    model: 'gpt-4o-mini',
-    messages: [{ role: 'user', content: prompt }],
-    temperature: 0.3
+    model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], temperature: 0.3
   });
   return r.choices[0].message.content;
 }
-
 async function getEmbedding(text) {
   const r = await openai.embeddings.create({ model: 'text-embedding-3-small', input: String(text).slice(0, 8000) });
   return r.data[0].embedding;
@@ -188,8 +182,8 @@ Monto inversión: ${op.monto_inversion ? `S/ ${Number(op.monto_inversion).toLoca
 Etapa: ${op.etapa || op.estado_convenio || 'No especificada'}
 ¿Incluye mobiliario/equipamiento?: ${op.incluye_mobiliario === true ? 'Sí (heurística)' : 'Por confirmar'}
 
-Responde ÚNICAMENTE con JSON válido, sin texto adicional. Calcula los valores reales.
-El score total debe ser la suma de los criteria.score (máx 100):
+Responde ÚNICAMENTE con JSON válido, sin texto adicional. El score total debe ser la
+suma de los criteria.score (máx 100):
 {
   "summary": "resumen ejecutivo en 2 oraciones",
   "business_line": "Educación|Hospitalario|Oficina|Metalmecánica|General",
@@ -231,7 +225,7 @@ async function scoreOpportunity(id) {
   return { ...op, ...update };
 }
 
-// ─── Digest por correo (reusa el patrón de Nodemailer) ───────────────────────
+// ─── Digest ──────────────────────────────────────────────────────────────────
 function renderInfraEmail(ops) {
   const rows = ops.slice(0, 15).map(o => {
     const link = `${FRONTEND_URL}/infra.html?id=${encodeURIComponent(o.id)}`;
@@ -267,7 +261,6 @@ async function sendInfraDigest() {
   const { data: vendors } = await supabase.from('vendors').select('*');
   const recipients = (vendors || []).map(v => v.email).filter(Boolean).join(',');
   if (!recipients) return { ok: false, message: 'No hay vendedores configurados' };
-
   const transport = nodemailer.createTransport({
     host: process.env.SMTP_HOST, port: Number(process.env.SMTP_PORT || 587),
     secure: String(process.env.SMTP_SECURE || 'false') === 'true',
@@ -276,8 +269,7 @@ async function sendInfraDigest() {
   });
   await transport.verify();
   const info = await transport.sendMail({
-    from: process.env.MAIL_FROM || process.env.SMTP_USER,
-    to: recipients,
+    from: process.env.MAIL_FROM || process.env.SMTP_USER, to: recipients,
     subject: `🏗️ ${(ops || []).length} oportunidades Infra (OxI/APP) — Radar Ibero`,
     html: renderInfraEmail(ops || [])
   });
@@ -288,8 +280,17 @@ async function sendInfraDigest() {
 router.get('/api/infra/health', (_, res) =>
   res.json({ ok: true, supabase: !!supabase, mef_url: MEF_OXI_XLSX_URL }));
 
+// PRINCIPAL: subir el .xlsx bajado desde el navegador (pasa Incapsula)
+router.post('/api/infra/ingest-upload', upload.single('file'), async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ ok: false, error: 'Falta el archivo (campo "file")' });
+    res.json({ ok: true, archivo: req.file.originalname, ...(await ingestFromBuffer(req.file.buffer)) });
+  } catch (e) { next(e); }
+});
+
+// Intento por URL (probablemente bloqueado por Incapsula desde Render)
 router.post('/api/infra/ingest', async (_, res, next) => {
-  try { res.json({ ok: true, ...(await ingestOxiMef()) }); } catch (e) { next(e); }
+  try { res.json({ ok: true, ...(await ingestOxiMefURL()) }); } catch (e) { next(e); }
 });
 
 router.get('/api/infra/opportunities', async (req, res, next) => {
@@ -318,20 +319,17 @@ router.get('/api/infra/opportunities/:id', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// Disparo manual de scoring para un lote sin analizar (controla costo de tokens)
 router.post('/api/infra/score-pending', async (req, res, next) => {
   try {
     if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
     const limit = Math.min(Number(req.query.limit || 10), 50);
-    const { data } = await supabase.from('infra_oportunidades').select('id')
-      .is('ai_score', null).limit(limit);
+    const { data } = await supabase.from('infra_oportunidades').select('id').is('ai_score', null).limit(limit);
     let done = 0;
     for (const row of data || []) { try { await scoreOpportunity(row.id); done++; } catch (e) { console.error(e.message); } }
     res.json({ ok: true, scored: done });
   } catch (e) { next(e); }
 });
 
-// Alta manual de señal (p.ej. retraso de mobiliario detectado a mano en Fase A)
 router.post('/api/infra/senales', async (req, res, next) => {
   try {
     if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
@@ -346,9 +344,9 @@ router.post('/api/infra/senales', async (req, res, next) => {
 router.get('/api/infra/send-digest', async (_, res, next) => { try { res.json(await sendInfraDigest()); } catch (e) { next(e); } });
 router.post('/api/infra/send-digest', async (_, res, next) => { try { res.json(await sendInfraDigest()); } catch (e) { next(e); } });
 
-// Para el cron de server.js
+// Para el cron de server.js (intenta por URL; si Incapsula bloquea, solo registra el error)
 export async function runInfraIngest() {
-  const r = await ingestOxiMef();
+  const r = await ingestOxiMefURL();
   console.log(`[INFRA][CRON] OxI MEF: ${r.relevantes} relevantes de ${r.total_filas} filas`);
   return r;
 }
@@ -356,20 +354,11 @@ export async function runInfraIngest() {
 export default router;
 
 // ============================================================================
-// INTEGRACIÓN EN server.js (3 cambios mínimos):
+// INTEGRACIÓN EN server.js (sin cambios respecto a v1):
+//   1) import infraRouter, { runInfraIngest } from './infra.js';
+//   2) app.use(infraRouter);   (antes del middleware de error)
+//   3) (opcional) cron — ojo: por Incapsula probablemente falle; el flujo real
+//      es subir el archivo a mano con /api/infra/ingest-upload una vez al mes.
 //
-// 1) Arriba, junto a los demás imports:
-//      import infraRouter, { runInfraIngest } from './infra.js';
-//
-// 2) Después de las rutas existentes (antes del middleware de error
-//    app.use((err,...))):
-//      app.use(infraRouter);
-//
-// 3) (Opcional) un cron propio para la base OxI, que se actualiza ~mensual.
-//    Junto al cron.schedule existente:
-//      cron.schedule(process.env.INFRA_CRON || '0 9 * * 1', async () => {
-//        try { await runInfraIngest(); } catch (e) { console.error('[INFRA][CRON]', e.message); }
-//      });
-//
-// Y en package.json agregar la dependencia:  "xlsx": "^0.18.5"
+// package.json: "xlsx" (nuevo) y "multer" (YA lo tienes) deben estar presentes.
 // ============================================================================
