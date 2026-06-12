@@ -85,6 +85,14 @@
   .li .dot{color:var(--accent2);flex-shrink:0;}
   .loading{color:var(--muted);font-size:13px;padding:20px 0;}
 
+  /* Chat */
+  #chatLog{display:flex;flex-direction:column;gap:8px;margin:6px 0 10px;max-height:300px;overflow-y:auto;}
+  .msg{padding:9px 12px;border-radius:11px;font-size:13px;white-space:pre-wrap;line-height:1.5;}
+  .msg.q{background:var(--accent2);color:#fff;align-self:flex-end;max-width:85%;}
+  .msg.a{background:var(--surface2);color:var(--text);align-self:flex-start;max-width:92%;border:1px solid var(--border);}
+  .chatbox{display:flex;gap:8px;}
+  .chatbox input{flex:1;}
+
   /* Toast */
   #toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(120px);background:var(--surface2);border:1px solid var(--border2);color:var(--text);padding:12px 20px;border-radius:12px;font-size:13px;transition:.25s;z-index:300;max-width:90vw;}
   #toast.show{transform:translateX(-50%) translateY(0);}
@@ -134,6 +142,7 @@
 <script>
 const $ = s => document.querySelector(s);
 let DATA = [];
+let CURRENT_ID = null;
 
 const money = v => v ? 'S/ ' + Number(v).toLocaleString('es-PE') : 'No especificado';
 const scoreClass = s => s == null ? 'none' : s >= 70 ? 'high' : s >= 40 ? 'mid' : 'low';
@@ -210,6 +219,7 @@ function render(){
 
 async function openDetail(id){
   const o = DATA.find(x=>x.id===id);
+  CURRENT_ID = id;
   $('#drawerBg').classList.add('open'); $('#drawer').classList.add('open');
   $('#drawer').innerHTML = `<button class="closeX" onclick="closeDetail()">×</button>
     <h2>${o.nombre||'Oportunidad'}</h2>
@@ -253,9 +263,35 @@ function drawDetail(o, senales, ejecutores){
     ${risks?`<div class="section"><div class="t">Riesgos</div>${risks}</div>`:''}
     ${actions?`<div class="section"><div class="t">Acciones</div>${actions}</div>`:''}
     <div class="section"><div class="t">Señales</div>${sen}</div>
-    <div class="section"><div class="t">Ejecutor</div>${ejec}</div>`;
+    <div class="section"><div class="t">Ejecutor</div>${ejec}</div>
+    <div class="section"><div class="t">Consultar a la IA</div>
+      <div id="chatLog"></div>
+      <div class="chatbox">
+        <input id="chatInput" placeholder="Pregunta sobre esta oportunidad…" onkeydown="if(event.key==='Enter')sendChat()">
+        <button class="btn" onclick="sendChat()">Enviar</button>
+      </div>
+    </div>`;
 }
-function closeDetail(){ $('#drawerBg').classList.remove('open'); $('#drawer').classList.remove('open'); }
+function closeDetail(){ $('#drawerBg').classList.remove('open'); $('#drawer').classList.remove('open'); CURRENT_ID=null; }
+
+function escapeHtml(s){ return String(s).replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+async function sendChat(){
+  const inp=$('#chatInput'); if(!inp) return;
+  const q=inp.value.trim(); if(!q || !CURRENT_ID) return;
+  const log=$('#chatLog');
+  log.innerHTML += `<div class="msg q">${escapeHtml(q)}</div>`;
+  inp.value=''; inp.disabled=true;
+  const wait=document.createElement('div'); wait.className='msg a'; wait.textContent='…';
+  log.appendChild(wait); log.scrollTop=log.scrollHeight;
+  try{
+    const r=await fetch('/api/infra/opportunities/'+CURRENT_ID+'/ask',{
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({question:q})
+    });
+    const j=await r.json();
+    wait.textContent = j.ok ? j.answer : ('Error: '+(j.error||'desconocido'));
+  }catch(e){ wait.textContent='Error: '+e.message; }
+  inp.disabled=false; inp.focus(); log.scrollTop=log.scrollHeight;
+}
 
 // Upload base MEF
 $('#file').addEventListener('change', async e=>{
