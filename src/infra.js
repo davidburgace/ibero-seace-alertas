@@ -296,7 +296,7 @@ router.post('/api/infra/ingest', async (_, res, next) => {
 router.get('/api/infra/opportunities', async (req, res, next) => {
   try {
     if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
-    let q = supabase.from('infra_oportunidades').select('*')
+    let q = supabase.from('infra_oportunidades').select('id,fuente,external_id,nombre,entidad_publica,financista,sector,departamento,provincia,distrito,monto_inversion,etapa,estado_convenio,estado_ejecucion,incluye_mobiliario,business_line,ai_summary,ai_score,ai_recommendation,ai_criteria,ai_risks,ai_actions,fecha_deteccion')
       .order('ai_score', { ascending: false, nullsFirst: false }).limit(500);
     if (req.query.sector)       q = q.ilike('sector', `%${req.query.sector}%`);
     if (req.query.financista)   q = q.ilike('financista', `%${req.query.financista}%`);
