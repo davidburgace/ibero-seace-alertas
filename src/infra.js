@@ -104,7 +104,7 @@ function esRelevante(item) {
 function detectCols(headers) {
   return {
     cui:        findCol(headers, 'CODIGO', 'UNICO') || findCol(headers, 'CUI') || findCol(headers, 'SNIP'),
-    nombre:     findCol(headers, 'NOMBRE', 'INVERSION') || findCol(headers, 'NOMBRE', 'PROYECTO') || findCol(headers, 'NOMBRE', 'INTERVENCION') || findCol(headers, 'NOMBRE') || findCol(headers, 'DENOMINACION'),
+    nombre:     findCol(headers, 'NOMBRE', 'INVERSION') || headers.find(h => normaliza(h) === 'INTERVENCION') || findCol(headers, 'NOMBRE', 'PROYECTO') || findCol(headers, 'DENOMINACION'),
     financista: findCol(headers, 'FINANCISTA'),
     sector:     findCol(headers, 'SECTOR') || findCol(headers, 'MATERIA') || findCol(headers, 'FUNCION'),
     entidad:    findCol(headers, 'ENTIDAD', 'PUBLICA') || findCol(headers, 'ENTIDAD'),
