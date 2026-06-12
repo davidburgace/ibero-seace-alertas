@@ -8,6 +8,7 @@ import OpenAI from 'openai';
 import multer from 'multer';
 import pdfParse from 'pdf-parse/lib/pdf-parse.js';
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
+import infraRouter, { runInfraIngest } from './infra.js';
 const app = express();
 app.use(cors({ origin: process.env.FRONTEND_URL?.split(',') || '*' }));
 app.use(express.json());
@@ -672,6 +673,7 @@ app.delete('/api/admin/keywords/:id', async (req, res, next) => {
     res.json({ ok: true });
   } catch(e) { next(e); }
 });
+app.use(infraRouter);
 app.use((err, _, res, __) => {
   console.error('API error:', err);
   res.status(500).json({ error: err.message, version: VERSION });
@@ -687,6 +689,9 @@ cron.schedule(schedule, async () => {
     await sendDigest();
     console.log(`[CRON] Completado: ${result.items.length} oportunidades`);
   } catch (e) { console.error('[CRON] Error:', e.message); }
+});
+cron.schedule(process.env.INFRA_CRON || '0 9 * * 1', async () => {
+  try { await runInfraIngest(); } catch (e) { console.error('[INFRA][CRON]', e.message); }
 });
 
 app.listen(process.env.PORT || 3000, () =>
