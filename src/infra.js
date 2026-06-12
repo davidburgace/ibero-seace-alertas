@@ -318,7 +318,51 @@ router.get('/api/infra/opportunities/:id', async (req, res, next) => {
     res.json({ ok: true, opportunity: analyzed, senales: senales || [], ejecutores: ejecutores || [] });
   } catch (e) { next(e); }
 });
+// Chat sobre una oportunidad (grounded en sus datos + análisis IA; sin RAG porque OxI no trae documentos)
+router.post('/api/infra/opportunities/:id/ask', async (req, res, next) => {
+  try {
+    if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
+    const { question } = req.body;
+    if (!question || !question.trim()) return res.status(400).json({ ok: false, error: 'La pregunta es requerida' });
+    const { data: op } = await supabase.from('infra_oportunidades').select('*').eq('id', req.params.id).single();
+    if (!op) return res.status(404).json({ ok: false, error: 'No encontrada' });
+    const { data: senales } = await supabase.from('infra_senales').select('*').eq('oportunidad_id', req.params.id);
+    const { data: ejecutores } = await supabase.from('infra_ejecutores').select('*').eq('oportunidad_id', req.params.id);
 
+    const ctx = `OPORTUNIDAD (canal: ${op.fuente})
+Nombre: ${op.nombre || ''}
+Entidad pública: ${op.entidad_publica || ''}
+Financista: ${op.financista || ''}
+Sector: ${op.sector || ''}
+Ubicación: ${[op.distrito, op.provincia, op.departamento].filter(Boolean).join(', ')}
+Monto inversión: ${op.monto_inversion ? 'S/ ' + Number(op.monto_inversion).toLocaleString('es-PE') : 'No especificado'}
+Estado: ${op.estado_convenio || op.etapa || 'No especificado'}
+CUI: ${op.external_id || ''}
+¿Incluye mobiliario?: ${op.incluye_mobiliario ? 'Sí' : 'Por confirmar'}
+
+ANÁLISIS IA:
+Resumen: ${op.ai_summary || 'No analizado aún'}
+Score: ${op.ai_score ?? '—'} · Decisión: ${op.ai_recommendation || '—'}
+Riesgos: ${(op.ai_risks || []).join('; ') || '—'}
+Acciones: ${(op.ai_actions || []).join('; ') || '—'}
+
+SEÑALES: ${(senales || []).map(s => `${s.tipo}: ${s.descripcion || ''}`).join(' | ') || 'ninguna'}
+EJECUTOR: ${(ejecutores || []).map(e => `${e.consorcio_nombre || 'por confirmar'} (${e.estado_verificacion})`).join(', ') || 'no identificado'}`;
+
+    const prompt = `Eres un asistente comercial experto en infraestructura pública/privada (OxI, APP, PRONIED) para Grupo Ibero Perú (fabrica mobiliario escolar, hospitalario, de oficina y metálico). En estos canales el comprador del mobiliario suele ser el EJECUTOR de la obra, no la entidad ni la financista.
+
+${ctx}
+
+PREGUNTA: ${question}
+
+Responde claro, práctico y orientado a decisión comercial. Si la respuesta exige un dato que no está arriba (p.ej. quién es el ejecutor), dilo y sugiere dónde buscarlo (convenio, informe de Contraloría).`;
+
+    const r = await openai.chat.completions.create({
+      model: 'gpt-4o', messages: [{ role: 'user', content: prompt }], temperature: 0.3, max_tokens: 1500
+    });
+    res.json({ ok: true, answer: r.choices[0].message.content });
+  } catch (e) { next(e); }
+});
 router.post('/api/infra/score-pending', async (req, res, next) => {
   try {
     if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
