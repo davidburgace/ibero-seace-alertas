@@ -104,7 +104,7 @@ function esRelevante(item) {
 function detectCols(headers) {
   return {
     cui:        findCol(headers, 'CODIGO', 'UNICO') || findCol(headers, 'CUI') || findCol(headers, 'SNIP'),
-    nombre:     findCol(headers, 'INTERVENCION') || findCol(headers, 'NOMBRE', 'PROYECTO') || findCol(headers, 'NOMBRE'),
+    nombre:     findCol(headers, 'NOMBRE', 'INVERSION') || findCol(headers, 'NOMBRE', 'PROYECTO') || findCol(headers, 'NOMBRE', 'INTERVENCION') || findCol(headers, 'NOMBRE') || findCol(headers, 'DENOMINACION'),
     financista: findCol(headers, 'FINANCISTA'),
     sector:     findCol(headers, 'SECTOR') || findCol(headers, 'MATERIA') || findCol(headers, 'FUNCION'),
     entidad:    findCol(headers, 'ENTIDAD', 'PUBLICA') || findCol(headers, 'ENTIDAD'),
@@ -133,7 +133,7 @@ async function ingestFromBuffer(buf) {
       .upsert(unique, { onConflict: 'fuente,external_id', ignoreDuplicates: false });
     if (error) throw error;
   }
-  return { total_filas: rows.length, relevantes: unique.length, columnas: cols };
+  return { total_filas: rows.length, relevantes: unique.length, columnas: cols, headers };
 }
 
 // Intento por URL (suele bloquearse por Incapsula desde Render)
