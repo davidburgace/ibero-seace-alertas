@@ -18,6 +18,7 @@
     "nodemailer": "^6.9.8",
     "openai": "^4.28.0",
     "pdf-parse": "^1.1.1",
-    "pdfjs-dist": "^4.0.379"
+    "pdfjs-dist": "^4.0.379",
+    "xlsx": "^0.18.5"
   }
 }
