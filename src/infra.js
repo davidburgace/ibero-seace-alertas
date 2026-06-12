@@ -42,7 +42,15 @@ function findCol(headers, ...claves) {
   const c = claves.map(normaliza);
   return headers.find(h => { const n = normaliza(h); return c.every(k => n.includes(k)); }) || null;
 }
-
+function toISODate(v) {
+  if (v == null || v === '') return null;
+  if (v instanceof Date && !isNaN(v)) return v.toISOString().slice(0, 10);
+  const s = String(v).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  return null;
+}
 function classify(text = '') {
   const t = text.toLowerCase();
   if (t.includes('hospital') || t.includes('clínic') || t.includes('clinic') || t.includes('salud') || t.includes('cama')) return 'Hospitalario';
@@ -59,7 +67,7 @@ function rowsFromBuffer(buf) {
     const preview = Buffer.from(buf || []).toString('utf8', 0, 300).replace(/\s+/g, ' ');
     throw new Error(`No es un .xlsx válido (¿bloqueo Incapsula o archivo equivocado?). inicio="${preview}"`);
   }
-  const wb = XLSX.read(buf, { type: 'buffer' });
+  const wb = XLSX.read(buf, { type: 'buffer', cellDates: true });
   const sheet = wb.Sheets[wb.SheetNames[0]];
   // La base suele tener filas de título antes del encabezado real.
   for (let hdr = 0; hdr < 6; hdr++) {
@@ -88,6 +96,8 @@ function normalizeMefRow(row, cols) {
     distrito: cols.dist ? row[cols.dist] : null,
     monto_inversion: cols.monto && row[cols.monto] != null ? Number(String(row[cols.monto]).replace(/[^\d.-]/g, '')) || null : null,
     estado_convenio: cols.estado ? row[cols.estado] : null,
+    anio_buena_pro: cols.anio_bp && row[cols.anio_bp] != null ? (parseInt(String(row[cols.anio_bp]).replace(/[^\d]/g, '')) || null) : null,
+    fecha_convenio: cols.fecha_conv ? toISODate(row[cols.fecha_conv]) : null,
     business_line: classify(texto),
     incluye_mobiliario: /MOBILIARI|EQUIPAMIENT|CARPETA/.test(normaliza(texto)),
     raw: row,
@@ -112,7 +122,9 @@ function detectCols(headers) {
     prov:       findCol(headers, 'PROVINCIA'),
     dist:       findCol(headers, 'DISTRITO'),
     monto:      findCol(headers, 'MONTO', 'INVERSION') || findCol(headers, 'MONTO', 'ADJUDICACION'),
-    estado:     findCol(headers, 'ESTADO', 'CONVENIO') || findCol(headers, 'ESTADO')
+   estado:     findCol(headers, 'ESTADO', 'CONVENIO') || findCol(headers, 'ESTADO'),
+    anio_bp:    findCol(headers, 'BUENA', 'PRO'),
+    fecha_conv: findCol(headers, 'FECHA', 'CONVENIO')
   };
 }
 
@@ -300,7 +312,7 @@ router.post('/api/infra/ingest', async (_, res, next) => {
 router.get('/api/infra/opportunities', async (req, res, next) => {
   try {
     if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
-    let q = supabase.from('infra_oportunidades').select('id,fuente,external_id,nombre,entidad_publica,financista,sector,departamento,provincia,distrito,monto_inversion,etapa,estado_convenio,estado_ejecucion,incluye_mobiliario,business_line,ai_summary,ai_score,ai_recommendation,ai_criteria,ai_risks,ai_actions,fecha_deteccion')
+    let q = supabase.from('infra_oportunidades').select('id,fuente,external_id,nombre,entidad_publica,financista,sector,departamento,provincia,distrito,monto_inversion,etapa,estado_convenio,estado_ejecucion,incluye_mobiliario,business_line,ai_summary,ai_score,ai_recommendation,ai_criteria,ai_risks,ai_actions,fecha_deteccion,anio_buena_pro,fecha_convenio')
       .order('ai_score', { ascending: false, nullsFirst: false }).limit(500);
     if (req.query.sector)       q = q.ilike('sector', `%${req.query.sector}%`);
     if (req.query.financista)   q = q.ilike('financista', `%${req.query.financista}%`);
