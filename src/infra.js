@@ -123,7 +123,11 @@ async function ingestFromBuffer(buf) {
   const cols = detectCols(headers);
   console.log('[INFRA] Columnas detectadas:', cols);
 
-  const items = rows.map(r => normalizeMefRow(r, cols)).filter(Boolean).filter(esRelevante);
+  // Excluir estados sin opción comercial (concluido/liquidado)
+  const SIN_OPCION = /CONCLUID|LIQUIDAD/;
+  const items = rows.map(r => normalizeMefRow(r, cols)).filter(Boolean)
+    .filter(esRelevante)
+    .filter(i => !SIN_OPCION.test(normaliza(i.estado_convenio)));
   const byId = new Map();
   items.forEach(i => byId.set(i.external_id, i));
   const unique = [...byId.values()];
