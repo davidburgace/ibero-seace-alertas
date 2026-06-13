@@ -107,8 +107,12 @@ function normalizeMefRow(row, cols) {
 
 function esRelevante(item) {
   const t = normaliza(`${item.nombre} ${item.sector || ''}`);
-  return t.includes('EDUCAC') || t.includes('COLEGIO') || t.includes('INSTITUCION EDUCATIVA')
+  const educacion = t.includes('EDUCAC') || t.includes('COLEGIO') || t.includes('INSTITUCION EDUCATIVA')
       || t.includes('I.E') || item.business_line === 'Educación';
+  const salud = t.includes('SALUD') || t.includes('HOSPITAL') || t.includes('CLINIC')
+      || t.includes('CENTRO DE SALUD') || t.includes('ESTABLECIMIENTO DE SALUD')
+      || t.includes('POSTA') || item.business_line === 'Hospitalario';
+  return educacion || salud;
 }
 
 function detectCols(headers) {
