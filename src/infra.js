@@ -337,14 +337,60 @@ router.get('/api/infra/opportunities/:id', async (req, res, next) => {
 // Chat sobre una oportunidad (grounded en sus datos + análisis IA; sin RAG porque OxI no trae documentos)
 // Guardar/actualizar el ejecutor de una oportunidad (cola de enriquecimiento)
 // Búsqueda web del ejecutor (Responses API + web_search), con fallback de variante
+// Búsqueda web del ejecutor (Responses API + web_search), con fallback de variante
 async function buscarEjecutorWeb(input) {
-  const model = process.env.INFRA_SEARCH_MODEL || 'gpt-4o-mini';
+  const model = process.env.INFRA_SEARCH_MODEL || 'gpt-4o';
   try {
     return await openai.responses.create({ model, tools: [{ type: 'web_search' }], input });
   } catch (e) {
     return await openai.responses.create({ model, tools: [{ type: 'web_search_preview' }], input });
   }
 }
+
+function normNombre(s){ return String(s||'').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[^A-Z0-9 ]/g,' ').replace(/\s+/g,' ').trim(); }
+
+// Sugerir ejecutor: la IA busca en la web y PROPONE; el humano confirma y guarda
+router.post('/api/infra/opportunities/:id/sugerir-ejecutor', async (req, res, next) => {
+  try {
+    if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
+    const { data: op } = await supabase.from('infra_oportunidades').select('*').eq('id', req.params.id).single();
+    if (!op) return res.status(404).json({ ok: false, error: 'No encontrada' });
+
+    const loc = [op.distrito, op.provincia, op.departamento].filter(Boolean).join(', ');
+    const fin = op.financista || 'desconocido';
+    const input = `Eres un investigador de obras públicas peruanas. Tu única tarea es identificar la EMPRESA EJECUTORA (la constructora o consorcio de construcción que FÍSICAMENTE construye la obra) de este proyecto, ejecutado bajo Obras por Impuestos (OxI).
+
+REGLA CRÍTICA: en OxI hay DOS empresas distintas. La FINANCISTA aporta el dinero (suele ser un banco o una minera: BCP, Antamina, Southern, Interbank, etc.). La EJECUTORA construye (constructora o consorcio de obra civil). NUNCA las confundas.
+- La financista de ESTA obra es: "${fin}". Ese nombre está PROHIBIDO como respuesta. Si lo único que encuentras es la financista, responde ejecutor=null.
+- Tampoco aceptes a la entidad pública (PRONIED, municipalidad, gobierno regional, Minedu) como ejecutor.
+- Un ejecutor válido se ve así: "Consorcio ...", "Constructora ...", "... Contratistas Generales", "... Ingeniería y Construcción".
+
+Proyecto: ${op.nombre}
+CUI: ${op.external_id}
+Entidad pública: ${op.entidad_publica || ''}
+Ubicación: ${loc}
+
+Busca frases explícitas: "ejecución a cargo de", "ejecutada por el consorcio", "contratista", "construye la obra". Prioriza INFOBRAS (campo Ejecutor/Contratista), notas de colocación de primera piedra y convenios. Si no hallas una constructora claramente distinta de la financista, responde ejecutor=null con confianza "baja".
+
+Responde ÚNICAMENTE con JSON válido, sin texto adicional:
+{"ejecutor":"constructora/consorcio o null","ruc":"RUC o null","confianza":"alta|media|baja","fuente":"URL principal","nota":"1 oración explicando el hallazgo o por qué no se encontró"}`;
+
+    const r = await buscarEjecutorWeb(input);
+    const text = (r.output_text || '').replace(/```json|```/g, '').trim();
+    let sug;
+    try { sug = JSON.parse(text); } catch { sug = { ejecutor: null, confianza: 'baja', nota: (text || '').slice(0, 300) }; }
+
+    // Candado determinista: si la "sugerencia" es la financista (o la contiene), se descarta
+    if (sug && sug.ejecutor && op.financista) {
+      const e = normNombre(sug.ejecutor), f = normNombre(op.financista);
+      if (e && f && (e.includes(f) || f.includes(e))) {
+        sug = { ejecutor: null, confianza: 'baja', fuente: sug.fuente || null,
+                nota: 'Solo se halló la empresa financista, no el ejecutor. Verifícalo manualmente en INFOBRAS.' };
+      }
+    }
+    res.json({ ok: true, sugerencia: sug });
+  } catch (e) { next(e); }
+});
 
 // Sugerir ejecutor: la IA busca en la web y PROPONE; el humano confirma y guarda
 router.post('/api/infra/opportunities/:id/sugerir-ejecutor', async (req, res, next) => {
