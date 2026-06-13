@@ -281,8 +281,6 @@ function drawDetail(o, senales, ejecutores){
       <a class="btn" href="${gUrl}" target="_blank" rel="noopener" style="text-decoration:none;">🔎 Buscar ejecutor</a>
       <button class="btn ghost" onclick="abrirInfobras()" style="text-decoration:none;cursor:pointer;">INFOBRAS (avance)</button>
     </div>
-    <button class="btn" onclick="consultarInfobrasUI()" id="btnInfo" style="width:100%;margin-bottom:8px;">🔍 Consultar INFOBRAS (estado/ejecutor)</button>
-    <div id="infoRes" style="font-size:12.5px;color:var(--muted);margin-bottom:8px;line-height:1.5;"></div>
     <button class="btn" onclick="sugerirEjecutor()" id="btnSug" style="width:100%;margin-bottom:8px;">✨ Sugerir ejecutor (IA)</button>
     <div id="ejSug" style="font-size:12.5px;color:var(--muted);margin-bottom:8px;line-height:1.5;"></div>
     <input id="ejNombre" placeholder="Consorcio / constructora" value="${(ej.consorcio_nombre||'').replace(/"/g,'&quot;')}" style="width:100%;margin-bottom:7px;">
@@ -382,27 +380,6 @@ function infobrasQuery(o){
   core=core.replace(/^\s*(DE\s+LA|DE\s+EL|DEL|DE|LA|EL)\s+/i,'').replace(/\s+/g,' ').trim().slice(0,55);
   const dist=o.distrito?(' '+o.distrito):'';
   return ((core||nombre.slice(0,40))+dist).trim();
-}
-async function consultarInfobrasUI(){
-  if(!CURRENT_ID) return;
-  const btn=$('#btnInfo'), out=$('#infoRes');
-  btn.disabled=true; out.innerHTML='Consultando INFOBRAS…';
-  try{
-    const r=await fetch('/api/infra/opportunities/'+CURRENT_ID+'/infobras');
-    const j=await r.json();
-    if(j.ok && j.infobras){
-      const i=j.infobras;
-      if(!i.registrada){ out.innerHTML='No registrada en INFOBRAS (probablemente la obra no ha iniciado).'; }
-      else {
-        let html=`Estado INFOBRAS: <b style="color:var(--text);">${i.estado||'?'}</b>`;
-        if(i.avanceFisico!=null) html+=` · Avance: <b style="color:var(--text);">${i.avanceFisico}%</b>`;
-        if(i.contratista){ html+=`<br>Ejecutor: <b style="color:var(--text);">${i.contratista}</b> (clic en Guardar para registrarlo)`; if($('#ejNombre')) $('#ejNombre').value=i.contratista; }
-        else html+='<br>El ejecutor no viene en este resultado (puede estar solo en la ficha de detalle).';
-        out.innerHTML=html;
-      }
-    } else out.textContent='Error: '+(j.error||'desconocido');
-  }catch(e){ out.textContent='Error: '+e.message; }
-  btn.disabled=false;
 }
 function abrirInfobras(){
   const o=DATA.find(x=>x.id===CURRENT_ID);
