@@ -279,7 +279,7 @@ function drawDetail(o, senales, ejecutores){
   const ejecHtml = `
     <div style="display:flex;gap:8px;margin-bottom:10px;">
       <a class="btn" href="${gUrl}" target="_blank" rel="noopener" style="text-decoration:none;">🔎 Buscar ejecutor</a>
-      <a class="btn ghost" href="https://infobras.contraloria.gob.pe/InfobrasWeb/Mapa/Index" target="_blank" rel="noopener" style="text-decoration:none;">INFOBRAS (avance)</a>
+      <button class="btn ghost" onclick="abrirInfobras()" style="text-decoration:none;cursor:pointer;">INFOBRAS (avance)</button>
     </div>
     <button class="btn" onclick="sugerirEjecutor()" id="btnSug" style="width:100%;margin-bottom:8px;">✨ Sugerir ejecutor (IA)</button>
     <div id="ejSug" style="font-size:12.5px;color:var(--muted);margin-bottom:8px;line-height:1.5;"></div>
@@ -367,6 +367,27 @@ async function saveEjecutor(){
       if(o){ o.infra_ejecutores=[{consorcio_nombre:body.consorcio_nombre, estado_verificacion:body.estado_verificacion}]; render(); }
     } else toast('Error: '+(j.error||'desconocido'));
   }catch(e){ toast('Error: '+e.message); }
+}
+
+function infobrasQuery(o){
+  const nombre=(o.nombre||'').replace(/\s+/g,' ').trim();
+  const stop=/\b(DEL? DISTRITO|DISTRITO|DE LA PROVINCIA|PROVINCIA|DEL? DEPARTAMENTO|DEPARTAMENTO)\b/i;
+  let core='';
+  const m=nombre.match(/\b(I\.?E\.?[ISP]?\.?|C\.?E\.?|INSTITUCI[ÓO]N EDUCATIVA|COLEGIO|CEBA|CETPRO|ESCUELA)\b(.*)/i);
+  if(m){ core=m[1]+' '+m[2]; }
+  else { const e=nombre.match(/\bEN\b(.*)/i); if(e) core=e[1]; }
+  if(core){ const s=core.search(stop); if(s>0) core=core.slice(0,s); }
+  core=core.replace(/^\s*(DE\s+LA|DE\s+EL|DEL|DE|LA|EL)\s+/i,'').replace(/\s+/g,' ').trim().slice(0,55);
+  const dist=o.distrito?(' '+o.distrito):'';
+  return ((core||nombre.slice(0,40))+dist).trim();
+}
+function abrirInfobras(){
+  const o=DATA.find(x=>x.id===CURRENT_ID);
+  const query=o?infobrasQuery(o):'';
+  if(navigator.clipboard && query){
+    navigator.clipboard.writeText(query).then(()=>toast('Copiado para INFOBRAS: "'+query+'" — pégalo (Cmd+V) en el buscador')).catch(()=>{});
+  } else { toast('Abriendo INFOBRAS…'); }
+  window.open('https://infobras.contraloria.gob.pe/InfobrasWeb/Mapa/Index','_blank','noopener');
 }
 
 async function sugerirEjecutor(){
