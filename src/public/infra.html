@@ -309,7 +309,7 @@ function drawDetail(o, senales, ejecutores){
         <span><b>Estado:</b> ${o.estado_convenio||'—'}</span>
         ${o.anio_buena_pro?`<span><b>Año buena pro:</b> ${o.anio_buena_pro}</span>`:''}
         ${o.fecha_convenio?`<span><b>Fecha convenio:</b> ${o.fecha_convenio}</span>`:''}
-        <span><b>CUI:</b> ${o.external_id||'—'}</span>
+        <span><b>CUI:</b> ${o.external_id||'—'} ${o.external_id?`<button onclick="copyText('${o.external_id}','CUI')" title="Copiar CUI para pegar en INFOBRAS" style="margin-left:4px;background:var(--surface2);border:1px solid var(--border2);color:var(--muted);border-radius:6px;padding:1px 7px;font-size:11px;cursor:pointer;">⧉ copiar</button>`:''}</span>
       </div></div>
     ${crit?`<div class="section"><div class="t">Criterios</div>${crit}</div>`:''}
     ${o.recommendation?`<div class="section"><div class="t">Recomendación</div><div>${o.recommendation}</div></div>`:''}
@@ -328,6 +328,10 @@ function drawDetail(o, senales, ejecutores){
 function closeDetail(){ $('#drawerBg').classList.remove('open'); $('#drawer').classList.remove('open'); CURRENT_ID=null; }
 
 function escapeHtml(s){ return String(s).replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function copyText(text, label){
+  if(navigator.clipboard){ navigator.clipboard.writeText(text).then(()=>toast((label||'Texto')+' copiado: '+text)).catch(()=>toast('No se pudo copiar')); }
+  else { toast('Copia manual: '+text); }
+}
 async function sendChat(){
   const inp=$('#chatInput'); if(!inp) return;
   const q=inp.value.trim(); if(!q || !CURRENT_ID) return;
