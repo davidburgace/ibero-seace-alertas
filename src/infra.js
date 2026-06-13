@@ -350,8 +350,30 @@ router.get('/api/infra/opportunities/:id/infobras', async (req, res, next) => {
 router.post('/api/infra/ingest', async (_, res, next) => {
   try { res.json({ ok: true, ...(await ingestOxiMefURL()) }); } catch (e) { next(e); }
 });
-
-router.get('/api/infra/opportunities', async (req, res, next) => {
+// Diagnóstico ProInversión: trae el detalle desde el servidor y reporta si la ejecutora viene en el HTML
+router.get('/api/infra/proinversion-test', async (req, res) => {
+  try {
+    const url = req.query.url || 'https://www.investinperu.pe/procesos-de-seleccion/procesos-de-seleccion-detalle/?1056/1653';
+    const r = await fetch(url, {
+      headers: {
+        'User-Agent':'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept':'text/html,application/xhtml+xml'
+      },
+      signal: AbortSignal.timeout(20000)
+    });
+    const html = await r.text();
+    const up = html.toUpperCase();
+    const idx = up.indexOf('EJECUTORA');
+    const rucs = (html.match(/\b\d{11}\b/g) || []).slice(0, 12);
+    res.json({
+      ok: true, status: r.status, length: html.length,
+      tieneEjecutora: idx >= 0,
+      tieneAdjudicataria: up.includes('ADJUDICATARIA'),
+      rucsEncontrados: rucs,
+      snippet: idx >= 0 ? html.slice(idx, idx + 700).replace(/<[^>]+>/g,' ').replace(/\s+/g,' ') : html.slice(0, 500)
+    });
+  } catch (e) { res.json({ ok: false, error: e.message }); }
+});router.get('/api/infra/opportunities', async (req, res, next) => {
   try {
     if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
     let q = supabase.from('infra_oportunidades').select('id,fuente,external_id,nombre,entidad_publica,financista,sector,departamento,provincia,distrito,monto_inversion,etapa,estado_convenio,estado_ejecucion,incluye_mobiliario,business_line,ai_summary,ai_score,ai_recommendation,ai_criteria,ai_risks,ai_actions,fecha_deteccion,anio_buena_pro,fecha_convenio,infra_ejecutores(consorcio_nombre,estado_verificacion),proinversion_url,proinversion_estado')
