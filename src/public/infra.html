@@ -278,7 +278,7 @@ function drawDetail(o, senales, ejecutores){
   const gUrl = 'https://www.google.com/search?q='+gQuery;
   const ejContactoVal = (ej.contacto && ej.contacto.nota ? ej.contacto.nota : '');
   const ejecHtml = `
-    ${o.proinversion_url?`<a class="btn" href="${o.proinversion_url}" target="_blank" rel="noopener" style="display:block;text-align:center;box-sizing:border-box;width:100%;margin-bottom:8px;text-decoration:none;">🔗 Ver ejecutora oficial (ProInversión)</a>`:''}
+    ${o.proinversion_url?`<a class="btn" href="${o.proinversion_url}" target="_blank" rel="noopener" style="display:block;text-align:center;box-sizing:border-box;width:100%;margin-bottom:6px;text-decoration:none;">🔗 Ver ejecutora oficial (ProInversión)</a><button class="btn" onclick="cargarProinversion()" id="btnPI" style="width:100%;margin-bottom:8px;">⬇ Cargar ejecutor automáticamente</button><div id="piRes" style="font-size:12.5px;color:var(--muted);margin-bottom:8px;line-height:1.5;"></div>`:''}
     <div style="display:flex;gap:8px;margin-bottom:10px;">
       <a class="btn" href="${gUrl}" target="_blank" rel="noopener" style="text-decoration:none;">🔎 Buscar ejecutor</a>
       <button class="btn ghost" onclick="abrirInfobras()" style="text-decoration:none;cursor:pointer;">INFOBRAS (avance)</button>
@@ -394,6 +394,28 @@ function abrirInfobras(){
     navigator.clipboard.writeText(query).then(()=>toast('Copiado para INFOBRAS: "'+query+'" — pégalo (Cmd+V) en el buscador')).catch(()=>{});
   } else { toast('Abriendo INFOBRAS…'); }
   window.open('https://infobras.contraloria.gob.pe/InfobrasWeb/Mapa/Index','_blank','noopener');
+}
+
+async function cargarProinversion(){
+  if(!CURRENT_ID) return;
+  const btn=$('#btnPI'), out=$('#piRes');
+  btn.disabled=true; out.innerHTML='Cargando de ProInversión…';
+  try{
+    const r=await fetch('/api/infra/opportunities/'+CURRENT_ID+'/cargar-proinversion',{method:'POST'});
+    const j=await r.json();
+    if(j.ok){
+      const ej=j.ejecutoras||[];
+      if(ej.length){
+        const nombres=ej.map(e=>e.nombre).join(' + ');
+        const rucs=ej.map(e=>e.ruc).filter(Boolean).join(', ');
+        if($('#ejNombre')) $('#ejNombre').value=nombres;
+        if($('#ejRuc')) $('#ejRuc').value=rucs;
+        const adj=(j.adjudicatarias||[]).map(a=>a.nombre).join(', ');
+        out.innerHTML=`Ejecutor cargado: <b style="color:var(--text);">${nombres}</b>${rucs?` · RUC ${rucs}`:''}.${adj?`<br>Financista: ${adj}.`:''} Revisa y guarda.`;
+      } else out.innerHTML='ProInversión aún no muestra ejecutora (proceso sin adjudicar todavía).';
+    } else out.textContent='Error: '+(j.error||'desconocido');
+  }catch(e){ out.textContent='Error: '+e.message; }
+  btn.disabled=false;
 }
 
 async function sugerirEjecutor(){
