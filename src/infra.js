@@ -336,6 +336,43 @@ router.get('/api/infra/opportunities/:id', async (req, res, next) => {
 });
 // Chat sobre una oportunidad (grounded en sus datos + análisis IA; sin RAG porque OxI no trae documentos)
 // Guardar/actualizar el ejecutor de una oportunidad (cola de enriquecimiento)
+// Búsqueda web del ejecutor (Responses API + web_search), con fallback de variante
+async function buscarEjecutorWeb(input) {
+  const model = process.env.INFRA_SEARCH_MODEL || 'gpt-4o-mini';
+  try {
+    return await openai.responses.create({ model, tools: [{ type: 'web_search' }], input });
+  } catch (e) {
+    return await openai.responses.create({ model, tools: [{ type: 'web_search_preview' }], input });
+  }
+}
+
+// Sugerir ejecutor: la IA busca en la web y PROPONE; el humano confirma y guarda
+router.post('/api/infra/opportunities/:id/sugerir-ejecutor', async (req, res, next) => {
+  try {
+    if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
+    const { data: op } = await supabase.from('infra_oportunidades').select('*').eq('id', req.params.id).single();
+    if (!op) return res.status(404).json({ ok: false, error: 'No encontrada' });
+
+    const loc = [op.distrito, op.provincia, op.departamento].filter(Boolean).join(', ');
+    const input = `Investiga en la web quién es la EMPRESA EJECUTORA (constructora o consorcio) de esta obra pública peruana, ejecutada bajo Obras por Impuestos (OxI). En OxI el ejecutor NO es la financista ni la entidad pública: es la constructora que construye la obra.
+
+Proyecto: ${op.nombre}
+CUI: ${op.external_id}
+Financista (NO es el ejecutor): ${op.financista || 'desconocido'}
+Entidad: ${op.entidad_publica || ''}
+Ubicación: ${loc}
+
+Busca en INFOBRAS, PRONIED, notas de prensa de colocación de primera piedra, convenios de inversión e informes de Contraloría. Responde ÚNICAMENTE con JSON válido, sin texto adicional:
+{"ejecutor":"nombre del consorcio/constructora o null","ruc":"RUC si aparece o null","confianza":"alta|media|baja","fuente":"URL de la fuente principal","nota":"1 oración explicando el hallazgo"}`;
+
+    const r = await buscarEjecutorWeb(input);
+    const text = (r.output_text || '').replace(/```json|```/g, '').trim();
+    let sug;
+    try { sug = JSON.parse(text); }
+    catch { sug = { ejecutor: null, confianza: 'baja', nota: (text || '').slice(0, 300) }; }
+    res.json({ ok: true, sugerencia: sug });
+  } catch (e) { next(e); }
+});
 router.put('/api/infra/opportunities/:id/ejecutor', async (req, res, next) => {
   try {
     if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
