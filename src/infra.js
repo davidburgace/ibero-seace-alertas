@@ -613,6 +613,44 @@ router.post('/api/infra/ingest-proinversion', upload.single('file'), async (req,
     res.json({ ok: true, archivo: req.file.originalname, ...(await ingestProinversion(req.file.buffer)) });
   } catch (e) { next(e); }
 });
+
+// --- ProInversión: extraer ejecutoras/adjudicatarias del HTML del detalle ---
+function piParseDescripcion(s) {
+  if (!s) return [];
+  return s.split(';').map(p => {
+    const f = p.split('|');
+    const nombre = (f[0] || '').trim().replace(/&amp;/g, '&');
+    const ruc = (f[1] || '').trim();
+    return nombre ? { nombre, ruc: /^\d{11}$/.test(ruc) ? ruc : null } : null;
+  }).filter(Boolean);
+}
+function piExtractField(html, field) {
+  const m = html.match(new RegExp('"' + field + '"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"'));
+  return m ? m[1] : null;
+}
+async function fetchProinversionEmpresas(url) {
+  const r = await fetch(url, {
+    headers: { 'User-Agent':'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36', 'Accept':'text/html,application/xhtml+xml' },
+    signal: AbortSignal.timeout(20000)
+  });
+  if (!r.ok) throw new Error(`ProInversión HTTP ${r.status}`);
+  const html = await r.text();
+  return {
+    ejecutoras: piParseDescripcion(piExtractField(html, 'EjecutoraDescripcion')),
+    adjudicatarias: piParseDescripcion(piExtractField(html, 'AdjudicatariaDescripcion'))
+  };
+}
+
+router.post('/api/infra/opportunities/:id/cargar-proinversion', async (req, res, next) => {
+  try {
+    if (!supabase) return res.status(503).json({ ok:false, error:'Supabase no configurado' });
+    const { data: op } = await supabase.from('infra_oportunidades').select('proinversion_url').eq('id', req.params.id).single();
+    if (!op) return res.status(404).json({ ok:false, error:'No encontrada' });
+    if (!op.proinversion_url) return res.json({ ok:false, error:'Esta oportunidad no tiene proceso en ProInversión' });
+    const emp = await fetchProinversionEmpresas(op.proinversion_url);
+    res.json({ ok:true, ...emp });
+  } catch (e) { next(e); }
+});
 router.post('/api/infra/score-pending', async (req, res, next) => {
   try {
     if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
