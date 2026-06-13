@@ -281,6 +281,8 @@ function drawDetail(o, senales, ejecutores){
       <a class="btn" href="${gUrl}" target="_blank" rel="noopener" style="text-decoration:none;">🔎 Buscar ejecutor</a>
       <a class="btn ghost" href="https://infobras.contraloria.gob.pe/InfobrasWeb/Mapa/Index" target="_blank" rel="noopener" style="text-decoration:none;">INFOBRAS (avance)</a>
     </div>
+    <button class="btn" onclick="sugerirEjecutor()" id="btnSug" style="width:100%;margin-bottom:8px;">✨ Sugerir ejecutor (IA)</button>
+    <div id="ejSug" style="font-size:12.5px;color:var(--muted);margin-bottom:8px;line-height:1.5;"></div>
     <input id="ejNombre" placeholder="Consorcio / constructora" value="${(ej.consorcio_nombre||'').replace(/"/g,'&quot;')}" style="width:100%;margin-bottom:7px;">
     <div style="display:flex;gap:7px;margin-bottom:7px;">
       <input id="ejRuc" placeholder="RUC" value="${(ej.ruc||'').replace(/"/g,'&quot;')}" style="flex:1;">
@@ -365,6 +367,26 @@ async function saveEjecutor(){
       if(o){ o.infra_ejecutores=[{consorcio_nombre:body.consorcio_nombre, estado_verificacion:body.estado_verificacion}]; render(); }
     } else toast('Error: '+(j.error||'desconocido'));
   }catch(e){ toast('Error: '+e.message); }
+}
+
+async function sugerirEjecutor(){
+  if(!CURRENT_ID) return;
+  const btn=$('#btnSug'), out=$('#ejSug');
+  btn.disabled=true; out.innerHTML='Buscando en la web…';
+  try{
+    const r=await fetch('/api/infra/opportunities/'+CURRENT_ID+'/sugerir-ejecutor',{method:'POST'});
+    const j=await r.json();
+    if(j.ok && j.sugerencia){
+      const s=j.sugerencia;
+      if(s.ejecutor && $('#ejNombre')) $('#ejNombre').value=s.ejecutor;
+      if(s.ruc && $('#ejRuc')) $('#ejRuc').value=s.ruc;
+      const src = s.fuente ? ` · <a href="${s.fuente}" target="_blank" rel="noopener" style="color:var(--accent);">fuente</a>` : '';
+      out.innerHTML = s.ejecutor
+        ? `Sugerencia: <b style="color:var(--text);">${s.ejecutor}</b> (confianza: ${s.confianza||'?'})${src}<br>${s.nota||''} — revisa y guarda.`
+        : `No se encontró un ejecutor claro. ${s.nota||''}`;
+    } else out.textContent='Error: '+(j.error||'desconocido');
+  }catch(e){ out.textContent='Error: '+e.message; }
+  btn.disabled=false;
 }
 
 // Upload base MEF
