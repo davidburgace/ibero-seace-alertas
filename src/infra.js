@@ -354,7 +354,7 @@ router.post('/api/infra/ingest', async (_, res, next) => {
 router.get('/api/infra/opportunities', async (req, res, next) => {
   try {
     if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
-    let q = supabase.from('infra_oportunidades').select('id,fuente,external_id,nombre,entidad_publica,financista,sector,departamento,provincia,distrito,monto_inversion,etapa,estado_convenio,estado_ejecucion,incluye_mobiliario,business_line,ai_summary,ai_score,ai_recommendation,ai_criteria,ai_risks,ai_actions,fecha_deteccion,anio_buena_pro,fecha_convenio,infra_ejecutores(consorcio_nombre,estado_verificacion)')
+    let q = supabase.from('infra_oportunidades').select('id,fuente,external_id,nombre,entidad_publica,financista,sector,departamento,provincia,distrito,monto_inversion,etapa,estado_convenio,estado_ejecucion,incluye_mobiliario,business_line,ai_summary,ai_score,ai_recommendation,ai_criteria,ai_risks,ai_actions,fecha_deteccion,anio_buena_pro,fecha_convenio,infra_ejecutores(consorcio_nombre,estado_verificacion),proinversion_url,proinversion_estado')
       .order('ai_score', { ascending: false, nullsFirst: false }).limit(500);
     if (req.query.sector)       q = q.ilike('sector', `%${req.query.sector}%`);
     if (req.query.financista)   q = q.ilike('financista', `%${req.query.financista}%`);
@@ -527,6 +527,68 @@ Responde claro, práctico y orientado a decisión comercial. Si la respuesta exi
       model: 'gpt-4o', messages: [{ role: 'user', content: prompt }], temperature: 0.3, max_tokens: 1500
     });
     res.json({ ok: true, answer: r.choices[0].message.content });
+  } catch (e) { next(e); }
+});
+// Ingesta del Excel de ProInversión (Procesos de selección OxI): mapea CUI -> enlace al detalle (donde está la ejecutora)
+async function ingestProinversion(buf) {
+  if (!supabase) throw new Error('Supabase no configurado');
+  if (!buf || buf.length < 4 || buf[0] !== 0x50 || buf[1] !== 0x4B) throw new Error('No es un .xlsx válido');
+  const wb = XLSX.read(buf, { type: 'buffer' });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const range = XLSX.utils.decode_range(ws['!ref']);
+
+  let headerRow = -1; const cols = {};
+  for (let r = range.s.r; r <= Math.min(range.s.r + 15, range.e.r); r++) {
+    let found = false;
+    for (let c = range.s.c; c <= range.e.c; c++) {
+      const cell = ws[XLSX.utils.encode_cell({ r, c })];
+      const v = cell ? normaliza(cell.v) : '';
+      if (v.includes('CODIGO UNICO') || v === 'CUI') found = true;
+    }
+    if (found) {
+      headerRow = r;
+      for (let c = range.s.c; c <= range.e.c; c++) {
+        const cell = ws[XLSX.utils.encode_cell({ r, c })];
+        const v = cell ? normaliza(cell.v) : '';
+        if (v.includes('CODIGO UNICO') || v === 'CUI') cols.cui = c;
+        else if (v.includes('ENLACE PORTAL') || (v.includes('PORTAL') && v.includes('PROINVERSION'))) cols.link = c;
+        else if (v.includes('TIPO') && v.includes('CONVOCATORIA')) cols.tipo = c;
+        else if (v === 'ESTADO') cols.estado = c;
+      }
+      break;
+    }
+  }
+  if (headerRow < 0 || cols.cui == null || cols.link == null) throw new Error('No se detectó encabezado (CUI/Enlace) en el Excel de ProInversión');
+
+  const byCui = new Map();
+  for (let r = headerRow + 1; r <= range.e.r; r++) {
+    const cuiCell = ws[XLSX.utils.encode_cell({ r, c: cols.cui })];
+    if (!cuiCell || cuiCell.v == null) continue;
+    const cui = String(cuiCell.v).trim();
+    const tipo = cols.tipo != null ? normaliza((ws[XLSX.utils.encode_cell({ r, c: cols.tipo })] || {}).v) : '';
+    const estado = cols.estado != null ? (ws[XLSX.utils.encode_cell({ r, c: cols.estado })] || {}).v : null;
+    const linkCell = ws[XLSX.utils.encode_cell({ r, c: cols.link })];
+    const url = linkCell && linkCell.l ? linkCell.l.Target : null;
+    if (!url) continue;
+    const isEmpresa = tipo.includes('EMPRESA PRIVADA');
+    const prev = byCui.get(cui);
+    if (!prev || (isEmpresa && !prev.isEmpresa)) byCui.set(cui, { url, estado, isEmpresa });
+  }
+
+  let matched = 0;
+  for (const [cui, info] of byCui) {
+    const { data, error } = await supabase.from('infra_oportunidades')
+      .update({ proinversion_url: info.url, proinversion_estado: info.estado, updated_at: new Date().toISOString() })
+      .eq('external_id', cui).select('id');
+    if (!error && data && data.length) matched += data.length;
+  }
+  return { procesos: byCui.size, oportunidades_actualizadas: matched };
+}
+
+router.post('/api/infra/ingest-proinversion', upload.single('file'), async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ ok: false, error: 'Falta el archivo (campo "file")' });
+    res.json({ ok: true, archivo: req.file.originalname, ...(await ingestProinversion(req.file.buffer)) });
   } catch (e) { next(e); }
 });
 router.post('/api/infra/score-pending', async (req, res, next) => {
