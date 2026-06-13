@@ -305,6 +305,48 @@ router.post('/api/infra/ingest-upload', upload.single('file'), async (req, res, 
 });
 
 // Intento por URL (probablemente bloqueado por Incapsula desde Render)
+// Consulta INFOBRAS por CUI (param "valor"). Devuelve estado, código interno y, si están, contratista/avance.
+async function consultarInfobras(cui) {
+  const base = 'https://infobras.contraloria.gob.pe/InfobrasWeb/Mapa/MapaEstadistico/BusquedaAvanzada';
+  const qs = new URLSearchParams({
+    nombre:'', codigo:'', valor:String(cui||''), desde:'', hasta:'', minimo:'', maximo:'',
+    nivel1:'', nivel2:'', nivel3:'', controlSocial:'', controlGubernamental:'', tipoControl:'',
+    marca:'', departamento:'', provincia:'', distrito:'', estado:'', modalidadEjecucion:'',
+    orderBy:'en_ejecucion', pageNumber:'1', pageSize:'20'
+  });
+  const res = await fetch(`${base}?${qs.toString()}`, {
+    headers: {
+      'User-Agent':'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      'Accept':'application/json, text/plain, */*',
+      'X-Requested-With':'XMLHttpRequest',
+      'Referer':'https://infobras.contraloria.gob.pe/InfobrasWeb/Mapa/Index'
+    },
+    signal: AbortSignal.timeout(20000)
+  });
+  if (!res.ok) throw new Error(`INFOBRAS HTTP ${res.status}`);
+  const data = await res.json();
+  const r = (data.Result || [])[0];
+  if (!r) return { registrada: false };
+  return {
+    registrada: true,
+    estado: r.Estado || null,
+    codigoInfobras: r.Codigo || null,
+    nombre: r.NombreObra || null,
+    ubicacion: r.Ubicacion || null,
+    contratista: r.Contratista || null,
+    avanceFisico: r.AvanceFisico ?? null
+  };
+}
+
+router.get('/api/infra/opportunities/:id/infobras', async (req, res, next) => {
+  try {
+    if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
+    const { data: op } = await supabase.from('infra_oportunidades').select('external_id').eq('id', req.params.id).single();
+    if (!op) return res.status(404).json({ ok: false, error: 'No encontrada' });
+    const info = await consultarInfobras(op.external_id);
+    res.json({ ok: true, infobras: info });
+  } catch (e) { next(e); }
+});
 router.post('/api/infra/ingest', async (_, res, next) => {
   try { res.json({ ok: true, ...(await ingestOxiMefURL()) }); } catch (e) { next(e); }
 });
