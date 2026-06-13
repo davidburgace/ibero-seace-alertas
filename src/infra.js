@@ -629,16 +629,22 @@ function piExtractField(html, field) {
   return m ? m[1] : null;
 }
 async function fetchProinversionEmpresas(url) {
-  const r = await fetch(url, {
-    headers: { 'User-Agent':'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36', 'Accept':'text/html,application/xhtml+xml' },
-    signal: AbortSignal.timeout(20000)
-  });
-  if (!r.ok) throw new Error(`ProInversión HTTP ${r.status}`);
-  const html = await r.text();
-  return {
-    ejecutoras: piParseDescripcion(piExtractField(html, 'EjecutoraDescripcion')),
-    adjudicatarias: piParseDescripcion(piExtractField(html, 'AdjudicatariaDescripcion'))
-  };
+  let lastErr;
+  for (let intento = 0; intento < 2; intento++) {
+    try {
+      const r = await fetch(url, {
+        headers: { 'User-Agent':'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36', 'Accept':'text/html,application/xhtml+xml' },
+        signal: AbortSignal.timeout(45000)
+      });
+      if (!r.ok) throw new Error(`ProInversión HTTP ${r.status}`);
+      const html = await r.text();
+      return {
+        ejecutoras: piParseDescripcion(piExtractField(html, 'EjecutoraDescripcion')),
+        adjudicatarias: piParseDescripcion(piExtractField(html, 'AdjudicatariaDescripcion'))
+      };
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr;
 }
 
 router.post('/api/infra/opportunities/:id/cargar-proinversion', async (req, res, next) => {
