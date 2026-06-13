@@ -108,6 +108,7 @@
   <div class="wrap">
     <div class="toolbar">
       <label class="btn"><input type="file" id="file" accept=".xlsx"> ⬆ Subir base MEF (.xlsx)</label>
+      <label class="btn ghost"><input type="file" id="filePI" accept=".xlsx"> ⬆ Subir Excel ProInversión</label>
       <button class="btn ghost" id="btnScore">✦ Puntuar pendientes</button>
       <select id="scoreLimit" title="Cuántas puntuar por lote">
         <option value="10">10</option><option value="25">25</option>
@@ -277,6 +278,7 @@ function drawDetail(o, senales, ejecutores){
   const gUrl = 'https://www.google.com/search?q='+gQuery;
   const ejContactoVal = (ej.contacto && ej.contacto.nota ? ej.contacto.nota : '');
   const ejecHtml = `
+    ${o.proinversion_url?`<a class="btn" href="${o.proinversion_url}" target="_blank" rel="noopener" style="display:block;text-align:center;box-sizing:border-box;width:100%;margin-bottom:8px;text-decoration:none;">🔗 Ver ejecutora oficial (ProInversión)</a>`:''}
     <div style="display:flex;gap:8px;margin-bottom:10px;">
       <a class="btn" href="${gUrl}" target="_blank" rel="noopener" style="text-decoration:none;">🔎 Buscar ejecutor</a>
       <button class="btn ghost" onclick="abrirInfobras()" style="text-decoration:none;cursor:pointer;">INFOBRAS (avance)</button>
@@ -423,6 +425,21 @@ $('#file').addEventListener('change', async e=>{
     const r=await fetch('/api/infra/ingest-upload',{method:'POST',body:fd});
     const j=await r.json();
     if(j.ok) toast(`Listo: ${j.relevantes} oportunidades de ${j.total_filas} filas.`);
+    else toast('Error: '+(j.error||'desconocido'));
+    load();
+  }catch(err){ toast('Error: '+err.message); }
+  e.target.value='';
+});
+
+// Upload Excel ProInversión (enlaza ejecutoras por CUI)
+$('#filePI').addEventListener('change', async e=>{
+  const f=e.target.files[0]; if(!f) return;
+  toast('Subiendo ProInversión: '+f.name+'…');
+  const fd=new FormData(); fd.append('file', f);
+  try{
+    const r=await fetch('/api/infra/ingest-proinversion',{method:'POST',body:fd});
+    const j=await r.json();
+    if(j.ok) toast(`ProInversión: ${j.oportunidades_actualizadas} oportunidades enlazadas (de ${j.procesos} procesos).`);
     else toast('Error: '+(j.error||'desconocido'));
     load();
   }catch(err){ toast('Error: '+err.message); }
