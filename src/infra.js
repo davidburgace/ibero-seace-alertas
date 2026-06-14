@@ -301,7 +301,26 @@ async function sendInfraDigest() {
   });
   return { ok: true, recipients, messageId: info.messageId || null };
 }
-
+// Diagnóstico SSI/MEF: ¿Render alcanza ofi5 y trae avance/INFOBRAS?
+router.get('/api/infra/ssi-test', async (req, res) => {
+  try {
+    const cui = req.query.cui || '2134829';
+    const url = `https://ofi5.mef.gob.pe/ssi/Ssi/Index?codigo=${encodeURIComponent(cui)}&tipo=2`;
+    const r = await fetch(url, {
+      headers: { 'User-Agent':'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36', 'Accept':'text/html,application/xhtml+xml' },
+      signal: AbortSignal.timeout(30000)
+    });
+    const html = await r.text();
+    const up = html.toUpperCase();
+    res.json({
+      ok:true, status:r.status, length:html.length,
+      tieneInfobras: up.includes('INFOBRAS'),
+      tieneAvance: up.includes('AVANCE'),
+      tieneEjecutor: up.includes('EJECUTOR') || up.includes('CONTRATISTA'),
+      snippet: html.slice(0, 700).replace(/<[^>]+>/g,' ').replace(/\s+/g,' ')
+    });
+  } catch (e) { res.json({ ok:false, error:e.message }); }
+});
 // ─── Rutas (/api/infra/*) ────────────────────────────────────────────────────
 router.get('/api/infra/health', (_, res) =>
   res.json({ ok: true, supabase: !!supabase, mef_url: MEF_OXI_XLSX_URL }));
