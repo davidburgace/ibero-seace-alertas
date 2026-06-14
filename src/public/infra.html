@@ -144,6 +144,7 @@
       </select>
       <label class="chk"><input type="checkbox" id="fMob" style="accent-color:var(--accent2);"> Solo con mobiliario</label>
       <label class="chk"><input type="checkbox" id="fNoEjec" style="accent-color:var(--accent2);"> Sin ejecutor</label>
+      <label class="chk"><input type="checkbox" id="fHideRev" style="accent-color:var(--accent2);"> Ocultar revisados</label>
     </div>
 
     <div id="list"></div>
@@ -202,6 +203,7 @@ const hasEjec = o => Array.isArray(o.infra_ejecutores) && o.infra_ejecutores.som
 function filtered(){
   const q=$('#q').value.toLowerCase().trim();
   const sec=$('#fSector').value, dep=$('#fDepto').value, dec=$('#fDec').value, est=$('#fEstado').value, ano=$('#fAnio').value, mob=$('#fMob').checked, noEjec=$('#fNoEjec').checked;
+  const hideRev=$('#fHideRev').checked;
   const sort=$('#fSort').value;
   const list = DATA.filter(o=>{
     if(q && !((o.nombre||'').toLowerCase().includes(q) || (o.financista||'').toLowerCase().includes(q))) return false;
@@ -212,6 +214,7 @@ function filtered(){
     if(ano && String(o.anio_buena_pro)!==ano) return false;
     if(mob && !o.incluye_mobiliario) return false;
     if(noEjec && hasEjec(o)) return false;
+    if(hideRev && o.revisado) return false;
     return true;
   });
   const cmp = {
@@ -225,6 +228,17 @@ function filtered(){
   return list.sort(cmp);
 }
 
+async function toggleRevisado(id, checked, el){
+  const o = DATA.find(x=>x.id===id); if(o) o.revisado = checked;
+  if($('#fHideRev').checked && checked){ render(); }
+  else { const card = el && el.closest('.card'); if(card) card.style.opacity = checked ? '.5' : ''; }
+  try{
+    await fetch('/api/infra/opportunities/'+id+'/revisado', {
+      method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ revisado: checked })
+    });
+  }catch(e){ toast('No se pudo guardar el estado revisado'); }
+}
+
 function render(){
   const items = filtered();
   if(!items.length){ $('#list').innerHTML = '<div class="empty">Sin resultados con estos filtros.</div>'; return; }
@@ -234,7 +248,7 @@ function render(){
     const dec = o.ai_recommendation ? `<span class="tag dec-${o.ai_recommendation.toLowerCase()}">${o.ai_recommendation}</span>` : '';
     const mob = o.incluye_mobiliario ? '<span class="tag mob">Mobiliario</span>' : '';
     const noej = hasEjec(o) ? '' : '<span class="tag" style="color:var(--amber);border-color:transparent;background:rgba(245,166,35,.12);">Sin ejecutor</span>';
-    return `<div class="card" onclick="openDetail('${o.id}')">
+    return `<div class="card" onclick="openDetail('${o.id}')" style="${o.revisado?'opacity:.5;':''}">
       <div class="score ${scoreClass(o.ai_score)}">${o.ai_score??'—'}</div>
       <div class="card-body">
         <h3>${o.nombre||'(sin nombre)'}</h3>
@@ -248,6 +262,7 @@ function render(){
         </div>
         <div class="tags">${dec}${mob}${noej}<span class="tag">${o.sector||o.business_line||''}</span></div>
       </div>
+      <label onclick="event.stopPropagation()" style="margin-left:auto;align-self:flex-start;display:flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);white-space:nowrap;cursor:pointer;"><input type="checkbox" ${o.revisado?'checked':''} onchange="toggleRevisado('${o.id}',this.checked,this)" style="accent-color:var(--accent2);"> Revisado</label>
     </div>`;
   }).join('');
 }
@@ -483,7 +498,7 @@ $('#btnScore').addEventListener('click', async ()=>{
 });
 
 $('#btnReload').addEventListener('click', load);
-['#q','#fSector','#fDepto','#fEstado','#fAnio','#fDec','#fSort','#fMob','#fNoEjec'].forEach(s=>$(s).addEventListener('input', render));
+['#q','#fSector','#fDepto','#fEstado','#fAnio','#fDec','#fSort','#fMob','#fNoEjec','#fHideRev'].forEach(s=>$(s).addEventListener('input', render));
 $('#drawerBg').addEventListener('click', closeDetail);
 
 load();
