@@ -142,6 +142,13 @@
         <option value="monto_asc">Orden: menor monto</option>
         <option value="nombre">Orden: nombre (A–Z)</option>
       </select>
+      <select id="fInteres">
+        <option value="">Todo interés</option>
+        <option value="si">Solo de interés</option>
+        <option value="ocultar_no">Ocultar descartados</option>
+        <option value="no">Solo descartados</option>
+        <option value="pend">Sin marcar</option>
+      </select>
       <label class="chk"><input type="checkbox" id="fMob" style="accent-color:var(--accent2);"> Solo con mobiliario</label>
       <label class="chk"><input type="checkbox" id="fNoEjec" style="accent-color:var(--accent2);"> Sin ejecutor</label>
       <label class="chk"><input type="checkbox" id="fHideRev" style="accent-color:var(--accent2);"> Ocultar revisados</label>
@@ -204,6 +211,7 @@ function filtered(){
   const q=$('#q').value.toLowerCase().trim();
   const sec=$('#fSector').value, dep=$('#fDepto').value, dec=$('#fDec').value, est=$('#fEstado').value, ano=$('#fAnio').value, mob=$('#fMob').checked, noEjec=$('#fNoEjec').checked;
   const hideRev=$('#fHideRev').checked;
+  const fint=$('#fInteres').value;
   const sort=$('#fSort').value;
   const list = DATA.filter(o=>{
     if(q && !((o.nombre||'').toLowerCase().includes(q) || (o.financista||'').toLowerCase().includes(q))) return false;
@@ -215,6 +223,10 @@ function filtered(){
     if(mob && !o.incluye_mobiliario) return false;
     if(noEjec && hasEjec(o)) return false;
     if(hideRev && o.revisado) return false;
+    if(fint==='si' && o.interes!=='si') return false;
+    if(fint==='no' && o.interes!=='no') return false;
+    if(fint==='ocultar_no' && o.interes==='no') return false;
+    if(fint==='pend' && o.interes) return false;
     return true;
   });
   const cmp = {
@@ -226,6 +238,18 @@ function filtered(){
     nombre:     (a,b)=>String(a.nombre||'').localeCompare(String(b.nombre||''))
   }[sort] || ((a,b)=>(b.ai_score??-1)-(a.ai_score??-1));
   return list.sort(cmp);
+}
+
+async function setInteres(id, val, el){
+  const o = DATA.find(x=>x.id===id);
+  const nuevo = (o && o.interes===val) ? null : val;
+  if(o) o.interes = nuevo;
+  render();
+  try{
+    await fetch('/api/infra/opportunities/'+id+'/interes', {
+      method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ interes: nuevo })
+    });
+  }catch(e){ toast('No se pudo guardar el interés'); }
 }
 
 async function toggleRevisado(id, checked, el){
@@ -248,7 +272,9 @@ function render(){
     const dec = o.ai_recommendation ? `<span class="tag dec-${o.ai_recommendation.toLowerCase()}">${o.ai_recommendation}</span>` : '';
     const mob = o.incluye_mobiliario ? '<span class="tag mob">Mobiliario</span>' : '';
     const noej = hasEjec(o) ? '' : '<span class="tag" style="color:var(--amber);border-color:transparent;background:rgba(245,166,35,.12);">Sin ejecutor</span>';
-    return `<div class="card" onclick="openDetail('${o.id}')" style="${o.revisado?'opacity:.5;':''}">
+    const int = o.interes==='si' ? '<span class="tag" style="color:#34d399;border-color:transparent;background:rgba(52,211,153,.14);">★ De interés</span>'
+              : o.interes==='no' ? '<span class="tag" style="color:#f87171;border-color:transparent;background:rgba(248,113,113,.14);">Descartado</span>' : '';
+    return `<div class="card" onclick="openDetail('${o.id}')" style="${(o.revisado||o.interes==='no')?'opacity:.5;':''}">
       <div class="score ${scoreClass(o.ai_score)}">${o.ai_score??'—'}</div>
       <div class="card-body">
         <h3>${o.nombre||'(sin nombre)'}</h3>
@@ -260,9 +286,15 @@ function render(){
           ${o.anio_buena_pro?`<span><b>Buena pro:</b> ${o.anio_buena_pro}</span>`:''}
           ${o.fecha_convenio?`<span><b>Convenio:</b> ${o.fecha_convenio}</span>`:''}
         </div>
-        <div class="tags">${dec}${mob}${noej}<span class="tag">${o.sector||o.business_line||''}</span></div>
+        <div class="tags">${int}${dec}${mob}${noej}<span class="tag">${o.sector||o.business_line||''}</span></div>
       </div>
-      <label onclick="event.stopPropagation()" style="margin-left:auto;align-self:flex-start;display:flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);white-space:nowrap;cursor:pointer;"><input type="checkbox" ${o.revisado?'checked':''} onchange="toggleRevisado('${o.id}',this.checked,this)" style="accent-color:var(--accent2);"> Revisado</label>
+      <div onclick="event.stopPropagation()" style="margin-left:auto;align-self:flex-start;display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
+        <div style="display:flex;gap:6px;">
+          <button onclick="setInteres('${o.id}','si',this)" title="De interés" style="background:${o.interes==='si'?'rgba(52,211,153,.18)':'var(--surface2)'};border:1px solid ${o.interes==='si'?'#34d399':'var(--border2)'};border-radius:8px;padding:2px 8px;font-size:15px;cursor:pointer;line-height:1.4;">👍</button>
+          <button onclick="setInteres('${o.id}','no',this)" title="No interesa" style="background:${o.interes==='no'?'rgba(248,113,113,.18)':'var(--surface2)'};border:1px solid ${o.interes==='no'?'#f87171':'var(--border2)'};border-radius:8px;padding:2px 8px;font-size:15px;cursor:pointer;line-height:1.4;">👎</button>
+        </div>
+        <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);white-space:nowrap;cursor:pointer;"><input type="checkbox" ${o.revisado?'checked':''} onchange="toggleRevisado('${o.id}',this.checked,this)" style="accent-color:var(--accent2);"> Revisado</label>
+      </div>
     </div>`;
   }).join('');
 }
@@ -498,7 +530,7 @@ $('#btnScore').addEventListener('click', async ()=>{
 });
 
 $('#btnReload').addEventListener('click', load);
-['#q','#fSector','#fDepto','#fEstado','#fAnio','#fDec','#fSort','#fMob','#fNoEjec','#fHideRev'].forEach(s=>$(s).addEventListener('input', render));
+['#q','#fSector','#fDepto','#fEstado','#fAnio','#fDec','#fSort','#fMob','#fNoEjec','#fHideRev','#fInteres'].forEach(s=>$(s).addEventListener('input', render));
 $('#drawerBg').addEventListener('click', closeDetail);
 
 load();
