@@ -149,6 +149,11 @@
         <option value="no">Solo descartados</option>
         <option value="pend">Sin marcar</option>
       </select>
+      <select id="fCot">
+        <option value="">Cotizado: todos</option>
+        <option value="no">Sin cotizar</option>
+        <option value="si">Cotizadas</option>
+      </select>
       <label class="chk"><input type="checkbox" id="fMob" style="accent-color:var(--accent2);"> Solo con mobiliario</label>
       <label class="chk"><input type="checkbox" id="fNoEjec" style="accent-color:var(--accent2);"> Sin ejecutor</label>
       <label class="chk"><input type="checkbox" id="fHideRev" style="accent-color:var(--accent2);"> Ocultar revisados</label>
@@ -212,6 +217,7 @@ function filtered(){
   const sec=$('#fSector').value, dep=$('#fDepto').value, dec=$('#fDec').value, est=$('#fEstado').value, ano=$('#fAnio').value, mob=$('#fMob').checked, noEjec=$('#fNoEjec').checked;
   const hideRev=$('#fHideRev').checked;
   const fint=$('#fInteres').value;
+  const fcot=$('#fCot').value;
   const sort=$('#fSort').value;
   const list = DATA.filter(o=>{
     if(q && !((o.nombre||'').toLowerCase().includes(q) || (o.financista||'').toLowerCase().includes(q))) return false;
@@ -227,6 +233,8 @@ function filtered(){
     if(fint==='no' && o.interes!=='no') return false;
     if(fint==='ocultar_no' && o.interes==='no') return false;
     if(fint==='pend' && o.interes) return false;
+    if(fcot==='si' && !o.cotizado) return false;
+    if(fcot==='no' && o.cotizado) return false;
     return true;
   });
   const cmp = {
@@ -250,6 +258,15 @@ async function setInteres(id, val, el){
       method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ interes: nuevo })
     });
   }catch(e){ toast('No se pudo guardar el interés'); }
+}
+
+async function toggleCotizado(id, checked, el){
+  const o = DATA.find(x=>x.id===id); if(o) o.cotizado = checked;
+  try{
+    await fetch('/api/infra/opportunities/'+id+'/cotizado', {
+      method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ cotizado: checked })
+    });
+  }catch(e){ toast('No se pudo guardar el estado cotizado'); }
 }
 
 async function toggleRevisado(id, checked, el){
@@ -294,6 +311,7 @@ function render(){
           <button onclick="setInteres('${o.id}','no',this)" title="No interesa" style="background:${o.interes==='no'?'rgba(248,113,113,.18)':'var(--surface2)'};border:1px solid ${o.interes==='no'?'#f87171':'var(--border2)'};border-radius:8px;padding:2px 8px;font-size:15px;cursor:pointer;line-height:1.4;">👎</button>
         </div>
         <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);white-space:nowrap;cursor:pointer;"><input type="checkbox" ${o.revisado?'checked':''} onchange="toggleRevisado('${o.id}',this.checked,this)" style="accent-color:var(--accent2);"> Revisado</label>
+        <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);white-space:nowrap;cursor:pointer;"><input type="checkbox" ${o.cotizado?'checked':''} onchange="toggleCotizado('${o.id}',this.checked,this)" style="accent-color:var(--accent2);"> Cotizado</label>
       </div>
     </div>`;
   }).join('');
@@ -445,6 +463,7 @@ function abrirInfobras(){
   window.open('https://infobras.contraloria.gob.pe/InfobrasWeb/Mapa/Index','_blank','noopener');
 }
 
+let PI_EJECUTORAS = [];
 async function cargarProinversion(){
   if(!CURRENT_ID) return;
   const btn=$('#btnPI'), out=$('#piRes');
@@ -454,17 +473,29 @@ async function cargarProinversion(){
     const j=await r.json();
     if(j.ok){
       const ej=j.ejecutoras||[];
-      if(ej.length){
-        const nombres=ej.map(e=>e.nombre).join(' + ');
-        const rucs=ej.map(e=>e.ruc).filter(Boolean).join(', ');
-        if($('#ejNombre')) $('#ejNombre').value=nombres;
-        if($('#ejRuc')) $('#ejRuc').value=rucs;
-        const adj=(j.adjudicatarias||[]).map(a=>a.nombre).join(', ');
-        out.innerHTML=`Ejecutor cargado: <b style="color:var(--text);">${nombres}</b>${rucs?` · RUC ${rucs}`:''}.${adj?`<br>Financista: ${adj}.`:''} Revisa y guarda.`;
-      } else out.innerHTML='ProInversión aún no muestra ejecutora (proceso sin adjudicar todavía).';
+      const adj=(j.adjudicatarias||[]).map(a=>a.nombre).join(', ');
+      if(!ej.length){ out.innerHTML='ProInversión aún no muestra ejecutora (proceso sin adjudicar todavía).'; }
+      else if(ej.length===1){
+        if($('#ejNombre')) $('#ejNombre').value=ej[0].nombre;
+        if($('#ejRuc')) $('#ejRuc').value=ej[0].ruc||'';
+        out.innerHTML=`Ejecutor cargado: <b style="color:var(--text);">${ej[0].nombre}</b>${ej[0].ruc?` · RUC ${ej[0].ruc}`:''}.${adj?`<br>Financista: ${adj}.`:''} Revisa y guarda.`;
+      } else {
+        PI_EJECUTORAS=ej;
+        const ops=ej.map((e,i)=>`<button onclick="aplicarEjecutorIdx(${i},this)" style="display:block;width:100%;text-align:left;margin:4px 0;background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:8px;padding:7px 10px;font-size:12.5px;cursor:pointer;">${escapeHtml(e.nombre)}${e.ruc?` · ${e.ruc}`:''}</button>`).join('');
+        out.innerHTML=`<b style="color:var(--text);">Consorcio de ${ej.length} empresas.</b> Elige <b>una</b> para cargar como cliente (evita duplicar en el CRM):${ops}${adj?`<div style="margin-top:6px;">Financista: ${adj}.</div>`:''}`;
+      }
     } else out.textContent='Error: '+(j.error||'desconocido');
   }catch(e){ out.textContent='Error: '+e.message; }
   btn.disabled=false;
+}
+function aplicarEjecutorIdx(i, el){
+  const e=PI_EJECUTORAS[i]; if(!e) return;
+  if($('#ejNombre')) $('#ejNombre').value=e.nombre;
+  if($('#ejRuc')) $('#ejRuc').value=e.ruc||'';
+  if(el && el.parentElement){
+    [...el.parentElement.querySelectorAll('button')].forEach(b=>{b.style.borderColor='var(--border2)';b.style.background='var(--surface2)';});
+    el.style.borderColor='var(--accent2)'; el.style.background='rgba(15,118,110,.18)';
+  }
 }
 
 async function sugerirEjecutor(){
@@ -530,7 +561,7 @@ $('#btnScore').addEventListener('click', async ()=>{
 });
 
 $('#btnReload').addEventListener('click', load);
-['#q','#fSector','#fDepto','#fEstado','#fAnio','#fDec','#fSort','#fMob','#fNoEjec','#fHideRev','#fInteres'].forEach(s=>$(s).addEventListener('input', render));
+['#q','#fSector','#fDepto','#fEstado','#fAnio','#fDec','#fSort','#fMob','#fNoEjec','#fHideRev','#fInteres','#fCot'].forEach(s=>$(s).addEventListener('input', render));
 $('#drawerBg').addEventListener('click', closeDetail);
 
 load();
