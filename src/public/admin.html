@@ -226,7 +226,18 @@
         <div class="stat-value" id="statKeywords">—</div>
       </div>
     </div>
-
+<!-- Acciones manuales -->
+    <div class="section-header">
+      <div>
+        <div class="section-title">Acciones manuales</div>
+        <div class="section-sub">Dispara la búsqueda y el envío de correos sin esperar al cron</div>
+      </div>
+    </div>
+    <div class="card" style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
+      <button class="btn-add" id="btnBuscar" onclick="buscarAhora()">🔍 Buscar oportunidades ahora</button>
+      <button class="btn-add" id="btnEnviar" onclick="enviarCorreos()">✉️ Enviar correos ahora</button>
+      <span id="accionMsg" style="font-size:13px;color:#9aa;flex:1;min-width:200px;"></span>
+    </div>
     <!-- Vendedores -->
     <div class="section-header">
       <div>
@@ -358,7 +369,29 @@ function logout() {
   document.getElementById('appWrap').style.display = 'none';
   document.getElementById('passwordInput').value = '';
 }
-
+async function buscarAhora(){
+  const b=document.getElementById('btnBuscar'), m=document.getElementById('accionMsg');
+  b.disabled=true; m.textContent='Buscando oportunidades en SEACE…';
+  try{
+    const res=await fetch(API+'/api/jobs/search-now');
+    const data=await res.json();
+    if(data.ok!==false){ m.textContent='Búsqueda lista: '+(data.found ?? 0)+' encontradas. Ya puedes enviar los correos.'; loadAll(); }
+    else m.textContent='Error en la búsqueda: '+(data.error||data.message||'desconocido');
+  }catch(e){ m.textContent='Error en la búsqueda: '+e.message; }
+  b.disabled=false;
+}
+async function enviarCorreos(){
+  if(!confirm('¿Enviar el correo de oportunidades a todos los vendedores ahora?')) return;
+  const b=document.getElementById('btnEnviar'), m=document.getElementById('accionMsg');
+  b.disabled=true; m.textContent='Enviando correos…';
+  try{
+    const res=await fetch(API+'/api/jobs/send-digest', { method:'POST' });
+    const data=await res.json();
+    if(data.ok){ const n=data.recipients?String(data.recipients).split(',').filter(Boolean).length:0; m.textContent='Correos enviados a '+n+' destinatario(s).'; }
+    else m.textContent='No se envió: '+(data.message||data.error||'revisa la configuración SMTP');
+  }catch(e){ m.textContent='Error al enviar: '+e.message; }
+  b.disabled=false;
+}
 async function loadAll() {
   try {
     const res = await fetch(API + '/api/bootstrap');
