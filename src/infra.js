@@ -708,7 +708,17 @@ router.put('/api/infra/opportunities/:id/interes', async (req, res, next) => {
     res.json({ ok:true, interes });
   } catch (e) { next(e); }
 });
-
+router.put('/api/infra/opportunities/:id/cotizado', async (req, res, next) => {
+  try {
+    if (!supabase) return res.status(503).json({ ok:false, error:'Supabase no configurado' });
+    const cotizado = !!req.body.cotizado;
+    const { error } = await supabase.from('infra_oportunidades')
+      .update({ cotizado, cotizado_at: cotizado ? new Date().toISOString() : null })
+      .eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ ok:true, cotizado });
+  } catch (e) { next(e); }
+});
 router.post('/api/infra/score-pending', async (req, res, next) => {
   try {
     if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
