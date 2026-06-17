@@ -145,8 +145,8 @@ function normalizeSeaceItem(item, keyword) {
 }
 
 async function fetchSeaceKeyword(keyword, page = 0, size = 100) {
-  const encoded = encodeURIComponent(keyword.toUpperCase());
-  const url = `${SEACE_API}/${page}/${size}/${encoded}/0`;
+  const encoded = encodeURIComponent(keyword.toLowerCase());
+  const url = `${SEACE_API}/0/0/${encoded}/0`;
   console.log(`[SEACE] Buscando: "${keyword}"`);
   const response = await fetch(url, { headers: SEACE_HEADERS, signal: AbortSignal.timeout(25000) });
   if (!response.ok) throw new Error(`SEACE HTTP ${response.status} para "${keyword}"`);
