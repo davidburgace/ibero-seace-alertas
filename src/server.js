@@ -194,7 +194,8 @@ async function upsertOpportunities(items) {
     demo.opportunities = [...map.values()].slice(0, 500);
     return demo.opportunities;
   }
-  const { error } = await supabase.from('opportunities').upsert(items, { onConflict: 'external_id' });
+  const payload = items.map(({ alert_sent, ...rest }) => rest);
+  const { error } = await supabase.from('opportunities').upsert(payload, { onConflict: 'external_id' });
   if (error) throw error;
   return table('opportunities');
 }
@@ -279,7 +280,18 @@ function renderEmail(opportunities) {
 }
 
 async function sendDigest() {
-  const opportunities = await table('opportunities');
+  let opportunities;
+  if (supabase) {
+    const { data, error } = await supabase.from('opportunities')
+      .select('*')
+      .or('alert_sent.is.null,alert_sent.eq.false')
+      .order('published_date', { ascending: false });
+    if (error) throw error;
+    opportunities = data || [];
+  } else {
+    opportunities = (await table('opportunities')).filter(o => !o.alert_sent);
+  }
+  if (!opportunities.length) return { ok: false, message: 'No hay oportunidades nuevas para enviar' };
   const vendors = await table('vendors');
   if (!process.env.SMTP_HOST) return { ok: false, message: 'SMTP no configurado' };
   const transport = nodemailer.createTransport({
