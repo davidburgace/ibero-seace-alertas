@@ -692,7 +692,7 @@ app.use((err, _, res, __) => {
 });
 
 // ─── Cron ──────────────────────────────────────────────────────────────────────
-const schedule = process.env.CRON_SCHEDULE || '0 8,17 * * *';
+const schedule = process.env.CRON_SCHEDULE || '0 8 * * *';
 cron.schedule(schedule, async () => {
   try {
     console.log('[CRON] Iniciando búsqueda SEACE...');
@@ -701,7 +701,7 @@ cron.schedule(schedule, async () => {
     await sendDigest();
     console.log(`[CRON] Completado: ${result.items.length} oportunidades`);
   } catch (e) { console.error('[CRON] Error:', e.message); }
-});
+}, { timezone: 'America/Lima' });
 cron.schedule(process.env.INFRA_CRON || '0 9 * * 1', async () => {
   try { await runInfraIngest(); } catch (e) { console.error('[INFRA][CRON]', e.message); }
 });
