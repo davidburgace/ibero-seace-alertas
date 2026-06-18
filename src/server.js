@@ -143,7 +143,27 @@ function normalizeSeaceItem(item, keyword) {
     alert_sent: false
   };
 }
-
+async function fetchSeaceFicha(idProceso) {
+  const url = `https://prod4.seace.gob.pe:8086/api/oportunidades/fichaProceso/idProceso/${encodeURIComponent(idProceso)}`;
+  const r = await fetch(url, { headers: SEACE_HEADERS, signal: AbortSignal.timeout(25000) });
+  if (!r.ok) throw new Error(`Ficha HTTP ${r.status}`);
+  const f = await r.json();
+  const norm = s => (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+  const cron = f.listaCronograma || [];
+  const etapa = frag => {
+    const e = cron.find(c => norm(c.nombreEtapa).includes(frag) || norm(c.descripcionEtapa).includes(frag));
+    return e ? (e.fechaInicio || null) : null;
+  };
+  const basesDoc = (f.listaDocumentos || []).find(d => norm(d.tipoDocumento).includes('BASES ADMINISTRATIVAS'));
+  return {
+    detalle_bien: classify(`${f.descripcionObjeto || ''} ${f.listaItems?.[0]?.descripcionCubso || ''}`),
+    fecha_consultas: etapa('FORMULACION'),
+    fecha_bases_admin: basesDoc ? (basesDoc.fechaPublicacion || '').split(' ')[0] : null,
+    fecha_bases_integradas: etapa('INTEGRACION'),
+    fecha_presentacion: etapa('PRESENTACION DE PROPUESTAS'),
+    fecha_buena_pro: etapa('BUENA PRO')
+  };
+}
 async function fetchSeaceKeyword(keyword, page = 0, size = 100) {
   const encoded = encodeURIComponent(keyword.toLowerCase());
   const url = `${SEACE_API}/0/0/${encoded}/0`;
@@ -690,7 +710,52 @@ app.use((err, _, res, __) => {
   console.error('API error:', err);
   res.status(500).json({ error: err.message, version: VERSION });
 });
+// Marcar interés (👍/👎). Si es "si", trae el cronograma de la ficha.
+app.put('/api/opportunities/:id/interes', async (req, res, next) => {
+  try {
+    if (!supabase) return res.json({ ok: false, message: 'Supabase no configurado' });
+    const interes = req.body.interes === 'si' ? 'si' : (req.body.interes === 'no' ? 'no' : null);
+    const { data: opp, error: e1 } = await supabase.from('opportunities')
+      .select('id, external_id, ficha_cargada').eq('id', req.params.id).single();
+    if (e1) throw e1;
+    const patch = { interes, interes_at: interes ? new Date().toISOString() : null };
+    if (interes === 'si' && opp && !opp.ficha_cargada && /^\d+$/.test(String(opp.external_id))) {
+      try {
+        const ficha = await fetchSeaceFicha(opp.external_id);
+        Object.assign(patch, ficha, { ficha_cargada: true });
+      } catch (e) { console.error('[FICHA]', e.message); }
+    }
+    const { error: e2 } = await supabase.from('opportunities').update(patch).eq('id', req.params.id);
+    if (e2) throw e2;
+    res.json({ ok: true, interes });
+  } catch (e) { next(e); }
+});
 
+// Listado para el módulo de interés
+app.get('/api/interes', async (_, res, next) => {
+  try {
+    if (!supabase) return res.json([]);
+    const { data, error } = await supabase.from('opportunities')
+      .select('id, external_id, nomenclature, title, detalle_bien, fecha_consultas, fecha_bases_admin, fecha_bases_integradas, fecha_presentacion, fecha_buena_pro, source_url')
+      .eq('interes', 'si').order('fecha_buena_pro', { ascending: true, nullsFirst: false });
+    if (error) throw error;
+    res.json(data || []);
+  } catch (e) { next(e); }
+});
+
+// Editar campos del tracker a mano (corregir detalle de bien o fechas)
+app.put('/api/opportunities/:id/tracker', async (req, res, next) => {
+  try {
+    if (!supabase) return res.json({ ok: false });
+    const allow = ['detalle_bien','fecha_consultas','fecha_bases_admin','fecha_bases_integradas','fecha_presentacion','fecha_buena_pro'];
+    const patch = {};
+    for (const k of allow) if (k in req.body) patch[k] = req.body[k];
+    if (!Object.keys(patch).length) return res.json({ ok: false });
+    const { error } = await supabase.from('opportunities').update(patch).eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
 // ─── Cron ──────────────────────────────────────────────────────────────────────
 const schedule = process.env.CRON_SCHEDULE || '0 8 * * *';
 cron.schedule(schedule, async () => {
