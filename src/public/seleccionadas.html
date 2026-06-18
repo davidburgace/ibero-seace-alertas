@@ -24,29 +24,39 @@
   .logo-dot{ width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px var(--accent); }
   .back{ color:var(--muted); text-decoration:none; font-size:13px; border:1px solid var(--border2); border-radius:8px; padding:7px 14px; white-space:nowrap; }
   .back:hover{ color:var(--text); border-color:var(--accent); }
-  .wrap{ padding:28px 24px; max-width:1440px; margin:0 auto; }
+  .wrap{ padding:24px 18px; max-width:1680px; margin:0 auto; }
   h1{ font-family:var(--font-display); font-weight:800; font-size:26px; letter-spacing:-0.01em; margin-bottom:4px; }
   .sub{ color:var(--muted); font-size:13px; margin-bottom:22px; }
   .count{ color:var(--accent); font-weight:600; }
+  .dash{ display:flex; gap:18px; flex-wrap:wrap; margin-bottom:24px; }
+  .dash-card{ flex:1; min-width:300px; background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:18px 20px; }
+  .dash-title{ font-family:var(--font-display); font-weight:600; font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; margin-bottom:16px; }
+  .dash-body{ display:flex; align-items:center; gap:22px; }
+  .donut{ width:118px; height:118px; border-radius:50%; position:relative; flex-shrink:0; }
+  .donut .hole{ position:absolute; inset:23px; background:var(--surface); border-radius:50%; display:flex; align-items:center; justify-content:center; font-family:var(--font-display); font-weight:800; font-size:20px; }
+  .dash-legend{ display:flex; flex-direction:column; gap:8px; font-size:13px; }
+  .dash-legend .lg{ display:flex; align-items:center; gap:8px; color:var(--text); }
+  .dash-legend .lg i{ width:11px; height:11px; border-radius:3px; flex-shrink:0; }
+  .dash-legend .lg span{ color:var(--muted); font-size:12px; }
   .tablewrap{ overflow-x:auto; border:1px solid var(--border); border-radius:14px; }
-  table{ width:100%; border-collapse:collapse; min-width:1120px; }
+  table{ width:100%; border-collapse:collapse; min-width:1000px; }
   th{
     text-align:left; font-family:var(--font-display); font-weight:600; font-size:11.5px;
-    color:var(--muted); text-transform:uppercase; letter-spacing:.05em;
-    padding:14px; border-bottom:1px solid var(--border2); background:var(--surface);
+    color:var(--muted); text-transform:uppercase; letter-spacing:.04em; font-size:11px;
+    padding:11px 9px; border-bottom:1px solid var(--border2); background:var(--surface);
     position:sticky; top:0; white-space:nowrap;
   }
-  td{ padding:12px 14px; border-bottom:1px solid var(--border); vertical-align:top; font-size:13px; }
+  td{ padding:9px 9px; border-bottom:1px solid var(--border); vertical-align:top; font-size:12.5px; }
   tbody tr:hover td{ background:var(--surface2); }
   .proc a{ color:var(--accent); text-decoration:none; font-weight:600; white-space:nowrap; }
   .proc a:hover{ text-decoration:underline; }
-  .desc{ min-width:280px; max-width:360px; color:var(--text); }
+  .desc{ max-width:230px; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   select.bien, input.fecha{
     background:var(--surface2); border:1px solid var(--border2); color:var(--text);
-    border-radius:7px; padding:6px 8px; font-family:var(--font-body); font-size:12.5px;
+    border-radius:7px; padding:5px 7px; font-family:var(--font-body); font-size:12px;
   }
   select.bien:focus, input.fecha:focus{ outline:none; border-color:var(--accent); }
-  input.fecha{ width:112px; }
+  input.fecha{ width:82px; }
   input.fecha.green{ border-color:rgba(34,211,160,.55); background:rgba(34,211,160,.12); }
   input.fecha.yellow{ border-color:rgba(245,166,35,.6); background:rgba(245,166,35,.14); }
   input.fecha.red{ border-color:rgba(240,82,82,.7); background:rgba(240,82,82,.16); color:#ffdada; }
@@ -85,6 +95,22 @@
   <div class="wrap">
     <h1>Oportunidades Seleccionadas</h1>
     <div class="sub">Procesos marcados de interés, con su cronograma. El detalle de bien y las fechas son editables. <span class="count" id="count"></span></div>
+    <div class="dash" id="dash" style="display:none">
+      <div class="dash-card">
+        <div class="dash-title">Resultado de licitaciones</div>
+        <div class="dash-body">
+          <div class="donut" id="donutRes"><div class="hole" id="holeRes"></div></div>
+          <div class="dash-legend" id="legendRes"></div>
+        </div>
+      </div>
+      <div class="dash-card">
+        <div class="dash-title">Por tipo de bien</div>
+        <div class="dash-body">
+          <div class="donut" id="donutBien"><div class="hole" id="holeBien"></div></div>
+          <div class="dash-legend" id="legendBien"></div>
+        </div>
+      </div>
+    </div>
     <div class="legend">
       <span><i style="background:#22d3a0"></i> Más de 2 días</span>
       <span><i style="background:#f5a623"></i> Faltan 2 días</span>
@@ -129,6 +155,42 @@
     applyDateColor(el);
   }
 
+  function donut(segs){
+    const total = segs.reduce((s,x)=>s+x.value,0);
+    if(!total) return { gradient:'var(--surface2)', legend:'<div class="lg" style="color:var(--muted)">Sin datos aún</div>' };
+    let acc=0; const stops=[];
+    segs.forEach(s=>{ if(s.value<=0) return; const a=acc/total*100, b=(acc+s.value)/total*100; stops.push(s.color+' '+a+'% '+b+'%'); acc+=s.value; });
+    const legend = segs.filter(s=>s.value>0).map(s=>'<div class="lg"><i style="background:'+s.color+'"></i> '+esc(s.label)+' <b>'+Math.round(s.value/total*100)+'%</b> <span>('+s.value+')</span></div>').join('');
+    return { gradient:'conic-gradient('+stops.join(',')+')', legend };
+  }
+  function renderDashboard(){
+    const dash = $('#dash');
+    if(!DATA.length){ dash.style.display='none'; return; }
+    dash.style.display='flex';
+    const g = DATA.filter(o=>o.resultado==='ganada').length;
+    const p = DATA.filter(o=>o.resultado==='perdida').length;
+    const en = DATA.length - g - p;
+    const d1 = donut([
+      {label:'Ganadas', value:g, color:'#22d3a0'},
+      {label:'Perdidas', value:p, color:'#f05252'},
+      {label:'En juego', value:en, color:'#3a3f4d'}
+    ]);
+    $('#donutRes').style.background = d1.gradient;
+    $('#legendRes').innerHTML = d1.legend;
+    const res = g+p;
+    $('#holeRes').textContent = res ? Math.round(g/res*100)+'%' : '—';
+    $('#holeRes').style.color = '#22d3a0';
+    const bienColors = {'Educación':'#4f7dff','Hospitalario':'#22d3a0','Metalmecánica':'#f5a623','Oficina':'#7c5cfc','General':'#6b7280'};
+    const counts = {};
+    DATA.forEach(o=>{ const b=(o.detalle_bien||'General'); counts[b]=(counts[b]||0)+1; });
+    const segs = Object.keys(counts).map(b=>({label:b, value:counts[b], color:bienColors[b]||'#9aa0b4'}));
+    const d2 = donut(segs);
+    $('#donutBien').style.background = d2.gradient;
+    $('#legendBien').innerHTML = d2.legend;
+    $('#holeBien').textContent = DATA.length;
+    $('#holeBien').style.color = 'var(--text)';
+  }
+
   async function load(){
     try{
       const res = await fetch('/api/interes');
@@ -139,6 +201,7 @@
 
   function render(){
     $('#count').textContent = DATA.length ? '('+DATA.length+')' : '';
+    renderDashboard();
     if(!DATA.length){
       $('#container').innerHTML = '<div class="empty"><div class="big">⭐</div>Aún no hay oportunidades seleccionadas.<br>Abre una oportunidad y marca 👍 para verla aquí.</div>';
       return;
@@ -149,7 +212,7 @@
       const rcls = o.resultado==='ganada' ? 'won' : (o.resultado==='perdida' ? 'lost' : '');
       return '<tr class="'+rcls+'" data-id="'+o.id+'">'
         + '<td class="proc"><a href="oportunidad.html?id='+o.id+'">'+esc(o.nomenclature||o.external_id||'—')+'</a></td>'
-        + '<td class="desc">'+esc(o.title||'—')+'</td>'
+        + '<td class="desc" title="'+esc(o.title||'')+'">'+esc(o.title||'—')+'</td>'
         + '<td><select class="bien" onchange="saveField(\''+o.id+'\',\'detalle_bien\',this.value)">'+opts+'</select></td>'
         + '<td><input class="fecha '+fechaColor(o.fecha_consultas)+'" value="'+esc(o.fecha_consultas||'')+'" onblur="onDateBlur(\''+o.id+'\',\'fecha_consultas\',this)"></td>'
         + '<td><input class="fecha '+fechaColor(o.fecha_bases_admin)+'" value="'+esc(o.fecha_bases_admin||'')+'" onblur="onDateBlur(\''+o.id+'\',\'fecha_bases_admin\',this)"></td>'
