@@ -23,20 +23,20 @@
       radial-gradient(circle at 85% 105%, rgba(124,92,252,0.12), transparent 50%);
   }
   .hero{ margin-bottom:52px; }
-  .dot{
-    width:14px; height:14px; border-radius:50%; background:var(--accent);
-    box-shadow:0 0 20px var(--accent); margin:0 auto 24px; animation:pulse 2s infinite;
+  .logo-badge{
+    background:#fff; border-radius:22px; padding:24px 32px; display:inline-block;
+    box-shadow:0 12px 44px rgba(0,0,0,.4); margin-bottom:28px;
   }
-  @keyframes pulse{ 0%,100%{opacity:1;transform:scale(1);} 50%{opacity:.45;transform:scale(.78);} }
+  .logo-badge img{ display:block; width:clamp(180px,44vw,250px); height:auto; }
   .wordmark{
-    font-family:var(--font-display); font-weight:800; letter-spacing:-0.02em;
-    font-size:clamp(44px,9vw,80px); line-height:.98;
+    font-family:var(--font-display); font-weight:800; letter-spacing:-0.01em;
+    font-size:clamp(28px,5.5vw,46px); line-height:1;
   }
   .wordmark .accent{
     background:linear-gradient(90deg,var(--accent),var(--accent2));
     -webkit-background-clip:text; background-clip:text; color:transparent;
   }
-  .tagline{ color:var(--muted); font-size:clamp(13px,2.4vw,16px); margin-top:18px; }
+  .tagline{ color:var(--muted); font-size:clamp(13px,2.4vw,16px); margin-top:14px; }
   .grid{ display:flex; gap:20px; width:100%; max-width:780px; flex-wrap:wrap; justify-content:center; }
   .tile{
     flex:1; min-width:268px; background:var(--surface); border:1px solid var(--border2);
@@ -54,9 +54,9 @@
 </head>
 <body>
   <div class="hero">
-    <div class="dot"></div>
-    <div class="wordmark">RADAR <span class="accent">IBERO</span></div>
-    <div class="tagline">Inteligencia de oportunidades con el Estado · Grupo Ibero Perú</div>
+    <div class="logo-badge"><img src="ibero-logo.png" alt="Grupo Ibero Perú"></div>
+    <div class="wordmark">Radar de <span class="accent">Oportunidades</span></div>
+    <div class="tagline">Contrataciones con el Estado · SEACE</div>
   </div>
 
   <div class="grid">
