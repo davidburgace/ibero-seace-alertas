@@ -164,6 +164,19 @@ async function fetchSeaceFicha(idProceso) {
     fecha_buena_pro: etapa('BUENA PRO')
   };
 }
+async function refreshFichaDates(opp) {
+  if (!opp || !/^\d+$/.test(String(opp.external_id))) return null;
+  const f = await fetchSeaceFicha(opp.external_id);
+  const dates = {
+    fecha_consultas: f.fecha_consultas,
+    fecha_bases_admin: f.fecha_bases_admin,
+    fecha_bases_integradas: f.fecha_bases_integradas,
+    fecha_presentacion: f.fecha_presentacion,
+    fecha_buena_pro: f.fecha_buena_pro
+  };
+  await supabase.from('opportunities').update(dates).eq('id', opp.id);
+  return dates;
+}
 async function fetchSeaceKeyword(keyword, page = 0, size = 100) {
   const encoded = encodeURIComponent(keyword.toLowerCase());
   const url = `${SEACE_API}/0/0/${encoded}/0`;
@@ -757,6 +770,28 @@ app.put('/api/opportunities/:id/tracker', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 // ─── Cron ──────────────────────────────────────────────────────────────────────
+// Refrescar el cronograma de UNA oportunidad desde la ficha
+app.post('/api/opportunities/:id/refrescar-ficha', async (req, res) => {
+  try {
+    if (!supabase) return res.json({ ok:false });
+    const { data: opp, error } = await supabase.from('opportunities')
+      .select('id, external_id').eq('id', req.params.id).single();
+    if (error) throw error;
+    const dates = await refreshFichaDates(opp);
+    res.json({ ok: !!dates, dates: dates || null });
+  } catch (e) { res.json({ ok:false, error:e.message }); }
+});
+
+// Refrescar el cronograma de TODAS las seleccionadas
+app.post('/api/interes/refrescar', async (_, res) => {
+  try {
+    if (!supabase) return res.json({ ok:false });
+    const { data: sel } = await supabase.from('opportunities').select('id, external_id').eq('interes','si');
+    let ok=0, fail=0;
+    for (const o of (sel||[])) { try { if (await refreshFichaDates(o)) ok++; else fail++; } catch(e){ fail++; } }
+    res.json({ ok:true, actualizadas: ok, fallidas: fail });
+  } catch (e) { res.json({ ok:false, error:e.message }); }
+});
 const schedule = process.env.CRON_SCHEDULE || '0 8 * * *';
 cron.schedule(schedule, async () => {
   try {
@@ -764,6 +799,10 @@ cron.schedule(schedule, async () => {
     const result = await searchSeaceAPI();
     await upsertOpportunities(result.items || []);
     await sendDigest();
+    if (supabase) {
+      const { data: sel } = await supabase.from('opportunities').select('id, external_id').eq('interes','si');
+      for (const o of (sel||[])) { try { await refreshFichaDates(o); } catch(e){} }
+    }
     console.log(`[CRON] Completado: ${result.items.length} oportunidades`);
   } catch (e) { console.error('[CRON] Error:', e.message); }
 }, { timezone: 'America/Lima' });
