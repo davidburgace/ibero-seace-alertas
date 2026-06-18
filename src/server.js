@@ -736,7 +736,7 @@ app.get('/api/interes', async (_, res, next) => {
   try {
     if (!supabase) return res.json([]);
     const { data, error } = await supabase.from('opportunities')
-      .select('id, external_id, nomenclature, title, detalle_bien, fecha_consultas, fecha_bases_admin, fecha_bases_integradas, fecha_presentacion, fecha_buena_pro, source_url')
+     .select('id, external_id, nomenclature, title, detalle_bien, resultado, fecha_consultas, fecha_bases_admin, fecha_bases_integradas, fecha_presentacion, fecha_buena_pro, source_url')
       .eq('interes', 'si').order('fecha_buena_pro', { ascending: true, nullsFirst: false });
     if (error) throw error;
     res.json(data || []);
@@ -747,7 +747,7 @@ app.get('/api/interes', async (_, res, next) => {
 app.put('/api/opportunities/:id/tracker', async (req, res, next) => {
   try {
     if (!supabase) return res.json({ ok: false });
-    const allow = ['detalle_bien','fecha_consultas','fecha_bases_admin','fecha_bases_integradas','fecha_presentacion','fecha_buena_pro'];
+    const allow = ['detalle_bien','resultado','fecha_consultas','fecha_bases_admin','fecha_bases_integradas','fecha_presentacion','fecha_buena_pro'];
     const patch = {};
     for (const k of allow) if (k in req.body) patch[k] = req.body[k];
     if (!Object.keys(patch).length) return res.json({ ok: false });
