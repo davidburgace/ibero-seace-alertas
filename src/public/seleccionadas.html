@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Oportunidades Seleccionadas — Radar Ibero</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0a0d14; --surface:#111520; --surface2:#161b28;
+    --border:rgba(255,255,255,0.07); --border2:rgba(255,255,255,0.12);
+    --text:#e8eaf0; --muted:#7a8099;
+    --accent:#4f7dff; --accent2:#7c5cfc; --green:#22d3a0; --red:#f05252;
+    --font-display:'Syne',sans-serif; --font-body:'DM Sans',sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{ font-family:var(--font-body); background:var(--bg); color:var(--text); min-height:100vh; font-size:14px; line-height:1.55; }
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between; gap:12px;
+    padding:14px 24px; border-bottom:1px solid var(--border); background:var(--surface);
+    position:sticky; top:0; z-index:50; backdrop-filter:blur(12px);
+  }
+  .logo{ display:flex; align-items:center; gap:10px; font-family:var(--font-display); font-size:16px; font-weight:700; color:var(--text); text-decoration:none; }
+  .logo-dot{ width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px var(--accent); }
+  .back{ color:var(--muted); text-decoration:none; font-size:13px; border:1px solid var(--border2); border-radius:8px; padding:7px 14px; white-space:nowrap; }
+  .back:hover{ color:var(--text); border-color:var(--accent); }
+  .wrap{ padding:28px 24px; max-width:1440px; margin:0 auto; }
+  h1{ font-family:var(--font-display); font-weight:800; font-size:26px; letter-spacing:-0.01em; margin-bottom:4px; }
+  .sub{ color:var(--muted); font-size:13px; margin-bottom:22px; }
+  .count{ color:var(--accent); font-weight:600; }
+  .tablewrap{ overflow-x:auto; border:1px solid var(--border); border-radius:14px; }
+  table{ width:100%; border-collapse:collapse; min-width:1120px; }
+  th{
+    text-align:left; font-family:var(--font-display); font-weight:600; font-size:11.5px;
+    color:var(--muted); text-transform:uppercase; letter-spacing:.05em;
+    padding:14px; border-bottom:1px solid var(--border2); background:var(--surface);
+    position:sticky; top:0; white-space:nowrap;
+  }
+  td{ padding:12px 14px; border-bottom:1px solid var(--border); vertical-align:top; font-size:13px; }
+  tbody tr:hover td{ background:var(--surface2); }
+  .proc a{ color:var(--accent); text-decoration:none; font-weight:600; white-space:nowrap; }
+  .proc a:hover{ text-decoration:underline; }
+  .desc{ min-width:280px; max-width:360px; color:var(--text); }
+  select.bien, input.fecha{
+    background:var(--surface2); border:1px solid var(--border2); color:var(--text);
+    border-radius:7px; padding:6px 8px; font-family:var(--font-body); font-size:12.5px;
+  }
+  select.bien:focus, input.fecha:focus{ outline:none; border-color:var(--accent); }
+  input.fecha{ width:112px; }
+  .rm{ background:transparent; border:1px solid var(--border2); color:var(--muted); border-radius:7px; padding:6px 10px; cursor:pointer; font-size:12px; white-space:nowrap; }
+  .rm:hover{ color:var(--red); border-color:var(--red); }
+  .empty{ text-align:center; color:var(--muted); padding:64px 20px; }
+  .empty .big{ font-size:42px; margin-bottom:14px; }
+  .loading{ text-align:center; color:var(--muted); padding:50px; }
+  .toast{
+    position:fixed; bottom:24px; left:50%; transform:translateX(-50%);
+    background:var(--surface2); border:1px solid var(--border2); color:var(--text);
+    padding:10px 18px; border-radius:10px; font-size:13px; opacity:0; transition:opacity .2s; pointer-events:none;
+  }
+  .toast.show{ opacity:1; }
+  @media(max-width:600px){ .wrap{ padding:20px 14px; } .topbar{ padding:12px 16px; } }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <a class="logo" href="/"><span class="logo-dot"></span> Radar Ibero</a>
+    <a class="back" href="/">← Inicio</a>
+  </div>
+
+  <div class="wrap">
+    <h1>Oportunidades Seleccionadas</h1>
+    <div class="sub">Procesos marcados de interés, con su cronograma. El detalle de bien y las fechas son editables. <span class="count" id="count"></span></div>
+    <div id="container"><div class="loading">Cargando…</div></div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+  const $ = s => document.querySelector(s);
+  const BIENES = ['Educación','Hospitalario','Metalmecánica','Oficina','General'];
+  let DATA = [];
+
+  function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1700); }
+  function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+  async function load(){
+    try{
+      const res = await fetch('/api/interes');
+      DATA = await res.json();
+      render();
+    }catch(e){ $('#container').innerHTML = '<div class="empty">Error al cargar: '+esc(e.message)+'</div>'; }
+  }
+
+  function render(){
+    $('#count').textContent = DATA.length ? '('+DATA.length+')' : '';
+    if(!DATA.length){
+      $('#container').innerHTML = '<div class="empty"><div class="big">⭐</div>Aún no hay oportunidades seleccionadas.<br>Abre una oportunidad y marca 👍 para verla aquí.</div>';
+      return;
+    }
+    const rows = DATA.map(o=>{
+      let opts = BIENES.map(b=>'<option '+(o.detalle_bien===b?'selected':'')+'>'+b+'</option>').join('');
+      if(o.detalle_bien && !BIENES.includes(o.detalle_bien)) opts = '<option selected>'+esc(o.detalle_bien)+'</option>'+opts;
+      return '<tr data-id="'+o.id+'">'
+        + '<td class="proc"><a href="oportunidad.html?id='+o.id+'">'+esc(o.nomenclature||o.external_id||'—')+'</a></td>'
+        + '<td class="desc">'+esc(o.title||'—')+'</td>'
+        + '<td><select class="bien" onchange="saveField(\''+o.id+'\',\'detalle_bien\',this.value)">'+opts+'</select></td>'
+        + '<td><input class="fecha" value="'+esc(o.fecha_consultas||'')+'" onblur="saveField(\''+o.id+'\',\'fecha_consultas\',this.value)"></td>'
+        + '<td><input class="fecha" value="'+esc(o.fecha_bases_admin||'')+'" onblur="saveField(\''+o.id+'\',\'fecha_bases_admin\',this.value)"></td>'
+        + '<td><input class="fecha" value="'+esc(o.fecha_bases_integradas||'')+'" onblur="saveField(\''+o.id+'\',\'fecha_bases_integradas\',this.value)"></td>'
+        + '<td><input class="fecha" value="'+esc(o.fecha_presentacion||'')+'" onblur="saveField(\''+o.id+'\',\'fecha_presentacion\',this.value)"></td>'
+        + '<td><input class="fecha" value="'+esc(o.fecha_buena_pro||'')+'" onblur="saveField(\''+o.id+'\',\'fecha_buena_pro\',this.value)"></td>'
+        + '<td><button class="rm" onclick="quitar(\''+o.id+'\')">✕ Quitar</button></td>'
+        + '</tr>';
+    }).join('');
+    $('#container').innerHTML = '<div class="tablewrap"><table>'
+      + '<thead><tr>'
+      + '<th>Nº de proceso</th><th>Descripción</th><th>Detalle de bien</th>'
+      + '<th>Consultas</th><th>Bases admin.</th><th>Bases integradas</th>'
+      + '<th>Presentación</th><th>Buena pro</th><th></th>'
+      + '</tr></thead><tbody>'+rows+'</tbody></table></div>';
+  }
+
+  async function saveField(id, field, value){
+    try{
+      await fetch('/api/opportunities/'+id+'/tracker', {
+        method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({[field]:value})
+      });
+      const o = DATA.find(x=>String(x.id)===String(id)); if(o) o[field]=value;
+      toast('Guardado');
+    }catch(e){ toast('No se pudo guardar'); }
+  }
+
+  async function quitar(id){
+    if(!confirm('¿Quitar esta oportunidad de las seleccionadas?')) return;
+    try{
+      await fetch('/api/opportunities/'+id+'/interes', {
+        method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({interes:'no'})
+      });
+      DATA = DATA.filter(x=>String(x.id)!==String(id));
+      render(); toast('Quitada');
+    }catch(e){ toast('No se pudo quitar'); }
+  }
+
+  load();
+</script>
+</body>
+</html>
