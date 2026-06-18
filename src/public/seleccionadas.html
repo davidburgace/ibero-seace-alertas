@@ -68,6 +68,11 @@
   .legend i{ width:10px; height:10px; border-radius:50%; display:inline-block; }
   .rm{ background:transparent; border:1px solid var(--border2); color:var(--muted); border-radius:7px; padding:6px 10px; cursor:pointer; font-size:12px; white-space:nowrap; }
   .rm:hover{ color:var(--red); border-color:var(--red); }
+  .refresh-all{ background:var(--surface2); border:1px solid var(--border2); color:var(--text); border-radius:9px; padding:8px 16px; font-size:13px; cursor:pointer; font-family:var(--font-body); }
+  .refresh-all:hover{ border-color:var(--accent); }
+  .refresh-all:disabled{ opacity:.6; cursor:default; }
+  .rfr{ background:transparent; border:1px solid var(--border2); color:var(--muted); border-radius:7px; padding:6px 8px; cursor:pointer; font-size:12px; }
+  .rfr:hover{ color:var(--accent); border-color:var(--accent); }
   tbody tr.won td{ background:rgba(34,211,160,.09); }
   tbody tr.won td.proc{ box-shadow:inset 3px 0 0 var(--green); }
   tbody tr.lost td{ opacity:.4; }
@@ -97,6 +102,7 @@
   <div class="wrap">
     <h1>Oportunidades Seleccionadas</h1>
     <div class="sub">Procesos marcados de interés, con su cronograma. El detalle de bien y las fechas son editables. <span class="count" id="count"></span></div>
+    <div style="margin:0 0 18px;"><button id="btnRefrescar" class="refresh-all" onclick="refrescarTodas()">🔄 Actualizar cronogramas</button></div>
     <div class="dash" id="dash" style="display:none">
       <div class="dash-card">
         <div class="dash-title">Resultado de licitaciones</div>
@@ -194,6 +200,28 @@
     $('#holeBien').style.color = 'var(--text)';
   }
 
+  async function refrescar(id){
+    const o = DATA.find(x=>String(x.id)===String(id)); if(!o) return;
+    toast('Actualizando cronograma…');
+    try{
+      const res = await fetch('/api/opportunities/'+id+'/refrescar-ficha', { method:'POST' });
+      const data = await res.json();
+      if(data.ok && data.dates){ Object.assign(o, data.dates); render(); toast('Cronograma actualizado'); }
+      else toast('No se pudo actualizar');
+    }catch(e){ toast('Error al actualizar'); }
+  }
+  async function refrescarTodas(){
+    const btn = $('#btnRefrescar'); const orig = btn.textContent;
+    btn.disabled = true; btn.textContent = '🔄 Actualizando…';
+    try{
+      const res = await fetch('/api/interes/refrescar', { method:'POST' });
+      const data = await res.json();
+      await load();
+      toast(data.ok ? ('Actualizadas: '+(data.actualizadas||0)) : 'Error al actualizar');
+    }catch(e){ toast('Error al actualizar'); }
+    btn.disabled = false; btn.textContent = orig;
+  }
+
   async function load(){
     try{
       const res = await fetch('/api/interes');
@@ -227,7 +255,7 @@
         +   '<label><input type="checkbox" '+(o.resultado==='ganada'?'checked':'')+' onchange="setResultado(\''+o.id+'\',\'ganada\',this.checked)"> Ganada</label>'
         +   '<label class="perdida"><input type="checkbox" '+(o.resultado==='perdida'?'checked':'')+' onchange="setResultado(\''+o.id+'\',\'perdida\',this.checked)"> Perdida</label>'
         + '</div></td>'
-        + '<td><button class="rm" onclick="quitar(\''+o.id+'\')">✕ Quitar</button></td>'
+        + '<td style="white-space:nowrap;"><button class="rfr" onclick="refrescar(\''+o.id+'\')" title="Actualizar cronograma">🔄</button> <button class="rm" onclick="quitar(\''+o.id+'\')" title="Quitar">✕</button></td>'
         + '</tr>';
     }).join('');
     $('#container').innerHTML = '<div class="tablewrap"><table>'
