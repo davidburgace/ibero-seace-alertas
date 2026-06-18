@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Radar Ibero</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0a0d14; --surface:#111520; --surface2:#161b28;
+    --border:rgba(255,255,255,0.07); --border2:rgba(255,255,255,0.12);
+    --text:#e8eaf0; --muted:#7a8099;
+    --accent:#4f7dff; --accent2:#7c5cfc;
+    --font-display:'Syne',sans-serif; --font-body:'DM Sans',sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{
+    font-family:var(--font-body); background:var(--bg); color:var(--text);
+    min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center;
+    padding:40px 20px; text-align:center;
+    background-image:
+      radial-gradient(circle at 50% -5%, rgba(79,125,255,0.14), transparent 55%),
+      radial-gradient(circle at 85% 105%, rgba(124,92,252,0.12), transparent 50%);
+  }
+  .hero{ margin-bottom:52px; }
+  .dot{
+    width:14px; height:14px; border-radius:50%; background:var(--accent);
+    box-shadow:0 0 20px var(--accent); margin:0 auto 24px; animation:pulse 2s infinite;
+  }
+  @keyframes pulse{ 0%,100%{opacity:1;transform:scale(1);} 50%{opacity:.45;transform:scale(.78);} }
+  .wordmark{
+    font-family:var(--font-display); font-weight:800; letter-spacing:-0.02em;
+    font-size:clamp(44px,9vw,80px); line-height:.98;
+  }
+  .wordmark .accent{
+    background:linear-gradient(90deg,var(--accent),var(--accent2));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+  }
+  .tagline{ color:var(--muted); font-size:clamp(13px,2.4vw,16px); margin-top:18px; }
+  .grid{ display:flex; gap:20px; width:100%; max-width:780px; flex-wrap:wrap; justify-content:center; }
+  .tile{
+    flex:1; min-width:268px; background:var(--surface); border:1px solid var(--border2);
+    border-radius:18px; padding:34px 30px; text-decoration:none; color:var(--text);
+    display:flex; flex-direction:column; gap:14px; text-align:left;
+    transition:transform .18s, border-color .18s, background .18s;
+  }
+  .tile:hover{ transform:translateY(-4px); border-color:var(--accent); background:var(--surface2); }
+  .tile .ico{ font-size:36px; line-height:1; }
+  .tile h2{ font-family:var(--font-display); font-weight:700; font-size:23px; letter-spacing:-0.01em; }
+  .tile p{ color:var(--muted); font-size:14px; line-height:1.5; }
+  .tile .go{ margin-top:6px; color:var(--accent); font-weight:600; font-size:14px; }
+  footer{ margin-top:54px; color:var(--muted); font-size:12px; opacity:.65; }
+</style>
+</head>
+<body>
+  <div class="hero">
+    <div class="dot"></div>
+    <div class="wordmark">RADAR <span class="accent">IBERO</span></div>
+    <div class="tagline">Inteligencia de oportunidades con el Estado · Grupo Ibero Perú</div>
+  </div>
+
+  <div class="grid">
+    <a class="tile" href="admin.html">
+      <div class="ico">⚙️</div>
+      <h2>Administrador</h2>
+      <p>Vendedores, palabras clave, búsqueda y envío de correos del radar.</p>
+      <span class="go">Entrar →</span>
+    </a>
+    <a class="tile" href="seleccionadas.html">
+      <div class="ico">⭐</div>
+      <h2>Oportunidades Seleccionadas</h2>
+      <p>Tu cartera de procesos de interés, con el cronograma completo.</p>
+      <span class="go">Ver cartera →</span>
+    </a>
+  </div>
+
+  <footer>Grupo Ibero Perú S.A.C. · Radar SEACE</footer>
+</body>
+</html>
