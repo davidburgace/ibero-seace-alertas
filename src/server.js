@@ -792,6 +792,86 @@ app.post('/api/interes/refrescar', async (_, res) => {
     res.json({ ok:true, actualizadas: ok, fallidas: fail });
   } catch (e) { res.json({ ok:false, error:e.message }); }
 });
+// ── Agregar oportunidad manual (el vendedor la encontró en la web de SEACE) ──
+function extraerIdProceso(input){
+  const s = String(input || '').trim();
+  const u = s.match(/idProceso\/(\d+)/i);          // si pegó la URL de la ficha
+  if (u) return u[1];
+  const nums = s.match(/\d{4,}/g);                 // si no, el número largo
+  return nums ? nums[nums.length - 1] : '';
+}
+
+async function fetchFichaCompleta(idProceso){
+  const url = `https://prod4.seace.gob.pe:8086/api/oportunidades/fichaProceso/idProceso/${encodeURIComponent(idProceso)}`;
+  const r = await fetch(url, { headers: SEACE_HEADERS, signal: AbortSignal.timeout(25000) });
+  if (!r.ok) throw new Error(`Ficha HTTP ${r.status}`);
+  const f = await r.json();
+  const norm = s => (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+  const cron = f.listaCronograma || [];
+  const etapa = frag => {
+    const e = cron.find(c => norm(c.nombreEtapa).includes(frag) || norm(c.descripcionEtapa).includes(frag));
+    return e ? (e.fechaInicio || null) : null;
+  };
+  const basesDoc = (f.listaDocumentos || []).find(d => norm(d.tipoDocumento).includes('BASES ADMINISTRATIVAS'));
+  const titulo = f.descripcionObjeto || f.sintesisProceso || f.detItem || '';
+  return {
+    external_id: String(idProceso),
+    nomenclature: f.nomenclatura || f.numProceso || '',
+    entity: f.detEntidad || f.entidadContratante || f.nombreEntidad || f.entidad || '',
+    title: titulo,
+    published_date: parseSeaceDate(f.fechaConvocatoria) || new Date().toISOString().slice(0,10),
+    detalle_bien: classify(`${titulo} ${f.listaItems?.[0]?.descripcionCubso || ''}`),
+    fecha_consultas: etapa('FORMULACION'),
+    fecha_bases_admin: basesDoc ? (basesDoc.fechaPublicacion || '').split(' ')[0] : null,
+    fecha_bases_integradas: etapa('INTEGRACION'),
+    fecha_presentacion: etapa('PRESENTACION DE PROPUESTAS'),
+    fecha_buena_pro: etapa('BUENA PRO')
+  };
+}
+
+// Vista previa: trae datos de la ficha SIN guardar (para llenar el formulario)
+app.get('/api/seace/ficha-preview/:idProceso', async (req, res) => {
+  try {
+    const id = extraerIdProceso(req.params.idProceso);
+    if (!/^\d+$/.test(id)) return res.json({ ok:false, error:'No reconocí un idProceso válido' });
+    const data = await fetchFichaCompleta(id);
+    res.json({ ok:true, data });
+  } catch (e) { res.json({ ok:false, error:e.message }); }
+});
+
+// Agregar manual: inserta (o actualiza) la oportunidad y la marca de interés
+app.post('/api/opportunities/agregar-manual', async (req, res) => {
+  try {
+    if (!supabase) return res.json({ ok:false, error:'Supabase no configurado' });
+    const b = req.body || {};
+    const id = extraerIdProceso(b.external_id || b.idProceso || '');
+    if (!id && !b.nomenclature) return res.json({ ok:false, error:'Falta el idProceso o la nomenclatura' });
+    const external_id = id || `MANUAL-${Date.now()}`;
+    const titulo = (b.title || '').trim() || (b.nomenclature || '').trim() || 'Oportunidad agregada manual';
+    const row = {
+      external_id,
+      nomenclature: (b.nomenclature || '').trim() || external_id,
+      title: titulo,
+      entity: (b.entity || '').trim() || 'Entidad no identificada',
+      published_date: parseSeaceDate(b.published_date) || new Date().toISOString().slice(0,10),
+      source_url: id ? `https://prod4.seace.gob.pe/openegocio/#/ficha/idProceso/${id}` : null,
+      business_line: b.detalle_bien || 'General',
+      interes: 'si',
+      interes_at: new Date().toISOString(),
+      detalle_bien: b.detalle_bien || null,
+      fecha_consultas: b.fecha_consultas || null,
+      fecha_bases_admin: b.fecha_bases_admin || null,
+      fecha_bases_integradas: b.fecha_bases_integradas || null,
+      fecha_presentacion: b.fecha_presentacion || null,
+      fecha_buena_pro: b.fecha_buena_pro || null,
+      ficha_cargada: true,
+      alert_sent: true       // que NO dispare correo
+    };
+    const { error } = await supabase.from('opportunities').upsert(row, { onConflict: 'external_id' });
+    if (error) throw error;
+    res.json({ ok:true, external_id });
+  } catch (e) { res.json({ ok:false, error:e.message }); }
+});
 const schedule = process.env.CRON_SCHEDULE || '0 8 * * *';
 cron.schedule(schedule, async () => {
   try {
