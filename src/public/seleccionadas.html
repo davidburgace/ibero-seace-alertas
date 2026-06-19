@@ -71,6 +71,8 @@
   .refresh-all{ background:var(--surface2); border:1px solid var(--border2); color:var(--text); border-radius:9px; padding:8px 16px; font-size:13px; cursor:pointer; font-family:var(--font-body); }
   .refresh-all:hover{ border-color:var(--accent); }
   .refresh-all:disabled{ opacity:.6; cursor:default; }
+  .sortsel{ background:var(--surface2); border:1px solid var(--border2); color:var(--text); border-radius:9px; padding:8px 12px; font-family:var(--font-body); font-size:13px; cursor:pointer; }
+  .sortsel:focus{ outline:none; border-color:var(--accent); }
   .rfr{ background:transparent; border:1px solid var(--border2); color:var(--muted); border-radius:7px; padding:6px 8px; cursor:pointer; font-size:12px; }
   .rfr:hover{ color:var(--accent); border-color:var(--accent); }
   tbody tr.won td{ background:rgba(34,211,160,.09); }
@@ -126,9 +128,19 @@
   <div class="wrap">
     <h1>Oportunidades Seleccionadas</h1>
     <div class="sub">Procesos marcados de interés, con su cronograma. El detalle de bien y las fechas son editables. <span class="count" id="count"></span></div>
-    <div style="margin:0 0 18px; display:flex; gap:10px; flex-wrap:wrap;">
+    <div style="margin:0 0 18px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
       <button id="btnRefrescar" class="refresh-all" onclick="refrescarTodas()">🔄 Actualizar cronogramas</button>
       <button class="refresh-all" onclick="abrirModal()">➕ Agregar manual</button>
+      <div style="margin-left:auto; display:flex; align-items:center; gap:8px;">
+        <span style="color:var(--muted); font-size:12.5px; white-space:nowrap;">Ordenar por:</span>
+        <select id="sortBy" class="sortsel" onchange="cambiarOrden()">
+          <option value="fecha_presentacion">Presentación</option>
+          <option value="fecha_buena_pro">Buena pro</option>
+          <option value="fecha_consultas">Consultas</option>
+          <option value="fecha_bases_integradas">Bases integradas</option>
+          <option value="published_date">Publicación</option>
+        </select>
+      </div>
     </div>
     <div class="dash" id="dash" style="display:none">
       <div class="dash-card">
@@ -188,6 +200,18 @@
   const $ = s => document.querySelector(s);
   const BIENES = ['Educación','Hospitalario','Metalmecánica','Oficina','General'];
   let DATA = [];
+  let SORT_FIELD = 'fecha_presentacion';
+  function toTime(v){
+    if(!v) return Infinity;
+    const s = String(v).trim();
+    let m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if(m) return new Date(+m[3], +m[2]-1, +m[1]).getTime();
+    m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if(m) return new Date(+m[1], +m[2]-1, +m[3]).getTime();
+    return Infinity;
+  }
+  function sortData(){ DATA.sort((a,b)=> toTime(a[SORT_FIELD]) - toTime(b[SORT_FIELD])); }
+  function cambiarOrden(){ SORT_FIELD = document.querySelector('#sortBy').value; sortData(); render(); }
 
   function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),1700); }
   function esc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
@@ -280,6 +304,7 @@
     try{
       const res = await fetch('/api/interes');
       DATA = await res.json();
+      sortData();
       render();
     }catch(e){ $('#container').innerHTML = '<div class="empty">Error al cargar: '+esc(e.message)+'</div>'; }
   }
