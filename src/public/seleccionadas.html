@@ -402,7 +402,7 @@
         else toast(j.error || 'No se pudo traer; prueba por nomenclatura o llena a mano');
       } else {
         // Texto/nomenclatura → buscar en lo que el radar ya capturó
-        const res = await fetch('/api/opportunities/buscar-local?q='+encodeURIComponent(raw));
+        const res = await fetch('/api/buscar-local?q='+encodeURIComponent(raw));
         const j = await res.json();
         if(j.ok && j.results && j.results.length){
           if(j.results.length===1){ fillForm(j.results[0]); toast('Encontrada en el radar ✓'); }
