@@ -817,7 +817,7 @@ async function fetchFichaCompleta(idProceso){
   return {
     external_id: String(idProceso),
     nomenclature: f.nomenclatura || f.numProceso || '',
-    entity: f.detEntidad || f.entidadContratante || f.nombreEntidad || f.entidad || '',
+    entity: (f.entidadConvocante && f.entidadConvocante.nombreOrganismo) || f.detEntidad || '',
     title: titulo,
     published_date: parseSeaceDate(f.fechaConvocatoria) || new Date().toISOString().slice(0,10),
     detalle_bien: classify(`${titulo} ${f.listaItems?.[0]?.descripcionCubso || ''}`),
@@ -853,7 +853,7 @@ app.post('/api/opportunities/agregar-manual', async (req, res) => {
       nomenclature: (b.nomenclature || '').trim() || external_id,
       title: titulo,
       entity: (b.entity || '').trim() || 'Entidad no identificada',
-      published_date: parseSeaceDate(b.published_date) || new Date().toISOString().slice(0,10),
+      published_date: parseSeaceDate(f.fechaConvocatoria) || parseSeaceDate(basesDoc ? (basesDoc.fechaPublicacion || '').split(' ')[0] : null) || new Date().toISOString().slice(0,10),
       source_url: id ? `https://prod4.seace.gob.pe/openegocio/#/ficha/idProceso/${id}` : null,
       business_line: b.detalle_bien || 'General',
       interes: 'si',
