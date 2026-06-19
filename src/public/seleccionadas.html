@@ -90,7 +90,25 @@
     padding:10px 18px; border-radius:10px; font-size:13px; opacity:0; transition:opacity .2s; pointer-events:none;
   }
   .toast.show{ opacity:1; }
-  @media(max-width:600px){ .wrap{ padding:20px 14px; } .topbar{ padding:12px 16px; } }
+  .modal-bg{ position:fixed; inset:0; background:rgba(5,7,12,.72); backdrop-filter:blur(4px); display:none; align-items:flex-start; justify-content:center; z-index:100; padding:40px 16px; overflow-y:auto; }
+  .modal-bg.show{ display:flex; }
+  .modal{ background:var(--surface); border:1px solid var(--border2); border-radius:16px; padding:24px; width:100%; max-width:560px; }
+  .modal h2{ font-family:var(--font-display); font-weight:800; font-size:20px; margin-bottom:6px; }
+  .modal-sub{ color:var(--muted); font-size:12.5px; margin-bottom:18px; line-height:1.5; }
+  .mrow{ display:flex; gap:8px; margin-bottom:18px; }
+  .minput{ background:var(--surface2); border:1px solid var(--border2); color:var(--text); border-radius:9px; padding:9px 11px; font-family:var(--font-body); font-size:13px; width:100%; }
+  .minput:focus{ outline:none; border-color:var(--accent); }
+  .mbtn-fetch{ background:var(--accent); border:none; color:#fff; border-radius:9px; padding:9px 16px; font-size:13px; font-weight:600; cursor:pointer; white-space:nowrap; font-family:var(--font-body); }
+  .mbtn-fetch:disabled{ opacity:.6; cursor:default; }
+  .mgrid{ display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:20px; }
+  .mgrid label{ display:flex; flex-direction:column; gap:5px; font-size:11px; color:var(--muted); font-family:var(--font-display); font-weight:600; text-transform:uppercase; letter-spacing:.03em; }
+  .mgrid label.full{ grid-column:1 / -1; }
+  .mactions{ display:flex; justify-content:flex-end; gap:10px; }
+  .mbtn-cancel{ background:transparent; border:1px solid var(--border2); color:var(--muted); border-radius:9px; padding:9px 18px; font-size:13px; cursor:pointer; font-family:var(--font-body); }
+  .mbtn-cancel:hover{ color:var(--text); }
+  .mbtn-save{ background:var(--green); border:none; color:#04201a; border-radius:9px; padding:9px 20px; font-size:13px; font-weight:700; cursor:pointer; font-family:var(--font-body); }
+  .mbtn-save:disabled{ opacity:.6; cursor:default; }
+  @media(max-width:600px){ .wrap{ padding:20px 14px; } .topbar{ padding:12px 16px; } .mgrid{ grid-template-columns:1fr; } }
 </style>
 </head>
 <body>
@@ -102,7 +120,10 @@
   <div class="wrap">
     <h1>Oportunidades Seleccionadas</h1>
     <div class="sub">Procesos marcados de interés, con su cronograma. El detalle de bien y las fechas son editables. <span class="count" id="count"></span></div>
-    <div style="margin:0 0 18px;"><button id="btnRefrescar" class="refresh-all" onclick="refrescarTodas()">🔄 Actualizar cronogramas</button></div>
+    <div style="margin:0 0 18px; display:flex; gap:10px; flex-wrap:wrap;">
+      <button id="btnRefrescar" class="refresh-all" onclick="refrescarTodas()">🔄 Actualizar cronogramas</button>
+      <button class="refresh-all" onclick="abrirModal()">➕ Agregar manual</button>
+    </div>
     <div class="dash" id="dash" style="display:none">
       <div class="dash-card">
         <div class="dash-title">Resultado de licitaciones</div>
@@ -126,6 +147,32 @@
       <span><i style="background:#3a3f4d"></i> Ya pasó</span>
     </div>
     <div id="container"><div class="loading">Cargando…</div></div>
+  </div>
+
+  <div class="modal-bg" id="modalBg" onclick="if(event.target===this)cerrarModal()">
+    <div class="modal">
+      <h2>➕ Agregar oportunidad manual</h2>
+      <p class="modal-sub">Si al vendedor se le pasó y la encontró en la web de SEACE: abre su <b>ficha</b>, copia el número del final de la URL (<code>…/idProceso/<b>1213621</b></code>) y pégalo aquí. Traigo los datos solos — puedes corregir antes de agregar. Si no se puede traer, llena los campos a mano.</p>
+      <div class="mrow">
+        <input id="mId" class="minput" placeholder="Ej: 1213621   ó   pega la URL completa de la ficha">
+        <button class="mbtn-fetch" id="mBtnFetch" onclick="traerFicha()">Traer datos</button>
+      </div>
+      <div class="mgrid">
+        <label class="full">Nº de proceso<input id="mNom" class="minput" placeholder="Nomenclatura"></label>
+        <label class="full">Entidad<input id="mEnt" class="minput"></label>
+        <label class="full">Descripción<input id="mTit" class="minput"></label>
+        <label>Detalle de bien<select id="mBien" class="minput"></select></label>
+        <label>Publicación<input id="mPub" class="minput" placeholder="aaaa-mm-dd"></label>
+        <label>Consultas<input id="mCons" class="minput" placeholder="dd/mm/aaaa"></label>
+        <label>Bases integradas<input id="mInt" class="minput" placeholder="dd/mm/aaaa"></label>
+        <label>Presentación<input id="mPres" class="minput" placeholder="dd/mm/aaaa"></label>
+        <label>Buena pro<input id="mBP" class="minput" placeholder="dd/mm/aaaa"></label>
+      </div>
+      <div class="mactions">
+        <button class="mbtn-cancel" onclick="cerrarModal()">Cancelar</button>
+        <button class="mbtn-save" id="mBtnSave" onclick="guardarManual()">Agregar a Seleccionadas</button>
+      </div>
+    </div>
   </div>
 
   <div class="toast" id="toast"></div>
@@ -297,6 +344,66 @@
       DATA = DATA.filter(x=>String(x.id)!==String(id));
       render(); toast('Quitada');
     }catch(e){ toast('No se pudo quitar'); }
+  }
+
+  // ── Agregar manual ──────────────────────────────────────────────
+  function abrirModal(){
+    ['mId','mNom','mEnt','mTit','mPub','mCons','mInt','mPres','mBP'].forEach(i=>{ const el=$('#'+i); el.value=''; });
+    $('#mId').dataset.ext=''; $('#mId').dataset.basesadmin='';
+    $('#mBien').innerHTML = BIENES.map(b=>'<option>'+b+'</option>').join('');
+    $('#mBien').value='General';
+    $('#modalBg').classList.add('show');
+    setTimeout(()=>$('#mId').focus(),50);
+  }
+  function cerrarModal(){ $('#modalBg').classList.remove('show'); }
+
+  async function traerFicha(){
+    const raw = $('#mId').value.trim();
+    if(!raw){ toast('Pega el N° o la URL de la ficha'); return; }
+    const btn=$('#mBtnFetch'); const o=btn.textContent; btn.disabled=true; btn.textContent='Trayendo…';
+    try{
+      const res = await fetch('/api/seace/ficha-preview/'+encodeURIComponent(raw));
+      const j = await res.json();
+      if(j.ok && j.data){
+        const d=j.data;
+        $('#mNom').value=d.nomenclature||''; $('#mEnt').value=d.entity||''; $('#mTit').value=d.title||'';
+        $('#mPub').value=d.published_date||'';
+        $('#mBien').value = BIENES.includes(d.detalle_bien)?d.detalle_bien:'General';
+        $('#mCons').value=d.fecha_consultas||''; $('#mInt').value=d.fecha_bases_integradas||'';
+        $('#mPres').value=d.fecha_presentacion||''; $('#mBP').value=d.fecha_buena_pro||'';
+        $('#mId').dataset.ext = d.external_id||'';
+        $('#mId').dataset.basesadmin = d.fecha_bases_admin||'';
+        toast('Datos traídos de SEACE ✓');
+      } else { toast(j.error || 'No se pudo traer; llena a mano'); }
+    }catch(e){ toast('Error al traer; llena a mano'); }
+    btn.disabled=false; btn.textContent=o;
+  }
+
+  async function guardarManual(){
+    const raw = $('#mId').value.trim();
+    const body = {
+      idProceso: raw,
+      external_id: $('#mId').dataset.ext || raw,
+      nomenclature: $('#mNom').value.trim(),
+      entity: $('#mEnt').value.trim(),
+      title: $('#mTit').value.trim(),
+      published_date: $('#mPub').value.trim(),
+      detalle_bien: $('#mBien').value,
+      fecha_consultas: $('#mCons').value.trim(),
+      fecha_bases_admin: $('#mId').dataset.basesadmin || '',
+      fecha_bases_integradas: $('#mInt').value.trim(),
+      fecha_presentacion: $('#mPres').value.trim(),
+      fecha_buena_pro: $('#mBP').value.trim()
+    };
+    if(!body.nomenclature && !body.external_id){ toast('Pon al menos el N° de proceso o el idProceso'); return; }
+    const btn=$('#mBtnSave'); const o=btn.textContent; btn.disabled=true; btn.textContent='Agregando…';
+    try{
+      const res = await fetch('/api/opportunities/agregar-manual',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      const j = await res.json();
+      if(j.ok){ cerrarModal(); await load(); toast('Agregada a Seleccionadas ✓'); }
+      else toast(j.error || 'No se pudo agregar');
+    }catch(e){ toast('Error al agregar'); }
+    btn.disabled=false; btn.textContent=o;
   }
 
   load();
