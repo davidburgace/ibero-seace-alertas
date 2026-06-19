@@ -853,7 +853,7 @@ app.post('/api/opportunities/agregar-manual', async (req, res) => {
       nomenclature: (b.nomenclature || '').trim() || external_id,
       title: titulo,
       entity: (b.entity || '').trim() || 'Entidad no identificada',
-      published_date: parseSeaceDate(f.fechaConvocatoria) || parseSeaceDate(basesDoc ? (basesDoc.fechaPublicacion || '').split(' ')[0] : null) || new Date().toISOString().slice(0,10),
+      published_date: parseSeaceDate(b.published_date) || new Date().toISOString().slice(0,10),
       source_url: id ? `https://prod4.seace.gob.pe/openegocio/#/ficha/idProceso/${id}` : null,
       business_line: b.detalle_bien || 'General',
       interes: 'si',
