@@ -872,6 +872,22 @@ app.post('/api/opportunities/agregar-manual', async (req, res) => {
     res.json({ ok:true, external_id });
   } catch (e) { res.json({ ok:false, error:e.message }); }
 });
+// Buscar oportunidades ya capturadas por el radar (por nomenclatura, palabra del objeto o entidad)
+app.get('/api/opportunities/buscar-local', async (req, res) => {
+  try {
+    if (!supabase) return res.json({ ok:false, error:'Supabase no configurado' });
+    const q = String(req.query.q || '').trim();
+    if (q.length < 3) return res.json({ ok:false, error:'Escribe al menos 3 caracteres' });
+    const safe = q.replace(/[,()]/g, ' ').trim();   // evita romper la sintaxis del filtro .or
+    const { data, error } = await supabase.from('opportunities')
+      .select('id, external_id, nomenclature, title, entity, published_date, detalle_bien, fecha_consultas, fecha_bases_admin, fecha_bases_integradas, fecha_presentacion, fecha_buena_pro, interes')
+      .or(`nomenclature.ilike.%${safe}%,title.ilike.%${safe}%,entity.ilike.%${safe}%`)
+      .order('published_date', { ascending: false })
+      .limit(25);
+    if (error) throw error;
+    res.json({ ok:true, results: data || [] });
+  } catch (e) { res.json({ ok:false, error:e.message }); }
+});
 const schedule = process.env.CRON_SCHEDULE || '0 8 * * *';
 cron.schedule(schedule, async () => {
   try {
