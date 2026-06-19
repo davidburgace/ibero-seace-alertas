@@ -873,7 +873,7 @@ app.post('/api/opportunities/agregar-manual', async (req, res) => {
   } catch (e) { res.json({ ok:false, error:e.message }); }
 });
 // Buscar oportunidades ya capturadas por el radar (por nomenclatura, palabra del objeto o entidad)
-app.get('/api/opportunities/buscar-local', async (req, res) => {
+app.get('/api/buscar-local', async (req, res) => {
   try {
     if (!supabase) return res.json({ ok:false, error:'Supabase no configurado' });
     const q = String(req.query.q || '').trim();
