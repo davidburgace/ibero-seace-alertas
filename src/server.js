@@ -133,7 +133,7 @@ function normalizeSeaceItem(item, keyword) {
     amount: monto,
     currency: moneda,
     process_type: tipoProceso,
-    published_date: parseSeaceDate(f.fechaConvocatoria) || (basesDoc && basesDoc.fechaPublicacion ? basesDoc.fechaPublicacion.split(' ')[0].split('/').reverse().join('-') : new Date().toISOString().slice(0,10)),
+   published_date: parseSeaceDate(item.fechaConvocatoria) || new Date().toISOString().slice(0, 10),
     closing_date: parseSeaceDate(item.fechaFin || item.fecFinParticipantes),
     submission_date: parseSeaceDate(item.fechaPresentacionPropuestas),
     business_line: classify(`${titulo} ${keyword}`),
