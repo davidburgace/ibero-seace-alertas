@@ -313,18 +313,14 @@ function renderEmail(opportunities) {
 }
 
 async function sendDigest() {
-  let opportunities;
-  if (supabase) {
-    const { data, error } = await supabase.from('opportunities')
-      .select('*')
-      .or('alert_sent.is.null,alert_sent.eq.false')
-      .order('published_date', { ascending: false });
-    if (error) throw error;
-    opportunities = data || [];
-  } else {
-    opportunities = (await table('opportunities')).filter(o => !o.alert_sent);
-  }
-  if (!opportunities.length) return { ok: false, message: 'No hay oportunidades nuevas para enviar' };
+  if (!supabase) return { ok: false, message: 'Supabase no configurado' };
+  const { data: opportunities, error } = await supabase.from('opportunities')
+    .select('*')
+    .or('alert_sent.is.null,alert_sent.eq.false')
+    .order('published_date', { ascending: false });
+  if (error) throw error;
+  if (!opportunities || !opportunities.length) return { ok: false, message: 'No hay oportunidades nuevas' };
+
   const vendors = await table('vendors');
   if (!process.env.SMTP_HOST) return { ok: false, message: 'SMTP no configurado' };
   const transport = nodemailer.createTransport({
@@ -344,10 +340,9 @@ async function sendDigest() {
     html: renderEmail(opportunities)
   });
   const ids = opportunities.map(o => o.id).filter(Boolean);
-  if (ids.length && supabase) await supabase.from('opportunities').update({ alert_sent: true }).in('id', ids);
-  return { ok: true, recipients, messageId: info.messageId || null };
+  if (ids.length) await supabase.from('opportunities').update({ alert_sent: true }).in('id', ids);
+  return { ok: true, recipients, messageId: info.messageId || null, count: opportunities.length };
 }
-
 // ─── Rutas ─────────────────────────────────────────────────────────────────────
 app.get('/', (_, res) => res.json({ ok: true, app: 'SEACE Radar — Grupo Ibero Perú', mode: MODE, version: VERSION }));
 
