@@ -7,10 +7,10 @@
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
   :root{
-    --bg:#0a0d14; --surface:#111520; --surface2:#161b28;
-    --border:rgba(255,255,255,0.07); --border2:rgba(255,255,255,0.12);
-    --text:#e8eaf0; --muted:#7a8099;
-    --accent:#4f7dff; --accent2:#7c5cfc;
+    --bg:#ffffff; --surface:#f7f8fa; --surface2:#eef0f4;
+    --border:rgba(0,0,0,0.08); --border2:rgba(0,0,0,0.14);
+    --text:#16181d; --muted:#5c6270;
+    --accent:#3a63e0; --accent2:#6a4fd1;
     --font-display:'Syne',sans-serif; --font-body:'DM Sans',sans-serif;
   }
   *{box-sizing:border-box;margin:0;padding:0;}
@@ -19,13 +19,13 @@
     min-height:100vh; display:flex; flex-direction:column; align-items:center; justify-content:center;
     padding:40px 20px; text-align:center;
     background-image:
-      radial-gradient(circle at 50% -5%, rgba(79,125,255,0.14), transparent 55%),
-      radial-gradient(circle at 85% 105%, rgba(124,92,252,0.12), transparent 50%);
+      radial-gradient(circle at 50% -5%, rgba(58,99,224,0.08), transparent 55%),
+      radial-gradient(circle at 85% 105%, rgba(106,79,209,0.07), transparent 50%);
   }
   .hero{ margin-bottom:52px; }
   .logo-badge{
     background:#fff; border-radius:22px; padding:24px 32px; display:inline-block;
-    box-shadow:0 12px 44px rgba(0,0,0,.4); margin-bottom:28px;
+    box-shadow:0 8px 28px rgba(0,0,0,.10); border:1px solid var(--border); margin-bottom:28px;
   }
   .logo-badge img{ display:block; width:clamp(180px,44vw,250px); height:auto; }
   .wordmark{
