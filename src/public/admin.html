@@ -7,17 +7,17 @@
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #0a0d14;
-    --surface: #111520;
-    --surface2: #161b28;
-    --border: rgba(255,255,255,0.07);
-    --border2: rgba(255,255,255,0.12);
-    --text: #e8eaf0;
-    --muted: #7a8099;
-    --accent: #4f7dff;
-    --green: #22d3a0;
-    --red: #f05252;
-    --amber: #f5a623;
+    --bg: #ffffff;
+    --surface: #f7f8fa;
+    --surface2: #eef0f4;
+    --border: rgba(0,0,0,0.08);
+    --border2: rgba(0,0,0,0.14);
+    --text: #16181d;
+    --muted: #5c6270;
+    --accent: #3a63e0;
+    --green: #0f9d72;
+    --red: #d6364a;
+    --amber: #b8860b;
     --font-display: 'Syne', sans-serif;
     --font-body: 'DM Sans', sans-serif;
   }
@@ -239,7 +239,7 @@
     <div class="card" style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
       <button class="btn-add" id="btnBuscar" onclick="buscarAhora()">🔍 Buscar oportunidades ahora</button>
       <button class="btn-add" id="btnEnviar" onclick="enviarCorreos()">✉️ Enviar correos ahora</button>
-      <span id="accionMsg" style="font-size:13px;color:#9aa;flex:1;min-width:200px;"></span>
+      <span id="accionMsg" style="font-size:13px;color:var(--muted);flex:1;min-width:200px;"></span>
     </div>
     <!-- Vendedores -->
     <div class="section-header">
