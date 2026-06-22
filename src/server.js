@@ -755,7 +755,7 @@ app.get('/api/interes', async (_, res, next) => {
 app.put('/api/opportunities/:id/tracker', async (req, res, next) => {
   try {
     if (!supabase) return res.json({ ok: false });
-    const allow = ['detalle_bien','resultado','fecha_consultas','fecha_bases_admin','fecha_bases_integradas','fecha_presentacion','fecha_buena_pro'];
+    const allow = ['detalle_bien','resultado','fecha_consultas','fecha_bases_admin','fecha_bases_integradas','fecha_presentacion','fecha_buena_pro','observacion'];
     const patch = {};
     for (const k of allow) if (k in req.body) patch[k] = req.body[k];
     if (!Object.keys(patch).length) return res.json({ ok: false });
