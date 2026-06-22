@@ -7,11 +7,11 @@
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg:#0a0d14; --surface:#111520; --surface2:#161b28;
-    --border:rgba(255,255,255,0.07); --border2:rgba(255,255,255,0.12);
-    --text:#e8eaf0; --muted:#7a8099;
-    --accent:#4f7dff; --accent2:#0f766e;
-    --green:#22d3a0; --amber:#f5a623; --red:#f05252;
+    --bg:#ffffff; --surface:#f7f8fa; --surface2:#eef0f4;
+    --border:rgba(0,0,0,0.08); --border2:rgba(0,0,0,0.14);
+    --text:#16181d; --muted:#5c6270;
+    --accent:#3a63e0; --accent2:#0f766e;
+    --green:#0f9d72; --amber:#b8860b; --red:#d6364a;
     --font-display:'Syne',sans-serif; --font-body:'DM Sans',sans-serif;
   }
   *{box-sizing:border-box;margin:0;padding:0;}
@@ -292,8 +292,8 @@ function render(){
     const dec = o.ai_recommendation ? `<span class="tag dec-${o.ai_recommendation.toLowerCase()}">${o.ai_recommendation}</span>` : '';
     const mob = o.incluye_mobiliario ? '<span class="tag mob">Mobiliario</span>' : '';
     const noej = hasEjec(o) ? '' : '<span class="tag" style="color:var(--amber);border-color:transparent;background:rgba(245,166,35,.12);">Sin ejecutor</span>';
-    const int = o.interes==='si' ? '<span class="tag" style="color:#34d399;border-color:transparent;background:rgba(52,211,153,.14);">★ De interés</span>'
-              : o.interes==='no' ? '<span class="tag" style="color:#f87171;border-color:transparent;background:rgba(248,113,113,.14);">Descartado</span>' : '';
+    const int = o.interes==='si' ? '<span class="tag" style="color:#0f9d72;border-color:transparent;background:rgba(15,157,114,.12);">★ De interés</span>'
+              : o.interes==='no' ? '<span class="tag" style="color:#c0394a;border-color:transparent;background:rgba(192,57,74,.12);">Descartado</span>' : '';
     return `<div class="card" onclick="openDetail('${o.id}')" style="${(o.revisado||o.interes==='no')?'opacity:.5;':''}">
       <div class="score ${scoreClass(o.ai_score)}">${o.ai_score??'—'}</div>
       <div class="card-body">
