@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Oportunidades Seleccionadas — Radar Ibero</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   :root{
     --bg:#0a0d14; --surface:#111520; --surface2:#161b28;
@@ -131,6 +132,7 @@
     <div style="margin:0 0 18px; display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
       <button id="btnRefrescar" class="refresh-all" onclick="refrescarTodas()">🔄 Actualizar cronogramas</button>
       <button class="refresh-all" onclick="abrirModal()">➕ Agregar manual</button>
+      <button class="refresh-all" onclick="exportarExcel()">📊 Exportar a Excel</button>
       <div style="margin-left:auto; display:flex; align-items:center; gap:8px;">
         <span style="color:var(--muted); font-size:12.5px; white-space:nowrap;">Ordenar por:</span>
         <select id="sortBy" class="sortsel" onchange="cambiarOrden()">
@@ -469,6 +471,34 @@
       else toast(j.error || 'No se pudo agregar');
     }catch(e){ toast('Error al agregar'); }
     btn.disabled=false; btn.textContent=o;
+  }
+
+  // ── Exportar a Excel ────────────────────────────────────────────
+  function exportarExcel(){
+    if(!DATA.length){ toast('No hay oportunidades para exportar'); return; }
+    const rows = DATA.map(o=>({
+      'Publicación': fmtISO(o.published_date) || '',
+      'Nº de proceso': o.nomenclature || o.external_id || '',
+      'Entidad': o.entity || '',
+      'Descripción': o.title || '',
+      'Detalle de bien': o.detalle_bien || '',
+      'Consultas': o.fecha_consultas || '',
+      'Bases integradas': o.fecha_bases_integradas || '',
+      'Presentación': o.fecha_presentacion || '',
+      'Buena pro': o.fecha_buena_pro || '',
+      'Observación': o.observacion || '',
+      'Resultado': o.resultado === 'ganada' ? 'Ganada' : (o.resultado === 'perdida' ? 'Perdida' : 'En juego')
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws['!cols'] = [
+      {wch:12},{wch:26},{wch:32},{wch:50},{wch:16},
+      {wch:12},{wch:14},{wch:13},{wch:12},{wch:24},{wch:11}
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Seleccionadas');
+    const fecha = new Date().toISOString().slice(0,10);
+    XLSX.writeFile(wb, `oportunidades-seleccionadas-${fecha}.xlsx`);
+    toast('Excel descargado ✓');
   }
 
   load();
