@@ -8,10 +8,10 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <style>
   :root{
-    --bg:#0a0d14; --surface:#111520; --surface2:#161b28;
-    --border:rgba(255,255,255,0.07); --border2:rgba(255,255,255,0.12);
-    --text:#e8eaf0; --muted:#7a8099;
-    --accent:#4f7dff; --accent2:#7c5cfc; --green:#22d3a0; --red:#f05252;
+    --bg:#ffffff; --surface:#f7f8fa; --surface2:#eef0f4;
+    --border:rgba(0,0,0,0.08); --border2:rgba(0,0,0,0.14);
+    --text:#16181d; --muted:#5c6270;
+    --accent:#3a63e0; --accent2:#6a4fd1; --green:#0f9d72; --red:#d6364a;
     --font-display:'Syne',sans-serif; --font-body:'DM Sans',sans-serif;
   }
   *{box-sizing:border-box;margin:0;padding:0;}
@@ -62,7 +62,7 @@
   input.fecha{ width:82px; }
   input.fecha.green{ border-color:rgba(34,211,160,.55); background:rgba(34,211,160,.12); }
   input.fecha.yellow{ border-color:rgba(245,166,35,.6); background:rgba(245,166,35,.14); }
-  input.fecha.red{ border-color:rgba(240,82,82,.7); background:rgba(240,82,82,.16); color:#ffdada; }
+  input.fecha.red{ border-color:rgba(214,54,74,.6); background:rgba(214,54,74,.10); color:#a3253a; }
   input.fecha.past{ border-color:var(--border2); color:var(--muted); opacity:.55; }
   .legend{ display:flex; gap:18px; flex-wrap:wrap; font-size:12px; color:var(--muted); margin:-8px 0 20px; }
   .legend span{ display:inline-flex; align-items:center; gap:6px; }
@@ -201,7 +201,7 @@
 <script>
   const $ = s => document.querySelector(s);
   const BIENES = ['Educación','Hospitalario','Metalmecánica','Oficina','General'];
-  const OBSERVACIONES = ['Oferta presentada','Cronograma desactualizado','Sin bases integradas','Consultas presentadas','No se presentaron consultas'];
+  const OBSERVACIONES = ['OFERTA PRESENTADA','CRONOGRAMA DESACTUALIZADO','SIN BASES INTEGRADAS','CONSULTAS PRESENTADAS','NO SE PRESENTARON CONSULTAS'];
   let DATA = [];
   let SORT_FIELD = 'fecha_presentacion';
   function toTime(v){
