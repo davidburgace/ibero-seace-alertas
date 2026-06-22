@@ -199,6 +199,7 @@
 <script>
   const $ = s => document.querySelector(s);
   const BIENES = ['Educación','Hospitalario','Metalmecánica','Oficina','General'];
+  const OBSERVACIONES = ['Oferta presentada','Cronograma desactualizado','Sin bases integradas','Consultas presentadas','No se presentaron consultas'];
   let DATA = [];
   let SORT_FIELD = 'fecha_presentacion';
   function toTime(v){
@@ -319,6 +320,8 @@
     const rows = DATA.map(o=>{
       let opts = BIENES.map(b=>'<option '+(o.detalle_bien===b?'selected':'')+'>'+b+'</option>').join('');
       if(o.detalle_bien && !BIENES.includes(o.detalle_bien)) opts = '<option selected>'+esc(o.detalle_bien)+'</option>'+opts;
+      let obsOpts = '<option value="">—</option>' + OBSERVACIONES.map(ob=>'<option '+(o.observacion===ob?'selected':'')+'>'+ob+'</option>').join('');
+      if(o.observacion && !OBSERVACIONES.includes(o.observacion)) obsOpts += '<option selected>'+esc(o.observacion)+'</option>';
       const rcls = o.resultado==='ganada' ? 'won' : (o.resultado==='perdida' ? 'lost' : '');
       return '<tr class="'+rcls+'" data-id="'+o.id+'">'
         + '<td class="pub">'+esc(fmtISO(o.published_date))+'</td>'
@@ -330,6 +333,7 @@
         + '<td><input class="fecha '+fechaColor(o.fecha_bases_integradas)+'" value="'+esc(o.fecha_bases_integradas||'')+'" onblur="onDateBlur(\''+o.id+'\',\'fecha_bases_integradas\',this)"></td>'
         + '<td><input class="fecha '+fechaColor(o.fecha_presentacion)+'" value="'+esc(o.fecha_presentacion||'')+'" onblur="onDateBlur(\''+o.id+'\',\'fecha_presentacion\',this)"></td>'
         + '<td><input class="fecha '+fechaColor(o.fecha_buena_pro)+'" value="'+esc(o.fecha_buena_pro||'')+'" onblur="onDateBlur(\''+o.id+'\',\'fecha_buena_pro\',this)"></td>'
+        + '<td><select class="bien" onchange="saveField(\''+o.id+'\',\'observacion\',this.value)">'+obsOpts+'</select></td>'
         + '<td><div class="res">'
         +   '<label><input type="checkbox" '+(o.resultado==='ganada'?'checked':'')+' onchange="setResultado(\''+o.id+'\',\'ganada\',this.checked)"> Ganada</label>'
         +   '<label class="perdida"><input type="checkbox" '+(o.resultado==='perdida'?'checked':'')+' onchange="setResultado(\''+o.id+'\',\'perdida\',this.checked)"> Perdida</label>'
@@ -341,7 +345,7 @@
       + '<thead><tr>'
       + '<th>Publicación</th><th>Nº de proceso</th><th>Entidad</th><th>Descripción</th><th>Detalle de bien</th>'
       + '<th>Consultas</th><th>Bases integradas</th>'
-      + '<th>Presentación</th><th>Buena pro</th><th>Resultado</th><th></th>'
+      + '<th>Presentación</th><th>Buena pro</th><th>Observación</th><th>Resultado</th><th></th>'
       + '</tr></thead><tbody>'+rows+'</tbody></table></div>';
   }
 
