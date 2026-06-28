@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+A<!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -49,6 +49,17 @@
   .tile h2{ font-family:var(--font-display); font-weight:700; font-size:23px; letter-spacing:-0.01em; }
   .tile p{ color:var(--muted); font-size:14px; line-height:1.5; }
   .tile .go{ margin-top:6px; color:var(--accent); font-weight:600; font-size:14px; }
+
+  /* Segunda fila de productos: visualmente agrupada aparte de SEACE,
+     ya que Radar Comercial es una app distinta (Aduanet/SUNAT, no SEACE),
+     pero con la misma identidad visual para que se sienta parte de la
+     misma familia de herramientas de Grupo Ibero. */
+  .section-label{
+    width:100%; max-width:1160px; text-align:left; margin:40px 0 -2px;
+    color:var(--muted); font-size:12px; font-weight:600; letter-spacing:.06em;
+    text-transform:uppercase;
+  }
+
   footer{ margin-top:54px; color:var(--muted); font-size:12px; opacity:.65; }
 </style>
 </head>
@@ -58,7 +69,6 @@
     <div class="wordmark">Radar de <span class="accent">Oportunidades</span></div>
     <div class="tagline">Contrataciones con el Estado · SEACE</div>
   </div>
-
   <div class="grid">
     <a class="tile" href="admin.html">
       <div class="ico">⚙️</div>
@@ -76,6 +86,16 @@
       <div class="ico">🏗️</div>
       <h2>Radar Infra</h2>
       <p>Oportunidades de obras públicas (OxI / APP) fuera del SEACE.</p>
+      <span class="go">Abrir radar →</span>
+    </a>
+  </div>
+
+  <div class="section-label">Inteligencia comercial</div>
+  <div class="grid">
+    <a class="tile" href="https://ibero-radar-comercial.onrender.com" target="_blank" rel="noopener">
+      <div class="ico">📦</div>
+      <h2>Radar Comercial</h2>
+      <p>Importaciones y exportaciones del Perú por SUNAT/Aduanet: competidores, productos y tendencias.</p>
       <span class="go">Abrir radar →</span>
     </a>
   </div>
