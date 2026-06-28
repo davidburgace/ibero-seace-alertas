@@ -1,4 +1,4 @@
-A<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="es">
 <head>
 <meta charset="UTF-8">
@@ -39,26 +39,16 @@ A<!DOCTYPE html>
   .tagline{ color:var(--muted); font-size:clamp(13px,2.4vw,16px); margin-top:14px; }
   .grid{ display:flex; gap:20px; width:100%; max-width:1160px; flex-wrap:wrap; justify-content:center; }
   .tile{
-    flex:1; min-width:268px; background:var(--surface); border:1px solid var(--border2);
+    flex:1; min-width:240px; background:var(--surface); border:1px solid var(--border2);
     border-radius:18px; padding:34px 30px; text-decoration:none; color:var(--text);
     display:flex; flex-direction:column; gap:14px; text-align:left;
     transition:transform .18s, border-color .18s, background .18s;
   }
   .tile:hover{ transform:translateY(-4px); border-color:var(--accent); background:var(--surface2); }
   .tile .ico{ font-size:36px; line-height:1; }
-  .tile h2{ font-family:var(--font-display); font-weight:700; font-size:23px; letter-spacing:-0.01em; }
+  .tile h2{ font-family:var(--font-display); font-weight:700; font-size:21px; letter-spacing:-0.01em; }
   .tile p{ color:var(--muted); font-size:14px; line-height:1.5; }
   .tile .go{ margin-top:6px; color:var(--accent); font-weight:600; font-size:14px; }
-
-  /* Segunda fila de productos: visualmente agrupada aparte de SEACE,
-     ya que Radar Comercial es una app distinta (Aduanet/SUNAT, no SEACE),
-     pero con la misma identidad visual para que se sienta parte de la
-     misma familia de herramientas de Grupo Ibero. */
-  .section-label{
-    width:100%; max-width:1160px; text-align:left; margin:40px 0 -2px;
-    color:var(--muted); font-size:12px; font-weight:600; letter-spacing:.06em;
-    text-transform:uppercase;
-  }
 
   footer{ margin-top:54px; color:var(--muted); font-size:12px; opacity:.65; }
 </style>
@@ -88,10 +78,6 @@ A<!DOCTYPE html>
       <p>Oportunidades de obras públicas (OxI / APP) fuera del SEACE.</p>
       <span class="go">Abrir radar →</span>
     </a>
-  </div>
-
-  <div class="section-label">Inteligencia comercial</div>
-  <div class="grid">
     <a class="tile" href="https://ibero-radar-comercial.onrender.com" target="_blank" rel="noopener">
       <div class="ico">📦</div>
       <h2>Radar Comercial</h2>
