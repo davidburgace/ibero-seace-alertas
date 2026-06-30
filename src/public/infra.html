@@ -126,7 +126,7 @@
     <div class="stats" id="stats"></div>
 
     <div class="filters">
-      <input id="q" placeholder="Buscar nombre o financista…" style="min-width:240px;flex:1;">
+      <input id="q" placeholder="Buscar nombre, financista o ejecutor…" style="min-width:240px;flex:1;">
       <select id="fSector"><option value="">Todos los sectores</option></select>
       <select id="fDepto"><option value="">Todos los departamentos</option></select>
       <select id="fEstado"><option value="">Todo estado</option></select>
@@ -223,7 +223,10 @@ function filtered(){
   const fcot=$('#fCot').value;
   const sort=$('#fSort').value;
   const list = DATA.filter(o=>{
-    if(q && !((o.nombre||'').toLowerCase().includes(q) || (o.financista||'').toLowerCase().includes(q))) return false;
+    if(q){
+      const ejNombres=(o.infra_ejecutores||[]).map(e=>(e.consorcio_nombre||'').toLowerCase()).join(' ');
+      if(!((o.nombre||'').toLowerCase().includes(q)||(o.financista||'').toLowerCase().includes(q)||ejNombres.includes(q))) return false;
+    }
     if(sec && o.sector!==sec) return false;
     if(dep && o.departamento!==dep) return false;
     if(dec && o.ai_recommendation!==dec) return false;
