@@ -150,14 +150,14 @@ async function fetchSeaceFicha(idProceso) {
   const f = await r.json();
   const norm = s => (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
   const cron = f.listaCronograma || [];
-  const etapa = frag => {
+ const etapa = (frag, fin = false) => {
     const e = cron.find(c => norm(c.nombreEtapa).includes(frag) || norm(c.descripcionEtapa).includes(frag));
-    return e ? (e.fechaInicio || null) : null;
+    return e ? ((fin ? e.fechaFin : e.fechaInicio) || null) : null;
   };
   const basesDoc = (f.listaDocumentos || []).find(d => norm(d.tipoDocumento).includes('BASES ADMINISTRATIVAS'));
   return {
     detalle_bien: classify(`${f.descripcionObjeto || ''} ${f.listaItems?.[0]?.descripcionCubso || ''}`),
-    fecha_consultas: etapa('FORMULACION'),
+    fecha_consultas: etapa('FORMULACION', true),
     fecha_bases_admin: basesDoc ? (basesDoc.fechaPublicacion || '').split(' ')[0] : null,
     fecha_bases_integradas: etapa('INTEGRACION'),
     fecha_presentacion: etapa('PRESENTACION DE PROPUESTAS'),
@@ -803,9 +803,9 @@ async function fetchFichaCompleta(idProceso){
   const f = await r.json();
   const norm = s => (s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
   const cron = f.listaCronograma || [];
-  const etapa = frag => {
+  const etapa = (frag, fin = false) => {
     const e = cron.find(c => norm(c.nombreEtapa).includes(frag) || norm(c.descripcionEtapa).includes(frag));
-    return e ? (e.fechaInicio || null) : null;
+    return e ? ((fin ? e.fechaFin : e.fechaInicio) || null) : null;
   };
   const basesDoc = (f.listaDocumentos || []).find(d => norm(d.tipoDocumento).includes('BASES ADMINISTRATIVAS'));
   const titulo = f.descripcionObjeto || f.sintesisProceso || f.detItem || '';
@@ -816,7 +816,7 @@ async function fetchFichaCompleta(idProceso){
     title: titulo,
     published_date: parseSeaceDate(f.fechaConvocatoria) || new Date().toISOString().slice(0,10),
     detalle_bien: classify(`${titulo} ${f.listaItems?.[0]?.descripcionCubso || ''}`),
-    fecha_consultas: etapa('FORMULACION'),
+    fecha_consultas: etapa('FORMULACION', true),
     fecha_bases_admin: basesDoc ? (basesDoc.fechaPublicacion || '').split(' ')[0] : null,
     fecha_bases_integradas: etapa('INTEGRACION'),
     fecha_presentacion: etapa('PRESENTACION DE PROPUESTAS'),
