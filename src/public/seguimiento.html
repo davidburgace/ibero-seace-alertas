@@ -8,6 +8,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 
 <style>
   :root{
@@ -143,6 +144,11 @@
   }
   .card-nombre{ font-weight:600; font-size:13.5px; line-height:1.35; margin-bottom:6px; }
   .card-meta{ font-size:12px; color:var(--muted); display:flex; flex-direction:column; gap:2px; }
+  .card-extra{ font-size:11.5px; color:var(--muted); margin-top:6px; line-height:1.35; }
+  .card-notas{ font-style:italic; }
+  .ref-tooltip{ cursor:help; border-bottom:1px dotted var(--muted); }
+  .semaforo{ display:flex; align-items:center; gap:5px; font-weight:600; }
+  .semaforo-dot{ width:7px; height:7px; border-radius:50%; flex-shrink:0; display:inline-block; }
   .card-empty{ font-size:12px; color:var(--muted); font-style:italic; padding:8px 2px; }
 
   /* ---------- CALENDAR VIEW ---------- */
@@ -294,6 +300,10 @@
 
   <!-- ===================== CALENDARIO ===================== -->
   <section class="view active" id="view-calendario">
+    <div class="toolbar">
+      <div></div>
+      <button class="btn btn-ghost" id="btn-export-reuniones">⬇️ Exportar a Excel</button>
+    </div>
     <div class="cal-layout">
       <div style="display:flex; flex-direction:column; gap:16px;">
         <button class="btn btn-primary" id="btn-nueva-reunion" style="width:100%;">+ Nueva reunión</button>
@@ -314,7 +324,10 @@
         <option value="SEACE">SEACE</option>
         <option value="Infra">Radar Infra</option>
       </select>
-      <button class="btn btn-primary" id="btn-nuevo-proceso">+ Nuevo proceso</button>
+      <div style="display:flex; gap:10px;">
+        <button class="btn btn-ghost" id="btn-export-procesos">⬇️ Exportar a Excel</button>
+        <button class="btn btn-primary" id="btn-nuevo-proceso">+ Nuevo proceso</button>
+      </div>
     </div>
     <div class="kanban" id="kanban-procesos"></div>
   </section>
@@ -322,7 +335,7 @@
   <!-- ===================== VISITAS ===================== -->
   <section class="view" id="view-visitas">
     <div class="toolbar">
-      <div></div>
+      <button class="btn btn-ghost" id="btn-export-visitas">⬇️ Exportar a Excel</button>
       <button class="btn btn-primary" id="btn-nueva-visita">+ Nueva visita</button>
     </div>
     <div class="kanban" id="kanban-visitas"></div>
@@ -396,6 +409,7 @@
         <div class="field"><label>Fecha límite</label><input type="date" id="p-fecha-limite"></div>
       </div>
       <div class="field"><label>Enlace (ficha SEACE / Infra)</label><input type="url" id="p-link" placeholder="Opcional"></div>
+      <div class="field"><label>Detalle del bien</label><textarea id="p-detalle-bien" placeholder="Se autocompleta al elegir de Oportunidades Seleccionadas"></textarea></div>
       <div class="field-row">
         <div class="field"><label>Etapa</label>
           <select id="p-etapa">
@@ -532,6 +546,18 @@ function toLocalInputValue(date){
 }
 function fmtTime(date){ return new Date(date).toLocaleTimeString('es-PE', {hour:'2-digit', minute:'2-digit'}); }
 function fmtDate(date){ return date ? new Date(date + 'T00:00:00').toLocaleDateString('es-PE', {day:'2-digit', month:'short'}) : ''; }
+function truncate(str, n){ if (!str) return ''; return str.length > n ? str.slice(0, n).trim() + '…' : str; }
+function semaforoFecha(fechaLimite){
+  if (!fechaLimite) return null;
+  const hoy = new Date(); hoy.setHours(0,0,0,0);
+  const limite = new Date(fechaLimite + 'T00:00:00');
+  const diffDias = Math.round((limite - hoy) / 86400000);
+  if (diffDias < 0) return { color:'#e74c3c', texto:'Vencido' };
+  if (diffDias === 0) return { color:'#e74c3c', texto:'Vence hoy' };
+  if (diffDias <= 3) return { color:'#e74c3c', texto:`Vence en ${diffDias}d` };
+  if (diffDias <= 7) return { color:'#ff9f43', texto:`Vence en ${diffDias}d` };
+  return { color:'#2ecc71', texto:fmtDate(fechaLimite) };
+}
 function fmtDuracion(mins){
   if (!mins) return '';
   if (mins < 60) return mins + ' min';
@@ -650,7 +676,7 @@ modalReunion.addEventListener('click', e => { if (e.target === modalReunion) mod
 
 document.getElementById('form-reunion').addEventListener('submit', async e => {
   e.preventDefault();
-  if (!supabase) return alert('Configura Supabase primero.');
+  if (!sb) return alert('Configura Supabase primero.');
   const id = document.getElementById('r-id').value;
   const payload = {
     titulo: document.getElementById('r-titulo').value,
@@ -700,15 +726,22 @@ function renderKanbanProcesos(){
         <div class="kcol-title"><span class="kcol-dot" style="background:${et.color}"></span>${et.key}</div>
         <span class="kcol-count">${items.length}</span>
       </div>
-      ${items.length === 0 ? '<p class="card-empty">Sin procesos</p>' : items.map(p => `
+      ${items.length === 0 ? '<p class="card-empty">Sin procesos</p>' : items.map(p => {
+        const sem = semaforoFecha(p.fecha_limite);
+        return `
         <div class="card" data-id="${p.id}">
-          <div class="card-tipo">${p.tipo}${p.referencia ? ' · ' + p.referencia : ''}</div>
-          <div class="card-nombre">${p.nombre}</div>
-          <div class="card-meta">
-            <span>${p.entidad}</span>
-            <span>${p.responsable}${p.fecha_limite ? ' · vence ' + fmtDate(p.fecha_limite) : ''}</span>
+          <div class="card-tipo">
+            ${p.tipo}${p.referencia ? ` · <span class="ref-tooltip" title="${escHtml(p.nombre || '')}">${escHtml(p.referencia)}</span>` : (p.nombre ? ` · <span class="ref-tooltip" title="${escHtml(p.nombre)}">${escHtml(truncate(p.nombre, 22))}</span>` : '')}
           </div>
-        </div>`).join('')}
+          <div class="card-meta">
+            <span>${escHtml(p.entidad || '')}</span>
+            <span>${escHtml(p.responsable || '')}</span>
+            ${sem ? `<span class="semaforo"><i class="semaforo-dot" style="background:${sem.color}"></i>${sem.texto}</span>` : ''}
+          </div>
+          ${p.detalle_bien ? `<div class="card-extra">📦 ${escHtml(truncate(p.detalle_bien, 90))}</div>` : ''}
+          ${p.notas ? `<div class="card-extra card-notas">📝 ${escHtml(truncate(p.notas, 90))}</div>` : ''}
+        </div>`;
+      }).join('')}
     </div>`;
   }).join('');
   el.querySelectorAll('.card').forEach(c => c.addEventListener('click', () => {
@@ -770,6 +803,7 @@ function renderSeacePicker(data, query){
     document.getElementById('p-nombre').value = o.title || o.nomenclature || '';
     document.getElementById('p-entidad').value = o.entity || '';
     document.getElementById('p-referencia').value = o.nomenclature || o.external_id || '';
+    document.getElementById('p-detalle-bien').value = o.detalle_bien || '';
     const fl = parseFechaDDMMYYYY(o.fecha_presentacion);
     if (fl) document.getElementById('p-fecha-limite').value = fl;
     el.innerHTML = `<p class="card-empty">✓ Seleccionado: ${escHtml(o.nomenclature || o.title || '')}</p>`;
@@ -827,6 +861,7 @@ function openProcesoModal(p){
   document.getElementById('p-referencia').value = p ? (p.referencia || '') : '';
   document.getElementById('p-fecha-limite').value = p ? (p.fecha_limite || '') : '';
   document.getElementById('p-link').value = p ? (p.link || '') : '';
+  document.getElementById('p-detalle-bien').value = p ? (p.detalle_bien || '') : '';
   document.getElementById('p-etapa').value = p ? p.etapa : 'Oficina Técnica';
   document.getElementById('p-responsable').value = p ? p.responsable : '';
   document.getElementById('p-notas').value = p ? (p.notas || '') : '';
@@ -839,7 +874,7 @@ modalProceso.addEventListener('click', e => { if (e.target === modalProceso) mod
 
 document.getElementById('form-proceso').addEventListener('submit', async e => {
   e.preventDefault();
-  if (!supabase) return alert('Configura Supabase primero.');
+  if (!sb) return alert('Configura Supabase primero.');
   const id = document.getElementById('p-id').value;
   const payload = {
     nombre: document.getElementById('p-nombre').value,
@@ -848,6 +883,7 @@ document.getElementById('form-proceso').addEventListener('submit', async e => {
     referencia: document.getElementById('p-referencia').value,
     fecha_limite: document.getElementById('p-fecha-limite').value || null,
     link: document.getElementById('p-link').value,
+    detalle_bien: document.getElementById('p-detalle-bien').value,
     etapa: document.getElementById('p-etapa').value,
     responsable: document.getElementById('p-responsable').value,
     notas: document.getElementById('p-notas').value,
@@ -934,7 +970,7 @@ modalVisita.addEventListener('click', e => { if (e.target === modalVisita) modal
 
 document.getElementById('form-visita').addEventListener('submit', async e => {
   e.preventDefault();
-  if (!supabase) return alert('Configura Supabase primero.');
+  if (!sb) return alert('Configura Supabase primero.');
   const id = document.getElementById('v-id').value;
   const payload = {
     cliente: document.getElementById('v-cliente').value,
@@ -963,6 +999,47 @@ document.getElementById('v-eliminar').addEventListener('click', async () => {
   if (error) return alert('Error: ' + error.message);
   modalVisita.classList.remove('open');
   await refreshVisitas();
+});
+
+/* =========================================================
+   EXPORTAR A EXCEL
+   ========================================================= */
+function exportarExcel(filas, nombreHoja, nombreArchivo){
+  if (!window.XLSX){ alert('La librería de Excel no cargó (revisa tu conexión).'); return; }
+  if (!filas || !filas.length){ alert('No hay datos para exportar en esta pestaña.'); return; }
+  const ws = XLSX.utils.json_to_sheet(filas);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, nombreHoja);
+  const fecha = new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb, `${nombreArchivo}_${fecha}.xlsx`);
+}
+document.getElementById('btn-export-reuniones').addEventListener('click', () => {
+  const filas = allReuniones.map(r => ({
+    Titulo: r.titulo, Inicio: r.fecha_inicio, Fin: r.fecha_fin,
+    Responsable: r.responsable, Area: r.area, Modalidad: r.modalidad,
+    Enlace: r.link || '', Descripcion: r.descripcion || ''
+  }));
+  exportarExcel(filas, 'Reuniones', 'reuniones_ibero');
+});
+document.getElementById('btn-export-procesos').addEventListener('click', () => {
+  const filtro = document.getElementById('filtro-tipo-proceso').value;
+  const lista = filtro ? allProcesos.filter(p => p.tipo === filtro) : allProcesos;
+  const filas = lista.map(p => ({
+    Nombre: p.nombre, Entidad: p.entidad, Tipo: p.tipo, Referencia: p.referencia || '',
+    Etapa: p.etapa, Responsable: p.responsable, 'Fecha límite': p.fecha_limite || '',
+    'Detalle del bien': p.detalle_bien || '', Notas: p.notas || '', Enlace: p.link || ''
+  }));
+  exportarExcel(filas, 'Procesos', 'procesos_seguimiento_ibero');
+});
+document.getElementById('btn-export-visitas').addEventListener('click', () => {
+  const filas = allVisitas.map(v => ({
+    Cliente: v.cliente, Contacto: v.contacto || '', Responsable: v.responsable,
+    'Fecha visita': v.fecha_visita || '', Hora: v.hora_visita || '',
+    'Duración (min)': v.duracion_minutos || '', Estado: v.estado,
+    'Próxima acción': v.proxima_accion || '', 'Fecha próxima acción': v.fecha_proxima_accion || '',
+    Notas: v.notas || ''
+  }));
+  exportarExcel(filas, 'Visitas', 'visitas_comerciales_ibero');
 });
 
 /* =========================================================
