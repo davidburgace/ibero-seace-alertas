@@ -423,13 +423,64 @@ async function sendMeetingReminders() {
   return { ok: true, enviados, total: reuniones.length, errores };
 }
 
+function renderInvitacionEmail(r) {
+  const inicio = new Date(r.fecha_inicio).toLocaleString('es-PE', { dateStyle: 'full', timeStyle: 'short', timeZone: 'America/Lima' });
+  const fin = new Date(r.fecha_fin).toLocaleString('es-PE', { timeStyle: 'short', timeZone: 'America/Lima' });
+  const linkBtn = (r.modalidad === 'virtual' && r.link)
+    ? `<a href="${r.link}" style="display:inline-block;margin-top:12px;background:#3a63e0;color:white;padding:10px 18px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:600;">Unirse a la reunión →</a>`
+    : '';
+  return `
+<div style="font-family:Arial,sans-serif;background:#f6f7fb;padding:20px;max-width:600px;margin:0 auto;">
+  <div style="background:#3a63e0;color:white;padding:20px;border-radius:12px 12px 0 0;text-align:center;">
+    <h1 style="margin:0;font-size:20px;">📅 Invitación a reunión</h1>
+  </div>
+  <div style="background:white;padding:20px;border-radius:0 0 12px 12px;">
+    <h2 style="margin:0 0 10px;color:#16181d;font-size:18px;">${r.titulo}</h2>
+    <p style="margin:4px 0;color:#4b5563;font-size:14px;"><b>Inicio:</b> ${inicio}</p>
+    <p style="margin:4px 0;color:#4b5563;font-size:14px;"><b>Fin:</b> ${fin}</p>
+    <p style="margin:4px 0;color:#4b5563;font-size:14px;"><b>Modalidad:</b> ${r.modalidad === 'virtual' ? 'Virtual' : 'Presencial'}</p>
+    <p style="margin:4px 0;color:#4b5563;font-size:14px;"><b>Responsable:</b> ${r.responsable || ''}</p>
+    ${r.descripcion ? `<p style="margin:10px 0 0;color:#4b5563;font-size:13px;">${r.descripcion}</p>` : ''}
+    ${linkBtn}
+  </div>
+  <p style="text-align:center;color:#9ca3af;font-size:12px;margin-top:10px;">Seguimiento Comercial · Grupo Ibero Perú</p>
+</div>`;
+}
+
+async function sendReunionInvitation(id) {
+  if (!supabase) return { ok: false, message: 'Supabase no configurado' };
+  if (!process.env.SMTP_HOST) return { ok: false, message: 'SMTP no configurado' };
+  const { data: r, error: errorReunion } = await supabase.from('reuniones').select('*').eq('id', id).single();
+  if (errorReunion) throw errorReunion;
+  if (!r) return { ok: false, message: 'Reunión no encontrada' };
+  const participantes = Array.isArray(r.participantes) ? r.participantes : [];
+  const emails = participantes.map(p => p.email).filter(Boolean);
+  if (!emails.length) return { ok: false, message: 'La reunión no tiene participantes con correo' };
+
+  const transportInvitacion = nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: Number(process.env.SMTP_PORT || 587),
+    secure: String(process.env.SMTP_SECURE || 'false') === 'true',
+    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+    connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 15000
+  });
+  await transportInvitacion.verify();
+  await transportInvitacion.sendMail({
+    from: process.env.MAIL_FROM || process.env.SMTP_USER,
+    to: emails.join(','),
+    subject: `📅 Invitación: ${r.titulo}`,
+    html: renderInvitacionEmail(r)
+  });
+  return { ok: true, enviados: emails.length };
+}
+
 // ─── Rutas ─────────────────────────────────────────────────────────────────────
 app.get('/', (_, res) => res.json({ ok: true, app: 'SEACE Radar — Grupo Ibero Perú', mode: MODE, version: VERSION }));
 
 app.get('/api/health', (_, res) => res.json({ ok: true, supabase: !!supabase, openai: !!process.env.OPENAI_API_KEY, smtp: !!process.env.SMTP_HOST, mode: MODE, version: VERSION }));
 
 app.get('/api/bootstrap', async (_, res, next) => {
-  try { res.json({ keywords: await table('keywords'), vendors: await table('vendors'), opportunities: await table('opportunities') }); }
+  try { res.json({ keywords: await table('keywords'), vendors: await table('vendors'), opportunities: await table('opportunities'), contactos: await table('contactos_frecuentes') }); }
   catch (e) { next(e); }
 });
 
@@ -456,6 +507,10 @@ app.post('/api/jobs/send-digest', async (_, res, next) => { try { res.json(await
 
 app.get('/api/jobs/send-meeting-reminders', async (_, res, next) => { try { res.json(await sendMeetingReminders()); } catch (e) { next(e); } });
 app.post('/api/jobs/send-meeting-reminders', async (_, res, next) => { try { res.json(await sendMeetingReminders()); } catch (e) { next(e); } });
+
+app.post('/api/reuniones/:id/enviar-invitacion', async (req, res, next) => {
+  try { res.json(await sendReunionInvitation(req.params.id)); } catch (e) { next(e); }
+});
 
 app.get('/api/opportunities/:id', async (req, res, next) => {
   try {
@@ -792,6 +847,26 @@ app.delete('/api/admin/keywords/:id', async (req, res, next) => {
   try {
     if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
     const { error } = await supabase.from('keywords').delete().eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch(e) { next(e); }
+});
+
+// Contactos frecuentes (usados en Seguimiento Comercial para autocompletar participantes)
+app.post('/api/admin/contactos', async (req, res, next) => {
+  try {
+    const { nombre, email } = req.body;
+    if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
+    if (!nombre || !email) return res.status(400).json({ ok: false, error: 'Nombre y email son requeridos' });
+    const { data, error } = await supabase.from('contactos_frecuentes').insert({ nombre, email }).select().single();
+    if (error) throw error;
+    res.json({ ok: true, contacto: data });
+  } catch(e) { next(e); }
+});
+app.delete('/api/admin/contactos/:id', async (req, res, next) => {
+  try {
+    if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
+    const { error } = await supabase.from('contactos_frecuentes').delete().eq('id', req.params.id);
     if (error) throw error;
     res.json({ ok: true });
   } catch(e) { next(e); }
