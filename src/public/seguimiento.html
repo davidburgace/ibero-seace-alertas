@@ -323,6 +323,7 @@
         <option value="">Todos los tipos</option>
         <option value="SEACE">SEACE</option>
         <option value="Infra">Radar Infra</option>
+        <option value="Privado">Privado</option>
       </select>
       <div style="display:flex; gap:10px;">
         <button class="btn btn-ghost" id="btn-export-procesos">⬇️ Exportar a Excel</button>
@@ -386,7 +387,7 @@
       <input type="hidden" id="p-id">
       <div class="field">
         <label>Tipo</label>
-        <select id="p-tipo"><option value="SEACE">SEACE</option><option value="Infra">Radar Infra</option></select>
+        <select id="p-tipo"><option value="SEACE">SEACE</option><option value="Infra">Radar Infra</option><option value="Privado">Privado</option></select>
       </div>
 
       <div class="field" id="picker-seace">
@@ -399,6 +400,7 @@
         <input type="text" id="picker-infra-input" placeholder="Filtrar por nombre o financista...">
         <div id="picker-infra-results" class="pick-results"></div>
       </div>
+      <p class="card-empty" id="picker-privado-note" style="display:none; margin-bottom:14px;">🖊️ Ingreso manual — completa los datos del proyecto privado abajo.</p>
 
       <div class="field"><label>Nombre del proceso</label><input type="text" id="p-nombre" required placeholder="Ej: Mobiliario I.E. San Martín"></div>
       <div class="field">
@@ -834,6 +836,7 @@ async function syncPicker(){
   const tipo = document.getElementById('p-tipo').value;
   document.getElementById('picker-seace').style.display = tipo === 'SEACE' ? 'block' : 'none';
   document.getElementById('picker-infra').style.display = tipo === 'Infra' ? 'block' : 'none';
+  document.getElementById('picker-privado-note').style.display = tipo === 'Privado' ? 'block' : 'none';
   if (tipo === 'SEACE'){
     document.getElementById('picker-seace-input').value = '';
     renderSeacePicker(await loadSeleccionadas(), '');
