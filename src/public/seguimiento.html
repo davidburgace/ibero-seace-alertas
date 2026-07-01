@@ -155,6 +155,25 @@
   .card-meta{ font-size:12px; color:var(--muted); display:flex; flex-direction:column; gap:2px; }
   .card-extra{ font-size:11.5px; color:var(--muted); margin-top:6px; line-height:1.35; }
   .card-notas{ font-style:italic; }
+  .ot-badge{
+    display:inline-block; font-size:11px; font-weight:600; margin-top:6px; margin-right:6px;
+    padding:3px 8px; border-radius:6px;
+  }
+  .ot-metalico{ background:rgba(74,85,104,0.12); color:#4A5568; }
+  .ot-melamine{ background:rgba(139,94,60,0.14); color:#8B5E3C; }
+
+  .card-stage-btn{
+    margin-top:10px; width:100%; font-family:var(--font-body); font-size:11.5px; font-weight:600;
+    border:1px solid var(--border2); background:#fff; color:var(--text);
+    border-radius:7px; padding:6px 8px; cursor:pointer; transition:all .15s;
+  }
+  .card-stage-btn:hover{ border-color:var(--accent); color:var(--accent); background:var(--surface); }
+  .card-stage-row{ display:flex; gap:6px; margin-top:10px; }
+  .card-stage-row .card-stage-btn{ margin-top:0; flex:1; }
+  .card-stage-win{ border-color:rgba(46,204,113,0.4); color:#1e8449; }
+  .card-stage-win:hover{ background:rgba(46,204,113,0.1); border-color:#2ecc71; color:#1e8449; }
+  .card-stage-lose{ border-color:rgba(231,76,60,0.4); color:#c0392b; }
+  .card-stage-lose:hover{ background:rgba(231,76,60,0.1); border-color:#e74c3c; color:#c0392b; }
   .ref-tooltip{ cursor:help; border-bottom:1px dotted var(--muted); }
   .semaforo{ display:flex; align-items:center; gap:5px; font-weight:600; }
   .semaforo-dot{ width:7px; height:7px; border-radius:50%; flex-shrink:0; display:inline-block; }
@@ -327,7 +346,20 @@
 
   <!-- ===================== PROCESOS ===================== -->
   <section class="view" id="view-procesos">
-    <div class="proc-dashboard">
+    <div class="toolbar">
+      <select class="filter" id="filtro-tipo-proceso">
+        <option value="">Todos los tipos</option>
+        <option value="SEACE">SEACE</option>
+        <option value="Infra">Radar Infra</option>
+        <option value="Privado">Privado</option>
+      </select>
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button class="btn btn-ghost" id="btn-toggle-dashboard">📊 Mostrar Dashboard</button>
+        <button class="btn btn-ghost" id="btn-export-procesos">⬇️ Exportar a Excel</button>
+        <button class="btn btn-primary" id="btn-nuevo-proceso">+ Nuevo proceso</button>
+      </div>
+    </div>
+    <div class="proc-dashboard" id="proc-dashboard" style="display:none;">
       <div class="panel dash-card">
         <p class="panel-title">Distribución por tipo</p>
         <div class="dash-chart-wrap">
@@ -341,18 +373,6 @@
           <canvas id="chart-resultado"></canvas>
           <p class="card-empty dash-empty" id="chart-resultado-empty">Aún no hay procesos ganados o perdidos.</p>
         </div>
-      </div>
-    </div>
-    <div class="toolbar">
-      <select class="filter" id="filtro-tipo-proceso">
-        <option value="">Todos los tipos</option>
-        <option value="SEACE">SEACE</option>
-        <option value="Infra">Radar Infra</option>
-        <option value="Privado">Privado</option>
-      </select>
-      <div style="display:flex; gap:10px;">
-        <button class="btn btn-ghost" id="btn-export-procesos">⬇️ Exportar a Excel</button>
-        <button class="btn btn-primary" id="btn-nuevo-proceso">+ Nuevo proceso</button>
       </div>
     </div>
     <div class="kanban" id="kanban-procesos"></div>
@@ -440,9 +460,9 @@
       <div class="field-row">
         <div class="field"><label>Etapa</label>
           <select id="p-etapa">
+            <option value="Etapa de Consultas">Etapa de Consultas</option>
             <option value="Oficina Técnica">Oficina Técnica</option>
             <option value="Desarrollo de Expediente">Desarrollo de Expediente</option>
-            <option value="Etapa de Consultas">Etapa de Consultas</option>
             <option value="Presentado">Presentado</option>
             <option value="Ganado">Ganado</option>
             <option value="Perdido">Perdido</option>
@@ -450,6 +470,25 @@
         </div>
         <div class="field"><label>Responsable</label><input type="text" id="p-responsable" required></div>
       </div>
+
+      <div class="field">
+        <label>Línea(s) en Oficina Técnica</label>
+        <select id="p-ot-linea">
+          <option value="">— No aplica / sin definir —</option>
+          <option value="Metálico">Metálico</option>
+          <option value="Melamine">Melamine</option>
+          <option value="Ambos">Ambos (Metálico + Melamine)</option>
+        </select>
+      </div>
+      <div class="field-row" id="ot-metalico-fields" style="display:none;">
+        <div class="field"><label>Responsable Metálico</label><input type="text" id="p-ot-resp-metalico" placeholder="Ej: Carlos"></div>
+        <div class="field"><label>Tiempo de entrega</label><input type="text" id="p-ot-tiempo-metalico" placeholder="Ej: 15 días"></div>
+      </div>
+      <div class="field-row" id="ot-melamine-fields" style="display:none;">
+        <div class="field"><label>Responsable Melamine</label><input type="text" id="p-ot-resp-melamine" placeholder="Ej: Stephanie"></div>
+        <div class="field"><label>Tiempo de entrega</label><input type="text" id="p-ot-tiempo-melamine" placeholder="Ej: 20 días"></div>
+      </div>
+
       <div class="field"><label>Notas</label><textarea id="p-notas"></textarea></div>
       <div class="modal-actions">
         <button type="button" class="btn-danger" id="p-eliminar" style="display:none">Eliminar</button>
@@ -526,9 +565,9 @@ const AREA_COLORS = {
   "Planta Puente Piedra":"#2ecc71","Planta Lurín":"#00b8a9","Otro":"#5c6270"
 };
 const ETAPAS_PROCESO = [
+  {key:"Etapa de Consultas", color:"var(--c-consultas)"},
   {key:"Oficina Técnica", color:"var(--c-oficina)"},
   {key:"Desarrollo de Expediente", color:"var(--c-expediente)"},
-  {key:"Etapa de Consultas", color:"var(--c-consultas)"},
   {key:"Presentado", color:"var(--c-presentado)"},
   {key:"Ganado", color:"var(--c-ganado)"},
   {key:"Perdido", color:"var(--c-perdido)"}
@@ -740,6 +779,37 @@ async function fetchProcesos(){
   if (error){ console.error(error); return []; }
   return data;
 }
+function renderOtBadges(p){
+  let out = '';
+  if ((p.ot_linea === 'Metálico' || p.ot_linea === 'Ambos') && (p.ot_responsable_metalico || p.ot_tiempo_metalico)){
+    out += `<div class="ot-badge ot-metalico">🔩 ${escHtml(p.ot_responsable_metalico || 'Sin asignar')}${p.ot_tiempo_metalico ? ' · ' + escHtml(p.ot_tiempo_metalico) : ''}</div>`;
+  }
+  if ((p.ot_linea === 'Melamine' || p.ot_linea === 'Ambos') && (p.ot_responsable_melamine || p.ot_tiempo_melamine)){
+    out += `<div class="ot-badge ot-melamine">🪵 ${escHtml(p.ot_responsable_melamine || 'Sin asignar')}${p.ot_tiempo_melamine ? ' · ' + escHtml(p.ot_tiempo_melamine) : ''}</div>`;
+  }
+  return out;
+}
+const ORDEN_ETAPAS_PROCESO = ['Etapa de Consultas', 'Oficina Técnica', 'Desarrollo de Expediente', 'Presentado'];
+function renderCardStageActions(p){
+  const idx = ORDEN_ETAPAS_PROCESO.indexOf(p.etapa);
+  if (idx >= 0 && idx < ORDEN_ETAPAS_PROCESO.length - 1){
+    const siguiente = ORDEN_ETAPAS_PROCESO[idx + 1];
+    return `<button type="button" class="card-stage-btn" onclick="event.stopPropagation(); avanzarEtapaProceso('${p.id}','${siguiente}')">→ Pasar a "${siguiente}"</button>`;
+  }
+  if (p.etapa === 'Presentado'){
+    return `<div class="card-stage-row">
+      <button type="button" class="card-stage-btn card-stage-win" onclick="event.stopPropagation(); avanzarEtapaProceso('${p.id}','Ganado')">✓ Ganado</button>
+      <button type="button" class="card-stage-btn card-stage-lose" onclick="event.stopPropagation(); avanzarEtapaProceso('${p.id}','Perdido')">✕ Perdido</button>
+    </div>`;
+  }
+  return '';
+}
+async function avanzarEtapaProceso(id, nuevaEtapa){
+  if (!sb) return alert('Configura Supabase primero.');
+  const { error } = await sb.from('procesos_seguimiento').update({ etapa: nuevaEtapa, updated_at: new Date().toISOString() }).eq('id', id);
+  if (error) return alert('Error: ' + error.message);
+  await refreshProcesos();
+}
 function renderKanbanProcesos(){
   const filtro = document.getElementById('filtro-tipo-proceso').value;
   const lista = filtro ? allProcesos.filter(p => p.tipo === filtro) : allProcesos;
@@ -766,7 +836,9 @@ function renderKanbanProcesos(){
             ${sem ? `<span class="semaforo"><i class="semaforo-dot" style="background:${sem.color}"></i>${sem.texto}</span>` : ''}
           </div>
           ${p.detalle_bien ? `<div class="card-extra">📦 ${escHtml(truncate(p.detalle_bien, 90))}</div>` : ''}
+          ${p.etapa === 'Oficina Técnica' && p.ot_linea ? renderOtBadges(p) : ''}
           ${p.notas ? `<div class="card-extra card-notas">📝 ${escHtml(truncate(p.notas, 90))}</div>` : ''}
+          ${renderCardStageActions(p)}
         </div>`;
       }).join('')}
     </div>`;
@@ -777,6 +849,7 @@ function renderKanbanProcesos(){
 }
 let chartTipo = null;
 let chartResultado = null;
+let dashboardVisible = false;
 function renderDashboardProcesos(){
   if (!window.Chart) return;
 
@@ -835,7 +908,17 @@ function renderDashboardProcesos(){
     });
   }
 }
-async function refreshProcesos(){ allProcesos = await fetchProcesos(); renderKanbanProcesos(); renderDashboardProcesos(); }
+async function refreshProcesos(){
+  allProcesos = await fetchProcesos();
+  renderKanbanProcesos();
+  if (dashboardVisible) renderDashboardProcesos();
+}
+document.getElementById('btn-toggle-dashboard').addEventListener('click', () => {
+  dashboardVisible = !dashboardVisible;
+  document.getElementById('proc-dashboard').style.display = dashboardVisible ? 'grid' : 'none';
+  document.getElementById('btn-toggle-dashboard').textContent = dashboardVisible ? '📊 Ocultar Dashboard' : '📊 Mostrar Dashboard';
+  if (dashboardVisible) renderDashboardProcesos();
+});
 document.getElementById('filtro-tipo-proceso').addEventListener('change', renderKanbanProcesos);
 
 /* ---------- Picker: Oportunidades Seleccionadas (SEACE) y Radar Infra revisados ---------- */
@@ -931,6 +1014,11 @@ async function syncPicker(){
   }
 }
 document.getElementById('p-tipo').addEventListener('change', syncPicker);
+document.getElementById('p-ot-linea').addEventListener('change', () => {
+  const v = document.getElementById('p-ot-linea').value;
+  document.getElementById('ot-metalico-fields').style.display = (v === 'Metálico' || v === 'Ambos') ? 'grid' : 'none';
+  document.getElementById('ot-melamine-fields').style.display = (v === 'Melamine' || v === 'Ambos') ? 'grid' : 'none';
+});
 document.getElementById('picker-seace-input').addEventListener('input', async e => {
   renderSeacePicker(await loadSeleccionadas(), e.target.value);
 });
@@ -950,9 +1038,15 @@ function openProcesoModal(p){
   document.getElementById('p-fecha-limite').value = p ? (p.fecha_limite || '') : '';
   document.getElementById('p-link').value = p ? (p.link || '') : '';
   document.getElementById('p-detalle-bien').value = p ? (p.detalle_bien || '') : '';
-  document.getElementById('p-etapa').value = p ? p.etapa : 'Oficina Técnica';
+  document.getElementById('p-etapa').value = p ? p.etapa : 'Etapa de Consultas';
   document.getElementById('p-responsable').value = p ? p.responsable : '';
   document.getElementById('p-notas').value = p ? (p.notas || '') : '';
+  document.getElementById('p-ot-linea').value = p ? (p.ot_linea || '') : '';
+  document.getElementById('p-ot-resp-metalico').value = p ? (p.ot_responsable_metalico || '') : '';
+  document.getElementById('p-ot-tiempo-metalico').value = p ? (p.ot_tiempo_metalico || '') : '';
+  document.getElementById('p-ot-resp-melamine').value = p ? (p.ot_responsable_melamine || '') : '';
+  document.getElementById('p-ot-tiempo-melamine').value = p ? (p.ot_tiempo_melamine || '') : '';
+  document.getElementById('p-ot-linea').dispatchEvent(new Event('change'));
   modalProceso.classList.add('open');
   syncPicker();
 }
@@ -975,6 +1069,11 @@ document.getElementById('form-proceso').addEventListener('submit', async e => {
     etapa: document.getElementById('p-etapa').value,
     responsable: document.getElementById('p-responsable').value,
     notas: document.getElementById('p-notas').value,
+    ot_linea: document.getElementById('p-ot-linea').value,
+    ot_responsable_metalico: document.getElementById('p-ot-resp-metalico').value,
+    ot_tiempo_metalico: document.getElementById('p-ot-tiempo-metalico').value,
+    ot_responsable_melamine: document.getElementById('p-ot-resp-melamine').value,
+    ot_tiempo_melamine: document.getElementById('p-ot-tiempo-melamine').value,
     updated_at: new Date().toISOString()
   };
   const { error } = id
