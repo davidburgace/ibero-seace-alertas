@@ -9,6 +9,7 @@
 <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 
 <style>
   :root{
@@ -142,6 +143,14 @@
     font-family:var(--font-mono); font-size:10px; text-transform:uppercase; letter-spacing:0.5px;
     color:var(--muted); margin-bottom:6px;
   }
+  .tipo-label{ color:var(--text); font-weight:700; }
+  #p-tipo option, #filtro-tipo-proceso option{ font-weight:700; }
+
+  .proc-dashboard{ display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px; }
+  .dash-card{ display:flex; flex-direction:column; }
+  .dash-chart-wrap{ position:relative; height:190px; display:flex; align-items:center; justify-content:center; }
+  .dash-empty{ display:none; text-align:center; }
+  @media (max-width:640px){ .proc-dashboard{ grid-template-columns:1fr; } }
   .card-nombre{ font-weight:600; font-size:13.5px; line-height:1.35; margin-bottom:6px; }
   .card-meta{ font-size:12px; color:var(--muted); display:flex; flex-direction:column; gap:2px; }
   .card-extra{ font-size:11.5px; color:var(--muted); margin-top:6px; line-height:1.35; }
@@ -318,6 +327,22 @@
 
   <!-- ===================== PROCESOS ===================== -->
   <section class="view" id="view-procesos">
+    <div class="proc-dashboard">
+      <div class="panel dash-card">
+        <p class="panel-title">Distribución por tipo</p>
+        <div class="dash-chart-wrap">
+          <canvas id="chart-tipo"></canvas>
+          <p class="card-empty dash-empty" id="chart-tipo-empty">Aún no hay procesos registrados.</p>
+        </div>
+      </div>
+      <div class="panel dash-card">
+        <p class="panel-title">Ganadas vs Perdidas</p>
+        <div class="dash-chart-wrap">
+          <canvas id="chart-resultado"></canvas>
+          <p class="card-empty dash-empty" id="chart-resultado-empty">Aún no hay procesos ganados o perdidos.</p>
+        </div>
+      </div>
+    </div>
     <div class="toolbar">
       <select class="filter" id="filtro-tipo-proceso">
         <option value="">Todos los tipos</option>
@@ -733,7 +758,7 @@ function renderKanbanProcesos(){
         return `
         <div class="card" data-id="${p.id}">
           <div class="card-tipo">
-            ${p.tipo}${p.referencia ? ` · <span class="ref-tooltip" title="${escHtml(p.nombre || '')}">${escHtml(p.referencia)}</span>` : (p.nombre ? ` · <span class="ref-tooltip" title="${escHtml(p.nombre)}">${escHtml(truncate(p.nombre, 22))}</span>` : '')}
+            <b class="tipo-label">${p.tipo}</b>${p.referencia ? ` · <span class="ref-tooltip" title="${escHtml(p.nombre || '')}">${escHtml(p.referencia)}</span>` : (p.nombre ? ` · <span class="ref-tooltip" title="${escHtml(p.nombre)}">${escHtml(truncate(p.nombre, 22))}</span>` : '')}
           </div>
           <div class="card-meta">
             <span>${escHtml(p.entidad || '')}</span>
@@ -750,7 +775,67 @@ function renderKanbanProcesos(){
     openProcesoModal(allProcesos.find(p => p.id === c.dataset.id));
   }));
 }
-async function refreshProcesos(){ allProcesos = await fetchProcesos(); renderKanbanProcesos(); }
+let chartTipo = null;
+let chartResultado = null;
+function renderDashboardProcesos(){
+  if (!window.Chart) return;
+
+  const counts = {};
+  allProcesos.forEach(p => { const k = p.tipo || 'Otro'; counts[k] = (counts[k] || 0) + 1; });
+  const tipoColors = { SEACE:'#3a63e0', Infra:'#6a4fd1', Privado:'#00b8a9' };
+  const tipoNombres = { SEACE:'SEACE', Infra:'OxI / Infra', Privado:'Privado' };
+  const tipoKeys = Object.keys(counts);
+
+  const wrapTipo = document.getElementById('chart-tipo');
+  const emptyTipo = document.getElementById('chart-tipo-empty');
+  if (!tipoKeys.length){
+    wrapTipo.style.display = 'none'; emptyTipo.style.display = 'block';
+    if (chartTipo){ chartTipo.destroy(); chartTipo = null; }
+  } else {
+    wrapTipo.style.display = 'block'; emptyTipo.style.display = 'none';
+    const data = tipoKeys.map(k => counts[k]);
+    const total = data.reduce((a,b) => a+b, 0);
+    if (chartTipo) chartTipo.destroy();
+    chartTipo = new Chart(wrapTipo, {
+      type: 'doughnut',
+      data: {
+        labels: tipoKeys.map(k => tipoNombres[k] || k),
+        datasets: [{ data, backgroundColor: tipoKeys.map(k => tipoColors[k] || '#94a3b8'), borderWidth: 0 }]
+      },
+      options: {
+        cutout: '62%', maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'bottom', labels: { font: { family: "'DM Sans',sans-serif", size: 11 }, boxWidth: 10, padding: 10 } },
+          tooltip: { callbacks: { label: ctx => `${ctx.label}: ${ctx.raw} (${Math.round(ctx.raw/total*100)}%)` } }
+        }
+      }
+    });
+  }
+
+  const ganadas = allProcesos.filter(p => p.etapa === 'Ganado').length;
+  const perdidas = allProcesos.filter(p => p.etapa === 'Perdido').length;
+  const wrapRes = document.getElementById('chart-resultado');
+  const emptyRes = document.getElementById('chart-resultado-empty');
+  if (ganadas + perdidas === 0){
+    wrapRes.style.display = 'none'; emptyRes.style.display = 'block';
+    if (chartResultado){ chartResultado.destroy(); chartResultado = null; }
+  } else {
+    wrapRes.style.display = 'block'; emptyRes.style.display = 'none';
+    if (chartResultado) chartResultado.destroy();
+    chartResultado = new Chart(wrapRes, {
+      type: 'doughnut',
+      data: { labels: ['Ganadas','Perdidas'], datasets: [{ data:[ganadas, perdidas], backgroundColor:['#2ecc71','#e74c3c'], borderWidth:0 }] },
+      options: {
+        cutout: '62%', maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'bottom', labels: { font: { family: "'DM Sans',sans-serif", size: 11 }, boxWidth: 10, padding: 10 } },
+          tooltip: { callbacks: { label: ctx => `${ctx.label}: ${ctx.raw} (${Math.round(ctx.raw/(ganadas+perdidas)*100)}%)` } }
+        }
+      }
+    });
+  }
+}
+async function refreshProcesos(){ allProcesos = await fetchProcesos(); renderKanbanProcesos(); renderDashboardProcesos(); }
 document.getElementById('filtro-tipo-proceso').addEventListener('change', renderKanbanProcesos);
 
 /* ---------- Picker: Oportunidades Seleccionadas (SEACE) y Radar Infra revisados ---------- */
