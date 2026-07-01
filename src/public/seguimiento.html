@@ -979,24 +979,32 @@ function renderSeacePicker(data, query){
     el.innerHTML = `<p class="card-empty">✓ Seleccionado: ${escHtml(o.nomenclature || o.title || '')}</p>`;
   }));
 }
+function ejecutorDe(o){
+  const ej = Array.isArray(o.infra_ejecutores) ? o.infra_ejecutores.find(e => e && e.consorcio_nombre) : null;
+  return ej ? ej.consorcio_nombre : '';
+}
 function renderInfraPicker(data, query){
   const el = document.getElementById('picker-infra-results');
   if (!data.length){ el.innerHTML = '<p class="card-empty">No hay procesos de Radar Infra marcados como revisados.</p>'; return; }
   const q = query.trim().toLowerCase();
-  const filtered = q ? data.filter(o => `${o.nombre||''} ${o.financista||''}`.toLowerCase().includes(q)) : data;
+  const filtered = q ? data.filter(o => `${o.nombre||''} ${o.financista||''} ${ejecutorDe(o)}`.toLowerCase().includes(q)) : data;
   const list = filtered.slice(0, 30);
   if (!list.length){ el.innerHTML = '<p class="card-empty">Sin coincidencias.</p>'; return; }
-  el.innerHTML = list.map((o,i) => `
+  el.innerHTML = list.map((o,i) => {
+    const ejecutor = ejecutorDe(o);
+    return `
     <div class="pick-item" data-idx="${i}">
       <b>${escHtml(o.nombre || 'Sin nombre')}</b>
-      <span>${escHtml(o.financista || '')}</span>
-    </div>`).join('');
+      <span>${ejecutor ? '🏗️ ' + escHtml(ejecutor) + ' (ejecutor)' : 'Financista: ' + escHtml(o.financista || '—')}</span>
+    </div>`;
+  }).join('');
   el.querySelectorAll('.pick-item').forEach(item => item.addEventListener('click', () => {
     const o = list[item.dataset.idx];
+    const ejecutor = ejecutorDe(o);
     document.getElementById('p-nombre').value = o.nombre || '';
-    document.getElementById('p-entidad').value = o.financista || '';
+    document.getElementById('p-entidad').value = ejecutor || o.financista || '';
     document.getElementById('p-referencia').value = o.id || '';
-    el.innerHTML = `<p class="card-empty">✓ Seleccionado: ${escHtml(o.nombre || '')}</p>`;
+    el.innerHTML = `<p class="card-empty">✓ Seleccionado: ${escHtml(o.nombre || '')}${ejecutor ? ' — entidad autocompletada con el ejecutor' : ' — sin ejecutor asignado, se usó el financista'}</p>`;
   }));
 }
 
