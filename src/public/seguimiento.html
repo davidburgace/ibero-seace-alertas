@@ -174,6 +174,19 @@
   .card-stage-win:hover{ background:rgba(46,204,113,0.1); border-color:#2ecc71; color:#1e8449; }
   .card-stage-lose{ border-color:rgba(231,76,60,0.4); color:#c0392b; }
   .card-stage-lose:hover{ background:rgba(231,76,60,0.1); border-color:#e74c3c; color:#c0392b; }
+
+  .interacciones-badge{
+    font-size:10.5px; font-weight:600; color:var(--accent); background:rgba(58,99,224,0.1);
+    padding:1px 7px; border-radius:20px; margin-left:4px;
+  }
+  .historial-item{
+    border:1px solid var(--border); border-radius:10px; padding:10px 12px; margin-bottom:8px; cursor:pointer;
+  }
+  .historial-item:hover{ border-color:var(--accent); background:var(--surface); }
+  .historial-item-head{ display:flex; justify-content:space-between; font-size:13px; font-weight:600; margin-bottom:4px; }
+  .historial-fecha{ font-family:var(--font-mono); font-size:11px; color:var(--muted); font-weight:500; }
+  .historial-item-estado{ display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); margin-bottom:4px; }
+  .historial-notas{ font-size:12px; color:var(--muted); font-style:italic; }
   .ref-tooltip{ cursor:help; border-bottom:1px dotted var(--muted); }
   .semaforo{ display:flex; align-items:center; gap:5px; font-weight:600; }
   .semaforo-dot{ width:7px; height:7px; border-radius:50%; flex-shrink:0; display:inline-block; }
@@ -507,16 +520,30 @@
     <h2 id="mv-title">Nueva visita</h2>
     <form id="form-visita">
       <input type="hidden" id="v-id">
-      <div class="field"><label>Cliente</label><input type="text" id="v-cliente" required></div>
+      <div class="field">
+        <label>Cliente</label>
+        <input type="text" id="v-cliente" list="lista-clientes" required autocomplete="off">
+        <datalist id="lista-clientes"></datalist>
+      </div>
       <div class="field-row">
         <div class="field"><label>Contacto</label><input type="text" id="v-contacto" placeholder="Nombre, cargo"></div>
         <div class="field"><label>Responsable</label><input type="text" id="v-responsable" required></div>
       </div>
       <div class="field-row">
-        <div class="field"><label>Fecha de visita</label><input type="date" id="v-fecha"></div>
-        <div class="field"><label>Hora</label><input type="time" id="v-hora"></div>
+        <div class="field"><label>Tipo de interacción</label>
+          <select id="v-tipo-interaccion">
+            <option value="Visita presencial">Visita presencial</option>
+            <option value="Llamada">Llamada</option>
+            <option value="Videollamada">Videollamada</option>
+            <option value="Email / WhatsApp">Email / WhatsApp</option>
+            <option value="Cotización enviada">Cotización enviada</option>
+            <option value="Seguimiento">Seguimiento</option>
+          </select>
+        </div>
+        <div class="field"><label>Fecha</label><input type="date" id="v-fecha"></div>
       </div>
       <div class="field-row">
+        <div class="field"><label>Hora</label><input type="time" id="v-hora"></div>
         <div class="field"><label>Duración</label>
           <select id="v-duracion">
             <option value="30">30 min</option>
@@ -527,16 +554,16 @@
             <option value="180">3 horas</option>
           </select>
         </div>
-        <div class="field"><label>Estado</label>
-          <select id="v-estado">
-            <option value="Por visitar">Por visitar</option>
-            <option value="Visitado">Visitado</option>
-            <option value="En seguimiento">En seguimiento</option>
-            <option value="Cotizando">Cotizando</option>
-            <option value="Ganado">Ganado</option>
-            <option value="Perdido">Perdido</option>
-          </select>
-        </div>
+      </div>
+      <div class="field"><label>Estado</label>
+        <select id="v-estado">
+          <option value="Por visitar">Por visitar</option>
+          <option value="Visitado">Visitado</option>
+          <option value="En seguimiento">En seguimiento</option>
+          <option value="Cotizando">Cotizando</option>
+          <option value="Ganado">Ganado</option>
+          <option value="Perdido">Perdido</option>
+        </select>
       </div>
       <div class="field"><label>Próxima acción</label><input type="text" id="v-proxima-accion" placeholder="Ej: Enviar cotización"></div>
       <div class="field"><label>Fecha próxima acción</label><input type="date" id="v-fecha-proxima"></div>
@@ -549,6 +576,20 @@
         </div>
       </div>
     </form>
+  </div>
+</div>
+
+<!-- ===================== MODAL HISTORIAL CLIENTE ===================== -->
+<div class="modal-overlay" id="modal-historial">
+  <div class="modal">
+    <h2 id="mh-title">Historial del cliente</h2>
+    <div id="historial-lista"></div>
+    <div class="modal-actions">
+      <div style="display:flex; gap:10px; margin-left:auto;">
+        <button type="button" class="btn btn-ghost" id="h-cerrar">Cerrar</button>
+        <button type="button" class="btn btn-primary" id="h-nueva-interaccion">+ Nueva interacción</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -1109,24 +1150,64 @@ async function fetchVisitas(){
   if (error){ console.error(error); return []; }
   return data;
 }
+function clienteKey(str){ return (str || '').trim().toLowerCase(); }
+function ordenarInteracciones(lista){
+  return [...lista].sort((a, b) => {
+    const da = a.fecha_visita ? new Date(`${a.fecha_visita}T${a.hora_visita || '00:00'}`) : new Date(a.created_at || 0);
+    const db = b.fecha_visita ? new Date(`${b.fecha_visita}T${b.hora_visita || '00:00'}`) : new Date(b.created_at || 0);
+    return db - da;
+  });
+}
+let visitasPorCliente = {};
+function agruparVisitasPorCliente(){
+  visitasPorCliente = {};
+  allVisitas.forEach(v => {
+    const k = clienteKey(v.cliente);
+    if (!visitasPorCliente[k]) visitasPorCliente[k] = [];
+    visitasPorCliente[k].push(v);
+  });
+  Object.keys(visitasPorCliente).forEach(k => { visitasPorCliente[k] = ordenarInteracciones(visitasPorCliente[k]); });
+}
+function poblarListaClientes(){
+  const dl = document.getElementById('lista-clientes');
+  const nombres = Object.values(visitasPorCliente).map(arr => arr[0].cliente).filter(Boolean);
+  dl.innerHTML = [...new Set(nombres)].sort().map(n => `<option value="${escHtml(n)}"></option>`).join('');
+}
+document.getElementById('v-cliente').addEventListener('input', e => {
+  if (document.getElementById('v-id').value) return; // no autocompletar si se está editando una existente
+  const registro = visitasPorCliente[clienteKey(e.target.value)];
+  if (registro && registro.length){
+    document.getElementById('v-contacto').value = registro[0].contacto || '';
+    document.getElementById('v-responsable').value = registro[0].responsable || '';
+  }
+});
+
 function renderKanbanVisitas(){
-  document.getElementById('count-visitas').textContent = allVisitas.length;
+  agruparVisitasPorCliente();
+  poblarListaClientes();
+  document.getElementById('count-visitas').textContent = Object.keys(visitasPorCliente).length;
   const el = document.getElementById('kanban-visitas');
   el.innerHTML = ESTADOS_VISITA.map(es => {
-    const items = allVisitas.filter(v => v.estado === es.key);
+    const items = Object.entries(visitasPorCliente)
+      .map(([k, arr]) => ({ key:k, latest:arr[0], total:arr.length }))
+      .filter(x => x.latest.estado === es.key);
     return `
     <div class="kcol">
       <div class="kcol-head">
         <div class="kcol-title"><span class="kcol-dot" style="background:${es.color}"></span>${es.key}</div>
         <span class="kcol-count">${items.length}</span>
       </div>
-      ${items.length === 0 ? '<p class="card-empty">Sin visitas</p>' : items.map(v => `
-        <div class="card" data-id="${v.id}">
-          <div class="card-tipo">${v.fecha_visita ? fmtDate(v.fecha_visita) : 'Sin fecha'}${v.hora_visita ? ' · ' + v.hora_visita.slice(0,5) : ''}${v.duracion_minutos ? ' (' + fmtDuracion(v.duracion_minutos) + ')' : ''}</div>
-          <div class="card-nombre">${v.cliente}</div>
+      ${items.length === 0 ? '<p class="card-empty">Sin visitas</p>' : items.map(({key, latest, total}) => `
+        <div class="card" data-id="${latest.id}">
+          <div class="card-tipo">${escHtml(latest.tipo_interaccion || 'Visita')} · ${latest.fecha_visita ? fmtDate(latest.fecha_visita) : 'Sin fecha'}${latest.hora_visita ? ' · ' + latest.hora_visita.slice(0,5) : ''}</div>
+          <div class="card-nombre">${escHtml(latest.cliente)}${total > 1 ? ` <span class="interacciones-badge">🕓 ${total}</span>` : ''}</div>
           <div class="card-meta">
-            <span>${v.responsable}${v.contacto ? ' · ' + v.contacto : ''}</span>
-            ${v.proxima_accion ? `<span>→ ${v.proxima_accion}${v.fecha_proxima_accion ? ' (' + fmtDate(v.fecha_proxima_accion) + ')' : ''}</span>` : ''}
+            <span>${escHtml(latest.responsable || '')}${latest.contacto ? ' · ' + escHtml(latest.contacto) : ''}</span>
+            ${latest.proxima_accion ? `<span>→ ${escHtml(latest.proxima_accion)}${latest.fecha_proxima_accion ? ' (' + fmtDate(latest.fecha_proxima_accion) + ')' : ''}</span>` : ''}
+          </div>
+          <div class="card-stage-row">
+            <button type="button" class="card-stage-btn" onclick="event.stopPropagation(); nuevaInteraccionCliente('${key.replace(/'/g,"\\'")}')">+ Interacción</button>
+            ${total > 1 ? `<button type="button" class="card-stage-btn" onclick="event.stopPropagation(); abrirHistorialCliente('${key.replace(/'/g,"\\'")}')">🕓 Historial</button>` : ''}
           </div>
         </div>`).join('')}
     </div>`;
@@ -1135,6 +1216,56 @@ function renderKanbanVisitas(){
     openVisitaModal(allVisitas.find(v => v.id === c.dataset.id));
   }));
 }
+
+function nuevaInteraccionCliente(key){
+  const registro = visitasPorCliente[key];
+  if (!registro || !registro.length) return;
+  const ref = registro[0];
+  openVisitaModal(null);
+  document.getElementById('v-cliente').value = ref.cliente || '';
+  document.getElementById('v-contacto').value = ref.contacto || '';
+  document.getElementById('v-responsable').value = ref.responsable || '';
+  document.getElementById('v-estado').value = ref.estado || 'Por visitar';
+}
+
+const modalHistorial = document.getElementById('modal-historial');
+const TIPO_ICONOS = {
+  'Visita presencial':'🚗', 'Llamada':'📞', 'Videollamada':'💻',
+  'Email / WhatsApp':'✉️', 'Cotización enviada':'📄', 'Seguimiento':'🔁'
+};
+let historialClienteActual = null;
+function abrirHistorialCliente(key){
+  const registro = visitasPorCliente[key];
+  if (!registro || !registro.length) return;
+  historialClienteActual = key;
+  document.getElementById('mh-title').textContent = 'Historial — ' + registro[0].cliente;
+  document.getElementById('historial-lista').innerHTML = registro.map(v => {
+    const estadoInfo = ESTADOS_VISITA.find(e => e.key === v.estado);
+    return `
+    <div class="historial-item" data-id="${v.id}">
+      <div class="historial-item-head">
+        <span>${TIPO_ICONOS[v.tipo_interaccion] || '🕓'} ${escHtml(v.tipo_interaccion || 'Visita')}</span>
+        <span class="historial-fecha">${v.fecha_visita ? fmtDate(v.fecha_visita) : 'Sin fecha'}${v.hora_visita ? ' · ' + v.hora_visita.slice(0,5) : ''}</span>
+      </div>
+      <div class="historial-item-estado"><i class="semaforo-dot" style="background:${estadoInfo ? estadoInfo.color : '#94a3b8'}"></i>${escHtml(v.estado)}</div>
+      ${v.notas ? `<div class="historial-notas">${escHtml(v.notas)}</div>` : ''}
+    </div>`;
+  }).join('');
+  document.getElementById('historial-lista').querySelectorAll('.historial-item').forEach(item => {
+    item.addEventListener('click', () => {
+      modalHistorial.classList.remove('open');
+      openVisitaModal(allVisitas.find(v => v.id === item.dataset.id));
+    });
+  });
+  modalHistorial.classList.add('open');
+}
+document.getElementById('h-cerrar').addEventListener('click', () => modalHistorial.classList.remove('open'));
+document.getElementById('h-nueva-interaccion').addEventListener('click', () => {
+  modalHistorial.classList.remove('open');
+  if (historialClienteActual) nuevaInteraccionCliente(historialClienteActual);
+});
+modalHistorial.addEventListener('click', e => { if (e.target === modalHistorial) modalHistorial.classList.remove('open'); });
+
 async function refreshVisitas(){
   allVisitas = await fetchVisitas();
   renderKanbanVisitas();
@@ -1150,6 +1281,7 @@ function openVisitaModal(v){
   document.getElementById('v-cliente').value = v ? v.cliente : '';
   document.getElementById('v-contacto').value = v ? (v.contacto || '') : '';
   document.getElementById('v-responsable').value = v ? v.responsable : '';
+  document.getElementById('v-tipo-interaccion').value = v ? (v.tipo_interaccion || 'Visita presencial') : 'Visita presencial';
   document.getElementById('v-fecha').value = v ? (v.fecha_visita || '') : '';
   document.getElementById('v-hora').value = v ? (v.hora_visita || '') : '';
   document.getElementById('v-duracion').value = v ? (v.duracion_minutos || 60) : 60;
@@ -1171,6 +1303,7 @@ document.getElementById('form-visita').addEventListener('submit', async e => {
     cliente: document.getElementById('v-cliente').value,
     contacto: document.getElementById('v-contacto').value,
     responsable: document.getElementById('v-responsable').value,
+    tipo_interaccion: document.getElementById('v-tipo-interaccion').value,
     fecha_visita: document.getElementById('v-fecha').value || null,
     hora_visita: document.getElementById('v-hora').value || null,
     duracion_minutos: parseInt(document.getElementById('v-duracion').value, 10) || 60,
