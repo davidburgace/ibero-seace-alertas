@@ -102,9 +102,9 @@
   .item-row:last-child { border-bottom: none; }
   .item-row:hover { background: var(--surface2); }
 
-  .item-info { display: flex; flex-direction: column; gap: 3px; }
-  .item-name { font-size: 14px; font-weight: 500; color: var(--text); }
-  .item-meta { font-size: 12px; color: var(--muted); }
+  .item-info { display: flex; flex-direction: column; gap: 3px; min-width: 0; flex: 1; }
+  .item-name { font-size: 14px; font-weight: 500; color: var(--text); overflow-wrap: break-word; }
+  .item-meta { font-size: 12px; color: var(--muted); overflow-wrap: break-word; }
 
   .badge {
     padding: 3px 10px; border-radius: 20px; font-size: 11px;
@@ -186,6 +186,39 @@
   }
   .toggle input:checked + .toggle-slider { background: var(--green); }
   .toggle input:checked + .toggle-slider:before { transform: translateX(18px); }
+
+  /* ---------- RESPONSIVE / MOBILE ---------- */
+  @media (max-width: 640px){
+    .login-card{ padding:28px 22px; }
+
+    .topbar{ padding:12px 16px; }
+    .logo{ font-size:14px; gap:8px; }
+    .topbar-actions{ gap:8px !important; }
+    .topbar-actions a{ font-size:12px !important; padding:6px 10px !important; }
+    .logout-btn{ font-size:12px; padding:6px 10px; }
+
+    .content{ padding:20px 14px; }
+
+    .stats-grid{ gap:8px; margin-bottom:24px; }
+    .stat-card{ padding:14px 12px; }
+    .stat-value{ font-size:22px; }
+    .stat-label{ font-size:10.5px; }
+
+    .section-header{ flex-wrap:wrap; gap:10px; }
+    .section-title{ font-size:16px; }
+
+    .card[style*="flex-wrap:wrap"]{ padding:14px !important; }
+    #accionMsg{ min-width:100% !important; }
+    .btn-add{ width:100%; justify-content:center; }
+
+    .item-row{ flex-wrap:wrap; gap:10px; padding:14px; }
+    .item-actions{ width:100%; justify-content:space-between !important; }
+
+    .security-grid{ display:flex !important; flex-direction:column; align-items:stretch !important; }
+    .security-grid .btn-add{ height:auto !important; padding:11px !important; }
+
+    .modal{ padding:22px 18px; max-width:100%; }
+  }
 </style>
 </head>
 <body>
@@ -206,7 +239,7 @@
 <div class="app" id="appWrap">
   <div class="topbar">
     <div class="logo"><div class="logo-dot"></div> Radar Ibero — Admin</div>
-   <div style="display:flex;gap:10px;align-items:center;">
+   <div class="topbar-actions" style="display:flex;gap:10px;align-items:center;">
       <a href="/" style="color:var(--muted);text-decoration:none;font-size:13px;border:1px solid var(--border2);border-radius:8px;padding:7px 14px;">← Inicio</a>
       <button class="logout-btn" onclick="logout()">Cerrar sesión</button>
     </div>
@@ -273,7 +306,7 @@
       </div>
     </div>
     <div class="card" style="padding:20px;">
-      <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:12px;align-items:end;">
+      <div class="security-grid" style="display:grid;grid-template-columns:1fr 1fr auto;gap:12px;align-items:end;">
         <div>
           <div class="form-label" style="margin-bottom:6px;">Nueva contraseña</div>
           <input type="password" class="input-field" id="newPassword" placeholder="Nueva contraseña" style="margin-bottom:0">
@@ -418,7 +451,7 @@ function renderVendors(vendors) {
         <div class="item-name">${v.name || '—'}</div>
         <div class="item-meta">${v.email || '—'}</div>
       </div>
-      <div style="display:flex;align-items:center;gap:10px;">
+      <div class="item-actions" style="display:flex;align-items:center;gap:10px;">
         <span class="badge ${BADGE_COLORS[v.line] || 'badge-gray'}">${v.line || 'General'}</span>
         <button class="btn-delete" onclick="deleteVendor('${v.id}')">Eliminar</button>
       </div>
@@ -434,7 +467,7 @@ function renderKeywords(keywords) {
       <div class="item-info">
         <div class="item-name" style="${k.active === false ? 'opacity:0.4;text-decoration:line-through' : ''}">${k.keyword || '—'}</div>
       </div>
-      <div style="display:flex;align-items:center;gap:12px;">
+      <div class="item-actions" style="display:flex;align-items:center;gap:12px;">
         <span class="badge ${BADGE_COLORS[k.business_line] || 'badge-gray'}">${k.business_line || 'General'}</span>
         <label class="toggle" title="${k.active !== false ? 'Activa — clic para desactivar' : 'Inactiva — clic para activar'}">
           <input type="checkbox" ${k.active !== false ? 'checked' : ''} onchange="toggleKeyword('${k.id}', this.checked)">
