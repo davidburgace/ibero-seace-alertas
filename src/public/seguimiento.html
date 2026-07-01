@@ -157,6 +157,12 @@
   .ticket-time{ font-family:var(--font-mono); font-size:11px; color:var(--muted); }
   .ticket-title{ font-weight:600; font-size:13.5px; margin:2px 0; }
   .ticket-meta{ font-size:12px; color:var(--muted); }
+  .join-link{
+    display:inline-block; margin-top:6px; font-size:12px; font-weight:600;
+    color:#fff; background:var(--accent); text-decoration:none;
+    padding:4px 10px; border-radius:6px;
+  }
+  .join-link:hover{ background:var(--accent2); }
 
   .calendar-panel{ background:#fff; border:1px solid var(--border); border-radius:14px; padding:18px; }
   .fc{ --fc-border-color: var(--border); --fc-today-bg-color: rgba(58,99,224,0.05); font-family:var(--font-body); }
@@ -165,6 +171,15 @@
   .fc .fc-button:hover{ background:var(--accent2); }
   .fc .fc-button-active{ background:var(--accent2) !important; }
   .fc-event{ border:none; font-size:12px; cursor:pointer; }
+  .fc .fc-daygrid-day-frame{ min-height:130px; }
+  .fc .fc-daygrid-day-events{ margin-bottom:4px; }
+  .fc-daygrid-event{
+    white-space:normal !important; line-height:1.3; padding:2px 5px; margin-bottom:2px; border-radius:4px;
+  }
+  .fc-daygrid-event .fc-event-time{ font-weight:600; }
+  .fc-daygrid-event .fc-event-title{ white-space:normal; }
+  .fc-timegrid-event .fc-event-title{ white-space:normal; line-height:1.25; }
+  .fc-daygrid-more-link{ font-size:11px; font-weight:600; color:var(--accent); }
 
   /* ---------- MODAL ---------- */
   .modal-overlay{
@@ -287,6 +302,7 @@
       <div class="field"><label>Modalidad</label>
         <select id="r-modalidad"><option value="presencial">Presencial</option><option value="virtual">Virtual</option></select>
       </div>
+      <div class="field"><label>Enlace de reunión (Meet, Zoom, Teams...)</label><input type="url" id="r-link" placeholder="https://meet.google.com/..."></div>
       <div class="field"><label>Descripción</label><textarea id="r-descripcion"></textarea></div>
       <div class="modal-actions">
         <button type="button" class="btn-danger" id="r-eliminar" style="display:none">Eliminar</button>
@@ -439,6 +455,7 @@ let sb = null;
 let calendar = null;
 let allProcesos = [];
 let allVisitas = [];
+let allReuniones = [];
 const isConfigured = !SUPABASE_URL.includes("TU-PROYECTO") && !SUPABASE_ANON_KEY.includes("TU-ANON-KEY");
 
 if (isConfigured) {
@@ -471,6 +488,16 @@ function fmtDuracion(mins){
   const h = Math.floor(mins / 60), m = mins % 60;
   return m ? `${h}h ${m}min` : `${h}h`;
 }
+function addMinutesToLocalDatetime(startStr, mins){
+  const d = new Date(startStr);
+  d.setMinutes(d.getMinutes() + mins);
+  const pad = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+const ESTADO_VISITA_COLOR = {
+  'Por visitar':'#94a3b8', 'Visitado':'#3a63e0', 'En seguimiento':'#6a4fd1',
+  'Cotizando':'#ff9f43', 'Ganado':'#2ecc71', 'Perdido':'#e74c3c'
+};
 
 /* =========================================================
    REUNIONES / CALENDARIO
@@ -482,31 +509,71 @@ async function fetchReuniones(){
   return data;
 }
 function toFcEvent(r){
-  return { id:r.id, title:r.titulo, start:r.fecha_inicio, end:r.fecha_fin,
-    backgroundColor: AREA_COLORS[r.area] || AREA_COLORS['Otro'], extendedProps:r };
+  return { id:'reunion-'+r.id, title:r.titulo, start:r.fecha_inicio, end:r.fecha_fin,
+    backgroundColor: AREA_COLORS[r.area] || AREA_COLORS['Otro'], extendedProps:{...r, _tipo:'reunion'} };
 }
-function renderHoy(reuniones){
+function toFcEventVisita(v){
+  if (!v.fecha_visita) return null;
+  const color = ESTADO_VISITA_COLOR[v.estado] || '#3a63e0';
+  const titulo = '🤝 ' + v.cliente;
+  if (v.hora_visita){
+    const hora = v.hora_visita.length >= 5 ? v.hora_visita.slice(0,5) : v.hora_visita;
+    const start = `${v.fecha_visita}T${hora}`;
+    const end = addMinutesToLocalDatetime(start, v.duracion_minutos || 60);
+    return { id:'visita-'+v.id, title:titulo, start, end, backgroundColor:color, extendedProps:{...v, _tipo:'visita'} };
+  }
+  return { id:'visita-'+v.id, title:titulo, start:v.fecha_visita, allDay:true, backgroundColor:color, extendedProps:{...v, _tipo:'visita'} };
+}
+function rebuildCalendar(){
+  if (!calendar) return;
+  calendar.removeAllEvents();
+  calendar.addEventSource(allReuniones.map(toFcEvent));
+  calendar.addEventSource(allVisitas.map(toFcEventVisita).filter(Boolean));
+}
+function renderHoy(reuniones, visitas){
   const el = document.getElementById('hoy-list');
   const hoy = new Date(); hoy.setHours(0,0,0,0);
   const manana = new Date(hoy); manana.setDate(manana.getDate()+1);
-  const deHoy = reuniones.filter(r => { const f = new Date(r.fecha_inicio); return f >= hoy && f < manana; })
-    .sort((a,b) => new Date(a.fecha_inicio) - new Date(b.fecha_inicio));
-  if (deHoy.length === 0){ el.innerHTML = '<p class="card-empty">No hay reuniones para hoy.</p>'; return; }
-  el.innerHTML = deHoy.map(r => `
-    <div class="ticket" style="border-left-color:${AREA_COLORS[r.area] || AREA_COLORS['Otro']}" data-id="${r.id}">
-      <div class="ticket-time">${fmtTime(r.fecha_inicio)} – ${fmtTime(r.fecha_fin)}</div>
-      <div class="ticket-title">${r.titulo}</div>
-      <div class="ticket-meta">${r.responsable} · ${r.area}</div>
-    </div>`).join('');
+  const hoyISO = `${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}-${String(hoy.getDate()).padStart(2,'0')}`;
+
+  const reunionesHoy = reuniones.filter(r => { const f = new Date(r.fecha_inicio); return f >= hoy && f < manana; })
+    .map(r => ({ _tipo:'reunion', orden: new Date(r.fecha_inicio).getTime(), data:r }));
+  const visitasHoy = (visitas||[]).filter(v => v.fecha_visita === hoyISO)
+    .map(v => ({ _tipo:'visita', orden: v.hora_visita ? new Date(`${v.fecha_visita}T${v.hora_visita}`).getTime() : Infinity, data:v }));
+
+  const items = [...reunionesHoy, ...visitasHoy].sort((a,b) => a.orden - b.orden);
+  if (items.length === 0){ el.innerHTML = '<p class="card-empty">Nada agendado para hoy.</p>'; return; }
+
+  el.innerHTML = items.map(item => {
+    if (item._tipo === 'reunion'){
+      const r = item.data;
+      const joinBtn = (r.modalidad === 'virtual' && r.link)
+        ? `<a href="${r.link}" target="_blank" rel="noopener" class="join-link" onclick="event.stopPropagation()">🔗 Unirse</a>` : '';
+      return `<div class="ticket" style="border-left-color:${AREA_COLORS[r.area] || AREA_COLORS['Otro']}" data-tipo="reunion" data-id="${r.id}">
+        <div class="ticket-time">${fmtTime(r.fecha_inicio)} – ${fmtTime(r.fecha_fin)}</div>
+        <div class="ticket-title">${r.titulo}</div>
+        <div class="ticket-meta">${r.responsable} · ${r.area}</div>
+        ${joinBtn}
+      </div>`;
+    }
+    const v = item.data;
+    const horaTxt = v.hora_visita ? v.hora_visita.slice(0,5) + (v.duracion_minutos ? ' (' + fmtDuracion(v.duracion_minutos) + ')' : '') : 'Sin hora';
+    return `<div class="ticket" style="border-left-color:${ESTADO_VISITA_COLOR[v.estado] || '#3a63e0'}" data-tipo="visita" data-id="${v.id}">
+      <div class="ticket-time">🤝 ${horaTxt}</div>
+      <div class="ticket-title">${v.cliente}</div>
+      <div class="ticket-meta">${v.responsable} · ${v.estado}</div>
+    </div>`;
+  }).join('');
+
   el.querySelectorAll('.ticket').forEach(t => t.addEventListener('click', () => {
-    openReunionModal(deHoy.find(x => x.id === t.dataset.id));
+    if (t.dataset.tipo === 'reunion') openReunionModal(reunionesHoy.find(x => x.data.id === t.dataset.id).data);
+    else openVisitaModal(visitasHoy.find(x => x.data.id === t.dataset.id).data);
   }));
 }
 async function refreshReuniones(){
-  const reuniones = await fetchReuniones();
-  calendar.removeAllEvents();
-  calendar.addEventSource(reuniones.map(toFcEvent));
-  renderHoy(reuniones);
+  allReuniones = await fetchReuniones();
+  rebuildCalendar();
+  renderHoy(allReuniones, allVisitas);
 }
 
 const modalReunion = document.getElementById('modal-reunion');
@@ -518,6 +585,7 @@ function openReunionModal(r, dateStr){
   document.getElementById('r-responsable').value = r ? r.responsable : '';
   document.getElementById('r-area').value = r ? r.area : 'Comercial';
   document.getElementById('r-modalidad').value = r ? r.modalidad : 'presencial';
+  document.getElementById('r-link').value = r ? (r.link || '') : '';
   document.getElementById('r-descripcion').value = r ? (r.descripcion || '') : '';
   const base = dateStr ? new Date(dateStr + 'T09:00') : new Date();
   const inicio = r ? new Date(r.fecha_inicio) : base;
@@ -541,6 +609,7 @@ document.getElementById('form-reunion').addEventListener('submit', async e => {
     responsable: document.getElementById('r-responsable').value,
     area: document.getElementById('r-area').value,
     modalidad: document.getElementById('r-modalidad').value,
+    link: document.getElementById('r-link').value,
     descripcion: document.getElementById('r-descripcion').value
   };
   const { error } = id
@@ -785,7 +854,12 @@ function renderKanbanVisitas(){
     openVisitaModal(allVisitas.find(v => v.id === c.dataset.id));
   }));
 }
-async function refreshVisitas(){ allVisitas = await fetchVisitas(); renderKanbanVisitas(); }
+async function refreshVisitas(){
+  allVisitas = await fetchVisitas();
+  renderKanbanVisitas();
+  rebuildCalendar();
+  renderHoy(allReuniones, allVisitas);
+}
 
 const modalVisita = document.getElementById('modal-visita');
 function openVisitaModal(v){
@@ -848,10 +922,14 @@ document.addEventListener('DOMContentLoaded', async () => {
   const calendarEl = document.getElementById('calendar');
   calendar = new FullCalendar.Calendar(calendarEl, {
     initialView: 'dayGridMonth', height:'auto', locale:'es',
+    dayMaxEvents: 3,
     headerToolbar: { left:'prev,next today', center:'title', right:'dayGridMonth,timeGridWeek,timeGridDay' },
     buttonText: { today:'Hoy', month:'Mes', week:'Semana', day:'Día' },
     events: [],
-    eventClick: info => openReunionModal(info.event.extendedProps),
+    eventClick: info => {
+      const ep = info.event.extendedProps;
+      if (ep._tipo === 'visita') openVisitaModal(ep); else openReunionModal(ep);
+    },
     dateClick: info => openReunionModal(null, info.dateStr)
   });
   calendar.render();
