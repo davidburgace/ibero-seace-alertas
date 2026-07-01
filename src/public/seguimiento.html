@@ -244,6 +244,16 @@
   }
   .field textarea{ resize:vertical; min-height:56px; }
   .field-row{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .participante-row{ display:flex; gap:6px; margin-bottom:6px; align-items:center; }
+  .participante-row input{
+    flex:1; padding:8px 9px; border:1px solid var(--border2); border-radius:8px;
+    font-family:var(--font-body); font-size:13px; background:var(--surface); min-width:0;
+  }
+  .participante-remove{
+    background:none; border:none; color:#e74c3c; cursor:pointer; font-size:17px;
+    padding:2px 8px; flex-shrink:0; line-height:1;
+  }
+  .participante-remove:hover{ color:#c0392b; }
   .modal-actions{ display:flex; justify-content:space-between; align-items:center; margin-top:16px; }
   .config-warning{
     background:#FFF3EC; border:1px solid #ff9f43; color:#8A3E1D; padding:12px 16px;
@@ -425,10 +435,18 @@
         <select id="r-modalidad"><option value="presencial">Presencial</option><option value="virtual">Virtual</option></select>
       </div>
       <div class="field"><label>Enlace de reunión (Meet, Zoom, Teams...)</label><input type="url" id="r-link" placeholder="https://meet.google.com/..."></div>
+
+      <div class="field">
+        <label>Participantes</label>
+        <div id="r-participantes-lista"></div>
+        <button type="button" class="btn btn-ghost" id="r-add-participante" style="width:100%; margin-top:4px;">+ Agregar participante</button>
+      </div>
+
       <div class="field"><label>Descripción</label><textarea id="r-descripcion"></textarea></div>
       <div class="modal-actions">
         <button type="button" class="btn-danger" id="r-eliminar" style="display:none">Eliminar</button>
-        <div style="display:flex; gap:10px; margin-left:auto;">
+        <div style="display:flex; gap:10px; margin-left:auto; flex-wrap:wrap;">
+          <button type="button" class="btn btn-ghost" id="r-enviar-invitacion">✉️ Enviar invitación</button>
           <button type="button" class="btn btn-ghost" id="r-cancelar">Cancelar</button>
           <button type="submit" class="btn btn-primary">Guardar</button>
         </div>
@@ -732,10 +750,13 @@ function renderHoy(reuniones, visitas){
       const r = item.data;
       const joinBtn = (r.modalidad === 'virtual' && r.link)
         ? `<a href="${r.link}" target="_blank" rel="noopener" class="join-link" onclick="event.stopPropagation()">🔗 Unirse</a>` : '';
+      const participantesTxt = (Array.isArray(r.participantes) && r.participantes.length)
+        ? `<div class="ticket-meta">👥 ${escHtml(r.participantes.map(p => p.nombre || p.email).filter(Boolean).join(', '))}</div>` : '';
       return `<div class="ticket" style="border-left-color:${AREA_COLORS[r.area] || AREA_COLORS['Otro']}" data-tipo="reunion" data-id="${r.id}">
         <div class="ticket-time">${fmtTime(r.fecha_inicio)} – ${fmtTime(r.fecha_fin)}</div>
         <div class="ticket-title">${r.titulo}</div>
         <div class="ticket-meta">${r.responsable} · ${r.area}</div>
+        ${participantesTxt}
         ${joinBtn}
       </div>`;
     }
@@ -760,6 +781,26 @@ async function refreshReuniones(){
 }
 
 const modalReunion = document.getElementById('modal-reunion');
+
+function agregarFilaParticipante(nombre, email){
+  const cont = document.getElementById('r-participantes-lista');
+  const row = document.createElement('div');
+  row.className = 'participante-row';
+  row.innerHTML = `
+    <input type="text" class="p-nombre" placeholder="Nombre" value="${escHtml(nombre || '')}">
+    <input type="email" class="p-email" placeholder="correo@empresa.com" value="${escHtml(email || '')}">
+    <button type="button" class="participante-remove" title="Quitar">✕</button>
+  `;
+  row.querySelector('.participante-remove').addEventListener('click', () => row.remove());
+  cont.appendChild(row);
+}
+document.getElementById('r-add-participante').addEventListener('click', () => agregarFilaParticipante('', ''));
+function leerParticipantes(){
+  return [...document.querySelectorAll('#r-participantes-lista .participante-row')]
+    .map(row => ({ nombre: row.querySelector('.p-nombre').value.trim(), email: row.querySelector('.p-email').value.trim() }))
+    .filter(p => p.nombre || p.email);
+}
+
 function openReunionModal(r, dateStr){
   document.getElementById('mr-title').textContent = r ? 'Editar reunión' : 'Nueva reunión';
   document.getElementById('r-eliminar').style.display = r ? 'inline' : 'none';
@@ -770,6 +811,8 @@ function openReunionModal(r, dateStr){
   document.getElementById('r-modalidad').value = r ? r.modalidad : 'presencial';
   document.getElementById('r-link').value = r ? (r.link || '') : '';
   document.getElementById('r-descripcion').value = r ? (r.descripcion || '') : '';
+  document.getElementById('r-participantes-lista').innerHTML = '';
+  (r && Array.isArray(r.participantes) ? r.participantes : []).forEach(p => agregarFilaParticipante(p.nombre, p.email));
   const base = dateStr ? new Date(dateStr + 'T09:00') : new Date();
   const inicio = r ? new Date(r.fecha_inicio) : base;
   const fin = r ? new Date(r.fecha_fin) : new Date(base.getTime() + 60*60000);
@@ -780,6 +823,27 @@ function openReunionModal(r, dateStr){
 document.getElementById('btn-nueva-reunion').addEventListener('click', () => openReunionModal(null));
 document.getElementById('r-cancelar').addEventListener('click', () => modalReunion.classList.remove('open'));
 modalReunion.addEventListener('click', e => { if (e.target === modalReunion) modalReunion.classList.remove('open'); });
+
+document.getElementById('r-enviar-invitacion').addEventListener('click', () => {
+  const titulo = document.getElementById('r-titulo').value || 'Reunión';
+  const inicio = document.getElementById('r-inicio').value;
+  const fin = document.getElementById('r-fin').value;
+  const modalidad = document.getElementById('r-modalidad').value;
+  const link = document.getElementById('r-link').value;
+  const descripcion = document.getElementById('r-descripcion').value;
+  const participantes = leerParticipantes();
+  const emails = participantes.map(p => p.email).filter(Boolean);
+  if (!inicio || !fin){ alert('Completa fecha y hora de inicio/fin antes de enviar la invitación.'); return; }
+  const fmt = d => new Date(d).toLocaleString('es-PE', { dateStyle:'full', timeStyle:'short' });
+  let cuerpo = `Te invito a la reunión: ${titulo}\n\n`;
+  cuerpo += `Inicio: ${fmt(inicio)}\nFin: ${fmt(fin)}\nModalidad: ${modalidad === 'virtual' ? 'Virtual' : 'Presencial'}\n`;
+  if (modalidad === 'virtual' && link) cuerpo += `Enlace: ${link}\n`;
+  if (descripcion) cuerpo += `\n${descripcion}\n`;
+  cuerpo += `\n— Enviado desde Seguimiento Comercial, Grupo Ibero`;
+  const mailto = `mailto:?bcc=${encodeURIComponent(emails.join(','))}&subject=${encodeURIComponent('Invitación: ' + titulo)}&body=${encodeURIComponent(cuerpo)}`;
+  if (!emails.length){ alert('Agrega al menos un participante con correo para poder enviar la invitación.'); return; }
+  window.location.href = mailto;
+});
 
 document.getElementById('form-reunion').addEventListener('submit', async e => {
   e.preventDefault();
@@ -793,6 +857,7 @@ document.getElementById('form-reunion').addEventListener('submit', async e => {
     area: document.getElementById('r-area').value,
     modalidad: document.getElementById('r-modalidad').value,
     link: document.getElementById('r-link').value,
+    participantes: leerParticipantes(),
     descripcion: document.getElementById('r-descripcion').value
   };
   const { error } = id
@@ -1345,7 +1410,9 @@ document.getElementById('btn-export-reuniones').addEventListener('click', () => 
   const filas = allReuniones.map(r => ({
     Titulo: r.titulo, Inicio: r.fecha_inicio, Fin: r.fecha_fin,
     Responsable: r.responsable, Area: r.area, Modalidad: r.modalidad,
-    Enlace: r.link || '', Descripcion: r.descripcion || ''
+    Enlace: r.link || '',
+    Participantes: (Array.isArray(r.participantes) ? r.participantes.map(p => `${p.nombre || ''} <${p.email || ''}>`).join('; ') : ''),
+    Descripcion: r.descripcion || ''
   }));
   exportarExcel(filas, 'Reuniones', 'reuniones_ibero');
 });
