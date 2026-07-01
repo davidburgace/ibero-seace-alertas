@@ -298,6 +298,18 @@
       <div class="loading-row">Cargando...</div>
     </div>
 
+    <!-- Contactos frecuentes -->
+    <div class="section-header">
+      <div>
+        <div class="section-title">Contactos frecuentes</div>
+        <div class="section-sub">Se usan para autocompletar el correo al agregar participantes en Seguimiento Comercial</div>
+      </div>
+      <button class="btn-add" onclick="openModal('contacto')">＋ Agregar</button>
+    </div>
+    <div class="card" id="contactosList">
+      <div class="loading-row">Cargando...</div>
+    </div>
+
     <!-- Cambiar contraseña -->
     <div class="section-header">
       <div>
@@ -378,6 +390,25 @@
   </div>
 </div>
 
+<!-- Modal Contacto frecuente -->
+<div class="modal-overlay" id="modalContacto">
+  <div class="modal">
+    <div class="modal-title">Agregar contacto frecuente</div>
+    <div class="form-group">
+      <label class="form-label">Nombre</label>
+      <input type="text" class="input-field" id="contactoNombre" placeholder="Ej: María Torres" style="margin-bottom:0">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Email</label>
+      <input type="email" class="input-field" id="contactoEmail" placeholder="maria@empresa.com" style="margin-bottom:0">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal('contacto')">Cancelar</button>
+      <button class="btn-save" onclick="saveContacto()">Guardar</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const ADMIN_PASSWORD = 'ibero2024';
 const API = '';
@@ -434,6 +465,7 @@ async function loadAll() {
     const data = await res.json();
     renderVendors(data.vendors || []);
     renderKeywords(data.keywords || []);
+    renderContactos(data.contactos || []);
     document.getElementById('statOpps').textContent = (data.opportunities || []).length;
     document.getElementById('statVendors').textContent = (data.vendors || []).length;
     document.getElementById('statKeywords').textContent = (data.keywords || []).length;
@@ -479,6 +511,22 @@ function renderKeywords(keywords) {
   `).join('');
 }
 
+function renderContactos(contactos) {
+  const el = document.getElementById('contactosList');
+  if (!contactos.length) { el.innerHTML = '<div class="empty-state">No hay contactos frecuentes. Agrega el primero.</div>'; return; }
+  el.innerHTML = contactos.map(c => `
+    <div class="item-row">
+      <div class="item-info">
+        <div class="item-name">${c.nombre || '—'}</div>
+        <div class="item-meta">${c.email || '—'}</div>
+      </div>
+      <div class="item-actions" style="display:flex;align-items:center;gap:10px;">
+        <button class="btn-delete" onclick="deleteContacto('${c.id}')">Eliminar</button>
+      </div>
+    </div>
+  `).join('');
+}
+
 async function toggleKeyword(id, active) {
   try {
     const res = await fetch(API + '/api/admin/keywords/' + id, {
@@ -506,8 +554,9 @@ function changePassword() {
   setTimeout(() => msg.textContent = '', 3000);
 }
 
-function openModal(type) { document.getElementById('modal' + (type === 'vendor' ? 'Vendor' : 'Keyword')).classList.add('open'); }
-function closeModal(type) { document.getElementById('modal' + (type === 'vendor' ? 'Vendor' : 'Keyword')).classList.remove('open'); }
+const MODAL_IDS = { vendor: 'Vendor', keyword: 'Keyword', contacto: 'Contacto' };
+function openModal(type) { document.getElementById('modal' + MODAL_IDS[type]).classList.add('open'); }
+function closeModal(type) { document.getElementById('modal' + MODAL_IDS[type]).classList.remove('open'); }
 
 async function saveVendor() {
   const name = document.getElementById('vendorName').value.trim();
@@ -545,6 +594,24 @@ async function saveKeyword() {
   } catch(e) { alert('Error: ' + e.message); }
 }
 
+async function saveContacto() {
+  const nombre = document.getElementById('contactoNombre').value.trim();
+  const email = document.getElementById('contactoEmail').value.trim();
+  if (!nombre || !email) { alert('Nombre y email son requeridos'); return; }
+  try {
+    const res = await fetch(API + '/api/admin/contactos', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nombre, email })
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error);
+    closeModal('contacto');
+    document.getElementById('contactoNombre').value = '';
+    document.getElementById('contactoEmail').value = '';
+    loadAll();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
 async function deleteVendor(id) {
   if (!confirm('¿Eliminar este vendedor?')) return;
   try {
@@ -559,6 +626,16 @@ async function deleteKeyword(id) {
   if (!confirm('¿Eliminar esta keyword?')) return;
   try {
     const res = await fetch(API + '/api/admin/keywords/' + id, { method: 'DELETE' });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error);
+    loadAll();
+  } catch(e) { alert('Error: ' + e.message); }
+}
+
+async function deleteContacto(id) {
+  if (!confirm('¿Eliminar este contacto?')) return;
+  try {
+    const res = await fetch(API + '/api/admin/contactos/' + id, { method: 'DELETE' });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error);
     loadAll();
