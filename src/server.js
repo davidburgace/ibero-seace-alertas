@@ -343,6 +343,86 @@ async function sendDigest() {
   if (ids.length) await supabase.from('opportunities').update({ alert_sent: true }).in('id', ids);
   return { ok: true, recipients, messageId: info.messageId || null, count: opportunities.length };
 }
+
+// ─── Recordatorios de reuniones (Seguimiento Comercial) ───────────────────────
+// Envía un correo a los participantes de reuniones que empiezan dentro de los
+// próximos RECORDATORIO_VENTANA_MIN minutos, y aún no tienen recordatorio enviado.
+
+function renderRecordatorioEmail(r) {
+  const inicio = new Date(r.fecha_inicio).toLocaleString('es-PE', { dateStyle: 'full', timeStyle: 'short', timeZone: 'America/Lima' });
+  const fin = new Date(r.fecha_fin).toLocaleString('es-PE', { timeStyle: 'short', timeZone: 'America/Lima' });
+  const linkBtn = (r.modalidad === 'virtual' && r.link)
+    ? `<a href="${r.link}" style="display:inline-block;margin-top:12px;background:#3a63e0;color:white;padding:10px 18px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:600;">Unirse a la reunión →</a>`
+    : '';
+  return `
+<div style="font-family:Arial,sans-serif;background:#f6f7fb;padding:20px;max-width:600px;margin:0 auto;">
+  <div style="background:#3a63e0;color:white;padding:20px;border-radius:12px 12px 0 0;text-align:center;">
+    <h1 style="margin:0;font-size:20px;">⏰ Recordatorio de reunión</h1>
+  </div>
+  <div style="background:white;padding:20px;border-radius:0 0 12px 12px;">
+    <h2 style="margin:0 0 10px;color:#16181d;font-size:18px;">${r.titulo}</h2>
+    <p style="margin:4px 0;color:#4b5563;font-size:14px;"><b>Inicio:</b> ${inicio}</p>
+    <p style="margin:4px 0;color:#4b5563;font-size:14px;"><b>Fin:</b> ${fin}</p>
+    <p style="margin:4px 0;color:#4b5563;font-size:14px;"><b>Modalidad:</b> ${r.modalidad === 'virtual' ? 'Virtual' : 'Presencial'}</p>
+    <p style="margin:4px 0;color:#4b5563;font-size:14px;"><b>Responsable:</b> ${r.responsable || ''}</p>
+    ${r.descripcion ? `<p style="margin:10px 0 0;color:#4b5563;font-size:13px;">${r.descripcion}</p>` : ''}
+    ${linkBtn}
+  </div>
+  <p style="text-align:center;color:#9ca3af;font-size:12px;margin-top:10px;">Seguimiento Comercial · Grupo Ibero Perú</p>
+</div>`;
+}
+
+const RECORDATORIO_VENTANA_MIN = Number(process.env.RECORDATORIO_VENTANA_MIN || 60);
+
+async function sendMeetingReminders() {
+  if (!supabase) return { ok: false, message: 'Supabase no configurado' };
+  if (!process.env.SMTP_HOST) return { ok: false, message: 'SMTP no configurado' };
+
+  const ahora = new Date();
+  const limite = new Date(ahora.getTime() + RECORDATORIO_VENTANA_MIN * 60000);
+
+  const { data: reuniones, error: errorReuniones } = await supabase.from('reuniones')
+    .select('*')
+    .or('recordatorio_enviado.is.null,recordatorio_enviado.eq.false')
+    .gte('fecha_inicio', ahora.toISOString())
+    .lte('fecha_inicio', limite.toISOString());
+  if (errorReuniones) throw errorReuniones;
+  if (!reuniones || !reuniones.length) return { ok: true, message: 'No hay reuniones próximas por recordar', enviados: 0 };
+
+  const transportRecordatorios = nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: Number(process.env.SMTP_PORT || 587),
+    secure: String(process.env.SMTP_SECURE || 'false') === 'true',
+    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+    connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 15000
+  });
+  await transportRecordatorios.verify();
+
+  let enviados = 0;
+  const errores = [];
+  for (const r of reuniones) {
+    const participantes = Array.isArray(r.participantes) ? r.participantes : [];
+    const emails = participantes.map(p => p.email).filter(Boolean);
+    if (!emails.length) {
+      await supabase.from('reuniones').update({ recordatorio_enviado: true }).eq('id', r.id);
+      continue;
+    }
+    try {
+      await transportRecordatorios.sendMail({
+        from: process.env.MAIL_FROM || process.env.SMTP_USER,
+        to: emails.join(','),
+        subject: `⏰ Recordatorio: ${r.titulo}`,
+        html: renderRecordatorioEmail(r)
+      });
+      await supabase.from('reuniones').update({ recordatorio_enviado: true }).eq('id', r.id);
+      enviados++;
+    } catch (e) {
+      errores.push({ id: r.id, titulo: r.titulo, error: e.message });
+    }
+  }
+  return { ok: true, enviados, total: reuniones.length, errores };
+}
+
 // ─── Rutas ─────────────────────────────────────────────────────────────────────
 app.get('/', (_, res) => res.json({ ok: true, app: 'SEACE Radar — Grupo Ibero Perú', mode: MODE, version: VERSION }));
 
@@ -373,6 +453,9 @@ app.post('/api/jobs/search', async (_, res, next) => {
 
 app.get('/api/jobs/send-digest', async (_, res, next) => { try { res.json(await sendDigest()); } catch (e) { next(e); } });
 app.post('/api/jobs/send-digest', async (_, res, next) => { try { res.json(await sendDigest()); } catch (e) { next(e); } });
+
+app.get('/api/jobs/send-meeting-reminders', async (_, res, next) => { try { res.json(await sendMeetingReminders()); } catch (e) { next(e); } });
+app.post('/api/jobs/send-meeting-reminders', async (_, res, next) => { try { res.json(await sendMeetingReminders()); } catch (e) { next(e); } });
 
 app.get('/api/opportunities/:id', async (req, res, next) => {
   try {
@@ -900,6 +983,14 @@ cron.schedule(schedule, async () => {
 cron.schedule(process.env.INFRA_CRON || '0 9 * * 1', async () => {
   try { await runInfraIngest(); } catch (e) { console.error('[INFRA][CRON]', e.message); }
 });
+
+// Recordatorios de reuniones: corre cada 15 min, avisa a reuniones que empiezan en la próxima hora
+cron.schedule('*/15 * * * *', async () => {
+  try {
+    const r = await sendMeetingReminders();
+    if (r.enviados) console.log(`[CRON] Recordatorios de reunión enviados: ${r.enviados}`);
+  } catch (e) { console.error('[CRON][recordatorios]', e.message); }
+}, { timezone: 'America/Lima' });
 
 app.listen(process.env.PORT || 3000, () =>
   console.log(`SEACE Radar v${VERSION} corriendo en puerto ${process.env.PORT || 3000}`)
