@@ -384,14 +384,14 @@ const ESTADOS_VISITA = [
   {key:"Perdido", color:"var(--c-perdido)"}
 ];
 
-let supabase = null;
+let sb = null;
 let calendar = null;
 let allProcesos = [];
 let allVisitas = [];
 const isConfigured = !SUPABASE_URL.includes("TU-PROYECTO") && !SUPABASE_ANON_KEY.includes("TU-ANON-KEY");
 
 if (isConfigured) {
-  supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 } else {
   document.getElementById('config-warning').style.display = 'block';
   document.getElementById('status-text').textContent = 'Sin configurar';
@@ -419,8 +419,8 @@ function fmtDate(date){ return date ? new Date(date + 'T00:00:00').toLocaleDateS
    REUNIONES / CALENDARIO
    ========================================================= */
 async function fetchReuniones(){
-  if (!supabase) return [];
-  const { data, error } = await supabase.from('reuniones').select('*').order('fecha_inicio');
+  if (!sb) return [];
+  const { data, error } = await sb.from('reuniones').select('*').order('fecha_inicio');
   if (error){ console.error(error); return []; }
   return data;
 }
@@ -487,8 +487,8 @@ document.getElementById('form-reunion').addEventListener('submit', async e => {
     descripcion: document.getElementById('r-descripcion').value
   };
   const { error } = id
-    ? await supabase.from('reuniones').update(payload).eq('id', id)
-    : await supabase.from('reuniones').insert(payload);
+    ? await sb.from('reuniones').update(payload).eq('id', id)
+    : await sb.from('reuniones').insert(payload);
   if (error) return alert('Error: ' + error.message);
   modalReunion.classList.remove('open');
   await refreshReuniones();
@@ -496,7 +496,7 @@ document.getElementById('form-reunion').addEventListener('submit', async e => {
 document.getElementById('r-eliminar').addEventListener('click', async () => {
   const id = document.getElementById('r-id').value;
   if (!id || !confirm('¿Eliminar esta reunión?')) return;
-  const { error } = await supabase.from('reuniones').delete().eq('id', id);
+  const { error } = await sb.from('reuniones').delete().eq('id', id);
   if (error) return alert('Error: ' + error.message);
   modalReunion.classList.remove('open');
   await refreshReuniones();
@@ -506,8 +506,8 @@ document.getElementById('r-eliminar').addEventListener('click', async () => {
    PROCESOS EN SEGUIMIENTO (KANBAN)
    ========================================================= */
 async function fetchProcesos(){
-  if (!supabase) return [];
-  const { data, error } = await supabase.from('procesos_seguimiento').select('*').order('created_at', {ascending:false});
+  if (!sb) return [];
+  const { data, error } = await sb.from('procesos_seguimiento').select('*').order('created_at', {ascending:false});
   if (error){ console.error(error); return []; }
   return data;
 }
@@ -579,8 +579,8 @@ document.getElementById('form-proceso').addEventListener('submit', async e => {
     updated_at: new Date().toISOString()
   };
   const { error } = id
-    ? await supabase.from('procesos_seguimiento').update(payload).eq('id', id)
-    : await supabase.from('procesos_seguimiento').insert(payload);
+    ? await sb.from('procesos_seguimiento').update(payload).eq('id', id)
+    : await sb.from('procesos_seguimiento').insert(payload);
   if (error) return alert('Error: ' + error.message);
   modalProceso.classList.remove('open');
   await refreshProcesos();
@@ -588,7 +588,7 @@ document.getElementById('form-proceso').addEventListener('submit', async e => {
 document.getElementById('p-eliminar').addEventListener('click', async () => {
   const id = document.getElementById('p-id').value;
   if (!id || !confirm('¿Eliminar este proceso?')) return;
-  const { error } = await supabase.from('procesos_seguimiento').delete().eq('id', id);
+  const { error } = await sb.from('procesos_seguimiento').delete().eq('id', id);
   if (error) return alert('Error: ' + error.message);
   modalProceso.classList.remove('open');
   await refreshProcesos();
@@ -598,8 +598,8 @@ document.getElementById('p-eliminar').addEventListener('click', async () => {
    VISITAS COMERCIALES (KANBAN)
    ========================================================= */
 async function fetchVisitas(){
-  if (!supabase) return [];
-  const { data, error } = await supabase.from('visitas_comerciales').select('*').order('created_at', {ascending:false});
+  if (!sb) return [];
+  const { data, error } = await sb.from('visitas_comerciales').select('*').order('created_at', {ascending:false});
   if (error){ console.error(error); return []; }
   return data;
 }
@@ -666,8 +666,8 @@ document.getElementById('form-visita').addEventListener('submit', async e => {
     updated_at: new Date().toISOString()
   };
   const { error } = id
-    ? await supabase.from('visitas_comerciales').update(payload).eq('id', id)
-    : await supabase.from('visitas_comerciales').insert(payload);
+    ? await sb.from('visitas_comerciales').update(payload).eq('id', id)
+    : await sb.from('visitas_comerciales').insert(payload);
   if (error) return alert('Error: ' + error.message);
   modalVisita.classList.remove('open');
   await refreshVisitas();
@@ -675,7 +675,7 @@ document.getElementById('form-visita').addEventListener('submit', async e => {
 document.getElementById('v-eliminar').addEventListener('click', async () => {
   const id = document.getElementById('v-id').value;
   if (!id || !confirm('¿Eliminar esta visita?')) return;
-  const { error } = await supabase.from('visitas_comerciales').delete().eq('id', id);
+  const { error } = await sb.from('visitas_comerciales').delete().eq('id', id);
   if (error) return alert('Error: ' + error.message);
   modalVisita.classList.remove('open');
   await refreshVisitas();
@@ -701,10 +701,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('status-dot').classList.add('live');
   document.getElementById('status-text').textContent = 'En vivo';
 
-  if (supabase){
-    supabase.channel('reuniones-rt').on('postgres_changes', {event:'*', schema:'public', table:'reuniones'}, refreshReuniones).subscribe();
-    supabase.channel('procesos-rt').on('postgres_changes', {event:'*', schema:'public', table:'procesos_seguimiento'}, refreshProcesos).subscribe();
-    supabase.channel('visitas-rt').on('postgres_changes', {event:'*', schema:'public', table:'visitas_comerciales'}, refreshVisitas).subscribe();
+  if (sb){
+    sb.channel('reuniones-rt').on('postgres_changes', {event:'*', schema:'public', table:'reuniones'}, refreshReuniones).subscribe();
+    sb.channel('procesos-rt').on('postgres_changes', {event:'*', schema:'public', table:'procesos_seguimiento'}, refreshProcesos).subscribe();
+    sb.channel('visitas-rt').on('postgres_changes', {event:'*', schema:'public', table:'visitas_comerciales'}, refreshVisitas).subscribe();
   }
 });
 </script>
