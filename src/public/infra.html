@@ -97,6 +97,47 @@
   #toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(120px);background:var(--surface2);border:1px solid var(--border2);color:var(--text);padding:12px 20px;border-radius:12px;font-size:13px;transition:.25s;z-index:300;max-width:90vw;}
   #toast.show{transform:translateX(-50%) translateY(0);}
   input[type=file]{display:none;}
+
+  /* ---------- RESPONSIVE / MOBILE ---------- */
+  @media (max-width: 640px){
+    .topbar{ padding:12px 16px; }
+    .logo{ font-size:14px; gap:8px; }
+    .topbar > div{ gap:10px !important; }
+    .topbar a.alt{ font-size:12px; }
+
+    .wrap{ padding:16px 14px 60px; }
+
+    .toolbar{ gap:8px; }
+    .btn{ padding:9px 12px; font-size:12.5px; }
+    .toolbar select{ flex:1; min-width:0; }
+
+    .stats{ gap:10px; }
+    .stat{ flex:1; min-width:calc(50% - 5px); padding:12px 14px; }
+    .stat .n{ font-size:20px; }
+
+    .filters{ gap:8px; }
+    #q{ min-width:0 !important; width:100%; }
+
+    .card{ flex-direction:column; align-items:stretch; gap:10px; padding:14px; }
+    .card .score{ align-self:flex-start; width:44px; height:44px; font-size:16px; }
+    .card-actions{
+      margin-left:0 !important; align-self:stretch !important;
+      flex-direction:row !important; align-items:center !important;
+      justify-content:space-between !important; width:100%; flex-wrap:wrap; gap:10px !important;
+    }
+
+    .drawer{ width:100vw; padding:18px 16px; }
+    .drawer h2{ font-size:16px; padding-right:26px; }
+    .closeX{ top:16px; right:16px; }
+
+    #chatLog{ max-height:220px; }
+    .chatbox{ flex-wrap:wrap; }
+    .chatbox input{ flex-basis:100%; }
+    .chatbox button{ flex:1; }
+
+    div[style*="display:flex;gap:8px;margin-bottom:10px;"]{ flex-wrap:wrap !important; }
+    div[style*="display:flex;gap:7px;margin-bottom:7px;"]{ flex-wrap:wrap !important; }
+  }
 </style>
 </head>
 <body>
@@ -311,7 +352,7 @@ function render(){
         </div>
         <div class="tags">${int}${dec}${mob}${noej}<span class="tag">${o.sector||o.business_line||''}</span></div>
       </div>
-      <div onclick="event.stopPropagation()" style="margin-left:auto;align-self:flex-start;display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
+      <div class="card-actions" onclick="event.stopPropagation()" style="margin-left:auto;align-self:flex-start;display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
         <div style="display:flex;gap:6px;">
           <button onclick="setInteres('${o.id}','si',this)" title="De interés" style="background:${o.interes==='si'?'rgba(52,211,153,.18)':'var(--surface2)'};border:1px solid ${o.interes==='si'?'#34d399':'var(--border2)'};border-radius:8px;padding:2px 8px;font-size:15px;cursor:pointer;line-height:1.4;">👍</button>
           <button onclick="setInteres('${o.id}','no',this)" title="No interesa" style="background:${o.interes==='no'?'rgba(248,113,113,.18)':'var(--surface2)'};border:1px solid ${o.interes==='no'?'#f87171':'var(--border2)'};border-radius:8px;padding:2px 8px;font-size:15px;cursor:pointer;line-height:1.4;">👎</button>
