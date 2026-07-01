@@ -34,6 +34,17 @@
       radial-gradient(circle at 90% 10%, rgba(106,79,209,0.05), transparent 50%);
   }
 
+  /* ---------- TOPBAR ---------- */
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between; gap:12px;
+    padding:14px 24px; border-bottom:1px solid var(--border); background:var(--surface);
+    position:sticky; top:0; z-index:50; backdrop-filter:blur(12px);
+  }
+  .logo{ display:flex; align-items:center; gap:10px; font-family:var(--font-display); font-size:16px; font-weight:700; color:var(--text); text-decoration:none; }
+  .logo-dot{ width:8px; height:8px; border-radius:50%; background:var(--accent); box-shadow:0 0 10px var(--accent); }
+  .back{ color:var(--muted); text-decoration:none; font-size:13px; border:1px solid var(--border2); border-radius:8px; padding:7px 14px; white-space:nowrap; }
+  .back:hover{ color:var(--text); border-color:var(--accent); }
+
   /* ---------- HEADER ---------- */
   header{
     padding: 26px 32px 0 32px;
@@ -191,8 +202,12 @@
 </head>
 <body>
 
+<div class="topbar">
+  <a class="logo" href="index.html"><span class="logo-dot"></span> Radar Ibero</a>
+  <a class="back" href="index.html">← Inicio</a>
+</div>
+
 <header>
-  <div class="breadcrumb"><a href="index.html">Radar Ibero</a> / Seguimiento Comercial</div>
   <div class="title-row">
     <div>
       <h1>Seguimiento <span class="accent">Comercial</span></h1>
@@ -353,6 +368,19 @@
       </div>
       <div class="field-row">
         <div class="field"><label>Fecha de visita</label><input type="date" id="v-fecha"></div>
+        <div class="field"><label>Hora</label><input type="time" id="v-hora"></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Duración</label>
+          <select id="v-duracion">
+            <option value="30">30 min</option>
+            <option value="45">45 min</option>
+            <option value="60" selected>1 hora</option>
+            <option value="90">1 hora 30</option>
+            <option value="120">2 horas</option>
+            <option value="180">3 horas</option>
+          </select>
+        </div>
         <div class="field"><label>Estado</label>
           <select id="v-estado">
             <option value="Por visitar">Por visitar</option>
@@ -437,6 +465,12 @@ function toLocalInputValue(date){
 }
 function fmtTime(date){ return new Date(date).toLocaleTimeString('es-PE', {hour:'2-digit', minute:'2-digit'}); }
 function fmtDate(date){ return date ? new Date(date + 'T00:00:00').toLocaleDateString('es-PE', {day:'2-digit', month:'short'}) : ''; }
+function fmtDuracion(mins){
+  if (!mins) return '';
+  if (mins < 60) return mins + ' min';
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return m ? `${h}h ${m}min` : `${h}h`;
+}
 
 /* =========================================================
    REUNIONES / CALENDARIO
@@ -738,7 +772,7 @@ function renderKanbanVisitas(){
       </div>
       ${items.length === 0 ? '<p class="card-empty">Sin visitas</p>' : items.map(v => `
         <div class="card" data-id="${v.id}">
-          <div class="card-tipo">${v.fecha_visita ? fmtDate(v.fecha_visita) : 'Sin fecha'}</div>
+          <div class="card-tipo">${v.fecha_visita ? fmtDate(v.fecha_visita) : 'Sin fecha'}${v.hora_visita ? ' · ' + v.hora_visita.slice(0,5) : ''}${v.duracion_minutos ? ' (' + fmtDuracion(v.duracion_minutos) + ')' : ''}</div>
           <div class="card-nombre">${v.cliente}</div>
           <div class="card-meta">
             <span>${v.responsable}${v.contacto ? ' · ' + v.contacto : ''}</span>
@@ -762,6 +796,8 @@ function openVisitaModal(v){
   document.getElementById('v-contacto').value = v ? (v.contacto || '') : '';
   document.getElementById('v-responsable').value = v ? v.responsable : '';
   document.getElementById('v-fecha').value = v ? (v.fecha_visita || '') : '';
+  document.getElementById('v-hora').value = v ? (v.hora_visita || '') : '';
+  document.getElementById('v-duracion').value = v ? (v.duracion_minutos || 60) : 60;
   document.getElementById('v-estado').value = v ? v.estado : 'Por visitar';
   document.getElementById('v-proxima-accion').value = v ? (v.proxima_accion || '') : '';
   document.getElementById('v-fecha-proxima').value = v ? (v.fecha_proxima_accion || '') : '';
@@ -781,6 +817,8 @@ document.getElementById('form-visita').addEventListener('submit', async e => {
     contacto: document.getElementById('v-contacto').value,
     responsable: document.getElementById('v-responsable').value,
     fecha_visita: document.getElementById('v-fecha').value || null,
+    hora_visita: document.getElementById('v-hora').value || null,
+    duracion_minutos: parseInt(document.getElementById('v-duracion').value, 10) || 60,
     estado: document.getElementById('v-estado').value,
     proxima_accion: document.getElementById('v-proxima-accion').value,
     fecha_proxima_accion: document.getElementById('v-fecha-proxima').value || null,
