@@ -1,0 +1,712 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Seguimiento Comercial — Radar Ibero</title>
+
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.11/index.global.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+  :root{
+    --bg:#ffffff; --surface:#f7f8fa; --surface2:#eef0f4;
+    --border:rgba(0,0,0,0.08); --border2:rgba(0,0,0,0.14);
+    --text:#16181d; --muted:#5c6270;
+    --accent:#3a63e0; --accent2:#6a4fd1;
+    --font-display:'Syne',sans-serif; --font-body:'DM Sans',sans-serif; --font-mono:'DM Mono',monospace;
+
+    --c-oficina:#3a63e0;
+    --c-expediente:#6a4fd1;
+    --c-consultas:#ff9f43;
+    --c-presentado:#00b8a9;
+    --c-ganado:#2ecc71;
+    --c-perdido:#e74c3c;
+    --c-porvisitar:#94a3b8;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{
+    font-family:var(--font-body); background:var(--bg); color:var(--text);
+    min-height:100vh;
+    background-image:
+      radial-gradient(circle at 50% -5%, rgba(58,99,224,0.06), transparent 55%),
+      radial-gradient(circle at 90% 10%, rgba(106,79,209,0.05), transparent 50%);
+  }
+
+  /* ---------- HEADER ---------- */
+  header{
+    padding: 26px 32px 0 32px;
+    max-width: 1320px; margin: 0 auto;
+  }
+  .breadcrumb{
+    font-size:13px; color:var(--muted); margin-bottom:14px;
+  }
+  .breadcrumb a{ color:var(--muted); text-decoration:none; }
+  .breadcrumb a:hover{ color:var(--accent); }
+
+  .title-row{
+    display:flex; justify-content:space-between; align-items:flex-end;
+    flex-wrap:wrap; gap:16px; margin-bottom:22px;
+  }
+  h1{
+    font-family:var(--font-display); font-weight:800; letter-spacing:-0.01em;
+    font-size: clamp(24px, 3.6vw, 32px);
+  }
+  h1 .accent{
+    background:linear-gradient(90deg,var(--accent),var(--accent2));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+  }
+  .subtitle{ color:var(--muted); font-size:14px; margin-top:4px; }
+
+  #status-pill{
+    font-family: var(--font-mono); font-size: 12px; color: var(--muted);
+    display:flex; align-items:center; gap:6px;
+  }
+  #status-dot{ width:8px; height:8px; border-radius:50%; background:#ccc; }
+  #status-dot.live{ background:#2ecc71; box-shadow:0 0 0 3px rgba(46,204,113,0.18); }
+
+  /* ---------- TABS ---------- */
+  .tabs{
+    display:flex; gap:6px; border-bottom:1px solid var(--border);
+  }
+  .tab-btn{
+    font-family:var(--font-display); font-weight:700; font-size:14px;
+    letter-spacing:-0.01em; color:var(--muted); background:none; border:none;
+    padding: 12px 18px; cursor:pointer; border-bottom:2px solid transparent;
+    display:flex; align-items:center; gap:8px;
+  }
+  .tab-btn .count{
+    font-family:var(--font-mono); font-size:11px; background:var(--surface2);
+    padding:1px 7px; border-radius:20px; color:var(--muted);
+  }
+  .tab-btn.active{ color:var(--text); border-bottom-color:var(--accent); }
+  .tab-btn.active .count{ background:var(--accent); color:#fff; }
+
+  main{ max-width:1320px; margin:0 auto; padding: 22px 32px 60px 32px; }
+  .view{ display:none; }
+  .view.active{ display:block; }
+
+  /* ---------- TOOLBAR ---------- */
+  .toolbar{
+    display:flex; justify-content:space-between; align-items:center;
+    margin-bottom:18px; flex-wrap:wrap; gap:12px;
+  }
+  .btn{
+    font-family:var(--font-display); font-weight:700; font-size:13px;
+    border:none; border-radius:10px; padding:11px 18px; cursor:pointer;
+    letter-spacing:-0.01em;
+  }
+  .btn-primary{ background:linear-gradient(90deg,var(--accent),var(--accent2)); color:#fff; }
+  .btn-primary:hover{ filter:brightness(1.06); }
+  .btn-ghost{ background:var(--surface); color:var(--text); border:1px solid var(--border2); }
+  .btn-ghost:hover{ background:var(--surface2); }
+  .btn-danger{ background:none; color:#e74c3c; text-decoration:underline; font-family:var(--font-body); font-weight:500; font-size:13px; }
+
+  select.filter{
+    font-family:var(--font-body); font-size:13px; padding:9px 12px;
+    border-radius:10px; border:1px solid var(--border2); background:var(--surface); color:var(--text);
+  }
+
+  /* ---------- KANBAN ---------- */
+  .kanban{
+    display:grid; grid-auto-flow:column; grid-auto-columns: minmax(250px, 1fr);
+    gap:14px; overflow-x:auto; padding-bottom: 10px;
+  }
+  .kcol{ background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:14px; min-height:200px; }
+  .kcol-head{
+    display:flex; align-items:center; justify-content:space-between; margin-bottom:12px;
+  }
+  .kcol-title{ font-family:var(--font-display); font-weight:700; font-size:13px; display:flex; align-items:center; gap:8px; }
+  .kcol-dot{ width:8px; height:8px; border-radius:50%; }
+  .kcol-count{ font-family:var(--font-mono); font-size:11px; color:var(--muted); }
+
+  .card{
+    background:#fff; border:1px solid var(--border); border-radius:10px;
+    padding:12px; margin-bottom:10px; cursor:pointer; transition:border-color .15s, transform .15s;
+  }
+  .card:hover{ border-color:var(--accent); transform:translateY(-2px); }
+  .card-tipo{
+    font-family:var(--font-mono); font-size:10px; text-transform:uppercase; letter-spacing:0.5px;
+    color:var(--muted); margin-bottom:6px;
+  }
+  .card-nombre{ font-weight:600; font-size:13.5px; line-height:1.35; margin-bottom:6px; }
+  .card-meta{ font-size:12px; color:var(--muted); display:flex; flex-direction:column; gap:2px; }
+  .card-empty{ font-size:12px; color:var(--muted); font-style:italic; padding:8px 2px; }
+
+  /* ---------- CALENDAR VIEW ---------- */
+  .cal-layout{ display:grid; grid-template-columns: 280px 1fr; gap:18px; }
+  @media (max-width: 900px){ .cal-layout{ grid-template-columns:1fr; } }
+  .panel{ background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:16px; }
+  .panel-title{
+    font-family:var(--font-display); font-weight:700; font-size:12px;
+    text-transform:uppercase; letter-spacing:0.5px; color:var(--muted); margin-bottom:12px;
+  }
+  .ticket{ border-left:3px solid var(--accent); background:#fff; padding:9px 11px; border-radius:6px; margin-bottom:8px; cursor:pointer; border:1px solid var(--border); border-left-width:3px; }
+  .ticket-time{ font-family:var(--font-mono); font-size:11px; color:var(--muted); }
+  .ticket-title{ font-weight:600; font-size:13.5px; margin:2px 0; }
+  .ticket-meta{ font-size:12px; color:var(--muted); }
+
+  .calendar-panel{ background:#fff; border:1px solid var(--border); border-radius:14px; padding:18px; }
+  .fc{ --fc-border-color: var(--border); --fc-today-bg-color: rgba(58,99,224,0.05); font-family:var(--font-body); }
+  .fc .fc-toolbar-title{ font-family:var(--font-display); font-size:18px; font-weight:700; }
+  .fc .fc-button{ background:var(--accent); border:none; font-family:var(--font-body); font-size:12px; text-transform:capitalize; box-shadow:none !important; }
+  .fc .fc-button:hover{ background:var(--accent2); }
+  .fc .fc-button-active{ background:var(--accent2) !important; }
+  .fc-event{ border:none; font-size:12px; cursor:pointer; }
+
+  /* ---------- MODAL ---------- */
+  .modal-overlay{
+    display:none; position:fixed; inset:0; background:rgba(22,24,29,0.5);
+    align-items:center; justify-content:center; z-index:1000; padding:16px;
+  }
+  .modal-overlay.open{ display:flex; }
+  .modal{ background:#fff; width:100%; max-width:460px; border-radius:16px; padding:26px; max-height:90vh; overflow-y:auto; }
+  .modal h2{ font-family:var(--font-display); font-weight:700; font-size:18px; margin-bottom:18px; }
+  .field{ margin-bottom:14px; }
+  .field label{ display:block; font-size:12px; font-weight:600; color:var(--muted); margin-bottom:5px; }
+  .field input, .field select, .field textarea{
+    width:100%; padding:10px 11px; border:1px solid var(--border2); border-radius:9px;
+    font-family:var(--font-body); font-size:14px; background:var(--surface);
+  }
+  .field textarea{ resize:vertical; min-height:56px; }
+  .field-row{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .modal-actions{ display:flex; justify-content:space-between; align-items:center; margin-top:16px; }
+  .config-warning{
+    background:#FFF3EC; border:1px solid #ff9f43; color:#8A3E1D; padding:12px 16px;
+    border-radius:10px; font-size:13px; margin-bottom:18px; display:none;
+  }
+  .config-warning code{ background:#fff; padding:1px 5px; border-radius:4px; font-family:var(--font-mono); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="breadcrumb"><a href="index.html">Radar Ibero</a> / Seguimiento Comercial</div>
+  <div class="title-row">
+    <div>
+      <h1>Seguimiento <span class="accent">Comercial</span></h1>
+      <div class="subtitle">Reuniones, procesos en curso y visitas — todo el desarrollo comercial en un solo lugar.</div>
+    </div>
+    <div id="status-pill"><span id="status-dot"></span><span id="status-text">Conectando…</span></div>
+  </div>
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="calendario">📅 Calendario</button>
+    <button class="tab-btn" data-tab="procesos">🏛️ Procesos en Seguimiento <span class="count" id="count-procesos">0</span></button>
+    <button class="tab-btn" data-tab="visitas">🤝 Visitas Comerciales <span class="count" id="count-visitas">0</span></button>
+  </div>
+</header>
+
+<main>
+  <div id="config-warning" class="config-warning">
+    Falta configurar la conexión a Supabase. Edita <code>SUPABASE_URL</code> y <code>SUPABASE_ANON_KEY</code> al inicio del <code>&lt;script&gt;</code>.
+  </div>
+
+  <!-- ===================== CALENDARIO ===================== -->
+  <section class="view active" id="view-calendario">
+    <div class="cal-layout">
+      <div style="display:flex; flex-direction:column; gap:16px;">
+        <button class="btn btn-primary" id="btn-nueva-reunion" style="width:100%;">+ Nueva reunión</button>
+        <div class="panel">
+          <p class="panel-title">Hoy</p>
+          <div id="hoy-list"><p class="card-empty">Cargando…</p></div>
+        </div>
+      </div>
+      <div class="calendar-panel"><div id="calendar"></div></div>
+    </div>
+  </section>
+
+  <!-- ===================== PROCESOS ===================== -->
+  <section class="view" id="view-procesos">
+    <div class="toolbar">
+      <select class="filter" id="filtro-tipo-proceso">
+        <option value="">Todos los tipos</option>
+        <option value="SEACE">SEACE</option>
+        <option value="Infra">Radar Infra</option>
+      </select>
+      <button class="btn btn-primary" id="btn-nuevo-proceso">+ Nuevo proceso</button>
+    </div>
+    <div class="kanban" id="kanban-procesos"></div>
+  </section>
+
+  <!-- ===================== VISITAS ===================== -->
+  <section class="view" id="view-visitas">
+    <div class="toolbar">
+      <div></div>
+      <button class="btn btn-primary" id="btn-nueva-visita">+ Nueva visita</button>
+    </div>
+    <div class="kanban" id="kanban-visitas"></div>
+  </section>
+</main>
+
+<!-- ===================== MODAL REUNIÓN ===================== -->
+<div class="modal-overlay" id="modal-reunion">
+  <div class="modal">
+    <h2 id="mr-title">Nueva reunión</h2>
+    <form id="form-reunion">
+      <input type="hidden" id="r-id">
+      <div class="field"><label>Título</label><input type="text" id="r-titulo" required></div>
+      <div class="field-row">
+        <div class="field"><label>Inicio</label><input type="datetime-local" id="r-inicio" required></div>
+        <div class="field"><label>Fin</label><input type="datetime-local" id="r-fin" required></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Responsable</label><input type="text" id="r-responsable" required></div>
+        <div class="field"><label>Área</label>
+          <select id="r-area">
+            <option>Gerencia</option><option>Comercial</option><option>PCP</option>
+            <option>Ingeniería</option><option>Planta Puente Piedra</option><option>Planta Lurín</option><option>Otro</option>
+          </select>
+        </div>
+      </div>
+      <div class="field"><label>Modalidad</label>
+        <select id="r-modalidad"><option value="presencial">Presencial</option><option value="virtual">Virtual</option></select>
+      </div>
+      <div class="field"><label>Descripción</label><textarea id="r-descripcion"></textarea></div>
+      <div class="modal-actions">
+        <button type="button" class="btn-danger" id="r-eliminar" style="display:none">Eliminar</button>
+        <div style="display:flex; gap:10px; margin-left:auto;">
+          <button type="button" class="btn btn-ghost" id="r-cancelar">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Guardar</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ===================== MODAL PROCESO ===================== -->
+<div class="modal-overlay" id="modal-proceso">
+  <div class="modal">
+    <h2 id="mp-title">Nuevo proceso</h2>
+    <form id="form-proceso">
+      <input type="hidden" id="p-id">
+      <div class="field"><label>Nombre del proceso</label><input type="text" id="p-nombre" required placeholder="Ej: Mobiliario I.E. San Martín"></div>
+      <div class="field-row">
+        <div class="field"><label>Entidad / Cliente</label><input type="text" id="p-entidad" required></div>
+        <div class="field"><label>Tipo</label>
+          <select id="p-tipo"><option value="SEACE">SEACE</option><option value="Infra">Radar Infra</option></select>
+        </div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Referencia / nomenclatura</label><input type="text" id="p-referencia" placeholder="Opcional"></div>
+        <div class="field"><label>Fecha límite</label><input type="date" id="p-fecha-limite"></div>
+      </div>
+      <div class="field"><label>Enlace (ficha SEACE / Infra)</label><input type="url" id="p-link" placeholder="Opcional"></div>
+      <div class="field-row">
+        <div class="field"><label>Etapa</label>
+          <select id="p-etapa">
+            <option value="Oficina Técnica">Oficina Técnica</option>
+            <option value="Desarrollo de Expediente">Desarrollo de Expediente</option>
+            <option value="Etapa de Consultas">Etapa de Consultas</option>
+            <option value="Presentado">Presentado</option>
+            <option value="Ganado">Ganado</option>
+            <option value="Perdido">Perdido</option>
+          </select>
+        </div>
+        <div class="field"><label>Responsable</label><input type="text" id="p-responsable" required></div>
+      </div>
+      <div class="field"><label>Notas</label><textarea id="p-notas"></textarea></div>
+      <div class="modal-actions">
+        <button type="button" class="btn-danger" id="p-eliminar" style="display:none">Eliminar</button>
+        <div style="display:flex; gap:10px; margin-left:auto;">
+          <button type="button" class="btn btn-ghost" id="p-cancelar">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Guardar</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<!-- ===================== MODAL VISITA ===================== -->
+<div class="modal-overlay" id="modal-visita">
+  <div class="modal">
+    <h2 id="mv-title">Nueva visita</h2>
+    <form id="form-visita">
+      <input type="hidden" id="v-id">
+      <div class="field"><label>Cliente</label><input type="text" id="v-cliente" required></div>
+      <div class="field-row">
+        <div class="field"><label>Contacto</label><input type="text" id="v-contacto" placeholder="Nombre, cargo"></div>
+        <div class="field"><label>Responsable</label><input type="text" id="v-responsable" required></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><label>Fecha de visita</label><input type="date" id="v-fecha"></div>
+        <div class="field"><label>Estado</label>
+          <select id="v-estado">
+            <option value="Por visitar">Por visitar</option>
+            <option value="Visitado">Visitado</option>
+            <option value="En seguimiento">En seguimiento</option>
+            <option value="Cotizando">Cotizando</option>
+            <option value="Ganado">Ganado</option>
+            <option value="Perdido">Perdido</option>
+          </select>
+        </div>
+      </div>
+      <div class="field"><label>Próxima acción</label><input type="text" id="v-proxima-accion" placeholder="Ej: Enviar cotización"></div>
+      <div class="field"><label>Fecha próxima acción</label><input type="date" id="v-fecha-proxima"></div>
+      <div class="field"><label>Notas</label><textarea id="v-notas"></textarea></div>
+      <div class="modal-actions">
+        <button type="button" class="btn-danger" id="v-eliminar" style="display:none">Eliminar</button>
+        <div style="display:flex; gap:10px; margin-left:auto;">
+          <button type="button" class="btn btn-ghost" id="v-cancelar">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Guardar</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+/* =========================================================
+   CONFIGURACIÓN — reemplaza con los datos de tu proyecto Supabase
+   ========================================================= */
+const SUPABASE_URL = "https://maitnligmaidhgzcqglq.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1haXRubGlnbWFpZGhnemNxZ2xxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk3NDcwNjcsImV4cCI6MjA5NTMyMzA2N30.2LICx1RqdTuzJgsykaerQnHMV7w1aobXcXMYIIViPAI";
+/* ========================================================= */
+
+const AREA_COLORS = {
+  "Gerencia":"#16181d","Comercial":"#3a63e0","PCP":"#ff9f43","Ingeniería":"#6a4fd1",
+  "Planta Puente Piedra":"#2ecc71","Planta Lurín":"#00b8a9","Otro":"#5c6270"
+};
+const ETAPAS_PROCESO = [
+  {key:"Oficina Técnica", color:"var(--c-oficina)"},
+  {key:"Desarrollo de Expediente", color:"var(--c-expediente)"},
+  {key:"Etapa de Consultas", color:"var(--c-consultas)"},
+  {key:"Presentado", color:"var(--c-presentado)"},
+  {key:"Ganado", color:"var(--c-ganado)"},
+  {key:"Perdido", color:"var(--c-perdido)"}
+];
+const ESTADOS_VISITA = [
+  {key:"Por visitar", color:"var(--c-porvisitar)"},
+  {key:"Visitado", color:"var(--c-oficina)"},
+  {key:"En seguimiento", color:"var(--c-expediente)"},
+  {key:"Cotizando", color:"var(--c-consultas)"},
+  {key:"Ganado", color:"var(--c-ganado)"},
+  {key:"Perdido", color:"var(--c-perdido)"}
+];
+
+let supabase = null;
+let calendar = null;
+let allProcesos = [];
+let allVisitas = [];
+const isConfigured = !SUPABASE_URL.includes("TU-PROYECTO") && !SUPABASE_ANON_KEY.includes("TU-ANON-KEY");
+
+if (isConfigured) {
+  supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+} else {
+  document.getElementById('config-warning').style.display = 'block';
+  document.getElementById('status-text').textContent = 'Sin configurar';
+}
+
+/* ---------- Tabs ---------- */
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('view-' + btn.dataset.tab).classList.add('active');
+    if (btn.dataset.tab === 'calendario' && calendar) setTimeout(() => calendar.updateSize(), 50);
+  });
+});
+
+function toLocalInputValue(date){
+  const d = new Date(date); const pad = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+function fmtTime(date){ return new Date(date).toLocaleTimeString('es-PE', {hour:'2-digit', minute:'2-digit'}); }
+function fmtDate(date){ return date ? new Date(date + 'T00:00:00').toLocaleDateString('es-PE', {day:'2-digit', month:'short'}) : ''; }
+
+/* =========================================================
+   REUNIONES / CALENDARIO
+   ========================================================= */
+async function fetchReuniones(){
+  if (!supabase) return [];
+  const { data, error } = await supabase.from('reuniones').select('*').order('fecha_inicio');
+  if (error){ console.error(error); return []; }
+  return data;
+}
+function toFcEvent(r){
+  return { id:r.id, title:r.titulo, start:r.fecha_inicio, end:r.fecha_fin,
+    backgroundColor: AREA_COLORS[r.area] || AREA_COLORS['Otro'], extendedProps:r };
+}
+function renderHoy(reuniones){
+  const el = document.getElementById('hoy-list');
+  const hoy = new Date(); hoy.setHours(0,0,0,0);
+  const manana = new Date(hoy); manana.setDate(manana.getDate()+1);
+  const deHoy = reuniones.filter(r => { const f = new Date(r.fecha_inicio); return f >= hoy && f < manana; })
+    .sort((a,b) => new Date(a.fecha_inicio) - new Date(b.fecha_inicio));
+  if (deHoy.length === 0){ el.innerHTML = '<p class="card-empty">No hay reuniones para hoy.</p>'; return; }
+  el.innerHTML = deHoy.map(r => `
+    <div class="ticket" style="border-left-color:${AREA_COLORS[r.area] || AREA_COLORS['Otro']}" data-id="${r.id}">
+      <div class="ticket-time">${fmtTime(r.fecha_inicio)} – ${fmtTime(r.fecha_fin)}</div>
+      <div class="ticket-title">${r.titulo}</div>
+      <div class="ticket-meta">${r.responsable} · ${r.area}</div>
+    </div>`).join('');
+  el.querySelectorAll('.ticket').forEach(t => t.addEventListener('click', () => {
+    openReunionModal(deHoy.find(x => x.id === t.dataset.id));
+  }));
+}
+async function refreshReuniones(){
+  const reuniones = await fetchReuniones();
+  calendar.removeAllEvents();
+  calendar.addEventSource(reuniones.map(toFcEvent));
+  renderHoy(reuniones);
+}
+
+const modalReunion = document.getElementById('modal-reunion');
+function openReunionModal(r, dateStr){
+  document.getElementById('mr-title').textContent = r ? 'Editar reunión' : 'Nueva reunión';
+  document.getElementById('r-eliminar').style.display = r ? 'inline' : 'none';
+  document.getElementById('r-id').value = r ? r.id : '';
+  document.getElementById('r-titulo').value = r ? r.titulo : '';
+  document.getElementById('r-responsable').value = r ? r.responsable : '';
+  document.getElementById('r-area').value = r ? r.area : 'Comercial';
+  document.getElementById('r-modalidad').value = r ? r.modalidad : 'presencial';
+  document.getElementById('r-descripcion').value = r ? (r.descripcion || '') : '';
+  const base = dateStr ? new Date(dateStr + 'T09:00') : new Date();
+  const inicio = r ? new Date(r.fecha_inicio) : base;
+  const fin = r ? new Date(r.fecha_fin) : new Date(base.getTime() + 60*60000);
+  document.getElementById('r-inicio').value = toLocalInputValue(inicio);
+  document.getElementById('r-fin').value = toLocalInputValue(fin);
+  modalReunion.classList.add('open');
+}
+document.getElementById('btn-nueva-reunion').addEventListener('click', () => openReunionModal(null));
+document.getElementById('r-cancelar').addEventListener('click', () => modalReunion.classList.remove('open'));
+modalReunion.addEventListener('click', e => { if (e.target === modalReunion) modalReunion.classList.remove('open'); });
+
+document.getElementById('form-reunion').addEventListener('submit', async e => {
+  e.preventDefault();
+  if (!supabase) return alert('Configura Supabase primero.');
+  const id = document.getElementById('r-id').value;
+  const payload = {
+    titulo: document.getElementById('r-titulo').value,
+    fecha_inicio: new Date(document.getElementById('r-inicio').value).toISOString(),
+    fecha_fin: new Date(document.getElementById('r-fin').value).toISOString(),
+    responsable: document.getElementById('r-responsable').value,
+    area: document.getElementById('r-area').value,
+    modalidad: document.getElementById('r-modalidad').value,
+    descripcion: document.getElementById('r-descripcion').value
+  };
+  const { error } = id
+    ? await supabase.from('reuniones').update(payload).eq('id', id)
+    : await supabase.from('reuniones').insert(payload);
+  if (error) return alert('Error: ' + error.message);
+  modalReunion.classList.remove('open');
+  await refreshReuniones();
+});
+document.getElementById('r-eliminar').addEventListener('click', async () => {
+  const id = document.getElementById('r-id').value;
+  if (!id || !confirm('¿Eliminar esta reunión?')) return;
+  const { error } = await supabase.from('reuniones').delete().eq('id', id);
+  if (error) return alert('Error: ' + error.message);
+  modalReunion.classList.remove('open');
+  await refreshReuniones();
+});
+
+/* =========================================================
+   PROCESOS EN SEGUIMIENTO (KANBAN)
+   ========================================================= */
+async function fetchProcesos(){
+  if (!supabase) return [];
+  const { data, error } = await supabase.from('procesos_seguimiento').select('*').order('created_at', {ascending:false});
+  if (error){ console.error(error); return []; }
+  return data;
+}
+function renderKanbanProcesos(){
+  const filtro = document.getElementById('filtro-tipo-proceso').value;
+  const lista = filtro ? allProcesos.filter(p => p.tipo === filtro) : allProcesos;
+  document.getElementById('count-procesos').textContent = allProcesos.length;
+  const el = document.getElementById('kanban-procesos');
+  el.innerHTML = ETAPAS_PROCESO.map(et => {
+    const items = lista.filter(p => p.etapa === et.key);
+    return `
+    <div class="kcol">
+      <div class="kcol-head">
+        <div class="kcol-title"><span class="kcol-dot" style="background:${et.color}"></span>${et.key}</div>
+        <span class="kcol-count">${items.length}</span>
+      </div>
+      ${items.length === 0 ? '<p class="card-empty">Sin procesos</p>' : items.map(p => `
+        <div class="card" data-id="${p.id}">
+          <div class="card-tipo">${p.tipo}${p.referencia ? ' · ' + p.referencia : ''}</div>
+          <div class="card-nombre">${p.nombre}</div>
+          <div class="card-meta">
+            <span>${p.entidad}</span>
+            <span>${p.responsable}${p.fecha_limite ? ' · vence ' + fmtDate(p.fecha_limite) : ''}</span>
+          </div>
+        </div>`).join('')}
+    </div>`;
+  }).join('');
+  el.querySelectorAll('.card').forEach(c => c.addEventListener('click', () => {
+    openProcesoModal(allProcesos.find(p => p.id === c.dataset.id));
+  }));
+}
+async function refreshProcesos(){ allProcesos = await fetchProcesos(); renderKanbanProcesos(); }
+document.getElementById('filtro-tipo-proceso').addEventListener('change', renderKanbanProcesos);
+
+const modalProceso = document.getElementById('modal-proceso');
+function openProcesoModal(p){
+  document.getElementById('mp-title').textContent = p ? 'Editar proceso' : 'Nuevo proceso';
+  document.getElementById('p-eliminar').style.display = p ? 'inline' : 'none';
+  document.getElementById('p-id').value = p ? p.id : '';
+  document.getElementById('p-nombre').value = p ? p.nombre : '';
+  document.getElementById('p-entidad').value = p ? p.entidad : '';
+  document.getElementById('p-tipo').value = p ? p.tipo : 'SEACE';
+  document.getElementById('p-referencia').value = p ? (p.referencia || '') : '';
+  document.getElementById('p-fecha-limite').value = p ? (p.fecha_limite || '') : '';
+  document.getElementById('p-link').value = p ? (p.link || '') : '';
+  document.getElementById('p-etapa').value = p ? p.etapa : 'Oficina Técnica';
+  document.getElementById('p-responsable').value = p ? p.responsable : '';
+  document.getElementById('p-notas').value = p ? (p.notas || '') : '';
+  modalProceso.classList.add('open');
+}
+document.getElementById('btn-nuevo-proceso').addEventListener('click', () => openProcesoModal(null));
+document.getElementById('p-cancelar').addEventListener('click', () => modalProceso.classList.remove('open'));
+modalProceso.addEventListener('click', e => { if (e.target === modalProceso) modalProceso.classList.remove('open'); });
+
+document.getElementById('form-proceso').addEventListener('submit', async e => {
+  e.preventDefault();
+  if (!supabase) return alert('Configura Supabase primero.');
+  const id = document.getElementById('p-id').value;
+  const payload = {
+    nombre: document.getElementById('p-nombre').value,
+    entidad: document.getElementById('p-entidad').value,
+    tipo: document.getElementById('p-tipo').value,
+    referencia: document.getElementById('p-referencia').value,
+    fecha_limite: document.getElementById('p-fecha-limite').value || null,
+    link: document.getElementById('p-link').value,
+    etapa: document.getElementById('p-etapa').value,
+    responsable: document.getElementById('p-responsable').value,
+    notas: document.getElementById('p-notas').value,
+    updated_at: new Date().toISOString()
+  };
+  const { error } = id
+    ? await supabase.from('procesos_seguimiento').update(payload).eq('id', id)
+    : await supabase.from('procesos_seguimiento').insert(payload);
+  if (error) return alert('Error: ' + error.message);
+  modalProceso.classList.remove('open');
+  await refreshProcesos();
+});
+document.getElementById('p-eliminar').addEventListener('click', async () => {
+  const id = document.getElementById('p-id').value;
+  if (!id || !confirm('¿Eliminar este proceso?')) return;
+  const { error } = await supabase.from('procesos_seguimiento').delete().eq('id', id);
+  if (error) return alert('Error: ' + error.message);
+  modalProceso.classList.remove('open');
+  await refreshProcesos();
+});
+
+/* =========================================================
+   VISITAS COMERCIALES (KANBAN)
+   ========================================================= */
+async function fetchVisitas(){
+  if (!supabase) return [];
+  const { data, error } = await supabase.from('visitas_comerciales').select('*').order('created_at', {ascending:false});
+  if (error){ console.error(error); return []; }
+  return data;
+}
+function renderKanbanVisitas(){
+  document.getElementById('count-visitas').textContent = allVisitas.length;
+  const el = document.getElementById('kanban-visitas');
+  el.innerHTML = ESTADOS_VISITA.map(es => {
+    const items = allVisitas.filter(v => v.estado === es.key);
+    return `
+    <div class="kcol">
+      <div class="kcol-head">
+        <div class="kcol-title"><span class="kcol-dot" style="background:${es.color}"></span>${es.key}</div>
+        <span class="kcol-count">${items.length}</span>
+      </div>
+      ${items.length === 0 ? '<p class="card-empty">Sin visitas</p>' : items.map(v => `
+        <div class="card" data-id="${v.id}">
+          <div class="card-tipo">${v.fecha_visita ? fmtDate(v.fecha_visita) : 'Sin fecha'}</div>
+          <div class="card-nombre">${v.cliente}</div>
+          <div class="card-meta">
+            <span>${v.responsable}${v.contacto ? ' · ' + v.contacto : ''}</span>
+            ${v.proxima_accion ? `<span>→ ${v.proxima_accion}${v.fecha_proxima_accion ? ' (' + fmtDate(v.fecha_proxima_accion) + ')' : ''}</span>` : ''}
+          </div>
+        </div>`).join('')}
+    </div>`;
+  }).join('');
+  el.querySelectorAll('.card').forEach(c => c.addEventListener('click', () => {
+    openVisitaModal(allVisitas.find(v => v.id === c.dataset.id));
+  }));
+}
+async function refreshVisitas(){ allVisitas = await fetchVisitas(); renderKanbanVisitas(); }
+
+const modalVisita = document.getElementById('modal-visita');
+function openVisitaModal(v){
+  document.getElementById('mv-title').textContent = v ? 'Editar visita' : 'Nueva visita';
+  document.getElementById('v-eliminar').style.display = v ? 'inline' : 'none';
+  document.getElementById('v-id').value = v ? v.id : '';
+  document.getElementById('v-cliente').value = v ? v.cliente : '';
+  document.getElementById('v-contacto').value = v ? (v.contacto || '') : '';
+  document.getElementById('v-responsable').value = v ? v.responsable : '';
+  document.getElementById('v-fecha').value = v ? (v.fecha_visita || '') : '';
+  document.getElementById('v-estado').value = v ? v.estado : 'Por visitar';
+  document.getElementById('v-proxima-accion').value = v ? (v.proxima_accion || '') : '';
+  document.getElementById('v-fecha-proxima').value = v ? (v.fecha_proxima_accion || '') : '';
+  document.getElementById('v-notas').value = v ? (v.notas || '') : '';
+  modalVisita.classList.add('open');
+}
+document.getElementById('btn-nueva-visita').addEventListener('click', () => openVisitaModal(null));
+document.getElementById('v-cancelar').addEventListener('click', () => modalVisita.classList.remove('open'));
+modalVisita.addEventListener('click', e => { if (e.target === modalVisita) modalVisita.classList.remove('open'); });
+
+document.getElementById('form-visita').addEventListener('submit', async e => {
+  e.preventDefault();
+  if (!supabase) return alert('Configura Supabase primero.');
+  const id = document.getElementById('v-id').value;
+  const payload = {
+    cliente: document.getElementById('v-cliente').value,
+    contacto: document.getElementById('v-contacto').value,
+    responsable: document.getElementById('v-responsable').value,
+    fecha_visita: document.getElementById('v-fecha').value || null,
+    estado: document.getElementById('v-estado').value,
+    proxima_accion: document.getElementById('v-proxima-accion').value,
+    fecha_proxima_accion: document.getElementById('v-fecha-proxima').value || null,
+    notas: document.getElementById('v-notas').value,
+    updated_at: new Date().toISOString()
+  };
+  const { error } = id
+    ? await supabase.from('visitas_comerciales').update(payload).eq('id', id)
+    : await supabase.from('visitas_comerciales').insert(payload);
+  if (error) return alert('Error: ' + error.message);
+  modalVisita.classList.remove('open');
+  await refreshVisitas();
+});
+document.getElementById('v-eliminar').addEventListener('click', async () => {
+  const id = document.getElementById('v-id').value;
+  if (!id || !confirm('¿Eliminar esta visita?')) return;
+  const { error } = await supabase.from('visitas_comerciales').delete().eq('id', id);
+  if (error) return alert('Error: ' + error.message);
+  modalVisita.classList.remove('open');
+  await refreshVisitas();
+});
+
+/* =========================================================
+   INIT + REALTIME
+   ========================================================= */
+document.addEventListener('DOMContentLoaded', async () => {
+  const calendarEl = document.getElementById('calendar');
+  calendar = new FullCalendar.Calendar(calendarEl, {
+    initialView: 'dayGridMonth', height:'auto', locale:'es',
+    headerToolbar: { left:'prev,next today', center:'title', right:'dayGridMonth,timeGridWeek,timeGridDay' },
+    buttonText: { today:'Hoy', month:'Mes', week:'Semana', day:'Día' },
+    events: [],
+    eventClick: info => openReunionModal(info.event.extendedProps),
+    dateClick: info => openReunionModal(null, info.dateStr)
+  });
+  calendar.render();
+
+  await Promise.all([refreshReuniones(), refreshProcesos(), refreshVisitas()]);
+
+  document.getElementById('status-dot').classList.add('live');
+  document.getElementById('status-text').textContent = 'En vivo';
+
+  if (supabase){
+    supabase.channel('reuniones-rt').on('postgres_changes', {event:'*', schema:'public', table:'reuniones'}, refreshReuniones).subscribe();
+    supabase.channel('procesos-rt').on('postgres_changes', {event:'*', schema:'public', table:'procesos_seguimiento'}, refreshProcesos).subscribe();
+    supabase.channel('visitas-rt').on('postgres_changes', {event:'*', schema:'public', table:'visitas_comerciales'}, refreshVisitas).subscribe();
+  }
+});
+</script>
+</body>
+</html>
