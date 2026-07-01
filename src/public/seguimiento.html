@@ -445,8 +445,9 @@
       <div class="field"><label>Descripción</label><textarea id="r-descripcion"></textarea></div>
       <div class="modal-actions">
         <button type="button" class="btn-danger" id="r-eliminar" style="display:none">Eliminar</button>
-        <div style="display:flex; gap:10px; margin-left:auto; flex-wrap:wrap;">
-          <button type="button" class="btn btn-ghost" id="r-enviar-invitacion">✉️ Enviar invitación</button>
+        <div style="display:flex; gap:10px; margin-left:auto; flex-wrap:wrap; align-items:center;">
+          <span id="r-envio-msg" style="font-size:12px; color:var(--muted);"></span>
+          <button type="button" class="btn btn-ghost" id="r-enviar-servidor" title="Se envía directo desde el servidor, sin abrir tu correo">📨 Enviar invitación</button>
           <button type="button" class="btn btn-ghost" id="r-cancelar">Cancelar</button>
           <button type="submit" class="btn btn-primary">Guardar</button>
         </div>
@@ -543,6 +544,7 @@
         <input type="text" id="v-cliente" list="lista-clientes" required autocomplete="off">
         <datalist id="lista-clientes"></datalist>
       </div>
+      <datalist id="lista-contactos-frecuentes"></datalist>
       <div class="field-row">
         <div class="field"><label>Contacto</label><input type="text" id="v-contacto" placeholder="Nombre, cargo"></div>
         <div class="field"><label>Responsable</label><input type="text" id="v-responsable" required></div>
@@ -782,15 +784,31 @@ async function refreshReuniones(){
 
 const modalReunion = document.getElementById('modal-reunion');
 
+let contactosFrecuentes = [];
+async function loadContactosFrecuentes(){
+  if (!sb) return;
+  const { data, error } = await sb.from('contactos_frecuentes').select('*').order('nombre');
+  if (error){ console.error(error); return; }
+  contactosFrecuentes = data || [];
+  const dl = document.getElementById('lista-contactos-frecuentes');
+  if (dl) dl.innerHTML = contactosFrecuentes.map(c => `<option value="${escHtml(c.nombre)}">`).join('');
+}
+
 function agregarFilaParticipante(nombre, email){
   const cont = document.getElementById('r-participantes-lista');
   const row = document.createElement('div');
   row.className = 'participante-row';
   row.innerHTML = `
-    <input type="text" class="p-nombre" placeholder="Nombre" value="${escHtml(nombre || '')}">
+    <input type="text" class="p-nombre" list="lista-contactos-frecuentes" placeholder="Nombre" value="${escHtml(nombre || '')}" autocomplete="off">
     <input type="email" class="p-email" placeholder="correo@empresa.com" value="${escHtml(email || '')}">
     <button type="button" class="participante-remove" title="Quitar">✕</button>
   `;
+  const inputNombre = row.querySelector('.p-nombre');
+  const inputEmail = row.querySelector('.p-email');
+  inputNombre.addEventListener('input', () => {
+    const match = contactosFrecuentes.find(c => c.nombre.trim().toLowerCase() === inputNombre.value.trim().toLowerCase());
+    if (match && !inputEmail.value) inputEmail.value = match.email;
+  });
   row.querySelector('.participante-remove').addEventListener('click', () => row.remove());
   cont.appendChild(row);
 }
@@ -812,6 +830,7 @@ function openReunionModal(r, dateStr){
   document.getElementById('r-link').value = r ? (r.link || '') : '';
   document.getElementById('r-descripcion').value = r ? (r.descripcion || '') : '';
   document.getElementById('r-participantes-lista').innerHTML = '';
+  document.getElementById('r-envio-msg').textContent = '';
   (r && Array.isArray(r.participantes) ? r.participantes : []).forEach(p => agregarFilaParticipante(p.nombre, p.email));
   const base = dateStr ? new Date(dateStr + 'T09:00') : new Date();
   const inicio = r ? new Date(r.fecha_inicio) : base;
@@ -824,32 +843,8 @@ document.getElementById('btn-nueva-reunion').addEventListener('click', () => ope
 document.getElementById('r-cancelar').addEventListener('click', () => modalReunion.classList.remove('open'));
 modalReunion.addEventListener('click', e => { if (e.target === modalReunion) modalReunion.classList.remove('open'); });
 
-document.getElementById('r-enviar-invitacion').addEventListener('click', () => {
-  const titulo = document.getElementById('r-titulo').value || 'Reunión';
-  const inicio = document.getElementById('r-inicio').value;
-  const fin = document.getElementById('r-fin').value;
-  const modalidad = document.getElementById('r-modalidad').value;
-  const link = document.getElementById('r-link').value;
-  const descripcion = document.getElementById('r-descripcion').value;
-  const participantes = leerParticipantes();
-  const emails = participantes.map(p => p.email).filter(Boolean);
-  if (!inicio || !fin){ alert('Completa fecha y hora de inicio/fin antes de enviar la invitación.'); return; }
-  const fmt = d => new Date(d).toLocaleString('es-PE', { dateStyle:'full', timeStyle:'short' });
-  let cuerpo = `Te invito a la reunión: ${titulo}\n\n`;
-  cuerpo += `Inicio: ${fmt(inicio)}\nFin: ${fmt(fin)}\nModalidad: ${modalidad === 'virtual' ? 'Virtual' : 'Presencial'}\n`;
-  if (modalidad === 'virtual' && link) cuerpo += `Enlace: ${link}\n`;
-  if (descripcion) cuerpo += `\n${descripcion}\n`;
-  cuerpo += `\n— Enviado desde Seguimiento Comercial, Grupo Ibero`;
-  const mailto = `mailto:?bcc=${encodeURIComponent(emails.join(','))}&subject=${encodeURIComponent('Invitación: ' + titulo)}&body=${encodeURIComponent(cuerpo)}`;
-  if (!emails.length){ alert('Agrega al menos un participante con correo para poder enviar la invitación.'); return; }
-  window.location.href = mailto;
-});
-
-document.getElementById('form-reunion').addEventListener('submit', async e => {
-  e.preventDefault();
-  if (!sb) return alert('Configura Supabase primero.');
-  const id = document.getElementById('r-id').value;
-  const payload = {
+function construirPayloadReunion(){
+  return {
     titulo: document.getElementById('r-titulo').value,
     fecha_inicio: new Date(document.getElementById('r-inicio').value).toISOString(),
     fecha_fin: new Date(document.getElementById('r-fin').value).toISOString(),
@@ -860,6 +855,55 @@ document.getElementById('form-reunion').addEventListener('submit', async e => {
     participantes: leerParticipantes(),
     descripcion: document.getElementById('r-descripcion').value
   };
+}
+
+document.getElementById('r-enviar-servidor').addEventListener('click', async () => {
+  if (!sb) return alert('Configura Supabase primero.');
+  const btn = document.getElementById('r-enviar-servidor');
+  const msg = document.getElementById('r-envio-msg');
+  const titulo = document.getElementById('r-titulo').value.trim();
+  const inicio = document.getElementById('r-inicio').value;
+  const fin = document.getElementById('r-fin').value;
+  const emails = leerParticipantes().map(p => p.email).filter(Boolean);
+  if (!titulo){ alert('Ponle un título a la reunión antes de enviar.'); return; }
+  if (!inicio || !fin){ alert('Completa fecha y hora de inicio/fin antes de enviar.'); return; }
+  if (!emails.length){ alert('Agrega al menos un participante con correo para poder enviar la invitación.'); return; }
+
+  btn.disabled = true;
+  msg.textContent = 'Guardando…';
+  try {
+    let id = document.getElementById('r-id').value;
+    const payload = construirPayloadReunion();
+    if (id){
+      const { error } = await sb.from('reuniones').update(payload).eq('id', id);
+      if (error) throw error;
+    } else {
+      const { data, error } = await sb.from('reuniones').insert(payload).select().single();
+      if (error) throw error;
+      id = data.id;
+      document.getElementById('r-id').value = id;
+      document.getElementById('r-eliminar').style.display = 'inline';
+      document.getElementById('mr-title').textContent = 'Editar reunión';
+    }
+    msg.textContent = 'Enviando…';
+    const res = await fetch(`/api/reuniones/${id}/enviar-invitacion`, { method: 'POST' });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.message || data.error || 'No se pudo enviar la invitación.');
+    msg.textContent = `✓ Enviada a ${data.enviados} participante(s).`;
+    await refreshReuniones();
+  } catch(e){
+    msg.textContent = '';
+    alert('Error: ' + e.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+document.getElementById('form-reunion').addEventListener('submit', async e => {
+  e.preventDefault();
+  if (!sb) return alert('Configura Supabase primero.');
+  const id = document.getElementById('r-id').value;
+  const payload = construirPayloadReunion();
   const { error } = id
     ? await sb.from('reuniones').update(payload).eq('id', id)
     : await sb.from('reuniones').insert(payload);
@@ -1456,7 +1500,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   calendar.render();
 
-  await Promise.all([refreshReuniones(), refreshProcesos(), refreshVisitas()]);
+  await Promise.all([refreshReuniones(), refreshProcesos(), refreshVisitas(), loadContactosFrecuentes()]);
 
   document.getElementById('status-dot').classList.add('live');
   document.getElementById('status-text').textContent = 'En vivo';
