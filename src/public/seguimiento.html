@@ -177,6 +177,16 @@
     border-radius:10px; font-size:13px; margin-bottom:18px; display:none;
   }
   .config-warning code{ background:#fff; padding:1px 5px; border-radius:4px; font-family:var(--font-mono); }
+
+  #picker-seace, #picker-infra{ display:none; }
+  .pick-results{ margin-top:8px; max-height:180px; overflow-y:auto; display:flex; flex-direction:column; gap:6px; }
+  .pick-item{
+    background:var(--surface); border:1px solid var(--border2); border-radius:9px;
+    padding:8px 10px; cursor:pointer; display:flex; flex-direction:column; gap:2px;
+  }
+  .pick-item:hover{ border-color:var(--accent); }
+  .pick-item b{ font-size:12.5px; color:var(--accent); }
+  .pick-item span{ font-size:11.5px; color:var(--muted); line-height:1.35; }
 </style>
 </head>
 <body>
@@ -280,12 +290,25 @@
     <h2 id="mp-title">Nuevo proceso</h2>
     <form id="form-proceso">
       <input type="hidden" id="p-id">
+      <div class="field">
+        <label>Tipo</label>
+        <select id="p-tipo"><option value="SEACE">SEACE</option><option value="Infra">Radar Infra</option></select>
+      </div>
+
+      <div class="field" id="picker-seace">
+        <label>Elegir de Oportunidades Seleccionadas</label>
+        <input type="text" id="picker-seace-input" placeholder="Filtrar por nomenclatura, entidad o descripción...">
+        <div id="picker-seace-results" class="pick-results"></div>
+      </div>
+      <div class="field" id="picker-infra">
+        <label>Elegir de Radar Infra (revisados)</label>
+        <input type="text" id="picker-infra-input" placeholder="Filtrar por nombre o financista...">
+        <div id="picker-infra-results" class="pick-results"></div>
+      </div>
+
       <div class="field"><label>Nombre del proceso</label><input type="text" id="p-nombre" required placeholder="Ej: Mobiliario I.E. San Martín"></div>
-      <div class="field-row">
-        <div class="field"><label>Entidad / Cliente</label><input type="text" id="p-entidad" required></div>
-        <div class="field"><label>Tipo</label>
-          <select id="p-tipo"><option value="SEACE">SEACE</option><option value="Infra">Radar Infra</option></select>
-        </div>
+      <div class="field">
+        <label>Entidad / Cliente</label><input type="text" id="p-entidad" required>
       </div>
       <div class="field-row">
         <div class="field"><label>Referencia / nomenclatura</label><input type="text" id="p-referencia" placeholder="Opcional"></div>
@@ -542,6 +565,104 @@ function renderKanbanProcesos(){
 async function refreshProcesos(){ allProcesos = await fetchProcesos(); renderKanbanProcesos(); }
 document.getElementById('filtro-tipo-proceso').addEventListener('change', renderKanbanProcesos);
 
+/* ---------- Picker: Oportunidades Seleccionadas (SEACE) y Radar Infra revisados ---------- */
+let seleccionadasCache = null;
+let infraRevisadosCache = null;
+
+function escHtml(s){ return (s==null?'':String(s)).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+function parseFechaDDMMYYYY(v){
+  if (!v) return null;
+  const s = String(v).trim();
+  let m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (m) return `${m[3]}-${String(m[2]).padStart(2,'0')}-${String(m[1]).padStart(2,'0')}`;
+  m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return m[0];
+  return null;
+}
+
+async function loadSeleccionadas(){
+  if (seleccionadasCache) return seleccionadasCache;
+  try{
+    const r = await fetch('/api/interes');
+    seleccionadasCache = await r.json();
+    if (!Array.isArray(seleccionadasCache)) seleccionadasCache = [];
+  }catch(e){ console.error('No se pudo cargar /api/interes', e); seleccionadasCache = []; }
+  return seleccionadasCache;
+}
+async function loadInfraRevisados(){
+  if (infraRevisadosCache) return infraRevisadosCache;
+  try{
+    const r = await fetch('/api/infra/opportunities');
+    const j = await r.json();
+    infraRevisadosCache = (j.opportunities || []).filter(o => o.revisado);
+  }catch(e){ console.error('No se pudo cargar /api/infra/opportunities', e); infraRevisadosCache = []; }
+  return infraRevisadosCache;
+}
+
+function renderSeacePicker(data, query){
+  const el = document.getElementById('picker-seace-results');
+  if (!data.length){ el.innerHTML = '<p class="card-empty">No hay oportunidades seleccionadas todavía.</p>'; return; }
+  const q = query.trim().toLowerCase();
+  const filtered = q ? data.filter(o => `${o.nomenclature||''} ${o.entity||''} ${o.title||''}`.toLowerCase().includes(q)) : data;
+  const list = filtered.slice(0, 30);
+  if (!list.length){ el.innerHTML = '<p class="card-empty">Sin coincidencias.</p>'; return; }
+  el.innerHTML = list.map((o,i) => `
+    <div class="pick-item" data-idx="${i}">
+      <b>${escHtml(o.nomenclature || o.external_id || 'Sin nomenclatura')}</b>
+      <span>${escHtml(o.entity || '')} — ${escHtml(o.title || '')}</span>
+    </div>`).join('');
+  el.querySelectorAll('.pick-item').forEach(item => item.addEventListener('click', () => {
+    const o = list[item.dataset.idx];
+    document.getElementById('p-nombre').value = o.title || o.nomenclature || '';
+    document.getElementById('p-entidad').value = o.entity || '';
+    document.getElementById('p-referencia').value = o.nomenclature || o.external_id || '';
+    const fl = parseFechaDDMMYYYY(o.fecha_presentacion);
+    if (fl) document.getElementById('p-fecha-limite').value = fl;
+    el.innerHTML = `<p class="card-empty">✓ Seleccionado: ${escHtml(o.nomenclature || o.title || '')}</p>`;
+  }));
+}
+function renderInfraPicker(data, query){
+  const el = document.getElementById('picker-infra-results');
+  if (!data.length){ el.innerHTML = '<p class="card-empty">No hay procesos de Radar Infra marcados como revisados.</p>'; return; }
+  const q = query.trim().toLowerCase();
+  const filtered = q ? data.filter(o => `${o.nombre||''} ${o.financista||''}`.toLowerCase().includes(q)) : data;
+  const list = filtered.slice(0, 30);
+  if (!list.length){ el.innerHTML = '<p class="card-empty">Sin coincidencias.</p>'; return; }
+  el.innerHTML = list.map((o,i) => `
+    <div class="pick-item" data-idx="${i}">
+      <b>${escHtml(o.nombre || 'Sin nombre')}</b>
+      <span>${escHtml(o.financista || '')}</span>
+    </div>`).join('');
+  el.querySelectorAll('.pick-item').forEach(item => item.addEventListener('click', () => {
+    const o = list[item.dataset.idx];
+    document.getElementById('p-nombre').value = o.nombre || '';
+    document.getElementById('p-entidad').value = o.financista || '';
+    document.getElementById('p-referencia').value = o.id || '';
+    el.innerHTML = `<p class="card-empty">✓ Seleccionado: ${escHtml(o.nombre || '')}</p>`;
+  }));
+}
+
+async function syncPicker(){
+  const tipo = document.getElementById('p-tipo').value;
+  document.getElementById('picker-seace').style.display = tipo === 'SEACE' ? 'block' : 'none';
+  document.getElementById('picker-infra').style.display = tipo === 'Infra' ? 'block' : 'none';
+  if (tipo === 'SEACE'){
+    document.getElementById('picker-seace-input').value = '';
+    renderSeacePicker(await loadSeleccionadas(), '');
+  } else if (tipo === 'Infra'){
+    document.getElementById('picker-infra-input').value = '';
+    renderInfraPicker(await loadInfraRevisados(), '');
+  }
+}
+document.getElementById('p-tipo').addEventListener('change', syncPicker);
+document.getElementById('picker-seace-input').addEventListener('input', async e => {
+  renderSeacePicker(await loadSeleccionadas(), e.target.value);
+});
+document.getElementById('picker-infra-input').addEventListener('input', async e => {
+  renderInfraPicker(await loadInfraRevisados(), e.target.value);
+});
+
 const modalProceso = document.getElementById('modal-proceso');
 function openProcesoModal(p){
   document.getElementById('mp-title').textContent = p ? 'Editar proceso' : 'Nuevo proceso';
@@ -557,6 +678,7 @@ function openProcesoModal(p){
   document.getElementById('p-responsable').value = p ? p.responsable : '';
   document.getElementById('p-notas').value = p ? (p.notas || '') : '';
   modalProceso.classList.add('open');
+  syncPicker();
 }
 document.getElementById('btn-nuevo-proceso').addEventListener('click', () => openProcesoModal(null));
 document.getElementById('p-cancelar').addEventListener('click', () => modalProceso.classList.remove('open'));
