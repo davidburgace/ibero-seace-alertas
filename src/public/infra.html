@@ -169,6 +169,7 @@
     <div class="filters">
       <input id="q" placeholder="Buscar nombre, financista o ejecutor…" style="min-width:240px;flex:1;">
       <select id="fSector"><option value="">Todos los sectores</option></select>
+      <select id="fTipo"><option value="">Todo tipo</option></select>
       <select id="fDepto"><option value="">Todos los departamentos</option></select>
       <select id="fEstado"><option value="">Todo estado</option></select>
       <select id="fAnio"><option value="">Todo año buena pro</option></select>
@@ -244,10 +245,11 @@ function renderStats(){
 
 function buildFilters(){
   const sectors = [...new Set(DATA.map(o=>o.sector).filter(Boolean))].sort();
+  const tipos   = [...new Set(DATA.map(o=>o.tipo_intervencion).filter(Boolean))].sort();
   const deptos  = [...new Set(DATA.map(o=>o.departamento).filter(Boolean))].sort();
   const estados = [...new Set(DATA.map(o=>o.estado_convenio).filter(Boolean))].sort();
   const anios = [...new Set(DATA.map(o=>o.anio_buena_pro).filter(Boolean))].sort((a,b)=>b-a);
-  fillSelect('#fSector', sectors); fillSelect('#fDepto', deptos); fillSelect('#fEstado', estados); fillSelect('#fAnio', anios);
+  fillSelect('#fSector', sectors); fillSelect('#fTipo', tipos); fillSelect('#fDepto', deptos); fillSelect('#fEstado', estados); fillSelect('#fAnio', anios);
 }
 function fillSelect(sel, items){
   const el=$(sel); const first=el.querySelector('option').outerHTML;
@@ -258,7 +260,7 @@ const dateKey = o => o.fecha_convenio || (o.anio_buena_pro ? o.anio_buena_pro+'-
 const hasEjec = o => Array.isArray(o.infra_ejecutores) && o.infra_ejecutores.some(e=>e && e.consorcio_nombre);
 function filtered(){
   const q=$('#q').value.toLowerCase().trim();
-  const sec=$('#fSector').value, dep=$('#fDepto').value, dec=$('#fDec').value, est=$('#fEstado').value, ano=$('#fAnio').value, mob=$('#fMob').checked, noEjec=$('#fNoEjec').checked;
+  const sec=$('#fSector').value, tipo=$('#fTipo').value, dep=$('#fDepto').value, dec=$('#fDec').value, est=$('#fEstado').value, ano=$('#fAnio').value, mob=$('#fMob').checked, noEjec=$('#fNoEjec').checked;
   const hideRev=$('#fHideRev').checked;
   const fint=$('#fInteres').value;
   const fcot=$('#fCot').value;
@@ -269,6 +271,7 @@ function filtered(){
       if(!((o.nombre||'').toLowerCase().includes(q)||(o.financista||'').toLowerCase().includes(q)||ejNombres.includes(q))) return false;
     }
     if(sec && o.sector!==sec) return false;
+    if(tipo && o.tipo_intervencion!==tipo) return false;
     if(dep && o.departamento!==dep) return false;
     if(dec && o.ai_recommendation!==dec) return false;
     if(est && o.estado_convenio!==est) return false;
@@ -339,6 +342,8 @@ function render(){
     const noej = ejecutor ? '' : '<span class="tag" style="color:var(--amber);border-color:transparent;background:rgba(245,166,35,.12);">Sin ejecutor</span>';
     const int = o.interes==='si' ? '<span class="tag" style="color:#0f9d72;border-color:transparent;background:rgba(15,157,114,.12);">★ De interés</span>'
               : o.interes==='no' ? '<span class="tag" style="color:#c0394a;border-color:transparent;background:rgba(192,57,74,.12);">Descartado</span>' : '';
+    const tipoColores = { 'Proyecto':'#3a63e0', 'IOARR':'#8b5cf6', 'Mantenimiento':'#0f9d72', 'Operación y Mantenimiento':'#0f9d72' };
+    const tipoTag = o.tipo_intervencion ? `<span class="tag" style="color:${tipoColores[o.tipo_intervencion]||'#6b7280'};border-color:transparent;background:${tipoColores[o.tipo_intervencion]||'#6b7280'}1f;">${o.tipo_intervencion}</span>` : '';
     return `<div class="card" onclick="openDetail('${o.id}')" style="${(o.revisado||o.interes==='no')?'opacity:.5;':''}">
       <div class="score ${scoreClass(o.ai_score)}">${o.ai_score??'—'}</div>
       <div class="card-body">
@@ -352,7 +357,7 @@ function render(){
           ${o.anio_buena_pro?`<span><b>Buena pro:</b> ${o.anio_buena_pro}</span>`:''}
           ${o.fecha_convenio?`<span><b>Convenio:</b> ${o.fecha_convenio}</span>`:''}
         </div>
-        <div class="tags">${int}${dec}${mob}${noej}<span class="tag">${o.sector||o.business_line||''}</span></div>
+        <div class="tags">${tipoTag}${int}${dec}${mob}${noej}<span class="tag">${o.sector||o.business_line||''}</span></div>
       </div>
       <div class="card-actions" onclick="event.stopPropagation()" style="margin-left:auto;align-self:flex-start;display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
         <div style="display:flex;gap:6px;">
