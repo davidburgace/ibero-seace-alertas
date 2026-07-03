@@ -526,8 +526,79 @@ router.post('/api/infra/opportunities/:id/cargar-proinversion', async (req, res,
 
 // TODO: reconstruir el parser real cuando tengamos una muestra del Excel de ProInversión.
 // Por ahora responde JSON claro en vez de un 404 en HTML, para no romper el fetch del frontend.
-router.post('/api/infra/ingest-proinversion', upload.single('file'), async (req, res) => {
-  res.status(501).json({ ok: false, error: 'La carga de Excel de ProInversión todavía no está reconstruida. Usa "Cargar ejecutor automáticamente" (funciona con la URL ya vinculada) o "Sugerir ejecutor (IA)" mientras tanto.' });
+router.post('/api/infra/ingest-proinversion', upload.single('file'), async (req, res, next) => {
+  try {
+    if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
+    if (!req.file) return res.status(400).json({ ok: false, error: 'Falta el archivo (campo "file")' });
+
+    const wb = XLSX.read(req.file.buffer, { type: 'buffer' });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const range = XLSX.utils.decode_range(sheet['!ref']);
+
+    // Ubicar la fila de encabezado y las columnas relevantes (el archivo trae varias filas de título antes)
+    let headerRow = -1, colCUI = -1, colLink = -1, colTipo = -1;
+    for (let r = range.s.r; r <= Math.min(range.e.r, 20); r++) {
+      for (let c = range.s.c; c <= range.e.c; c++) {
+        const cell = sheet[XLSX.utils.encode_cell({ r, c })];
+        if (cell && typeof cell.v === 'string') {
+          if (cell.v.includes('Código Único de Inversiones')) { headerRow = r; colCUI = c; }
+          if (cell.v.includes('Enlace Portal web ProInversión')) colLink = c;
+          if (cell.v.trim() === 'Tipo de Convocatoria') colTipo = c;
+        }
+      }
+      if (headerRow >= 0 && colLink >= 0) break;
+    }
+    if (headerRow === -1 || colCUI === -1 || colLink === -1) {
+      return res.status(400).json({ ok: false, error: 'No se detectaron las columnas esperadas (CUI / Enlace Portal web ProInversión) en el Excel.' });
+    }
+
+    // Leer cada fila: uno o varios CUI (separados por ";") con su URL de la ficha (el hipervínculo real, no el texto de la celda).
+    // Un mismo CUI puede tener 2 convocatorias (p.ej. "Empresa Privada" y "Entidad Privada Supervisora");
+    // nos quedamos con la de "Empresa Privada" porque es la que identifica al ejecutor/constructora.
+    const porCui = {};
+    let totalFilas = 0;
+    for (let r = headerRow + 1; r <= range.e.r; r++) {
+      const cuiCell = sheet[XLSX.utils.encode_cell({ r, c: colCUI })];
+      const linkCell = sheet[XLSX.utils.encode_cell({ r, c: colLink })];
+      if (!cuiCell || !cuiCell.v) continue;
+      const url = linkCell && linkCell.l ? linkCell.l.Target : null;
+      if (!url) continue;
+      totalFilas++;
+      const tipo = colTipo >= 0 ? (sheet[XLSX.utils.encode_cell({ r, c: colTipo })]?.v || '') : '';
+      String(cuiCell.v).split(';').map(s => s.trim()).filter(Boolean).forEach(cui => {
+        const actual = porCui[cui];
+        if (!actual || (tipo === 'Empresa Privada' && actual.tipo !== 'Empresa Privada')) {
+          porCui[cui] = { url, tipo };
+        }
+      });
+    }
+    const registros = Object.entries(porCui).map(([cui, v]) => ({ cui, url: v.url }));
+
+    // Enlazar por lotes: buscar el id interno de infra_oportunidades para cada CUI, y actualizar solo proinversion_url
+    let actualizadas = 0;
+    const CHUNK = 200;
+    for (let i = 0; i < registros.length; i += CHUNK) {
+      const lote = registros.slice(i, i + CHUNK);
+      const cuis = [...new Set(lote.map(x => x.cui))];
+      const { data: encontrados, error: errBusca } = await supabase.from('infra_oportunidades')
+        .select('id, external_id').in('external_id', cuis);
+      if (errBusca) { console.error('[INFRA] Error buscando CUIs:', errBusca.message); continue; }
+      const idPorCui = {};
+      (encontrados || []).forEach(o => { idPorCui[o.external_id] = o.id; });
+
+      const payload = lote
+        .filter(x => idPorCui[x.cui])
+        .map(x => ({ id: idPorCui[x.cui], proinversion_url: x.url }));
+      if (!payload.length) continue;
+
+      const { error: errUpsert } = await supabase.from('infra_oportunidades')
+        .upsert(payload, { onConflict: 'id' });
+      if (errUpsert) console.error('[INFRA] Error actualizando proinversion_url:', errUpsert.message);
+      else actualizadas += payload.length;
+    }
+
+    res.json({ ok: true, procesos: registros.length, oportunidades_actualizadas: actualizadas });
+  } catch (e) { next(e); }
 });
 
 // Para el cron de server.js (intenta por URL; si Incapsula bloquea, solo registra el error)
