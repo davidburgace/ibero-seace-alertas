@@ -477,6 +477,49 @@ Responde ÚNICAMENTE con JSON válido, sin texto adicional:
   } catch (e) { next(e); }
 });
 
+// Cargar ejecutor(as) directo desde la ficha oficial de ProInversión ya vinculada a esta oportunidad
+router.post('/api/infra/opportunities/:id/cargar-proinversion', async (req, res, next) => {
+  try {
+    if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
+    const { id } = req.params;
+    const { data: op } = await supabase.from('infra_oportunidades').select('*').eq('id', id).single();
+    if (!op) return res.status(404).json({ ok: false, error: 'Oportunidad no encontrada' });
+    if (!op.proinversion_url) return res.json({ ok: true, ejecutoras: [], adjudicatarias: [], nota: 'Esta oportunidad no tiene ficha de ProInversión vinculada.' });
+
+    const prompt = `Visita esta ficha oficial de ProInversión y extrae la información del proceso:
+${op.proinversion_url}
+
+Responde ÚNICAMENTE con JSON válido, sin texto adicional:
+{
+  "ejecutoras": [{"nombre":"razón social de la empresa/consorcio ejecutor","ruc":"RUC si aparece, o null"}],
+  "adjudicatarias": [{"nombre":"razón social de la empresa adjudicataria/financista, si difiere del ejecutor"}]
+}
+Si el proceso todavía no tiene buena pro / adjudicación, responde con arrays vacíos en ambos campos.
+Si es un consorcio de varias empresas, inclúyelas todas como entradas separadas en "ejecutoras".`;
+
+    let raw;
+    try {
+      const resp = await openai.responses.create({
+        model: 'gpt-4o',
+        tools: [{ type: 'web_search_preview' }],
+        input: prompt
+      });
+      raw = resp.output_text;
+    } catch (webErr) {
+      console.error('[INFRA] web_search no disponible en cargar-proinversion:', webErr.message);
+      return res.json({ ok: true, ejecutoras: [], adjudicatarias: [], nota: 'No se pudo acceder a la ficha en este momento, intenta de nuevo.' });
+    }
+    const parsed = JSON.parse(String(raw).replace(/```json|```/g, '').trim());
+    res.json({ ok: true, ejecutoras: parsed.ejecutoras || [], adjudicatarias: parsed.adjudicatarias || [] });
+  } catch (e) { next(e); }
+});
+
+// TODO: reconstruir el parser real cuando tengamos una muestra del Excel de ProInversión.
+// Por ahora responde JSON claro en vez de un 404 en HTML, para no romper el fetch del frontend.
+router.post('/api/infra/ingest-proinversion', upload.single('file'), async (req, res) => {
+  res.status(501).json({ ok: false, error: 'La carga de Excel de ProInversión todavía no está reconstruida. Usa "Cargar ejecutor automáticamente" (funciona con la URL ya vinculada) o "Sugerir ejecutor (IA)" mientras tanto.' });
+});
+
 // Para el cron de server.js (intenta por URL; si Incapsula bloquea, solo registra el error)
 export async function runInfraIngest() {
   const r = await ingestOxiMefURL();
