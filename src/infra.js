@@ -1,764 +1,622 @@
-// ============================================================================
-// src/infra.js  —  Módulo Infra-Radar  (Fase A, v2)
-// v2: el MEF está detrás de Incapsula (anti-bots) y bloquea la descarga desde
-// Render. Como la base se actualiza ~mensual, el flujo robusto es subir el .xlsx
-// a mano (bajado desde el navegador, que sí pasa Incapsula).
-//   - POST /api/infra/ingest-upload   (multipart, campo "file")  ← USAR ESTE
-//   - POST /api/infra/ingest          (intenta por URL; suele bloquearse)
-// Reutiliza el stack: Supabase (service key), OpenAI gpt-4o-mini, embeddings
-// text-embedding-3-small, Nodemailer, multer. No toca lo existente.
-// ============================================================================
-
-import express from 'express';
-import { createClient } from '@supabase/supabase-js';
-import OpenAI from 'openai';
-import nodemailer from 'nodemailer';
-import multer from 'multer';
-import * as XLSX from 'xlsx';
-
-const router = express.Router();
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 80 * 1024 * 1024 } });
-
-// ─── Clientes (mismos env que server.js) ────────────────────────────────────
-const SUPABASE_KEY = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
-const supabase = process.env.SUPABASE_URL && SUPABASE_KEY
-  ? createClient(process.env.SUPABASE_URL, SUPABASE_KEY)
-  : null;
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
-const MEF_OXI_XLSX_URL = process.env.MEF_OXI_XLSX_URL
-  || 'https://www.mef.gob.pe/contenidos/inv_privada/obras_impuestos/base_adjudicaciones_OXI_31032026.xlsx';
-
-const FRONTEND_URL = process.env.FRONTEND_URL || 'https://ibero-seace-alertas.onrender.com';
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-function normaliza(v) {
-  if (v == null) return '';
-  return String(v).normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
-    .toUpperCase().replace(/\s+/g, ' ').trim();
-}
-
-function findCol(headers, ...claves) {
-  const c = claves.map(normaliza);
-  return headers.find(h => { const n = normaliza(h); return c.every(k => n.includes(k)); }) || null;
-}
-function toISODate(v) {
-  if (v == null || v === '') return null;
-  if (v instanceof Date && !isNaN(v)) return v.toISOString().slice(0, 10);
-  const s = String(v).trim();
-  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
-  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
-  if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
-  return null;
-}
-function classify(text = '') {
-  const t = text.toLowerCase();
-  if (t.includes('hospital') || t.includes('clínic') || t.includes('clinic') || t.includes('salud') || t.includes('cama')) return 'Hospitalario';
-  if (t.includes('escolar') || t.includes('carpeta') || t.includes('coleg') || t.includes('educac') || t.includes('ugel') || t.includes('institución educativa')) return 'Educación';
-  if (t.includes('locker') || t.includes('casillero') || t.includes('metálic') || t.includes('metalico') || t.includes('armario')) return 'Metalmecánica';
-  if (t.includes('melamine') || t.includes('oficina') || t.includes('escritorio') || t.includes('archivador')) return 'Oficina';
-  return 'General';
-}
-
-// ─── Parseo del workbook (compartido por URL y por upload) ───────────────────
-function rowsFromBuffer(buf) {
-  // Validar que sea un .xlsx real (ZIP → empieza con "PK"). Si no, es HTML/bloqueo.
-  if (!buf || buf.length < 4 || buf[0] !== 0x50 || buf[1] !== 0x4B) {
-    const preview = Buffer.from(buf || []).toString('utf8', 0, 300).replace(/\s+/g, ' ');
-    throw new Error(`No es un .xlsx válido (¿bloqueo Incapsula o archivo equivocado?). inicio="${preview}"`);
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Radar Infra — Grupo Ibero</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:#ffffff; --surface:#f7f8fa; --surface2:#eef0f4;
+    --border:rgba(0,0,0,0.08); --border2:rgba(0,0,0,0.14);
+    --text:#16181d; --muted:#5c6270;
+    --accent:#3a63e0; --accent2:#0f766e;
+    --green:#0f9d72; --amber:#b8860b; --red:#d6364a;
+    --font-display:'Syne',sans-serif; --font-body:'DM Sans',sans-serif;
   }
-  const wb = XLSX.read(buf, { type: 'buffer', cellDates: true });
-  const sheet = wb.Sheets[wb.SheetNames[0]];
-  // La base suele tener filas de título antes del encabezado real.
-  for (let hdr = 0; hdr < 6; hdr++) {
-    const rows = XLSX.utils.sheet_to_json(sheet, { range: hdr, defval: null });
-    if (rows.length && findCol(Object.keys(rows[0]), 'FINANCISTA')) {
-      return { rows, headers: Object.keys(rows[0]) };
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:var(--font-body);background:var(--bg);color:var(--text);min-height:100vh;font-size:14px;line-height:1.6;}
+  a{color:inherit;}
+
+  .topbar{display:flex;align-items:center;justify-content:space-between;padding:14px 28px;border-bottom:1px solid var(--border);background:var(--surface);position:sticky;top:0;z-index:100;backdrop-filter:blur(12px);}
+  .logo{display:flex;align-items:center;gap:10px;font-family:var(--font-display);font-size:17px;font-weight:700;text-decoration:none;}
+  .logo-dot{width:8px;height:8px;border-radius:50%;background:var(--accent2);box-shadow:0 0 10px var(--accent2);animation:pulse 2s infinite;}
+  @keyframes pulse{0%,100%{opacity:1;transform:scale(1);}50%{opacity:.6;transform:scale(.8);}}
+  .topbar a.alt{color:var(--muted);font-size:13px;text-decoration:none;}
+  .topbar a.alt:hover{color:var(--text);}
+
+  .wrap{max-width:1180px;margin:0 auto;padding:24px 28px 80px;}
+
+  /* Toolbar */
+  .toolbar{display:flex;flex-wrap:wrap;gap:12px;align-items:center;margin-bottom:20px;}
+  .btn{display:inline-flex;align-items:center;gap:8px;background:var(--accent2);color:#fff;border:none;border-radius:10px;padding:10px 16px;font-family:var(--font-body);font-weight:600;font-size:13px;cursor:pointer;transition:.15s;}
+  .btn:hover{filter:brightness(1.1);}
+  .btn.ghost{background:transparent;border:1px solid var(--border2);color:var(--text);}
+  .btn:disabled{opacity:.5;cursor:not-allowed;}
+  input,select{background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:9px;padding:9px 12px;font-family:var(--font-body);font-size:13px;outline:none;}
+  input::placeholder{color:var(--muted);}
+  .spacer{flex:1;}
+
+  /* Stats */
+  .stats{display:flex;flex-wrap:wrap;gap:14px;margin-bottom:22px;}
+  .stat{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:14px 18px;min-width:130px;}
+  .stat .n{font-family:var(--font-display);font-size:24px;font-weight:800;}
+  .stat .l{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.04em;}
+
+  /* Filters */
+  .filters{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:18px;}
+  .chk{display:inline-flex;align-items:center;gap:7px;color:var(--muted);font-size:13px;cursor:pointer;}
+
+  /* List */
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px 18px;margin-bottom:12px;cursor:pointer;transition:.15s;display:flex;gap:16px;align-items:flex-start;}
+  .card:hover{border-color:var(--border2);background:var(--surface2);}
+  .score{flex-shrink:0;width:54px;height:54px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-family:var(--font-display);font-weight:800;font-size:20px;}
+  .score.high{background:rgba(34,211,160,.13);color:var(--green);}
+  .score.mid{background:rgba(245,166,35,.13);color:var(--amber);}
+  .score.low{background:rgba(240,82,82,.12);color:var(--red);}
+  .score.none{background:var(--surface2);color:var(--muted);font-size:13px;}
+  .card-body{flex:1;min-width:0;}
+  .card h3{font-size:14.5px;font-weight:600;margin-bottom:6px;line-height:1.4;}
+  .meta{color:var(--muted);font-size:12.5px;display:flex;flex-wrap:wrap;gap:4px 14px;}
+  .meta b{color:var(--text);font-weight:500;}
+  .tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px;}
+  .tag{font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px;border:1px solid var(--border2);color:var(--muted);}
+  .tag.mob{background:rgba(79,125,255,.13);color:var(--accent);border-color:transparent;}
+  .tag.dec-perseguir{background:rgba(34,211,160,.13);color:var(--green);border-color:transparent;}
+  .tag.dec-revisar{background:rgba(245,166,35,.13);color:var(--amber);border-color:transparent;}
+  .tag.dec-descartar{background:rgba(240,82,82,.12);color:var(--red);border-color:transparent;}
+
+  .empty{text-align:center;color:var(--muted);padding:60px 20px;}
+
+  /* Drawer */
+  .drawer-bg{position:fixed;inset:0;background:rgba(0,0,0,.55);opacity:0;pointer-events:none;transition:.2s;z-index:200;}
+  .drawer-bg.open{opacity:1;pointer-events:auto;}
+  .drawer{position:fixed;top:0;right:0;height:100%;width:min(540px,94vw);background:var(--surface);border-left:1px solid var(--border2);transform:translateX(100%);transition:.25s;z-index:201;overflow-y:auto;padding:26px;}
+  .drawer.open{transform:translateX(0);}
+  .drawer h2{font-family:var(--font-display);font-size:18px;font-weight:700;line-height:1.35;margin-bottom:6px;padding-right:30px;}
+  .closeX{position:absolute;top:20px;right:22px;background:none;border:none;color:var(--muted);font-size:22px;cursor:pointer;}
+  .section{margin-top:20px;}
+  .section .t{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:8px;}
+  .crit{margin-bottom:9px;}
+  .crit .row{display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:3px;}
+  .bar{height:6px;background:var(--surface2);border-radius:6px;overflow:hidden;}
+  .bar span{display:block;height:100%;background:var(--accent2);}
+  .li{display:flex;gap:8px;font-size:13px;margin-bottom:6px;color:var(--text);}
+  .li .dot{color:var(--accent2);flex-shrink:0;}
+  .loading{color:var(--muted);font-size:13px;padding:20px 0;}
+
+  /* Chat */
+  #chatLog{display:flex;flex-direction:column;gap:8px;margin:6px 0 10px;max-height:300px;overflow-y:auto;}
+  .msg{padding:9px 12px;border-radius:11px;font-size:13px;white-space:pre-wrap;line-height:1.5;}
+  .msg.q{background:var(--accent2);color:#fff;align-self:flex-end;max-width:85%;}
+  .msg.a{background:var(--surface2);color:var(--text);align-self:flex-start;max-width:92%;border:1px solid var(--border);}
+  .chatbox{display:flex;gap:8px;}
+  .chatbox input{flex:1;}
+
+  /* Toast */
+  #toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(120px);background:var(--surface2);border:1px solid var(--border2);color:var(--text);padding:12px 20px;border-radius:12px;font-size:13px;transition:.25s;z-index:300;max-width:90vw;}
+  #toast.show{transform:translateX(-50%) translateY(0);}
+  input[type=file]{display:none;}
+
+  /* ---------- RESPONSIVE / MOBILE ---------- */
+  @media (max-width: 640px){
+    .topbar{ padding:12px 16px; }
+    .logo{ font-size:14px; gap:8px; }
+    .topbar > div{ gap:10px !important; }
+    .topbar a.alt{ font-size:12px; }
+
+    .wrap{ padding:16px 14px 60px; }
+
+    .toolbar{ gap:8px; }
+    .btn{ padding:9px 12px; font-size:12.5px; }
+    .toolbar select{ flex:1; min-width:0; }
+
+    .stats{ gap:10px; }
+    .stat{ flex:1; min-width:calc(50% - 5px); padding:12px 14px; }
+    .stat .n{ font-size:20px; }
+
+    .filters{ gap:8px; }
+    #q{ min-width:0 !important; width:100%; }
+
+    .card{ flex-direction:column; align-items:stretch; gap:10px; padding:14px; }
+    .card .score{ align-self:flex-start; width:44px; height:44px; font-size:16px; }
+    .card-actions{
+      margin-left:0 !important; align-self:stretch !important;
+      flex-direction:row !important; align-items:center !important;
+      justify-content:space-between !important; width:100%; flex-wrap:wrap; gap:10px !important;
     }
+
+    .drawer{ width:100vw; padding:18px 16px; }
+    .drawer h2{ font-size:16px; padding-right:26px; }
+    .closeX{ top:16px; right:16px; }
+
+    #chatLog{ max-height:220px; }
+    .chatbox{ flex-wrap:wrap; }
+    .chatbox input{ flex-basis:100%; }
+    .chatbox button{ flex:1; }
+
+    div[style*="display:flex;gap:8px;margin-bottom:10px;"]{ flex-wrap:wrap !important; }
+    div[style*="display:flex;gap:7px;margin-bottom:7px;"]{ flex-wrap:wrap !important; }
   }
-  throw new Error('No se detectó el encabezado (columna FINANCISTA) en la base del MEF.');
-}
-
-function normalizeMefRow(row, cols) {
-  const cui = row[cols.cui];
-  const nombre = row[cols.nombre];
-  if (!cui || !nombre) return null;
-  const texto = `${nombre} ${row[cols.sector] || ''}`;
-  return {
-    fuente: 'oxi_mef',
-    external_id: String(cui).trim(),
-    nombre: String(nombre).trim(),
-    entidad_publica: cols.entidad ? row[cols.entidad] : null,
-    financista: cols.financista && row[cols.financista] ? String(row[cols.financista]).trim() : null,
-    sector: cols.sector ? row[cols.sector] : null,
-    departamento: cols.depto ? row[cols.depto] : null,
-    provincia: cols.prov ? row[cols.prov] : null,
-    distrito: cols.dist ? row[cols.dist] : null,
-    monto_inversion: cols.monto && row[cols.monto] != null ? Number(String(row[cols.monto]).replace(/[^\d.-]/g, '')) || null : null,
-    estado_convenio: cols.estado ? row[cols.estado] : null,
-    anio_buena_pro: cols.anio_bp && row[cols.anio_bp] != null ? (parseInt(String(row[cols.anio_bp]).replace(/[^\d]/g, '')) || null) : null,
-    fecha_convenio: cols.fecha_conv ? toISODate(row[cols.fecha_conv]) : null,
-    business_line: classify(texto),
-    incluye_mobiliario: /MOBILIARI|EQUIPAMIENT|CARPETA/.test(normaliza(texto)),
-    raw: row,
-    alert_sent: false
-  };
-}
-
-function esRelevante(item) {
-  const t = normaliza(`${item.nombre} ${item.sector || ''}`);
-
-  // Educación: como estaba
-  const educacion = t.includes('EDUCAC') || t.includes('COLEGIO') || t.includes('INSTITUCION EDUCATIVA')
-      || t.includes('I.E') || item.business_line === 'Educación';
-
-  // Salud: SOLO proyectos de construcción (hay constructora ejecutora), no compras de ambulancias/equipos
-  const esSalud = t.includes('SALUD') || t.includes('HOSPITAL') || t.includes('CLINIC')
-      || t.includes('CENTRO DE SALUD') || t.includes('ESTABLECIMIENTO DE SALUD')
-      || t.includes('POSTA') || item.business_line === 'Hospitalario';
-  const esObra = /\b(CONSTRUCCION|MEJORAMIENTO|AMPLIACION|CREACION|RECONSTRUCCION|INSTALACION|REHABILITACION)\b/.test(t);
-
-  return educacion || (esSalud && esObra);
-}
-
-function detectCols(headers) {
-  return {
-    cui:        findCol(headers, 'CODIGO', 'UNICO') || findCol(headers, 'CUI') || findCol(headers, 'SNIP'),
-    nombre:     findCol(headers, 'NOMBRE', 'INVERSION') || headers.find(h => normaliza(h) === 'INTERVENCION') || findCol(headers, 'NOMBRE', 'PROYECTO') || findCol(headers, 'DENOMINACION'),
-    financista: findCol(headers, 'FINANCISTA'),
-    sector:     findCol(headers, 'SECTOR') || findCol(headers, 'MATERIA') || findCol(headers, 'FUNCION'),
-    entidad:    findCol(headers, 'ENTIDAD', 'PUBLICA') || findCol(headers, 'ENTIDAD'),
-    depto:      findCol(headers, 'DEPARTAMENTO'),
-    prov:       findCol(headers, 'PROVINCIA'),
-    dist:       findCol(headers, 'DISTRITO'),
-    monto:      findCol(headers, 'MONTO', 'INVERSION') || findCol(headers, 'MONTO', 'ADJUDICACION'),
-   estado:     findCol(headers, 'ESTADO', 'CONVENIO') || findCol(headers, 'ESTADO'),
-    anio_bp:    findCol(headers, 'BUENA', 'PRO'),
-    fecha_conv: findCol(headers, 'FECHA', 'CONVENIO')
-  };
-}
-
-// Núcleo: parsea un buffer .xlsx y hace upsert. Lo usan URL y upload.
-async function ingestFromBuffer(buf) {
-  if (!supabase) throw new Error('Supabase no configurado');
-  const { rows, headers } = rowsFromBuffer(buf);
-  const cols = detectCols(headers);
-  console.log('[INFRA] Columnas detectadas:', cols);
-
-  // Excluir estados sin opción comercial (concluido/liquidado)
-  const SIN_OPCION = /CONCLUID|LIQUIDAD/;
-  const items = rows.map(r => normalizeMefRow(r, cols)).filter(Boolean)
-    .filter(esRelevante)
-    .filter(i => !SIN_OPCION.test(normaliza(i.estado_convenio)));
-  const byId = new Map();
-  items.forEach(i => byId.set(i.external_id, i));
-  const unique = [...byId.values()];
-
-  if (unique.length) {
-    const { error } = await supabase.from('infra_oportunidades')
-      .upsert(unique, { onConflict: 'fuente,external_id', ignoreDuplicates: false });
-    if (error) throw error;
-  }
-  return { total_filas: rows.length, relevantes: unique.length, columnas: cols, headers };
-}
-
-// Intento por URL (suele bloquearse por Incapsula desde Render)
-async function ingestOxiMefURL() {
-  const res = await fetch(MEF_OXI_XLSX_URL, {
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-      'Accept': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/octet-stream,*/*',
-      'Accept-Language': 'es-PE,es;q=0.9',
-      'Referer': 'https://www.mef.gob.pe/'
-    },
-    redirect: 'follow',
-    signal: AbortSignal.timeout(60000)
-  });
-  if (!res.ok) throw new Error(`MEF HTTP ${res.status}`);
-  const buf = Buffer.from(await res.arrayBuffer());
-  return ingestFromBuffer(buf);
-}
-
-// ─── IA: scoring ─────────────────────────────────────────────────────────────
-async function callAI(prompt) {
-  const r = await openai.chat.completions.create({
-    model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], temperature: 0.3
-  });
-  return r.choices[0].message.content;
-}
-async function getEmbedding(text) {
-  const r = await openai.embeddings.create({ model: 'text-embedding-3-small', input: String(text).slice(0, 8000) });
-  return r.data[0].embedding;
-}
-
-async function analyzeInfra(op) {
-  const prompt = `
-Analiza esta oportunidad de infraestructura pública/privada para Grupo Ibero Perú
-(fabricante de mobiliario escolar, hospitalario, de oficina y metálico). A diferencia
-de una licitación SEACE, aquí el comprador del mobiliario suele ser el EJECUTOR de la
-obra (constructora/consorcio), no la entidad pública ni la financista.
-
-Fuente: ${op.fuente}
-Nombre: ${op.nombre || ''}
-Entidad pública: ${op.entidad_publica || ''}
-Financista: ${op.financista || ''}
-Sector: ${op.sector || ''}
-Ubicación: ${[op.distrito, op.provincia, op.departamento].filter(Boolean).join(', ') || ''}
-Monto inversión: ${op.monto_inversion ? `S/ ${Number(op.monto_inversion).toLocaleString('es-PE')}` : 'No especificado'}
-Etapa: ${op.etapa || op.estado_convenio || 'No especificada'}
-¿Incluye mobiliario/equipamiento?: ${op.incluye_mobiliario === true ? 'Sí (heurística)' : 'Por confirmar'}
-
-Responde ÚNICAMENTE con JSON válido, sin texto adicional. El score total debe ser la
-suma de los criteria.score (máx 100):
-{
-  "summary": "resumen ejecutivo en 2 oraciones",
-  "business_line": "Educación|Hospitalario|Oficina|Metalmecánica|General",
-  "incluye_mobiliario": true,
-  "score": 0,
-  "decision": "PERSEGUIR|REVISAR|DESCARTAR",
-  "recommendation": "recomendación breve y accionable",
-  "criteria": [
-    {"name":"Mobiliario/línea de negocio","score":0,"max":30},
-    {"name":"Monto de inversión","score":0,"max":15},
-    {"name":"Etapa y timing","score":0,"max":20},
-    {"name":"Logística y región (plantas Puente Piedra/Lurín)","score":0,"max":15},
-    {"name":"Canal de acceso al comprador (¿ejecutor identificable?)","score":0,"max":10},
-    {"name":"Probabilidad de cierre","score":0,"max":10}
-  ],
-  "risks": ["riesgo 1","riesgo 2","riesgo 3"],
-  "actions": ["acción 1","acción 2","acción 3"]
-}`;
-  const raw = await callAI(prompt);
-  return JSON.parse(raw.replace(/```json|```/g, '').trim());
-}
-
-async function scoreOpportunity(id) {
-  const { data: op, error } = await supabase.from('infra_oportunidades').select('*').eq('id', id).single();
-  if (error) throw error;
-  const a = await analyzeInfra(op);
-  let embedding = null;
-  try { embedding = await getEmbedding(`${op.nombre} ${op.financista || ''} ${op.sector || ''} ${a.summary || ''}`); }
-  catch (e) { console.error('[INFRA] embedding:', e.message); }
-  const update = {
-    ai_summary: a.summary, ai_score: a.score, ai_recommendation: a.decision,
-    ai_criteria: a.criteria || [], ai_risks: a.risks || [], ai_actions: a.actions || [],
-    incluye_mobiliario: a.incluye_mobiliario ?? op.incluye_mobiliario,
-    business_line: a.business_line || op.business_line,
-    updated_at: new Date().toISOString()
-  };
-  if (embedding) update.embedding = embedding;
-  await supabase.from('infra_oportunidades').update(update).eq('id', id);
-  return { ...op, ...update };
-}
-
-// ─── Digest ──────────────────────────────────────────────────────────────────
-function renderInfraEmail(ops) {
-  const rows = ops.slice(0, 15).map(o => {
-    const link = `${FRONTEND_URL}/infra.html?id=${encodeURIComponent(o.id)}`;
-    const monto = o.monto_inversion ? `S/ ${Number(o.monto_inversion).toLocaleString('es-PE')}` : 'No especificado';
-    return `
-<div style="border:1px solid #e7eaf0;border-radius:12px;padding:16px;margin-bottom:12px;background:white;">
-  <div style="margin-bottom:8px;">
-    <span style="background:#0f766e;color:white;padding:2px 10px;border-radius:20px;font-size:12px;font-weight:600;">${o.fuente}</span>
-    <span style="color:#6b7280;font-size:12px;margin-left:6px;">${o.external_id || ''} · score ${o.ai_score ?? '—'}</span>
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <a class="logo" href="/infra.html"><span class="logo-dot"></span>Radar Infra · Ibero</a>
+    <div style="display:flex;gap:16px;align-items:center;">
+      <a class="alt" href="/">← Inicio</a>
+      <a class="alt" href="/admin.html">Radar SEACE</a>
+    </div>
   </div>
-  <h3 style="margin:0 0 8px;font-size:15px;color:#111827;">${o.nombre || 'Oportunidad'}</h3>
-  <p style="margin:2px 0;color:#4b5563;font-size:13px;"><b>Financista:</b> ${o.financista || '-'}</p>
-  <p style="margin:2px 0;color:#4b5563;font-size:13px;"><b>Monto:</b> ${monto}</p>
-  <p style="margin:2px 0;color:#4b5563;font-size:13px;"><b>Etapa:</b> ${o.etapa || o.estado_convenio || '-'}</p>
-  <a href="${link}" style="display:inline-block;margin-top:10px;background:#0f766e;color:white;padding:8px 16px;border-radius:8px;text-decoration:none;font-size:13px;font-weight:600;">Ver oportunidad →</a>
-</div>`;
+
+  <div class="wrap">
+    <div class="toolbar">
+      <a class="btn ghost" href="https://www.mef.gob.pe/index.php?option=com_content&amp;view=article&amp;id=3981&amp;Itemid=102178&amp;lang=es" target="_blank" rel="noopener" style="text-decoration:none;">📥 Web base MEF</a>
+      <a class="btn ghost" href="https://www.investinperu.pe/procesos-de-seleccion/" target="_blank" rel="noopener" style="text-decoration:none;">📥 Web ProInversión</a>
+      <label class="btn"><input type="file" id="file" accept=".xlsx"> ⬆ Subir base MEF (.xlsx)</label>
+      <label class="btn ghost"><input type="file" id="filePI" accept=".xlsx"> ⬆ Subir Excel ProInversión</label>
+      <button class="btn ghost" id="btnScore">✦ Puntuar pendientes</button>
+      <select id="scoreLimit" title="Cuántas puntuar por lote">
+        <option value="10">10</option><option value="25">25</option>
+        <option value="50" selected>50</option><option value="100">100</option>
+      </select>
+      <div class="spacer"></div>
+      <button class="btn ghost" id="btnReload">↻ Recargar</button>
+    </div>
+
+    <div class="stats" id="stats"></div>
+
+    <div class="filters">
+      <input id="q" placeholder="Buscar nombre, financista o ejecutor…" style="min-width:240px;flex:1;">
+      <select id="fSector"><option value="">Todos los sectores</option></select>
+      <select id="fDepto"><option value="">Todos los departamentos</option></select>
+      <select id="fEstado"><option value="">Todo estado</option></select>
+      <select id="fAnio"><option value="">Todo año buena pro</option></select>
+      <select id="fDec">
+        <option value="">Toda decisión</option>
+        <option value="PERSEGUIR">Perseguir</option>
+        <option value="REVISAR">Revisar</option>
+        <option value="DESCARTAR">Descartar</option>
+      </select>
+      <select id="fSort">
+        <option value="score">Orden: mayor score</option>
+        <option value="fecha_asc">Orden: más antiguos</option>
+        <option value="fecha_desc">Orden: más recientes</option>
+        <option value="monto_desc">Orden: mayor monto</option>
+        <option value="monto_asc">Orden: menor monto</option>
+        <option value="nombre">Orden: nombre (A–Z)</option>
+      </select>
+      <select id="fInteres">
+        <option value="">Todo interés</option>
+        <option value="si">Solo de interés</option>
+        <option value="ocultar_no">Ocultar descartados</option>
+        <option value="no">Solo descartados</option>
+        <option value="pend">Sin marcar</option>
+      </select>
+      <select id="fCot">
+        <option value="">Cotizado: todos</option>
+        <option value="no">Sin cotizar</option>
+        <option value="si">Cotizadas</option>
+      </select>
+      <label class="chk"><input type="checkbox" id="fMob" style="accent-color:var(--accent2);"> Solo con mobiliario</label>
+      <label class="chk"><input type="checkbox" id="fNoEjec" style="accent-color:var(--accent2);"> Sin ejecutor</label>
+      <label class="chk"><input type="checkbox" id="fHideRev" style="accent-color:var(--accent2);"> Ocultar revisados</label>
+    </div>
+
+    <div id="list"></div>
+  </div>
+
+  <div class="drawer-bg" id="drawerBg"></div>
+  <div class="drawer" id="drawer"></div>
+  <div id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+let DATA = [];
+let CURRENT_ID = null;
+
+const money = v => v ? 'S/ ' + Number(v).toLocaleString('es-PE') : 'No especificado';
+const scoreClass = s => s == null ? 'none' : s >= 70 ? 'high' : s >= 40 ? 'mid' : 'low';
+
+function toast(msg){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); setTimeout(()=>t.classList.remove('show'),3500); }
+
+async function load(){
+  $('#list').innerHTML = '<div class="loading">Cargando…</div>';
+  try{
+    const r = await fetch('/api/infra/opportunities');
+    const j = await r.json();
+    DATA = j.opportunities || [];
+    buildFilters(); render(); renderStats();
+  }catch(e){ $('#list').innerHTML = '<div class="empty">Error cargando: '+e.message+'</div>'; }
+}
+
+function renderStats(){
+  const scored = DATA.filter(o=>o.ai_score!=null).length;
+  const mob = DATA.filter(o=>o.incluye_mobiliario).length;
+  const perseguir = DATA.filter(o=>o.ai_recommendation==='PERSEGUIR').length;
+  $('#stats').innerHTML = [
+    ['Oportunidades', DATA.length],
+    ['Puntuadas', scored],
+    ['Con mobiliario', mob],
+    ['A perseguir', perseguir]
+  ].map(([l,n])=>`<div class="stat"><div class="n">${n}</div><div class="l">${l}</div></div>`).join('');
+}
+
+function buildFilters(){
+  const sectors = [...new Set(DATA.map(o=>o.sector).filter(Boolean))].sort();
+  const deptos  = [...new Set(DATA.map(o=>o.departamento).filter(Boolean))].sort();
+  const estados = [...new Set(DATA.map(o=>o.estado_convenio).filter(Boolean))].sort();
+  const anios = [...new Set(DATA.map(o=>o.anio_buena_pro).filter(Boolean))].sort((a,b)=>b-a);
+  fillSelect('#fSector', sectors); fillSelect('#fDepto', deptos); fillSelect('#fEstado', estados); fillSelect('#fAnio', anios);
+}
+function fillSelect(sel, items){
+  const el=$(sel); const first=el.querySelector('option').outerHTML;
+  el.innerHTML = first + items.map(i=>`<option value="${i}">${i}</option>`).join('');
+}
+
+const dateKey = o => o.fecha_convenio || (o.anio_buena_pro ? o.anio_buena_pro+'-01-01' : '');
+const hasEjec = o => Array.isArray(o.infra_ejecutores) && o.infra_ejecutores.some(e=>e && e.consorcio_nombre);
+function filtered(){
+  const q=$('#q').value.toLowerCase().trim();
+  const sec=$('#fSector').value, dep=$('#fDepto').value, dec=$('#fDec').value, est=$('#fEstado').value, ano=$('#fAnio').value, mob=$('#fMob').checked, noEjec=$('#fNoEjec').checked;
+  const hideRev=$('#fHideRev').checked;
+  const fint=$('#fInteres').value;
+  const fcot=$('#fCot').value;
+  const sort=$('#fSort').value;
+  const list = DATA.filter(o=>{
+    if(q){
+      const ejNombres=(o.infra_ejecutores||[]).map(e=>(e.consorcio_nombre||'').toLowerCase()).join(' ');
+      if(!((o.nombre||'').toLowerCase().includes(q)||(o.financista||'').toLowerCase().includes(q)||ejNombres.includes(q))) return false;
+    }
+    if(sec && o.sector!==sec) return false;
+    if(dep && o.departamento!==dep) return false;
+    if(dec && o.ai_recommendation!==dec) return false;
+    if(est && o.estado_convenio!==est) return false;
+    if(ano && String(o.anio_buena_pro)!==ano) return false;
+    if(mob && !o.incluye_mobiliario) return false;
+    if(noEjec && hasEjec(o)) return false;
+    if(hideRev && o.revisado) return false;
+    if(fint==='si' && o.interes!=='si') return false;
+    if(fint==='no' && o.interes!=='no') return false;
+    if(fint==='ocultar_no' && o.interes==='no') return false;
+    if(fint==='pend' && o.interes) return false;
+    if(fcot==='si' && !o.cotizado) return false;
+    if(fcot==='no' && o.cotizado) return false;
+    return true;
+  });
+  const cmp = {
+    score:      (a,b)=>(b.ai_score??-1)-(a.ai_score??-1),
+    fecha_asc:  (a,b)=>{const x=dateKey(a)||'9999',y=dateKey(b)||'9999';return x<y?-1:x>y?1:0;},
+    fecha_desc: (a,b)=>{const x=dateKey(a)||'',y=dateKey(b)||'';return x<y?1:x>y?-1:0;},
+    monto_desc: (a,b)=>(b.monto_inversion??0)-(a.monto_inversion??0),
+    monto_asc:  (a,b)=>(a.monto_inversion??0)-(b.monto_inversion??0),
+    nombre:     (a,b)=>String(a.nombre||'').localeCompare(String(b.nombre||''))
+  }[sort] || ((a,b)=>(b.ai_score??-1)-(a.ai_score??-1));
+  return list.sort(cmp);
+}
+
+async function setInteres(id, val, el){
+  const o = DATA.find(x=>x.id===id);
+  const nuevo = (o && o.interes===val) ? null : val;
+  if(o) o.interes = nuevo;
+  render();
+  try{
+    await fetch('/api/infra/opportunities/'+id+'/interes', {
+      method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ interes: nuevo })
+    });
+  }catch(e){ toast('No se pudo guardar el interés'); }
+}
+
+async function toggleCotizado(id, checked, el){
+  const o = DATA.find(x=>x.id===id); if(o) o.cotizado = checked;
+  try{
+    await fetch('/api/infra/opportunities/'+id+'/cotizado', {
+      method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ cotizado: checked })
+    });
+  }catch(e){ toast('No se pudo guardar el estado cotizado'); }
+}
+
+async function toggleRevisado(id, checked, el){
+  const o = DATA.find(x=>x.id===id); if(o) o.revisado = checked;
+  if($('#fHideRev').checked && checked){ render(); }
+  else { const card = el && el.closest('.card'); if(card) card.style.opacity = checked ? '.5' : ''; }
+  try{
+    await fetch('/api/infra/opportunities/'+id+'/revisado', {
+      method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ revisado: checked })
+    });
+  }catch(e){ toast('No se pudo guardar el estado revisado'); }
+}
+
+function render(){
+  const items = filtered();
+  if(!items.length){ $('#list').innerHTML = '<div class="empty">Sin resultados con estos filtros.</div>'; return; }
+  const head = `<div style="color:var(--muted);font-size:12.5px;margin-bottom:10px;">${items.length} resultado(s)</div>`;
+  $('#list').innerHTML = head + items.map(o=>{
+    const loc = [o.distrito,o.provincia,o.departamento].filter(Boolean).join(', ');
+    const dec = o.ai_recommendation ? `<span class="tag dec-${o.ai_recommendation.toLowerCase()}">${o.ai_recommendation}</span>` : '';
+    const mob = o.incluye_mobiliario ? '<span class="tag mob">Mobiliario</span>' : '';
+    const ejecutor = (o.infra_ejecutores||[]).find(e => e && e.consorcio_nombre);
+    const noej = ejecutor ? '' : '<span class="tag" style="color:var(--amber);border-color:transparent;background:rgba(245,166,35,.12);">Sin ejecutor</span>';
+    const int = o.interes==='si' ? '<span class="tag" style="color:#0f9d72;border-color:transparent;background:rgba(15,157,114,.12);">★ De interés</span>'
+              : o.interes==='no' ? '<span class="tag" style="color:#c0394a;border-color:transparent;background:rgba(192,57,74,.12);">Descartado</span>' : '';
+    return `<div class="card" onclick="openDetail('${o.id}')" style="${(o.revisado||o.interes==='no')?'opacity:.5;':''}">
+      <div class="score ${scoreClass(o.ai_score)}">${o.ai_score??'—'}</div>
+      <div class="card-body">
+        <h3>${o.nombre||'(sin nombre)'}</h3>
+        <div class="meta">
+          <span><b>Financista:</b> ${o.financista||'—'}</span>
+          ${ejecutor ? `<span style="color:var(--accent2);"><b>🏗️ Ejecutor:</b> ${ejecutor.consorcio_nombre}${ejecutor.estado_verificacion?` (${ejecutor.estado_verificacion})`:''}</span>` : ''}
+          <span><b>Monto:</b> ${money(o.monto_inversion)}</span>
+          ${loc?`<span><b>Ubicación:</b> ${loc}</span>`:''}
+          ${o.estado_convenio?`<span><b>Estado:</b> ${o.estado_convenio}</span>`:''}
+          ${o.anio_buena_pro?`<span><b>Buena pro:</b> ${o.anio_buena_pro}</span>`:''}
+          ${o.fecha_convenio?`<span><b>Convenio:</b> ${o.fecha_convenio}</span>`:''}
+        </div>
+        <div class="tags">${int}${dec}${mob}${noej}<span class="tag">${o.sector||o.business_line||''}</span></div>
+      </div>
+      <div class="card-actions" onclick="event.stopPropagation()" style="margin-left:auto;align-self:flex-start;display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
+        <div style="display:flex;gap:6px;">
+          <button onclick="setInteres('${o.id}','si',this)" title="De interés" style="background:${o.interes==='si'?'rgba(52,211,153,.18)':'var(--surface2)'};border:1px solid ${o.interes==='si'?'#34d399':'var(--border2)'};border-radius:8px;padding:2px 8px;font-size:15px;cursor:pointer;line-height:1.4;">👍</button>
+          <button onclick="setInteres('${o.id}','no',this)" title="No interesa" style="background:${o.interes==='no'?'rgba(248,113,113,.18)':'var(--surface2)'};border:1px solid ${o.interes==='no'?'#f87171':'var(--border2)'};border-radius:8px;padding:2px 8px;font-size:15px;cursor:pointer;line-height:1.4;">👎</button>
+        </div>
+        <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);white-space:nowrap;cursor:pointer;"><input type="checkbox" ${o.revisado?'checked':''} onchange="toggleRevisado('${o.id}',this.checked,this)" style="accent-color:var(--accent2);"> Revisado</label>
+        <label style="display:flex;align-items:center;gap:5px;font-size:12px;color:var(--muted);white-space:nowrap;cursor:pointer;"><input type="checkbox" ${o.cotizado?'checked':''} onchange="toggleCotizado('${o.id}',this.checked,this)" style="accent-color:var(--accent2);"> Cotizado</label>
+      </div>
+    </div>`;
   }).join('');
-  return `
-<div style="font-family:Arial,sans-serif;background:#f6f7fb;padding:20px;max-width:680px;margin:0 auto;">
-  <div style="background:#0f766e;color:white;padding:20px;border-radius:12px 12px 0 0;text-align:center;">
-    <h1 style="margin:0;font-size:22px;">🏗️ Radar Infra (OxI/APP) — Grupo Ibero</h1>
-    <p style="margin:6px 0 0;opacity:0.85;">${ops.length} oportunidades de infraestructura</p>
-  </div>
-  <div style="padding:16px 0;">${rows}</div>
-</div>`;
 }
 
-async function sendInfraDigest() {
-  if (!supabase) return { ok: false, message: 'Supabase no configurado' };
-  if (!process.env.SMTP_HOST) return { ok: false, message: 'SMTP no configurado' };
-  const { data: ops } = await supabase.from('infra_oportunidades').select('*')
-    .order('ai_score', { ascending: false, nullsFirst: false }).limit(30);
-  const { data: vendors } = await supabase.from('vendors').select('*');
-  const recipients = (vendors || []).map(v => v.email).filter(Boolean).join(',');
-  if (!recipients) return { ok: false, message: 'No hay vendedores configurados' };
-  const transport = nodemailer.createTransport({
-    host: process.env.SMTP_HOST, port: Number(process.env.SMTP_PORT || 587),
-    secure: String(process.env.SMTP_SECURE || 'false') === 'true',
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-    connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 15000
-  });
-  await transport.verify();
-  const info = await transport.sendMail({
-    from: process.env.MAIL_FROM || process.env.SMTP_USER, to: recipients,
-    subject: `🏗️ ${(ops || []).length} oportunidades Infra (OxI/APP) — Radar Ibero`,
-    html: renderInfraEmail(ops || [])
-  });
-  return { ok: true, recipients, messageId: info.messageId || null };
+async function openDetail(id){
+  const o = DATA.find(x=>x.id===id);
+  CURRENT_ID = id;
+  $('#drawerBg').classList.add('open'); $('#drawer').classList.add('open');
+  $('#drawer').innerHTML = `<button class="closeX" onclick="closeDetail()">×</button>
+    <h2>${o.nombre||'Oportunidad'}</h2>
+    <div class="meta"><span><b>Financista:</b> ${o.financista||'—'}</span></div>
+    <div class="loading">Analizando con IA…</div>`;
+  try{
+    const r = await fetch('/api/infra/opportunities/'+id);
+    const j = await r.json();
+    const op = j.opportunity; Object.assign(o, op); // refresca cache
+    drawDetail(o, j.senales||[], j.ejecutores||[]);
+    renderStats(); // por si recién se puntuó
+  }catch(e){ $('#drawer').querySelector('.loading').textContent='Error: '+e.message; }
 }
-// Diagnóstico SSI/MEF: ¿Render alcanza ofi5 y trae avance/INFOBRAS?
-router.get('/api/infra/ssi-test', async (req, res) => {
-  try {
-    const cui = req.query.cui || '2134829';
-    const url = `https://ofi5.mef.gob.pe/ssi/Ssi/Index?codigo=${encodeURIComponent(cui)}&tipo=2`;
-    const r = await fetch(url, {
-      headers: { 'User-Agent':'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36', 'Accept':'text/html,application/xhtml+xml' },
-      signal: AbortSignal.timeout(30000)
-    });
-    const html = await r.text();
-    const up = html.toUpperCase();
-    res.json({
-      ok:true, status:r.status, length:html.length,
-      tieneInfobras: up.includes('INFOBRAS'),
-      tieneAvance: up.includes('AVANCE'),
-      tieneEjecutor: up.includes('EJECUTOR') || up.includes('CONTRATISTA'),
-      snippet: html.slice(0, 700).replace(/<[^>]+>/g,' ').replace(/\s+/g,' ')
-    });
-  } catch (e) { res.json({ ok:false, error:e.message }); }
-});
-// ─── Rutas (/api/infra/*) ────────────────────────────────────────────────────
-router.get('/api/infra/health', (_, res) =>
-  res.json({ ok: true, supabase: !!supabase, mef_url: MEF_OXI_XLSX_URL }));
 
-// PRINCIPAL: subir el .xlsx bajado desde el navegador (pasa Incapsula)
-router.post('/api/infra/ingest-upload', upload.single('file'), async (req, res, next) => {
-  try {
-    if (!req.file) return res.status(400).json({ ok: false, error: 'Falta el archivo (campo "file")' });
-    res.json({ ok: true, archivo: req.file.originalname, ...(await ingestFromBuffer(req.file.buffer)) });
-  } catch (e) { next(e); }
-});
+function drawDetail(o, senales, ejecutores){
+  const loc=[o.distrito,o.provincia,o.departamento].filter(Boolean).join(', ');
+  const crit=(o.ai_criteria||[]).map(c=>`<div class="crit"><div class="row"><span>${c.name}</span><span>${c.score}/${c.max}</span></div><div class="bar"><span style="width:${Math.round(100*c.score/(c.max||1))}%"></span></div></div>`).join('');
+  const risks=(o.ai_risks||[]).map(x=>`<div class="li"><span class="dot">▸</span>${x}</div>`).join('');
+  const actions=(o.ai_actions||[]).map(x=>`<div class="li"><span class="dot">✓</span>${x}</div>`).join('');
+  const sen=senales.length?senales.map(s=>`<div class="li"><span class="dot">⚑</span>${s.tipo} — ${s.descripcion||''}</div>`).join(''):'<div class="meta">Sin señales registradas.</div>';
+  const ej = ejecutores[0] || {};
+  const gQuery = encodeURIComponent(`${o.nombre||''} ${o.external_id||''} ejecutor consorcio contratista infobras`);
+  const gUrl = 'https://www.google.com/search?q='+gQuery;
+  const ejContactoVal = (ej.contacto && ej.contacto.nota ? ej.contacto.nota : '');
+  const ejecHtml = `
+    ${o.proinversion_url?`<a class="btn" href="${o.proinversion_url}" target="_blank" rel="noopener" style="display:block;text-align:center;box-sizing:border-box;width:100%;margin-bottom:6px;text-decoration:none;">🔗 Ver ejecutora oficial (ProInversión)</a><button class="btn" onclick="cargarProinversion()" id="btnPI" style="width:100%;margin-bottom:8px;">⬇ Cargar ejecutor automáticamente</button><div id="piRes" style="font-size:12.5px;color:var(--muted);margin-bottom:8px;line-height:1.5;"></div>`:''}
+    <div style="display:flex;gap:8px;margin-bottom:10px;">
+      <a class="btn" href="${gUrl}" target="_blank" rel="noopener" style="text-decoration:none;">🔎 Buscar ejecutor</a>
+      <button class="btn ghost" onclick="abrirInfobras()" style="text-decoration:none;cursor:pointer;">INFOBRAS (avance)</button>
+    </div>
+    <button class="btn" onclick="sugerirEjecutor()" id="btnSug" style="width:100%;margin-bottom:8px;">✨ Sugerir ejecutor (IA)</button>
+    <div id="ejSug" style="font-size:12.5px;color:var(--muted);margin-bottom:8px;line-height:1.5;"></div>
+    <input id="ejNombre" placeholder="Consorcio / constructora" value="${(ej.consorcio_nombre||'').replace(/"/g,'&quot;')}" style="width:100%;margin-bottom:7px;">
+    <div style="display:flex;gap:7px;margin-bottom:7px;">
+      <input id="ejRuc" placeholder="RUC" value="${(ej.ruc||'').replace(/"/g,'&quot;')}" style="flex:1;">
+      <select id="ejEstado" style="flex:1;">
+        ${['pendiente','en_revision','confirmado','descartado'].map(s=>`<option value="${s}" ${(ej.estado_verificacion||'en_revision')===s?'selected':''}>${s}</option>`).join('')}
+      </select>
+    </div>
+    <input id="ejContacto" placeholder="Contacto (teléfono / correo / nombre)" value="${ejContactoVal.replace(/"/g,'&quot;')}" style="width:100%;margin-bottom:8px;">
+    <button class="btn" onclick="saveEjecutor()">Guardar ejecutor</button>`;
+  $('#drawer').innerHTML = `<button class="closeX" onclick="closeDetail()">×</button>
+    <h2>${o.nombre||'Oportunidad'}</h2>
+    <div class="tags" style="margin:6px 0 2px;">
+      <span class="score ${scoreClass(o.ai_score)}" style="width:auto;height:auto;padding:2px 12px;border-radius:20px;font-size:14px;">${o.ai_score??'—'}</span>
+      ${o.ai_recommendation?`<span class="tag dec-${o.ai_recommendation.toLowerCase()}">${o.ai_recommendation}</span>`:''}
+      ${o.incluye_mobiliario?'<span class="tag mob">Mobiliario</span>':''}
+    </div>
+    <div class="section"><div class="t">Resumen</div><div>${o.ai_summary||'—'}</div></div>
+    <div class="section"><div class="t">Datos</div>
+      <div class="meta" style="flex-direction:column;gap:4px;">
+        <span><b>Financista:</b> ${o.financista||'—'}</span>
+        <span><b>Entidad:</b> ${o.entidad_publica||'—'}</span>
+        <span><b>Monto inversión:</b> ${money(o.monto_inversion)}</span>
+        ${loc?`<span><b>Ubicación:</b> ${loc}</span>`:''}
+        <span><b>Estado:</b> ${o.estado_convenio||'—'}</span>
+        ${o.anio_buena_pro?`<span><b>Año buena pro:</b> ${o.anio_buena_pro}</span>`:''}
+        ${o.fecha_convenio?`<span><b>Fecha convenio:</b> ${o.fecha_convenio}</span>`:''}
+        <span><b>CUI:</b> ${o.external_id||'—'} ${o.external_id?`<button onclick="copyText('${o.external_id}','CUI')" title="Copiar CUI para pegar en INFOBRAS" style="margin-left:4px;background:var(--surface2);border:1px solid var(--border2);color:var(--muted);border-radius:6px;padding:1px 7px;font-size:11px;cursor:pointer;">⧉ copiar</button>`:''}</span>
+      </div></div>
+    ${crit?`<div class="section"><div class="t">Criterios</div>${crit}</div>`:''}
+    ${o.recommendation?`<div class="section"><div class="t">Recomendación</div><div>${o.recommendation}</div></div>`:''}
+    ${risks?`<div class="section"><div class="t">Riesgos</div>${risks}</div>`:''}
+    ${actions?`<div class="section"><div class="t">Acciones</div>${actions}</div>`:''}
+    <div class="section"><div class="t">Señales</div>${sen}</div>
+    <div class="section"><div class="t">Ejecutor</div>${ejecHtml}</div>
+    <div class="section"><div class="t">Consultar a la IA</div>
+      <div id="chatLog"></div>
+      <div class="chatbox">
+        <input id="chatInput" placeholder="Pregunta sobre esta oportunidad…" onkeydown="if(event.key==='Enter')sendChat()">
+        <button class="btn" onclick="sendChat()">Enviar</button>
+      </div>
+    </div>`;
+}
+function closeDetail(){ $('#drawerBg').classList.remove('open'); $('#drawer').classList.remove('open'); CURRENT_ID=null; }
 
-// Intento por URL (probablemente bloqueado por Incapsula desde Render)
-// Consulta INFOBRAS por CUI (param "valor"). Devuelve estado, código interno y, si están, contratista/avance.
-async function consultarInfobras(cui) {
-  const base = 'https://infobras.contraloria.gob.pe/InfobrasWeb/Mapa/MapaEstadistico/BusquedaAvanzada';
-  const qs = new URLSearchParams({
-    nombre:'', codigo:'', valor:String(cui||''), desde:'', hasta:'', minimo:'', maximo:'',
-    nivel1:'', nivel2:'', nivel3:'', controlSocial:'', controlGubernamental:'', tipoControl:'',
-    marca:'', departamento:'', provincia:'', distrito:'', estado:'', modalidadEjecucion:'',
-    orderBy:'en_ejecucion', pageNumber:'1', pageSize:'20'
-  });
-  const res = await fetch(`${base}?${qs.toString()}`, {
-    headers: {
-      'User-Agent':'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-      'Accept':'application/json, text/plain, */*',
-      'X-Requested-With':'XMLHttpRequest',
-      'Referer':'https://infobras.contraloria.gob.pe/InfobrasWeb/Mapa/Index'
-    },
-    signal: AbortSignal.timeout(20000)
-  });
-  if (!res.ok) throw new Error(`INFOBRAS HTTP ${res.status}`);
-  const data = await res.json();
-  const r = (data.Result || [])[0];
-  if (!r) return { registrada: false };
-  return {
-    registrada: true,
-    estado: r.Estado || null,
-    codigoInfobras: r.Codigo || null,
-    nombre: r.NombreObra || null,
-    ubicacion: r.Ubicacion || null,
-    contratista: r.Contratista || null,
-    avanceFisico: r.AvanceFisico ?? null
+function escapeHtml(s){ return String(s).replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function copyText(text, label){
+  if(navigator.clipboard){ navigator.clipboard.writeText(text).then(()=>toast((label||'Texto')+' copiado: '+text)).catch(()=>toast('No se pudo copiar')); }
+  else { toast('Copia manual: '+text); }
+}
+async function sendChat(){
+  const inp=$('#chatInput'); if(!inp) return;
+  const q=inp.value.trim(); if(!q || !CURRENT_ID) return;
+  const log=$('#chatLog');
+  log.innerHTML += `<div class="msg q">${escapeHtml(q)}</div>`;
+  inp.value=''; inp.disabled=true;
+  const wait=document.createElement('div'); wait.className='msg a'; wait.textContent='…';
+  log.appendChild(wait); log.scrollTop=log.scrollHeight;
+  try{
+    const r=await fetch('/api/infra/opportunities/'+CURRENT_ID+'/ask',{
+      method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({question:q})
+    });
+    const j=await r.json();
+    wait.textContent = j.ok ? j.answer : ('Error: '+(j.error||'desconocido'));
+  }catch(e){ wait.textContent='Error: '+e.message; }
+  inp.disabled=false; inp.focus(); log.scrollTop=log.scrollHeight;
+}
+
+async function saveEjecutor(){
+  if(!CURRENT_ID) return;
+  const nota=$('#ejContacto').value.trim();
+  const body={
+    consorcio_nombre: $('#ejNombre').value.trim(),
+    ruc: $('#ejRuc').value.trim(),
+    contacto: nota ? { nota } : null,
+    estado_verificacion: $('#ejEstado').value,
+    fuente: 'manual'
   };
+  try{
+    const r=await fetch('/api/infra/opportunities/'+CURRENT_ID+'/ejecutor',{
+      method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)
+    });
+    const j=await r.json();
+    if(j.ok){
+      toast('Ejecutor guardado.');
+      const o=DATA.find(x=>x.id===CURRENT_ID);
+      if(o){ o.infra_ejecutores=[{consorcio_nombre:body.consorcio_nombre, estado_verificacion:body.estado_verificacion}]; render(); }
+    } else toast('Error: '+(j.error||'desconocido'));
+  }catch(e){ toast('Error: '+e.message); }
 }
 
-router.get('/api/infra/opportunities/:id/infobras', async (req, res, next) => {
-  try {
-    if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
-    const { data: op } = await supabase.from('infra_oportunidades').select('external_id').eq('id', req.params.id).single();
-    if (!op) return res.status(404).json({ ok: false, error: 'No encontrada' });
-    const info = await consultarInfobras(op.external_id);
-    res.json({ ok: true, infobras: info });
-  } catch (e) { next(e); }
-});
-router.post('/api/infra/ingest', async (_, res, next) => {
-  try { res.json({ ok: true, ...(await ingestOxiMefURL()) }); } catch (e) { next(e); }
-});
-// Diagnóstico ProInversión: trae el detalle desde el servidor y reporta si la ejecutora viene en el HTML
-router.get('/api/infra/proinversion-test', async (req, res) => {
-  try {
-    const url = req.query.url || 'https://www.investinperu.pe/procesos-de-seleccion/procesos-de-seleccion-detalle/?1056/1653';
-    const r = await fetch(url, {
-      headers: {
-        'User-Agent':'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-        'Accept':'text/html,application/xhtml+xml'
-      },
-      signal: AbortSignal.timeout(20000)
-    });
-    const html = await r.text();
-    const up = html.toUpperCase();
-    const idx = up.indexOf('EJECUTORA');
-    const rucs = (html.match(/\b\d{11}\b/g) || []).slice(0, 12);
-    res.json({
-      ok: true, status: r.status, length: html.length,
-      tieneEjecutora: idx >= 0,
-      tieneAdjudicataria: up.includes('ADJUDICATARIA'),
-      rucsEncontrados: rucs,
-      snippet: idx >= 0 ? html.slice(idx, idx + 700).replace(/<[^>]+>/g,' ').replace(/\s+/g,' ') : html.slice(0, 500)
-    });
-  } catch (e) { res.json({ ok: false, error: e.message }); }
-});router.get('/api/infra/opportunities', async (req, res, next) => {
-  try {
-    if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
-    let q = supabase.from('infra_oportunidades').select('id,fuente,external_id,nombre,entidad_publica,financista,sector,departamento,provincia,distrito,monto_inversion,etapa,estado_convenio,estado_ejecucion,incluye_mobiliario,business_line,ai_summary,ai_score,ai_recommendation,ai_criteria,ai_risks,ai_actions,fecha_deteccion,anio_buena_pro,fecha_convenio,infra_ejecutores(consorcio_nombre,estado_verificacion),proinversion_url,proinversion_estado,revisado,interes')
-      .order('ai_score', { ascending: false, nullsFirst: false }).limit(500);
-    if (req.query.sector)       q = q.ilike('sector', `%${req.query.sector}%`);
-    if (req.query.financista)   q = q.ilike('financista', `%${req.query.financista}%`);
-    if (req.query.departamento) q = q.ilike('departamento', `%${req.query.departamento}%`);
-    const { data, error } = await q;
-    if (error) throw error;
-    res.json({ ok: true, count: data.length, opportunities: data });
-  } catch (e) { next(e); }
-});
-
-router.get('/api/infra/opportunities/:id', async (req, res, next) => {
-  try {
-    if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
-    const { data: op } = await supabase.from('infra_oportunidades').select('*').eq('id', req.params.id).single();
-    if (!op) return res.status(404).json({ ok: false, error: 'No encontrada' });
-    const analyzed = op.ai_summary ? op : await scoreOpportunity(req.params.id);
-    const { data: senales } = await supabase.from('infra_senales').select('*').eq('oportunidad_id', req.params.id);
-    const { data: ejecutores } = await supabase.from('infra_ejecutores').select('*').eq('oportunidad_id', req.params.id);
-    res.json({ ok: true, opportunity: analyzed, senales: senales || [], ejecutores: ejecutores || [] });
-  } catch (e) { next(e); }
-});
-// Chat sobre una oportunidad (grounded en sus datos + análisis IA; sin RAG porque OxI no trae documentos)
-// Guardar/actualizar el ejecutor de una oportunidad (cola de enriquecimiento)
-// Búsqueda web del ejecutor (Responses API + web_search), con fallback de variante
-// Búsqueda web del ejecutor (Responses API + web_search), con fallback de variante
-async function buscarEjecutorWeb(input) {
-  const model = process.env.INFRA_SEARCH_MODEL || 'gpt-4o';
-  try {
-    return await openai.responses.create({ model, tools: [{ type: 'web_search' }], input });
-  } catch (e) {
-    return await openai.responses.create({ model, tools: [{ type: 'web_search_preview' }], input });
-  }
+function infobrasQuery(o){
+  const nombre=(o.nombre||'').replace(/\s+/g,' ').trim();
+  const stop=/\b(DEL? DISTRITO|DISTRITO|DE LA PROVINCIA|PROVINCIA|DEL? DEPARTAMENTO|DEPARTAMENTO)\b/i;
+  let core='';
+  const m=nombre.match(/\b(I\.?E\.?[ISP]?\.?|C\.?E\.?|INSTITUCI[ÓO]N EDUCATIVA|COLEGIO|CEBA|CETPRO|ESCUELA)\b(.*)/i);
+  if(m){ core=m[1]+' '+m[2]; }
+  else { const e=nombre.match(/\bEN\b(.*)/i); if(e) core=e[1]; }
+  if(core){ const s=core.search(stop); if(s>0) core=core.slice(0,s); }
+  core=core.replace(/^\s*(DE\s+LA|DE\s+EL|DEL|DE|LA|EL)\s+/i,'').replace(/\s+/g,' ').trim().slice(0,55);
+  const dist=o.distrito?(' '+o.distrito):'';
+  return ((core||nombre.slice(0,40))+dist).trim();
+}
+function abrirInfobras(){
+  const o=DATA.find(x=>x.id===CURRENT_ID);
+  const query=o?infobrasQuery(o):'';
+  if(navigator.clipboard && query){
+    navigator.clipboard.writeText(query).then(()=>toast('Copiado para INFOBRAS: "'+query+'" — pégalo (Cmd+V) en el buscador')).catch(()=>{});
+  } else { toast('Abriendo INFOBRAS…'); }
+  window.open('https://infobras.contraloria.gob.pe/InfobrasWeb/Mapa/Index','_blank','noopener');
 }
 
-function normNombre(s){ return String(s||'').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[^A-Z0-9 ]/g,' ').replace(/\s+/g,' ').trim(); }
-
-// Sugerir ejecutor: la IA busca en la web y PROPONE; el humano confirma y guarda
-router.post('/api/infra/opportunities/:id/sugerir-ejecutor', async (req, res, next) => {
-  try {
-    if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
-    const { data: op } = await supabase.from('infra_oportunidades').select('*').eq('id', req.params.id).single();
-    if (!op) return res.status(404).json({ ok: false, error: 'No encontrada' });
-
-    const loc = [op.distrito, op.provincia, op.departamento].filter(Boolean).join(', ');
-    const fin = op.financista || 'desconocido';
-    const input = `Eres un investigador de obras públicas peruanas. Tu única tarea es identificar la EMPRESA EJECUTORA (la constructora o consorcio de construcción que FÍSICAMENTE construye la obra) de este proyecto, ejecutado bajo Obras por Impuestos (OxI).
-
-REGLA CRÍTICA: en OxI hay DOS empresas distintas. La FINANCISTA aporta el dinero (suele ser un banco o una minera: BCP, Antamina, Southern, Interbank, etc.). La EJECUTORA construye (constructora o consorcio de obra civil). NUNCA las confundas.
-- La financista de ESTA obra es: "${fin}". Ese nombre está PROHIBIDO como respuesta. Si lo único que encuentras es la financista, responde ejecutor=null.
-- Tampoco aceptes a la entidad pública (PRONIED, municipalidad, gobierno regional, Minedu) como ejecutor.
-- Un ejecutor válido se ve así: "Consorcio ...", "Constructora ...", "... Contratistas Generales", "... Ingeniería y Construcción".
-
-Proyecto: ${op.nombre}
-CUI: ${op.external_id}
-Entidad pública: ${op.entidad_publica || ''}
-Ubicación: ${loc}
-
-Busca frases explícitas: "ejecución a cargo de", "ejecutada por el consorcio", "contratista", "construye la obra". Prioriza INFOBRAS (campo Ejecutor/Contratista), notas de colocación de primera piedra y convenios. Si no hallas una constructora claramente distinta de la financista, responde ejecutor=null con confianza "baja".
-
-Responde ÚNICAMENTE con JSON válido, sin texto adicional:
-{"ejecutor":"constructora/consorcio o null","ruc":"RUC o null","confianza":"alta|media|baja","fuente":"URL principal","nota":"1 oración explicando el hallazgo o por qué no se encontró"}`;
-
-    const r = await buscarEjecutorWeb(input);
-    const text = (r.output_text || '').replace(/```json|```/g, '').trim();
-    let sug;
-    try { sug = JSON.parse(text); } catch { sug = { ejecutor: null, confianza: 'baja', nota: (text || '').slice(0, 300) }; }
-
-    // Candado determinista: si la "sugerencia" es la financista (o la contiene), se descarta
-    if (sug && sug.ejecutor && op.financista) {
-      const e = normNombre(sug.ejecutor), f = normNombre(op.financista);
-      if (e && f && (e.includes(f) || f.includes(e))) {
-        sug = { ejecutor: null, confianza: 'baja', fuente: sug.fuente || null,
-                nota: 'Solo se halló la empresa financista, no el ejecutor. Verifícalo manualmente en INFOBRAS.' };
+let PI_EJECUTORAS = [];
+async function cargarProinversion(){
+  if(!CURRENT_ID) return;
+  const btn=$('#btnPI'), out=$('#piRes');
+  btn.disabled=true; out.innerHTML='Cargando de ProInversión…';
+  try{
+    const r=await fetch('/api/infra/opportunities/'+CURRENT_ID+'/cargar-proinversion',{method:'POST'});
+    const j=await r.json();
+    if(j.ok){
+      const ej=j.ejecutoras||[];
+      const adj=(j.adjudicatarias||[]).map(a=>a.nombre).join(', ');
+      if(!ej.length){ out.innerHTML='ProInversión aún no muestra ejecutora (proceso sin adjudicar todavía).'; }
+      else if(ej.length===1){
+        if($('#ejNombre')) $('#ejNombre').value=ej[0].nombre;
+        if($('#ejRuc')) $('#ejRuc').value=ej[0].ruc||'';
+        out.innerHTML=`Ejecutor cargado: <b style="color:var(--text);">${ej[0].nombre}</b>${ej[0].ruc?` · RUC ${ej[0].ruc}`:''}.${adj?`<br>Financista: ${adj}.`:''} Revisa y guarda.`;
+      } else {
+        PI_EJECUTORAS=ej;
+        const ops=ej.map((e,i)=>`<button onclick="aplicarEjecutorIdx(${i},this)" style="display:block;width:100%;text-align:left;margin:4px 0;background:var(--surface2);border:1px solid var(--border2);color:var(--text);border-radius:8px;padding:7px 10px;font-size:12.5px;cursor:pointer;">${escapeHtml(e.nombre)}${e.ruc?` · ${e.ruc}`:''}</button>`).join('');
+        out.innerHTML=`<b style="color:var(--text);">Consorcio de ${ej.length} empresas.</b> Elige <b>una</b> para cargar como cliente (evita duplicar en el CRM):${ops}${adj?`<div style="margin-top:6px;">Financista: ${adj}.</div>`:''}`;
       }
-    }
-    res.json({ ok: true, sugerencia: sug });
-  } catch (e) { next(e); }
-});
-
-// Sugerir ejecutor: la IA busca en la web y PROPONE; el humano confirma y guarda
-router.post('/api/infra/opportunities/:id/sugerir-ejecutor', async (req, res, next) => {
-  try {
-    if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
-    const { data: op } = await supabase.from('infra_oportunidades').select('*').eq('id', req.params.id).single();
-    if (!op) return res.status(404).json({ ok: false, error: 'No encontrada' });
-
-    const loc = [op.distrito, op.provincia, op.departamento].filter(Boolean).join(', ');
-    const input = `Investiga en la web quién es la EMPRESA EJECUTORA (constructora o consorcio) de esta obra pública peruana, ejecutada bajo Obras por Impuestos (OxI). En OxI el ejecutor NO es la financista ni la entidad pública: es la constructora que construye la obra.
-
-Proyecto: ${op.nombre}
-CUI: ${op.external_id}
-Financista (NO es el ejecutor): ${op.financista || 'desconocido'}
-Entidad: ${op.entidad_publica || ''}
-Ubicación: ${loc}
-
-Busca en INFOBRAS, PRONIED, notas de prensa de colocación de primera piedra, convenios de inversión e informes de Contraloría. Responde ÚNICAMENTE con JSON válido, sin texto adicional:
-{"ejecutor":"nombre del consorcio/constructora o null","ruc":"RUC si aparece o null","confianza":"alta|media|baja","fuente":"URL de la fuente principal","nota":"1 oración explicando el hallazgo"}`;
-
-    const r = await buscarEjecutorWeb(input);
-    const text = (r.output_text || '').replace(/```json|```/g, '').trim();
-    let sug;
-    try { sug = JSON.parse(text); }
-    catch { sug = { ejecutor: null, confianza: 'baja', nota: (text || '').slice(0, 300) }; }
-    res.json({ ok: true, sugerencia: sug });
-  } catch (e) { next(e); }
-});
-router.put('/api/infra/opportunities/:id/ejecutor', async (req, res, next) => {
-  try {
-    if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
-    const { consorcio_nombre, ruc, contacto, estado_verificacion, fuente } = req.body;
-    const payload = {
-      oportunidad_id: req.params.id,
-      consorcio_nombre: consorcio_nombre || null,
-      ruc: ruc || null,
-      contacto: contacto || null,
-      estado_verificacion: estado_verificacion || 'en_revision',
-      fuente: fuente || 'infobras',
-      updated_at: new Date().toISOString()
-    };
-    const { data: existing } = await supabase.from('infra_ejecutores').select('id').eq('oportunidad_id', req.params.id).limit(1);
-    let result;
-    if (existing && existing.length) {
-      result = await supabase.from('infra_ejecutores').update(payload).eq('id', existing[0].id).select().single();
-    } else {
-      result = await supabase.from('infra_ejecutores').insert(payload).select().single();
-    }
-    if (result.error) throw result.error;
-    res.json({ ok: true, ejecutor: result.data });
-  } catch (e) { next(e); }
-});
-router.post('/api/infra/opportunities/:id/ask', async (req, res, next) => {
-  try {
-    if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
-    const { question } = req.body;
-    if (!question || !question.trim()) return res.status(400).json({ ok: false, error: 'La pregunta es requerida' });
-    const { data: op } = await supabase.from('infra_oportunidades').select('*').eq('id', req.params.id).single();
-    if (!op) return res.status(404).json({ ok: false, error: 'No encontrada' });
-    const { data: senales } = await supabase.from('infra_senales').select('*').eq('oportunidad_id', req.params.id);
-    const { data: ejecutores } = await supabase.from('infra_ejecutores').select('*').eq('oportunidad_id', req.params.id);
-
-    const ctx = `OPORTUNIDAD (canal: ${op.fuente})
-Nombre: ${op.nombre || ''}
-Entidad pública: ${op.entidad_publica || ''}
-Financista: ${op.financista || ''}
-Sector: ${op.sector || ''}
-Ubicación: ${[op.distrito, op.provincia, op.departamento].filter(Boolean).join(', ')}
-Monto inversión: ${op.monto_inversion ? 'S/ ' + Number(op.monto_inversion).toLocaleString('es-PE') : 'No especificado'}
-Estado: ${op.estado_convenio || op.etapa || 'No especificado'}
-CUI: ${op.external_id || ''}
-¿Incluye mobiliario?: ${op.incluye_mobiliario ? 'Sí' : 'Por confirmar'}
-
-ANÁLISIS IA:
-Resumen: ${op.ai_summary || 'No analizado aún'}
-Score: ${op.ai_score ?? '—'} · Decisión: ${op.ai_recommendation || '—'}
-Riesgos: ${(op.ai_risks || []).join('; ') || '—'}
-Acciones: ${(op.ai_actions || []).join('; ') || '—'}
-
-SEÑALES: ${(senales || []).map(s => `${s.tipo}: ${s.descripcion || ''}`).join(' | ') || 'ninguna'}
-EJECUTOR: ${(ejecutores || []).map(e => `${e.consorcio_nombre || 'por confirmar'} (${e.estado_verificacion})`).join(', ') || 'no identificado'}`;
-
-    const prompt = `Eres un asistente comercial experto en infraestructura pública/privada (OxI, APP, PRONIED) para Grupo Ibero Perú (fabrica mobiliario escolar, hospitalario, de oficina y metálico). En estos canales el comprador del mobiliario suele ser el EJECUTOR de la obra, no la entidad ni la financista.
-
-${ctx}
-
-PREGUNTA: ${question}
-
-Responde claro, práctico y orientado a decisión comercial. Si la respuesta exige un dato que no está arriba (p.ej. quién es el ejecutor), dilo y sugiere dónde buscarlo (convenio, informe de Contraloría).`;
-
-    const r = await openai.chat.completions.create({
-      model: 'gpt-4o', messages: [{ role: 'user', content: prompt }], temperature: 0.3, max_tokens: 1500
-    });
-    res.json({ ok: true, answer: r.choices[0].message.content });
-  } catch (e) { next(e); }
-});
-// Ingesta del Excel de ProInversión (Procesos de selección OxI): mapea CUI -> enlace al detalle (donde está la ejecutora)
-async function ingestProinversion(buf) {
-  if (!supabase) throw new Error('Supabase no configurado');
-  if (!buf || buf.length < 4 || buf[0] !== 0x50 || buf[1] !== 0x4B) throw new Error('No es un .xlsx válido');
-  const wb = XLSX.read(buf, { type: 'buffer' });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  const range = XLSX.utils.decode_range(ws['!ref']);
-
-  let headerRow = -1; const cols = {};
-  for (let r = range.s.r; r <= Math.min(range.s.r + 15, range.e.r); r++) {
-    let found = false;
-    for (let c = range.s.c; c <= range.e.c; c++) {
-      const cell = ws[XLSX.utils.encode_cell({ r, c })];
-      const v = cell ? normaliza(cell.v) : '';
-      if (v.includes('CODIGO UNICO') || v === 'CUI') found = true;
-    }
-    if (found) {
-      headerRow = r;
-      for (let c = range.s.c; c <= range.e.c; c++) {
-        const cell = ws[XLSX.utils.encode_cell({ r, c })];
-        const v = cell ? normaliza(cell.v) : '';
-        if (v.includes('CODIGO UNICO') || v === 'CUI') cols.cui = c;
-        else if (v.includes('ENLACE PORTAL') || (v.includes('PORTAL') && v.includes('PROINVERSION'))) cols.link = c;
-        else if (v.includes('TIPO') && v.includes('CONVOCATORIA')) cols.tipo = c;
-        else if (v === 'ESTADO') cols.estado = c;
-      }
-      break;
-    }
+    } else out.textContent='Error: '+(j.error||'desconocido');
+  }catch(e){ out.textContent='Error: '+e.message; }
+  btn.disabled=false;
+}
+function aplicarEjecutorIdx(i, el){
+  const e=PI_EJECUTORAS[i]; if(!e) return;
+  if($('#ejNombre')) $('#ejNombre').value=e.nombre;
+  if($('#ejRuc')) $('#ejRuc').value=e.ruc||'';
+  if(el && el.parentElement){
+    [...el.parentElement.querySelectorAll('button')].forEach(b=>{b.style.borderColor='var(--border2)';b.style.background='var(--surface2)';});
+    el.style.borderColor='var(--accent2)'; el.style.background='rgba(15,118,110,.18)';
   }
-  if (headerRow < 0 || cols.cui == null || cols.link == null) throw new Error('No se detectó encabezado (CUI/Enlace) en el Excel de ProInversión');
-
-  const byCui = new Map();
-  for (let r = headerRow + 1; r <= range.e.r; r++) {
-    const cuiCell = ws[XLSX.utils.encode_cell({ r, c: cols.cui })];
-    if (!cuiCell || cuiCell.v == null) continue;
-    const cui = String(cuiCell.v).trim();
-    const tipo = cols.tipo != null ? normaliza((ws[XLSX.utils.encode_cell({ r, c: cols.tipo })] || {}).v) : '';
-    const estado = cols.estado != null ? (ws[XLSX.utils.encode_cell({ r, c: cols.estado })] || {}).v : null;
-    const linkCell = ws[XLSX.utils.encode_cell({ r, c: cols.link })];
-    const url = linkCell && linkCell.l ? linkCell.l.Target : null;
-    if (!url) continue;
-    const isEmpresa = tipo.includes('EMPRESA PRIVADA');
-    const prev = byCui.get(cui);
-    if (!prev || (isEmpresa && !prev.isEmpresa)) byCui.set(cui, { url, estado, isEmpresa });
-  }
-
-  let matched = 0;
-  for (const [cui, info] of byCui) {
-    const { data, error } = await supabase.from('infra_oportunidades')
-      .update({ proinversion_url: info.url, proinversion_estado: info.estado, updated_at: new Date().toISOString() })
-      .eq('external_id', cui).select('id');
-    if (!error && data && data.length) matched += data.length;
-  }
-  return { procesos: byCui.size, oportunidades_actualizadas: matched };
 }
 
-router.post('/api/infra/ingest-proinversion', upload.single('file'), async (req, res, next) => {
-  try {
-    if (!req.file) return res.status(400).json({ ok: false, error: 'Falta el archivo (campo "file")' });
-    res.json({ ok: true, archivo: req.file.originalname, ...(await ingestProinversion(req.file.buffer)) });
-  } catch (e) { next(e); }
-});
-
-// --- ProInversión: extraer ejecutoras/adjudicatarias del HTML del detalle ---
-function piParseDescripcion(s) {
-  if (!s) return [];
-  return s.split(';').map(p => {
-    const f = p.split('|');
-    const nombre = (f[0] || '').trim().replace(/&amp;/g, '&');
-    const ruc = (f[1] || '').trim();
-    return nombre ? { nombre, ruc: /^\d{11}$/.test(ruc) ? ruc : null } : null;
-  }).filter(Boolean);
-}
-function piExtractField(html, field) {
-  const m = html.match(new RegExp('"' + field + '"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"'));
-  return m ? m[1] : null;
-}
-async function fetchProinversionEmpresas(url) {
-  let lastErr;
-  for (let intento = 0; intento < 2; intento++) {
-    try {
-      const r = await fetch(url, {
-        headers: { 'User-Agent':'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36', 'Accept':'text/html,application/xhtml+xml' },
-        signal: AbortSignal.timeout(45000)
-      });
-      if (!r.ok) throw new Error(`ProInversión HTTP ${r.status}`);
-      const html = await r.text();
-      return {
-        ejecutoras: piParseDescripcion(piExtractField(html, 'EjecutoraDescripcion')),
-        adjudicatarias: piParseDescripcion(piExtractField(html, 'AdjudicatariaDescripcion'))
-      };
-    } catch (e) { lastErr = e; }
-  }
-  throw lastErr;
+async function sugerirEjecutor(){
+  if(!CURRENT_ID) return;
+  const btn=$('#btnSug'), out=$('#ejSug');
+  btn.disabled=true; out.innerHTML='Buscando en la web…';
+  try{
+    const r=await fetch('/api/infra/opportunities/'+CURRENT_ID+'/sugerir-ejecutor',{method:'POST'});
+    const j=await r.json();
+    if(j.ok && j.sugerencia){
+      const s=j.sugerencia;
+      if(s.ejecutor && $('#ejNombre')) $('#ejNombre').value=s.ejecutor;
+      if(s.ruc && $('#ejRuc')) $('#ejRuc').value=s.ruc;
+      const src = s.fuente ? ` · <a href="${s.fuente}" target="_blank" rel="noopener" style="color:var(--accent);">fuente</a>` : '';
+      out.innerHTML = s.ejecutor
+        ? `Sugerencia: <b style="color:var(--text);">${s.ejecutor}</b> (confianza: ${s.confianza||'?'})${src}<br>${s.nota||''} — revisa y guarda.`
+        : `No se encontró un ejecutor claro. ${s.nota||''}`;
+    } else out.textContent='Error: '+(j.error||'desconocido');
+  }catch(e){ out.textContent='Error: '+e.message; }
+  btn.disabled=false;
 }
 
-router.post('/api/infra/opportunities/:id/cargar-proinversion', async (req, res, next) => {
-  try {
-    if (!supabase) return res.status(503).json({ ok:false, error:'Supabase no configurado' });
-    const { data: op } = await supabase.from('infra_oportunidades').select('proinversion_url').eq('id', req.params.id).single();
-    if (!op) return res.status(404).json({ ok:false, error:'No encontrada' });
-    if (!op.proinversion_url) return res.json({ ok:false, error:'Esta oportunidad no tiene proceso en ProInversión' });
-    const emp = await fetchProinversionEmpresas(op.proinversion_url);
-    res.json({ ok:true, ...emp });
-  } catch (e) { next(e); }
-});
-router.put('/api/infra/opportunities/:id/revisado', async (req, res, next) => {
-  try {
-    if (!supabase) return res.status(503).json({ ok:false, error:'Supabase no configurado' });
-    const revisado = !!req.body.revisado;
-    const { error } = await supabase.from('infra_oportunidades')
-      .update({ revisado, revisado_at: revisado ? new Date().toISOString() : null })
-      .eq('id', req.params.id);
-    if (error) throw error;
-    res.json({ ok:true, revisado });
-  } catch (e) { next(e); }
+// Upload base MEF
+$('#file').addEventListener('change', async e=>{
+  const f=e.target.files[0]; if(!f) return;
+  toast('Subiendo y procesando ' + f.name + '…');
+  const fd=new FormData(); fd.append('file', f);
+  try{
+    const r=await fetch('/api/infra/ingest-upload',{method:'POST',body:fd});
+    const j=await r.json();
+    if(j.ok) toast(`Listo: ${j.relevantes} oportunidades de ${j.total_filas} filas.`);
+    else toast('Error: '+(j.error||'desconocido'));
+    load();
+  }catch(err){ toast('Error: '+err.message); }
+  e.target.value='';
 });
 
-router.put('/api/infra/opportunities/:id/interes', async (req, res, next) => {
-  try {
-    if (!supabase) return res.status(503).json({ ok:false, error:'Supabase no configurado' });
-    const v = req.body.interes;
-    const interes = (v === 'si' || v === 'no') ? v : null;
-    const { error } = await supabase.from('infra_oportunidades').update({ interes }).eq('id', req.params.id);
-    if (error) throw error;
-    res.json({ ok:true, interes });
-  } catch (e) { next(e); }
-});
-router.put('/api/infra/opportunities/:id/cotizado', async (req, res, next) => {
-  try {
-    if (!supabase) return res.status(503).json({ ok:false, error:'Supabase no configurado' });
-    const cotizado = !!req.body.cotizado;
-    const { error } = await supabase.from('infra_oportunidades')
-      .update({ cotizado, cotizado_at: cotizado ? new Date().toISOString() : null })
-      .eq('id', req.params.id);
-    if (error) throw error;
-    res.json({ ok:true, cotizado });
-  } catch (e) { next(e); }
-});
-router.post('/api/infra/score-pending', async (req, res, next) => {
-  try {
-    if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
-    const limit = Math.min(Number(req.query.limit || 10), 50);
-    const { data } = await supabase.from('infra_oportunidades').select('id').is('ai_score', null).limit(limit);
-    let done = 0;
-    for (const row of data || []) { try { await scoreOpportunity(row.id); done++; } catch (e) { console.error(e.message); } }
-    res.json({ ok: true, scored: done });
-  } catch (e) { next(e); }
+// Upload Excel ProInversión (enlaza ejecutoras por CUI)
+$('#filePI').addEventListener('change', async e=>{
+  const f=e.target.files[0]; if(!f) return;
+  toast('Subiendo ProInversión: '+f.name+'…');
+  const fd=new FormData(); fd.append('file', f);
+  try{
+    const r=await fetch('/api/infra/ingest-proinversion',{method:'POST',body:fd});
+    const j=await r.json();
+    if(j.ok) toast(`ProInversión: ${j.oportunidades_actualizadas} oportunidades enlazadas (de ${j.procesos} procesos).`);
+    else toast('Error: '+(j.error||'desconocido'));
+    load();
+  }catch(err){ toast('Error: '+err.message); }
+  e.target.value='';
 });
 
-router.post('/api/infra/senales', async (req, res, next) => {
-  try {
-    if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
-    const { oportunidad_id, tipo, descripcion, severidad, fecha, fuente_url } = req.body;
-    const { data, error } = await supabase.from('infra_senales')
-      .insert({ oportunidad_id, tipo, descripcion, severidad, fecha, fuente_url }).select().single();
-    if (error) throw error;
-    res.json({ ok: true, senal: data });
-  } catch (e) { next(e); }
+// Puntuar pendientes
+$('#btnScore').addEventListener('click', async ()=>{
+  const lim=$('#scoreLimit').value;
+  $('#btnScore').disabled=true; toast('Puntuando hasta '+lim+' oportunidades…');
+  try{
+    const r=await fetch('/api/infra/score-pending?limit='+lim,{method:'POST'});
+    const j=await r.json();
+    toast(`Puntuadas: ${j.scored}.`); load();
+  }catch(e){ toast('Error: '+e.message); }
+  $('#btnScore').disabled=false;
 });
 
-router.get('/api/infra/send-digest', async (_, res, next) => { try { res.json(await sendInfraDigest()); } catch (e) { next(e); } });
-router.post('/api/infra/send-digest', async (_, res, next) => { try { res.json(await sendInfraDigest()); } catch (e) { next(e); } });
+$('#btnReload').addEventListener('click', load);
+['#q','#fSector','#fDepto','#fEstado','#fAnio','#fDec','#fSort','#fMob','#fNoEjec','#fHideRev','#fInteres','#fCot'].forEach(s=>$(s).addEventListener('input', render));
+$('#drawerBg').addEventListener('click', closeDetail);
 
-// Para el cron de server.js (intenta por URL; si Incapsula bloquea, solo registra el error)
-export async function runInfraIngest() {
-  const r = await ingestOxiMefURL();
-  console.log(`[INFRA][CRON] OxI MEF: ${r.relevantes} relevantes de ${r.total_filas} filas`);
-  return r;
-}
-
-export default router;
-
-// ============================================================================
-// INTEGRACIÓN EN server.js (sin cambios respecto a v1):
-//   1) import infraRouter, { runInfraIngest } from './infra.js';
-//   2) app.use(infraRouter);   (antes del middleware de error)
-//   3) (opcional) cron — ojo: por Incapsula probablemente falle; el flujo real
-//      es subir el archivo a mano con /api/infra/ingest-upload una vez al mes.
-//
-// package.json: "xlsx" (nuevo) y "multer" (YA lo tienes) deben estar presentes.
-// ============================================================================
+load();
+// Si llega ?id=… (desde el correo), abre ese detalle
+const pid=new URLSearchParams(location.search).get('id');
+if(pid) setTimeout(()=>openDetail(pid), 800);
+</script>
+</body>
+</html>
