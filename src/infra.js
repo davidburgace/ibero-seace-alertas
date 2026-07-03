@@ -303,6 +303,23 @@ router.get('/api/infra/opportunities', async (req, res, next) => {
     if (req.query.departamento) q = q.ilike('departamento', `%${req.query.departamento}%`);
     const { data, error } = await q;
     if (error) throw error;
+
+    // Adjuntar los ejecutores ya encontrados (tabla separada), para que se vean en la tarjeta sin abrir el detalle.
+    const ids = (data || []).map(o => o.id);
+    if (ids.length) {
+      const { data: ejecutores, error: errEj } = await supabase.from('infra_ejecutores')
+        .select('*').in('oportunidad_id', ids);
+      if (errEj) console.error('[INFRA] Error cargando ejecutores para el listado:', errEj.message);
+      else {
+        const porOportunidad = {};
+        (ejecutores || []).forEach(e => {
+          if (!porOportunidad[e.oportunidad_id]) porOportunidad[e.oportunidad_id] = [];
+          porOportunidad[e.oportunidad_id].push(e);
+        });
+        (data || []).forEach(o => { o.infra_ejecutores = porOportunidad[o.id] || []; });
+      }
+    }
+
     res.json({ ok: true, count: data.length, opportunities: data });
   } catch (e) { next(e); }
 });
@@ -330,6 +347,38 @@ router.post('/api/infra/score-pending', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Guardar/actualizar el ejecutor (constructora/consorcio) de una oportunidad, a mano.
+router.put('/api/infra/opportunities/:id/ejecutor', async (req, res, next) => {
+  try {
+    if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
+    const { id } = req.params;
+    const { consorcio_nombre, ruc, contacto, estado_verificacion, fuente } = req.body;
+    if (!consorcio_nombre) return res.status(400).json({ ok: false, error: 'consorcio_nombre es requerido' });
+
+    const { data: existente } = await supabase.from('infra_ejecutores')
+      .select('id').eq('oportunidad_id', id).limit(1).maybeSingle();
+
+    const payload = {
+      oportunidad_id: id,
+      consorcio_nombre,
+      ruc: ruc || null,
+      contacto: contacto || null,
+      estado_verificacion: estado_verificacion || null,
+      fuente: fuente || 'manual',
+      updated_at: new Date().toISOString()
+    };
+
+    let error;
+    if (existente) {
+      ({ error } = await supabase.from('infra_ejecutores').update(payload).eq('id', existente.id));
+    } else {
+      ({ error } = await supabase.from('infra_ejecutores').insert(payload));
+    }
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
 router.post('/api/infra/senales', async (req, res, next) => {
   try {
     if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
@@ -343,6 +392,90 @@ router.post('/api/infra/senales', async (req, res, next) => {
 
 router.get('/api/infra/send-digest', async (_, res, next) => { try { res.json(await sendInfraDigest()); } catch (e) { next(e); } });
 router.post('/api/infra/send-digest', async (_, res, next) => { try { res.json(await sendInfraDigest()); } catch (e) { next(e); } });
+
+// Chat de preguntas sobre una oportunidad puntual
+router.post('/api/infra/opportunities/:id/ask', async (req, res, next) => {
+  try {
+    if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
+    const { id } = req.params;
+    const { question } = req.body;
+    if (!question?.trim()) return res.status(400).json({ ok: false, error: 'La pregunta es requerida' });
+
+    const { data: op } = await supabase.from('infra_oportunidades').select('*').eq('id', id).single();
+    if (!op) return res.status(404).json({ ok: false, error: 'Oportunidad no encontrada' });
+    const { data: ejecutores } = await supabase.from('infra_ejecutores').select('*').eq('oportunidad_id', id);
+    const ej = (ejecutores || [])[0];
+
+    const prompt = `Eres un asistente comercial experto en obras por impuestos (OxI) y APP para Grupo Ibero Perú
+(fabrica mobiliario escolar, hospitalario, de oficina y metálico). A diferencia de una licitación SEACE,
+aquí el comprador del mobiliario suele ser el EJECUTOR de la obra (constructora/consorcio), no la entidad
+pública ni la financista.
+
+OPORTUNIDAD:
+Nombre: ${op.nombre || ''}
+Financista: ${op.financista || ''}
+Entidad pública: ${op.entidad_publica || ''}
+Sector: ${op.sector || ''}
+Ubicación: ${[op.distrito, op.provincia, op.departamento].filter(Boolean).join(', ') || ''}
+Monto de inversión: ${op.monto_inversion ? `S/ ${Number(op.monto_inversion).toLocaleString('es-PE')}` : 'No especificado'}
+Estado del convenio: ${op.estado_convenio || 'No especificado'}
+Año de buena pro: ${op.anio_buena_pro || 'No especificado'}
+Ejecutor asignado: ${ej ? `${ej.consorcio_nombre}${ej.ruc ? ' (RUC ' + ej.ruc + ')' : ''}` : 'Aún no identificado'}
+${op.ai_summary ? `Resumen IA: ${op.ai_summary}` : ''}
+
+PREGUNTA: ${question}
+
+Responde de forma clara, práctica y orientada a decisión comercial.`;
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o', messages: [{ role: 'user', content: prompt }], temperature: 0.3, max_tokens: 1500
+    });
+    const answer = response.choices[0].message.content;
+    try { await supabase.from('infra_ai_chats').insert({ oportunidad_id: id, question, answer }); } catch (e) {}
+    res.json({ ok: true, answer });
+  } catch (e) { next(e); }
+});
+
+// Sugerir ejecutor con IA + búsqueda web (herramienta nativa de OpenAI, sin API key adicional)
+router.post('/api/infra/opportunities/:id/sugerir-ejecutor', async (req, res, next) => {
+  try {
+    if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
+    const { id } = req.params;
+    const { data: op } = await supabase.from('infra_oportunidades').select('*').eq('id', id).single();
+    if (!op) return res.status(404).json({ ok: false, error: 'Oportunidad no encontrada' });
+
+    const prompt = `Busca en la web quién es el EJECUTOR (constructora o consorcio a cargo de la obra) del
+siguiente proyecto de infraestructura pública en Perú (Obras por Impuestos / APP). Suele aparecer en
+INFOBRAS (infobras.contraloria.gob.pe), ProInversión, OSCE o noticias de adjudicación.
+
+Proyecto: ${op.nombre || ''}
+Financista: ${op.financista || ''}
+Entidad pública: ${op.entidad_publica || ''}
+Ubicación: ${[op.distrito, op.provincia, op.departamento].filter(Boolean).join(', ') || ''}
+Año de buena pro: ${op.anio_buena_pro || ''}
+
+Responde ÚNICAMENTE con JSON válido, sin texto adicional:
+{"ejecutor": "nombre de la constructora/consorcio, o null si no lo encuentras", "ruc": "RUC si lo encuentras, o null", "confianza": "alta|media|baja", "fuente": "URL de la fuente más confiable, o null", "nota": "breve explicación de 1 línea"}`;
+
+    let raw;
+    try {
+      const resp = await openai.responses.create({
+        model: 'gpt-4o',
+        tools: [{ type: 'web_search_preview' }],
+        input: prompt
+      });
+      raw = resp.output_text;
+    } catch (webErr) {
+      console.error('[INFRA] web_search no disponible, uso fallback sin navegar:', webErr.message);
+      const fallback = await openai.chat.completions.create({
+        model: 'gpt-4o-mini', messages: [{ role: 'user', content: prompt }], temperature: 0.2
+      });
+      raw = fallback.choices[0].message.content;
+    }
+    const sugerencia = JSON.parse(String(raw).replace(/```json|```/g, '').trim());
+    res.json({ ok: true, sugerencia });
+  } catch (e) { next(e); }
+});
 
 // Para el cron de server.js (intenta por URL; si Incapsula bloquea, solo registra el error)
 export async function runInfraIngest() {
