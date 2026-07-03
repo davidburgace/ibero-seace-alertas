@@ -104,7 +104,11 @@ function esRelevante(item) {
 function detectCols(headers) {
   return {
     cui:        findCol(headers, 'CODIGO', 'UNICO') || findCol(headers, 'CUI') || findCol(headers, 'SNIP'),
-    nombre:     findCol(headers, 'INTERVENCION') || findCol(headers, 'NOMBRE', 'PROYECTO') || findCol(headers, 'NOMBRE'),
+    // "INTERVENCIÓN" es el nombre real del proyecto; "TIPO DE INTERVENCIÓN" es solo una categoría (siempre dice "Proyecto")
+    // y contiene la misma palabra, así que hay que evitarla explícitamente.
+    nombre:     headers.find(h => normaliza(h) === 'INTERVENCION')
+             || headers.find(h => normaliza(h).includes('INTERVENCION') && !normaliza(h).startsWith('TIPO'))
+             || findCol(headers, 'NOMBRE', 'PROYECTO') || findCol(headers, 'NOMBRE'),
     financista: findCol(headers, 'FINANCISTA'),
     sector:     findCol(headers, 'SECTOR') || findCol(headers, 'MATERIA') || findCol(headers, 'FUNCION'),
     entidad:    findCol(headers, 'ENTIDAD', 'PUBLICA') || findCol(headers, 'ENTIDAD'),
