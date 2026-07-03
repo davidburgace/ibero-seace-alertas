@@ -80,6 +80,7 @@ function normalizeMefRow(row, cols) {
     fuente: 'oxi_mef',
     external_id: String(cui).trim(),
     nombre: String(nombre).trim(),
+    tipo_intervencion: cols.tipo && row[cols.tipo] ? String(row[cols.tipo]).trim() : null,
     entidad_publica: cols.entidad ? row[cols.entidad] : null,
     financista: cols.financista && row[cols.financista] ? String(row[cols.financista]).trim() : null,
     sector: cols.sector ? row[cols.sector] : null,
@@ -109,6 +110,8 @@ function detectCols(headers) {
     nombre:     headers.find(h => normaliza(h) === 'INTERVENCION')
              || headers.find(h => normaliza(h).includes('INTERVENCION') && !normaliza(h).startsWith('TIPO'))
              || findCol(headers, 'NOMBRE', 'PROYECTO') || findCol(headers, 'NOMBRE'),
+    // Esta sí es la columna "TIPO DE INTERVENCIÓN": Proyecto | IOARR | Mantenimiento | Operación y Mantenimiento
+    tipo:       headers.find(h => normaliza(h).startsWith('TIPO') && normaliza(h).includes('INTERVENCION')),
     financista: findCol(headers, 'FINANCISTA'),
     sector:     findCol(headers, 'SECTOR') || findCol(headers, 'MATERIA') || findCol(headers, 'FUNCION'),
     entidad:    findCol(headers, 'ENTIDAD', 'PUBLICA') || findCol(headers, 'ENTIDAD'),
