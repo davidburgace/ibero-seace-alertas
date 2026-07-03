@@ -477,7 +477,25 @@ Responde ÚNICAMENTE con JSON válido, sin texto adicional:
   } catch (e) { next(e); }
 });
 
-// Cargar ejecutor(as) directo desde la ficha oficial de ProInversión ya vinculada a esta oportunidad
+// Extrae una tabla RUC/Razón Social de una sección del HTML de la ficha ProInversión,
+// buscando el <h2> que la titula y tomando el primer <tbody> que aparezca después.
+function extraerTablaProinversion(html, tituloSeccion) {
+  const idx = html.indexOf(tituloSeccion);
+  if (idx === -1) return [];
+  const resto = html.slice(idx);
+  const tbodyMatch = resto.match(/<tbody>([\s\S]*?)<\/tbody>/);
+  if (!tbodyMatch) return [];
+  const filas = [...tbodyMatch[1].matchAll(/<tr>\s*<td>([^<]*)<\/td>\s*<td>([^<]*)<\/td>(?:\s*<td[^>]*>([^<]*)<\/td>)?\s*<\/tr>/g)];
+  return filas.map(f => ({
+    ruc: (f[1] || '').trim(),
+    nombre: (f[2] || '').trim(),
+    ...(f[3] !== undefined ? { participacion: f[3].trim() } : {})
+  })).filter(e => e.nombre);
+}
+
+// Cargar ejecutor(as) directo desde la ficha oficial de ProInversión ya vinculada a esta oportunidad.
+// La ficha es HTML servido por WordPress (no una SPA), así que se descarga y se parsean sus tablas
+// "Empresa(s) Ejecutora(s)" y "Empresa(s) Adjudicataria(s)" directamente — sin IA, sin adivinar.
 router.post('/api/infra/opportunities/:id/cargar-proinversion', async (req, res, next) => {
   try {
     if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
@@ -486,31 +504,23 @@ router.post('/api/infra/opportunities/:id/cargar-proinversion', async (req, res,
     if (!op) return res.status(404).json({ ok: false, error: 'Oportunidad no encontrada' });
     if (!op.proinversion_url) return res.json({ ok: true, ejecutoras: [], adjudicatarias: [], nota: 'Esta oportunidad no tiene ficha de ProInversión vinculada.' });
 
-    const prompt = `Visita esta ficha oficial de ProInversión y extrae la información del proceso:
-${op.proinversion_url}
+    const resp = await fetch(op.proinversion_url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'text/html'
+      },
+      signal: AbortSignal.timeout(20000)
+    });
+    if (!resp.ok) return res.json({ ok: true, ejecutoras: [], adjudicatarias: [], nota: `No se pudo abrir la ficha (HTTP ${resp.status}).` });
+    const html = await resp.text();
 
-Responde ÚNICAMENTE con JSON válido, sin texto adicional:
-{
-  "ejecutoras": [{"nombre":"razón social de la empresa/consorcio ejecutor","ruc":"RUC si aparece, o null"}],
-  "adjudicatarias": [{"nombre":"razón social de la empresa adjudicataria/financista, si difiere del ejecutor"}]
-}
-Si el proceso todavía no tiene buena pro / adjudicación, responde con arrays vacíos en ambos campos.
-Si es un consorcio de varias empresas, inclúyelas todas como entradas separadas en "ejecutoras".`;
+    const ejecutoras = extraerTablaProinversion(html, 'Empresa(s) Ejecutora(s)');
+    const adjudicatarias = extraerTablaProinversion(html, 'Empresa(s) Adjudicataria(s)');
 
-    let raw;
-    try {
-      const resp = await openai.responses.create({
-        model: 'gpt-4o',
-        tools: [{ type: 'web_search_preview' }],
-        input: prompt
-      });
-      raw = resp.output_text;
-    } catch (webErr) {
-      console.error('[INFRA] web_search no disponible en cargar-proinversion:', webErr.message);
-      return res.json({ ok: true, ejecutoras: [], adjudicatarias: [], nota: 'No se pudo acceder a la ficha en este momento, intenta de nuevo.' });
+    if (!ejecutoras.length && !adjudicatarias.length) {
+      return res.json({ ok: true, ejecutoras: [], adjudicatarias: [], nota: 'ProInversión aún no muestra ejecutora (proceso sin adjudicar todavía).' });
     }
-    const parsed = JSON.parse(String(raw).replace(/```json|```/g, '').trim());
-    res.json({ ok: true, ejecutoras: parsed.ejecutoras || [], adjudicatarias: parsed.adjudicatarias || [] });
+    res.json({ ok: true, ejecutoras, adjudicatarias });
   } catch (e) { next(e); }
 });
 
