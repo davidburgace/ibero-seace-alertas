@@ -335,7 +335,8 @@ function render(){
     const loc = [o.distrito,o.provincia,o.departamento].filter(Boolean).join(', ');
     const dec = o.ai_recommendation ? `<span class="tag dec-${o.ai_recommendation.toLowerCase()}">${o.ai_recommendation}</span>` : '';
     const mob = o.incluye_mobiliario ? '<span class="tag mob">Mobiliario</span>' : '';
-    const noej = hasEjec(o) ? '' : '<span class="tag" style="color:var(--amber);border-color:transparent;background:rgba(245,166,35,.12);">Sin ejecutor</span>';
+    const ejecutor = (o.infra_ejecutores||[]).find(e => e && e.consorcio_nombre);
+    const noej = ejecutor ? '' : '<span class="tag" style="color:var(--amber);border-color:transparent;background:rgba(245,166,35,.12);">Sin ejecutor</span>';
     const int = o.interes==='si' ? '<span class="tag" style="color:#0f9d72;border-color:transparent;background:rgba(15,157,114,.12);">★ De interés</span>'
               : o.interes==='no' ? '<span class="tag" style="color:#c0394a;border-color:transparent;background:rgba(192,57,74,.12);">Descartado</span>' : '';
     return `<div class="card" onclick="openDetail('${o.id}')" style="${(o.revisado||o.interes==='no')?'opacity:.5;':''}">
@@ -344,6 +345,7 @@ function render(){
         <h3>${o.nombre||'(sin nombre)'}</h3>
         <div class="meta">
           <span><b>Financista:</b> ${o.financista||'—'}</span>
+          ${ejecutor ? `<span style="color:var(--accent2);"><b>🏗️ Ejecutor:</b> ${ejecutor.consorcio_nombre}${ejecutor.estado_verificacion?` (${ejecutor.estado_verificacion})`:''}</span>` : ''}
           <span><b>Monto:</b> ${money(o.monto_inversion)}</span>
           ${loc?`<span><b>Ubicación:</b> ${loc}</span>`:''}
           ${o.estado_convenio?`<span><b>Estado:</b> ${o.estado_convenio}</span>`:''}
