@@ -436,6 +436,21 @@
       </div>
       <div class="field"><label>Enlace de reunión (Meet, Zoom, Teams...)</label><input type="url" id="r-link" placeholder="https://meet.google.com/..."></div>
 
+      <div class="field-row">
+        <div class="field"><label>Repetir</label>
+          <select id="r-repetir">
+            <option value="">No se repite</option>
+            <option value="semanal">Cada semana</option>
+            <option value="quincenal">Cada 2 semanas</option>
+            <option value="mensual">Cada mes</option>
+          </select>
+        </div>
+        <div class="field" id="r-repetir-hasta-wrap" style="display:none;">
+          <label>Repetir hasta</label>
+          <input type="date" id="r-repetir-hasta">
+        </div>
+      </div>
+
       <div class="field">
         <label>Participantes</label>
         <div id="r-participantes-lista"></div>
@@ -617,8 +632,8 @@
 /* =========================================================
    CONFIGURACIÓN — reemplaza con los datos de tu proyecto Supabase
    ========================================================= */
-const SUPABASE_URL = "https://maitnligmaidhgzcqglq.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_8aRr2hZh0RB-DX2KqI9IFQ_wEmK1KvR";
+const SUPABASE_URL = "https://TU-PROYECTO.supabase.co";
+const SUPABASE_ANON_KEY = "TU-ANON-KEY";
 /* ========================================================= */
 
 const AREA_COLORS = {
@@ -712,7 +727,7 @@ async function fetchReuniones(){
   return data;
 }
 function toFcEvent(r){
-  return { id:'reunion-'+r.id, title:r.titulo, start:r.fecha_inicio, end:r.fecha_fin,
+  return { id:'reunion-'+r.id, title:(r.serie_id ? '🔁 ' : '') + r.titulo, start:r.fecha_inicio, end:r.fecha_fin,
     backgroundColor: AREA_COLORS[r.area] || AREA_COLORS['Otro'], extendedProps:{...r, _tipo:'reunion'} };
 }
 function toFcEventVisita(v){
@@ -756,7 +771,7 @@ function renderHoy(reuniones, visitas){
         ? `<div class="ticket-meta">👥 ${escHtml(r.participantes.map(p => p.nombre || p.email).filter(Boolean).join(', '))}</div>` : '';
       return `<div class="ticket" style="border-left-color:${AREA_COLORS[r.area] || AREA_COLORS['Otro']}" data-tipo="reunion" data-id="${r.id}">
         <div class="ticket-time">${fmtTime(r.fecha_inicio)} – ${fmtTime(r.fecha_fin)}</div>
-        <div class="ticket-title">${r.titulo}</div>
+        <div class="ticket-title">${r.serie_id ? '🔁 ' : ''}${r.titulo}</div>
         <div class="ticket-meta">${r.responsable} · ${r.area}</div>
         ${participantesTxt}
         ${joinBtn}
@@ -837,11 +852,39 @@ function openReunionModal(r, dateStr){
   const fin = r ? new Date(r.fecha_fin) : new Date(base.getTime() + 60*60000);
   document.getElementById('r-inicio').value = toLocalInputValue(inicio);
   document.getElementById('r-fin').value = toLocalInputValue(fin);
+
+  const repetirField = document.getElementById('r-repetir').closest('.field');
+  repetirField.style.display = r ? 'none' : 'block';
+  document.getElementById('r-repetir').value = '';
+  document.getElementById('r-repetir-hasta-wrap').style.display = 'none';
+  document.getElementById('r-repetir-hasta').value = '';
+
   modalReunion.classList.add('open');
 }
+document.getElementById('r-repetir').addEventListener('change', () => {
+  document.getElementById('r-repetir-hasta-wrap').style.display = document.getElementById('r-repetir').value ? 'block' : 'none';
+});
 document.getElementById('btn-nueva-reunion').addEventListener('click', () => openReunionModal(null));
 document.getElementById('r-cancelar').addEventListener('click', () => modalReunion.classList.remove('open'));
 modalReunion.addEventListener('click', e => { if (e.target === modalReunion) modalReunion.classList.remove('open'); });
+
+function generarOcurrencias(fechaInicioISO, fechaFinISO, frecuencia, hastaStr){
+  const inicio = new Date(fechaInicioISO);
+  const fin = new Date(fechaFinISO);
+  const duracionMs = fin - inicio;
+  const hasta = new Date(hastaStr + 'T23:59:59');
+  const pasoDias = { semanal: 7, quincenal: 14 }[frecuencia];
+  const ocurrencias = [];
+  let cursor = new Date(inicio);
+  let guard = 0;
+  while (cursor <= hasta && guard < 260){
+    ocurrencias.push({ inicio: new Date(cursor), fin: new Date(cursor.getTime() + duracionMs) });
+    if (frecuencia === 'mensual') cursor.setMonth(cursor.getMonth() + 1);
+    else cursor.setDate(cursor.getDate() + pasoDias);
+    guard++;
+  }
+  return ocurrencias;
+}
 
 function construirPayloadReunion(){
   return {
@@ -904,6 +947,28 @@ document.getElementById('form-reunion').addEventListener('submit', async e => {
   if (!sb) return alert('Configura Supabase primero.');
   const id = document.getElementById('r-id').value;
   const payload = construirPayloadReunion();
+  const frecuencia = document.getElementById('r-repetir').value;
+  const hasta = document.getElementById('r-repetir-hasta').value;
+
+  if (!id && frecuencia){
+    if (!hasta){ alert('Elige hasta qué fecha se repite la reunión.'); return; }
+    const ocurrencias = generarOcurrencias(payload.fecha_inicio, payload.fecha_fin, frecuencia, hasta);
+    if (!ocurrencias.length){ alert('La fecha "hasta" debe ser posterior al inicio de la reunión.'); return; }
+    const serieId = crypto.randomUUID();
+    const filas = ocurrencias.map(o => ({
+      ...payload,
+      fecha_inicio: o.inicio.toISOString(),
+      fecha_fin: o.fin.toISOString(),
+      serie_id: serieId,
+      recurrencia: frecuencia
+    }));
+    const { error } = await sb.from('reuniones').insert(filas);
+    if (error) return alert('Error: ' + error.message);
+    modalReunion.classList.remove('open');
+    await refreshReuniones();
+    return;
+  }
+
   const { error } = id
     ? await sb.from('reuniones').update(payload).eq('id', id)
     : await sb.from('reuniones').insert(payload);
@@ -913,7 +978,18 @@ document.getElementById('form-reunion').addEventListener('submit', async e => {
 });
 document.getElementById('r-eliminar').addEventListener('click', async () => {
   const id = document.getElementById('r-id').value;
-  if (!id || !confirm('¿Eliminar esta reunión?')) return;
+  if (!id) return;
+  const actual = allReuniones.find(r => r.id === id);
+  if (actual && actual.serie_id){
+    const todaLaSerie = confirm('Esta reunión es parte de una serie recurrente.\n\nAceptar = eliminar TODA la serie.\nCancelar = eliminar solo esta reunión.');
+    if (todaLaSerie){
+      const { error } = await sb.from('reuniones').delete().eq('serie_id', actual.serie_id);
+      if (error) return alert('Error: ' + error.message);
+      modalReunion.classList.remove('open');
+      await refreshReuniones();
+      return;
+    }
+  } else if (!confirm('¿Eliminar esta reunión?')) return;
   const { error } = await sb.from('reuniones').delete().eq('id', id);
   if (error) return alert('Error: ' + error.message);
   modalReunion.classList.remove('open');
@@ -1018,18 +1094,19 @@ function renderDashboardProcesos(){
     wrapTipo.style.display = 'block'; emptyTipo.style.display = 'none';
     const data = tipoKeys.map(k => counts[k]);
     const total = data.reduce((a,b) => a+b, 0);
+    const labels = tipoKeys.map(k => `${tipoNombres[k] || k} — ${Math.round(counts[k]/total*100)}%`);
     if (chartTipo) chartTipo.destroy();
     chartTipo = new Chart(wrapTipo, {
       type: 'doughnut',
       data: {
-        labels: tipoKeys.map(k => tipoNombres[k] || k),
+        labels,
         datasets: [{ data, backgroundColor: tipoKeys.map(k => tipoColors[k] || '#94a3b8'), borderWidth: 0 }]
       },
       options: {
         cutout: '62%', maintainAspectRatio: false,
         plugins: {
           legend: { position: 'bottom', labels: { font: { family: "'DM Sans',sans-serif", size: 11 }, boxWidth: 10, padding: 10 } },
-          tooltip: { callbacks: { label: ctx => `${ctx.label}: ${ctx.raw} (${Math.round(ctx.raw/total*100)}%)` } }
+          tooltip: { callbacks: { label: ctx => `${tipoNombres[tipoKeys[ctx.dataIndex]] || tipoKeys[ctx.dataIndex]}: ${ctx.raw} (${Math.round(ctx.raw/total*100)}%)` } }
         }
       }
     });
@@ -1045,14 +1122,18 @@ function renderDashboardProcesos(){
   } else {
     wrapRes.style.display = 'block'; emptyRes.style.display = 'none';
     if (chartResultado) chartResultado.destroy();
+    const totalRes = ganadas + perdidas;
     chartResultado = new Chart(wrapRes, {
       type: 'doughnut',
-      data: { labels: ['Ganadas','Perdidas'], datasets: [{ data:[ganadas, perdidas], backgroundColor:['#2ecc71','#e74c3c'], borderWidth:0 }] },
+      data: {
+        labels: [`Ganadas — ${Math.round(ganadas/totalRes*100)}%`, `Perdidas — ${Math.round(perdidas/totalRes*100)}%`],
+        datasets: [{ data:[ganadas, perdidas], backgroundColor:['#2ecc71','#e74c3c'], borderWidth:0 }]
+      },
       options: {
         cutout: '62%', maintainAspectRatio: false,
         plugins: {
           legend: { position: 'bottom', labels: { font: { family: "'DM Sans',sans-serif", size: 11 }, boxWidth: 10, padding: 10 } },
-          tooltip: { callbacks: { label: ctx => `${ctx.label}: ${ctx.raw} (${Math.round(ctx.raw/(ganadas+perdidas)*100)}%)` } }
+          tooltip: { callbacks: { label: ctx => `${ctx.dataIndex === 0 ? 'Ganadas' : 'Perdidas'}: ${ctx.raw} (${Math.round(ctx.raw/totalRes*100)}%)` } }
         }
       }
     });
