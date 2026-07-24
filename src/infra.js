@@ -386,6 +386,38 @@ router.put('/api/infra/opportunities/:id/ejecutor', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// Toggles simples de la tarjeta: Revisado, Cotizado, Interés (★ de interés / Descartado)
+router.put('/api/infra/opportunities/:id/revisado', async (req, res, next) => {
+  try {
+    if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
+    const { error } = await supabase.from('infra_oportunidades')
+      .update({ revisado: !!req.body.revisado, updated_at: new Date().toISOString() })
+      .eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+router.put('/api/infra/opportunities/:id/cotizado', async (req, res, next) => {
+  try {
+    if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
+    const { error } = await supabase.from('infra_oportunidades')
+      .update({ cotizado: !!req.body.cotizado, updated_at: new Date().toISOString() })
+      .eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+router.put('/api/infra/opportunities/:id/interes', async (req, res, next) => {
+  try {
+    if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
+    const { error } = await supabase.from('infra_oportunidades')
+      .update({ interes: req.body.interes ?? null, updated_at: new Date().toISOString() })
+      .eq('id', req.params.id);
+    if (error) throw error;
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
 router.post('/api/infra/senales', async (req, res, next) => {
   try {
     if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
