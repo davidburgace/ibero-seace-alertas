@@ -123,11 +123,11 @@
 
   /* ---------- KANBAN ---------- */
   .kanban{
-    display:grid; grid-template-columns: repeat(6, minmax(0, 1fr));
+    display:grid; grid-template-columns: repeat(var(--kanban-cols, 6), minmax(0, 1fr));
     gap:12px; padding-bottom: 10px;
   }
   @media (max-width: 1100px) and (min-width: 641px){
-    .kanban{ grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .kanban{ grid-template-columns: repeat(3, minmax(0, 1fr)) !important; }
   }
   .kcol{ background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:14px; min-height:200px; min-width:0; }
   .kcol-head{
@@ -149,10 +149,11 @@
   .tipo-label{ color:var(--text); font-weight:700; }
   #p-tipo option, #filtro-tipo-proceso option{ font-weight:700; }
 
-  .proc-dashboard{ display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px; }
+  .proc-dashboard{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:16px; margin-bottom:20px; }
   .dash-card{ display:flex; flex-direction:column; }
   .dash-chart-wrap{ position:relative; height:190px; display:flex; align-items:center; justify-content:center; }
   .dash-empty{ display:none; text-align:center; }
+  @media (max-width:900px){ .proc-dashboard{ grid-template-columns:1fr 1fr; } }
   @media (max-width:640px){ .proc-dashboard{ grid-template-columns:1fr; } }
   .card-nombre{ font-weight:600; font-size:13.5px; line-height:1.35; margin-bottom:6px; }
   .card-meta{ font-size:12px; color:var(--muted); display:flex; flex-direction:column; gap:2px; }
@@ -164,6 +165,7 @@
   }
   .ot-metalico{ background:rgba(74,85,104,0.12); color:#4A5568; }
   .ot-melamine{ background:rgba(139,94,60,0.14); color:#8B5E3C; }
+  .ot-licitaciones{ background:rgba(58,99,224,0.12); color:var(--accent); }
 
   .card-stage-btn{
     margin-top:10px; width:100%; font-family:var(--font-body); font-size:11.5px; font-weight:600;
@@ -294,7 +296,7 @@
     .toolbar .btn-primary{ width:100%; }
     select.filter{ width:100%; }
 
-    .kanban{ grid-template-columns:none; grid-auto-flow:column; grid-auto-columns: minmax(78vw, 1fr); overflow-x:auto; gap:10px; }
+    .kanban{ grid-template-columns:none !important; grid-auto-flow:column; grid-auto-columns: minmax(78vw, 1fr); overflow-x:auto; gap:10px; }
     .kcol{ padding:12px; scroll-snap-align:start; }
     .kanban{ scroll-snap-type:x mandatory; }
 
@@ -398,6 +400,13 @@
         <div class="dash-chart-wrap">
           <canvas id="chart-resultado"></canvas>
           <p class="card-empty dash-empty" id="chart-resultado-empty">Aún no hay procesos ganados o perdidos.</p>
+        </div>
+      </div>
+      <div class="panel dash-card">
+        <p class="panel-title">Cumplimiento de tiempos (Oficina Técnica)</p>
+        <div class="dash-chart-wrap">
+          <canvas id="chart-cumplimiento"></canvas>
+          <p class="card-empty dash-empty" id="chart-cumplimiento-empty">Sin procesos con fecha límite en OT o Expediente.</p>
         </div>
       </div>
     </div>
@@ -512,7 +521,6 @@
           <select id="p-etapa">
             <option value="Etapa de Consultas">Etapa de Consultas</option>
             <option value="Oficina Técnica">Oficina Técnica</option>
-            <option value="Desarrollo de Expediente">Desarrollo de Expediente</option>
             <option value="Presentado">Presentado</option>
             <option value="Ganado">Ganado</option>
             <option value="Perdido">Perdido</option>
@@ -530,6 +538,7 @@
           <option value="Ambos">Ambos (Metálico + Melamine)</option>
         </select>
       </div>
+      <div class="field"><label>Responsable Especialista en Licitaciones</label><input type="text" id="p-ot-resp-licitaciones" placeholder="Ej: Rocío"></div>
       <div class="field-row" id="ot-metalico-fields" style="display:none;">
         <div class="field"><label>Responsable Metálico</label><input type="text" id="p-ot-resp-metalico" placeholder="Ej: Carlos"></div>
         <div class="field"><label>Tiempo de entrega</label><input type="text" id="p-ot-tiempo-metalico" placeholder="Ej: 15 días"></div>
@@ -538,6 +547,7 @@
         <div class="field"><label>Responsable Melamine</label><input type="text" id="p-ot-resp-melamine" placeholder="Ej: Stephanie"></div>
         <div class="field"><label>Tiempo de entrega</label><input type="text" id="p-ot-tiempo-melamine" placeholder="Ej: 20 días"></div>
       </div>
+      <p class="card-empty" id="p-fechas-inicio-info" style="display:none; margin-bottom:14px;"></p>
 
       <div class="field"><label>Notas</label><textarea id="p-notas"></textarea></div>
       <div class="modal-actions">
@@ -635,8 +645,8 @@
 /* =========================================================
    CONFIGURACIÓN — reemplaza con los datos de tu proyecto Supabase
    ========================================================= */
-const SUPABASE_URL = "https://maitnligmaidhgzcqglq.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_8aRr2hZh0RB-DX2KqI9IFQ_wEmK1KvR";
+const SUPABASE_URL = "https://TU-PROYECTO.supabase.co";
+const SUPABASE_ANON_KEY = "TU-ANON-KEY";
 /* ========================================================= */
 
 const AREA_COLORS = {
@@ -646,7 +656,6 @@ const AREA_COLORS = {
 const ETAPAS_PROCESO = [
   {key:"Etapa de Consultas", color:"var(--c-consultas)"},
   {key:"Oficina Técnica", color:"var(--c-oficina)"},
-  {key:"Desarrollo de Expediente", color:"var(--c-expediente)"},
   {key:"Presentado", color:"var(--c-presentado)"},
   {key:"Ganado", color:"var(--c-ganado)"},
   {key:"Perdido", color:"var(--c-perdido)"}
@@ -1010,6 +1019,9 @@ async function fetchProcesos(){
 }
 function renderOtBadges(p){
   let out = '';
+  if (p.ot_responsable_licitaciones){
+    out += `<div class="ot-badge ot-licitaciones">📋 ${escHtml(p.ot_responsable_licitaciones)}</div>`;
+  }
   if ((p.ot_linea === 'Metálico' || p.ot_linea === 'Ambos') && (p.ot_responsable_metalico || p.ot_tiempo_metalico)){
     out += `<div class="ot-badge ot-metalico">🔩 ${escHtml(p.ot_responsable_metalico || 'Sin asignar')}${p.ot_tiempo_metalico ? ' · ' + escHtml(p.ot_tiempo_metalico) : ''}</div>`;
   }
@@ -1018,7 +1030,7 @@ function renderOtBadges(p){
   }
   return out;
 }
-const ORDEN_ETAPAS_PROCESO = ['Etapa de Consultas', 'Oficina Técnica', 'Desarrollo de Expediente', 'Presentado'];
+const ORDEN_ETAPAS_PROCESO = ['Etapa de Consultas', 'Oficina Técnica', 'Presentado'];
 function renderCardStageActions(p){
   const idx = ORDEN_ETAPAS_PROCESO.indexOf(p.etapa);
   if (idx >= 0 && idx < ORDEN_ETAPAS_PROCESO.length - 1){
@@ -1035,7 +1047,10 @@ function renderCardStageActions(p){
 }
 async function avanzarEtapaProceso(id, nuevaEtapa){
   if (!sb) return alert('Configura Supabase primero.');
-  const { error } = await sb.from('procesos_seguimiento').update({ etapa: nuevaEtapa, updated_at: new Date().toISOString() }).eq('id', id);
+  const actual = allProcesos.find(p => p.id === id);
+  const payload = { etapa: nuevaEtapa, updated_at: new Date().toISOString() };
+  if (nuevaEtapa === 'Oficina Técnica' && (!actual || !actual.fecha_inicio_ot)) payload.fecha_inicio_ot = new Date().toISOString();
+  const { error } = await sb.from('procesos_seguimiento').update(payload).eq('id', id);
   if (error) return alert('Error: ' + error.message);
   await refreshProcesos();
 }
@@ -1044,6 +1059,7 @@ function renderKanbanProcesos(){
   const lista = filtro ? allProcesos.filter(p => p.tipo === filtro) : allProcesos;
   document.getElementById('count-procesos').textContent = allProcesos.length;
   const el = document.getElementById('kanban-procesos');
+  el.style.setProperty('--kanban-cols', ETAPAS_PROCESO.length);
   el.innerHTML = ETAPAS_PROCESO.map(et => {
     const items = lista.filter(p => p.etapa === et.key);
     return `
@@ -1065,7 +1081,7 @@ function renderKanbanProcesos(){
             ${sem ? `<span class="semaforo"><i class="semaforo-dot" style="background:${sem.color}"></i>${sem.texto}</span>` : ''}
           </div>
           ${p.detalle_bien ? `<div class="card-extra">📦 ${escHtml(truncate(p.detalle_bien, 90))}</div>` : ''}
-          ${p.etapa === 'Oficina Técnica' && p.ot_linea ? renderOtBadges(p) : ''}
+          ${p.etapa === 'Oficina Técnica' && (p.ot_linea || p.ot_responsable_licitaciones) ? renderOtBadges(p) : ''}
           ${p.notas ? `<div class="card-extra card-notas">📝 ${escHtml(truncate(p.notas, 90))}</div>` : ''}
           ${renderCardStageActions(p)}
         </div>`;
@@ -1078,7 +1094,31 @@ function renderKanbanProcesos(){
 }
 let chartTipo = null;
 let chartResultado = null;
+let chartCumplimiento = null;
 let dashboardVisible = false;
+function parseDiasTexto(txt){
+  if (!txt) return null;
+  const t = String(txt).toLowerCase();
+  const m = t.match(/(\d+(?:\.\d+)?)/);
+  if (!m) return null;
+  const n = parseFloat(m[1]);
+  if (t.includes('sem')) return n * 7;
+  if (t.includes('mes')) return n * 30;
+  return n;
+}
+function cumpleTiempoProceso(p){
+  // Oficina Técnica: si hay fecha de inicio de OT y algún tiempo prometido (metálico/melamine), calcula días reales
+  if (p.etapa === 'Oficina Técnica' && p.fecha_inicio_ot){
+    const diasProm = Math.max(parseDiasTexto(p.ot_tiempo_metalico) || 0, parseDiasTexto(p.ot_tiempo_melamine) || 0) || null;
+    if (diasProm){
+      const diasTranscurridos = (Date.now() - new Date(p.fecha_inicio_ot).getTime()) / 86400000;
+      return diasTranscurridos <= diasProm;
+    }
+  }
+  // Sin tiempo prometido registrado (o etapa Desarrollo de Expediente, que aún no tiene ese campo): usa la fecha límite como referencia
+  if (p.fecha_limite) return semaforoFecha(p.fecha_limite)?.color !== '#e74c3c';
+  return null;
+}
 function renderDashboardProcesos(){
   if (!window.Chart) return;
 
@@ -1137,6 +1177,38 @@ function renderDashboardProcesos(){
         plugins: {
           legend: { position: 'bottom', labels: { font: { family: "'DM Sans',sans-serif", size: 11 }, boxWidth: 10, padding: 10 } },
           tooltip: { callbacks: { label: ctx => `${ctx.dataIndex === 0 ? 'Ganadas' : 'Perdidas'}: ${ctx.raw} (${Math.round(ctx.raw/totalRes*100)}%)` } }
+        }
+      }
+    });
+  }
+
+  // Cumplimiento de tiempos: entre los procesos en Oficina Técnica evaluables
+  // (con fecha de inicio de OT + tiempo prometido, o al menos fecha límite),
+  // ¿cuántos siguen en tiempo vs ya vencidos?
+  const enTramite = allProcesos.filter(p => p.etapa === 'Oficina Técnica');
+  const evaluados = enTramite.map(p => cumpleTiempoProceso(p)).filter(v => v !== null);
+  const enTiempo = evaluados.filter(v => v === true).length;
+  const vencidos = evaluados.filter(v => v === false).length;
+  const wrapCump = document.getElementById('chart-cumplimiento');
+  const emptyCump = document.getElementById('chart-cumplimiento-empty');
+  if (evaluados.length === 0){
+    wrapCump.style.display = 'none'; emptyCump.style.display = 'block';
+    if (chartCumplimiento){ chartCumplimiento.destroy(); chartCumplimiento = null; }
+  } else {
+    wrapCump.style.display = 'block'; emptyCump.style.display = 'none';
+    if (chartCumplimiento) chartCumplimiento.destroy();
+    const totalCump = evaluados.length;
+    chartCumplimiento = new Chart(wrapCump, {
+      type: 'doughnut',
+      data: {
+        labels: [`En tiempo — ${Math.round(enTiempo/totalCump*100)}%`, `Vencidos — ${Math.round(vencidos/totalCump*100)}%`],
+        datasets: [{ data:[enTiempo, vencidos], backgroundColor:['#2ecc71','#e74c3c'], borderWidth:0 }]
+      },
+      options: {
+        cutout: '62%', maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'bottom', labels: { font: { family: "'DM Sans',sans-serif", size: 11 }, boxWidth: 10, padding: 10 } },
+          tooltip: { callbacks: { label: ctx => `${ctx.dataIndex === 0 ? 'En tiempo' : 'Vencidos'}: ${ctx.raw} (${Math.round(ctx.raw/totalCump*100)}%)` } }
         }
       }
     });
@@ -1284,10 +1356,17 @@ function openProcesoModal(p){
   document.getElementById('p-responsable').value = p ? p.responsable : '';
   document.getElementById('p-notas').value = p ? (p.notas || '') : '';
   document.getElementById('p-ot-linea').value = p ? (p.ot_linea || '') : '';
+  document.getElementById('p-ot-resp-licitaciones').value = p ? (p.ot_responsable_licitaciones || '') : '';
   document.getElementById('p-ot-resp-metalico').value = p ? (p.ot_responsable_metalico || '') : '';
   document.getElementById('p-ot-tiempo-metalico').value = p ? (p.ot_tiempo_metalico || '') : '';
   document.getElementById('p-ot-resp-melamine').value = p ? (p.ot_responsable_melamine || '') : '';
   document.getElementById('p-ot-tiempo-melamine').value = p ? (p.ot_tiempo_melamine || '') : '';
+  const infoFechas = document.getElementById('p-fechas-inicio-info');
+  const partes = [];
+  if (p && p.fecha_inicio_ot) partes.push('Oficina Técnica inició: ' + fmtDate(p.fecha_inicio_ot.slice(0,10)));
+  if (p && p.fecha_inicio_expediente) partes.push('Expediente inició: ' + fmtDate(p.fecha_inicio_expediente.slice(0,10)));
+  if (partes.length){ infoFechas.textContent = '🕓 ' + partes.join(' · '); infoFechas.style.display = 'block'; }
+  else infoFechas.style.display = 'none';
   document.getElementById('p-ot-linea').dispatchEvent(new Event('change'));
   modalProceso.classList.add('open');
   syncPicker();
@@ -1300,6 +1379,8 @@ document.getElementById('form-proceso').addEventListener('submit', async e => {
   e.preventDefault();
   if (!sb) return alert('Configura Supabase primero.');
   const id = document.getElementById('p-id').value;
+  const nuevaEtapa = document.getElementById('p-etapa').value;
+  const original = id ? allProcesos.find(pr => pr.id === id) : null;
   const payload = {
     nombre: document.getElementById('p-nombre').value,
     entidad: document.getElementById('p-entidad').value,
@@ -1308,16 +1389,18 @@ document.getElementById('form-proceso').addEventListener('submit', async e => {
     fecha_limite: document.getElementById('p-fecha-limite').value || null,
     link: document.getElementById('p-link').value,
     detalle_bien: document.getElementById('p-detalle-bien').value,
-    etapa: document.getElementById('p-etapa').value,
+    etapa: nuevaEtapa,
     responsable: document.getElementById('p-responsable').value,
     notas: document.getElementById('p-notas').value,
     ot_linea: document.getElementById('p-ot-linea').value,
+    ot_responsable_licitaciones: document.getElementById('p-ot-resp-licitaciones').value,
     ot_responsable_metalico: document.getElementById('p-ot-resp-metalico').value,
     ot_tiempo_metalico: document.getElementById('p-ot-tiempo-metalico').value,
     ot_responsable_melamine: document.getElementById('p-ot-resp-melamine').value,
     ot_tiempo_melamine: document.getElementById('p-ot-tiempo-melamine').value,
     updated_at: new Date().toISOString()
   };
+  if (nuevaEtapa === 'Oficina Técnica' && (!original || !original.fecha_inicio_ot)) payload.fecha_inicio_ot = new Date().toISOString();
   const { error } = id
     ? await sb.from('procesos_seguimiento').update(payload).eq('id', id)
     : await sb.from('procesos_seguimiento').insert(payload);
@@ -1380,6 +1463,7 @@ function renderKanbanVisitas(){
   poblarListaClientes();
   document.getElementById('count-visitas').textContent = Object.keys(visitasPorCliente).length;
   const el = document.getElementById('kanban-visitas');
+  el.style.setProperty('--kanban-cols', ESTADOS_VISITA.length);
   el.innerHTML = ESTADOS_VISITA.map(es => {
     const items = Object.entries(visitasPorCliente)
       .map(([k, arr]) => ({ key:k, latest:arr[0], total:arr.length }))
