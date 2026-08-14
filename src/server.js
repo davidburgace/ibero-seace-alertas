@@ -910,7 +910,7 @@ app.put('/api/opportunities/:id/interes', async (req, res, next) => {
             referencia: opp2.nomenclature || opp2.external_id || '',
             link: opp2.source_url || null,
             detalle_bien: opp2.detalle_bien || opp2.business_line || '',
-            fecha_limite: opp2.fecha_presentacion || opp2.closing_date || null,
+            fecha_limite: parseSeaceDate(opp2.fecha_presentacion) || parseSeaceDate(opp2.closing_date) || null,
             etapa: 'Etapa de Consultas',
             responsable: 'Por asignar',
             concluido: false,
