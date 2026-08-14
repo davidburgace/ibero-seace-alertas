@@ -893,6 +893,33 @@ app.put('/api/opportunities/:id/interes', async (req, res, next) => {
     }
     const { error: e2 } = await supabase.from('opportunities').update(patch).eq('id', req.params.id);
     if (e2) throw e2;
+
+    // Si se marcó como interés, crear automáticamente en Seguimiento Comercial
+    if (interes === 'si') {
+      try {
+        const { data: opp2 } = await supabase.from('opportunities')
+          .select('*').eq('id', req.params.id).single();
+        if (opp2) {
+          const procesoRow = {
+            opportunity_id: String(opp2.id),
+            nombre: opp2.title || opp2.nomenclature || 'Oportunidad SEACE',
+            entidad: opp2.entity || '',
+            tipo: 'SEACE',
+            referencia: opp2.nomenclature || opp2.external_id || '',
+            link: opp2.source_url || null,
+            detalle_bien: opp2.detalle_bien || opp2.business_line || '',
+            fecha_limite: opp2.fecha_presentacion || opp2.closing_date || null,
+            etapa: 'Etapa de Consultas',
+            responsable: '',
+            concluido: false,
+            updated_at: new Date().toISOString()
+          };
+          await supabase.from('procesos_seguimiento')
+            .upsert(procesoRow, { onConflict: 'opportunity_id', ignoreDuplicates: true });
+        }
+      } catch(e) { console.error('[INTERES] Error creando proceso:', e.message); }
+    }
+
     res.json({ ok: true, interes });
   } catch (e) { next(e); }
 });
