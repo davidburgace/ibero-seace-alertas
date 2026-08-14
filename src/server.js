@@ -910,7 +910,7 @@ app.put('/api/opportunities/:id/interes', async (req, res, next) => {
             detalle_bien: opp2.detalle_bien || opp2.business_line || '',
             fecha_limite: opp2.fecha_presentacion || opp2.closing_date || null,
             etapa: 'Etapa de Consultas',
-            responsable: '',
+            responsable: 'Por asignar',
             concluido: false,
             updated_at: new Date().toISOString()
           };
