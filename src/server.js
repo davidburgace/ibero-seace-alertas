@@ -897,8 +897,10 @@ app.put('/api/opportunities/:id/interes', async (req, res, next) => {
     // Si se marcó como interés, crear automáticamente en Seguimiento Comercial
     if (interes === 'si') {
       try {
-        const { data: opp2 } = await supabase.from('opportunities')
+        console.log('[INTERES] Iniciando creación de proceso para:', req.params.id);
+        const { data: opp2, error: e3 } = await supabase.from('opportunities')
           .select('*').eq('id', req.params.id).single();
+        console.log('[INTERES] opp2 id:', opp2?.id, 'error:', e3?.message);
         if (opp2) {
           const procesoRow = {
             opportunity_id: String(opp2.id),
@@ -914,8 +916,10 @@ app.put('/api/opportunities/:id/interes', async (req, res, next) => {
             concluido: false,
             updated_at: new Date().toISOString()
           };
-          await supabase.from('procesos_seguimiento')
+          console.log('[INTERES] procesoRow opportunity_id:', procesoRow.opportunity_id);
+          const { error: upsertError } = await supabase.from('procesos_seguimiento')
             .upsert(procesoRow, { onConflict: 'opportunity_id', ignoreDuplicates: true });
+          console.log('[INTERES] upsert resultado:', upsertError?.message || 'OK');
         }
       } catch(e) { console.error('[INTERES] Error creando proceso:', e.message); }
     }
