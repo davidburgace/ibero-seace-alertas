@@ -196,6 +196,9 @@
   .semaforo{ display:flex; align-items:center; gap:5px; font-weight:600; }
   .semaforo-dot{ width:7px; height:7px; border-radius:50%; flex-shrink:0; display:inline-block; }
   .card-empty{ font-size:12px; color:var(--muted); font-style:italic; padding:8px 2px; }
+  .card.concluida{ opacity:0.45; filter:grayscale(0.6); }
+  .card-stage-btn.concluido-btn{ border-color:rgba(46,204,113,0.5); color:#1e8449; background:rgba(46,204,113,0.08); }
+  .card-stage-btn.concluido-btn:hover{ background:rgba(46,204,113,0.18); border-color:#2ecc71; }
 
   /* ---------- CALENDAR VIEW ---------- */
   .cal-layout{ display:grid; grid-template-columns: 280px 1fr; gap:18px; }
@@ -381,7 +384,10 @@
         <option value="Infra">Radar Infra</option>
         <option value="Privado">Privado</option>
       </select>
-      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);cursor:pointer;">
+          <input type="checkbox" id="fOcultarConcluidos" style="accent-color:var(--accent);"> Ocultar concluidos
+        </label>
         <button class="btn btn-ghost" id="btn-toggle-dashboard">📊 Mostrar Dashboard</button>
         <button class="btn btn-ghost" id="btn-export-procesos">⬇️ Exportar a Excel</button>
         <button class="btn btn-primary" id="btn-nuevo-proceso">+ Nuevo proceso</button>
@@ -1043,7 +1049,19 @@ function renderCardStageActions(p){
       <button type="button" class="card-stage-btn card-stage-lose" onclick="event.stopPropagation(); avanzarEtapaProceso('${p.id}','Perdido')">✕ Perdido</button>
     </div>`;
   }
+  if (p.etapa === 'Ganado'){
+    return `<button type="button" class="card-stage-btn concluido-btn" onclick="event.stopPropagation(); concluirProceso('${p.id}')">${p.concluido ? '↩ Reabrir' : '📦 Concluido'}</button>`;
+  }
   return '';
+}
+async function concluirProceso(id){
+  if (!sb) return alert('Configura Supabase primero.');
+  const actual = allProcesos.find(p => p.id === id);
+  const nuevoConcluido = !(actual && actual.concluido);
+  const { error } = await sb.from('procesos_seguimiento').update({ concluido: nuevoConcluido, updated_at: new Date().toISOString() }).eq('id', id);
+  if (error) return alert('Error: ' + error.message);
+  if (actual) actual.concluido = nuevoConcluido;
+  renderKanbanProcesos();
 }
 async function avanzarEtapaProceso(id, nuevaEtapa){
   if (!sb) return alert('Configura Supabase primero.');
@@ -1056,7 +1074,9 @@ async function avanzarEtapaProceso(id, nuevaEtapa){
 }
 function renderKanbanProcesos(){
   const filtro = document.getElementById('filtro-tipo-proceso').value;
-  const lista = filtro ? allProcesos.filter(p => p.tipo === filtro) : allProcesos;
+  const ocultarConcluidos = document.getElementById('fOcultarConcluidos').checked;
+  let lista = filtro ? allProcesos.filter(p => p.tipo === filtro) : allProcesos;
+  if (ocultarConcluidos) lista = lista.filter(p => !p.concluido);
   document.getElementById('count-procesos').textContent = allProcesos.length;
   const el = document.getElementById('kanban-procesos');
   el.style.setProperty('--kanban-cols', ETAPAS_PROCESO.length);
@@ -1071,7 +1091,7 @@ function renderKanbanProcesos(){
       ${items.length === 0 ? '<p class="card-empty">Sin procesos</p>' : items.map(p => {
         const sem = semaforoFecha(p.fecha_limite);
         return `
-        <div class="card" data-id="${p.id}">
+        <div class="card${p.concluido ? ' concluida' : ''}" data-id="${p.id}">
           <div class="card-tipo">
             <b class="tipo-label">${p.tipo}</b>${p.referencia ? ` · <span class="ref-tooltip" title="${escHtml(p.nombre || '')}">${escHtml(p.referencia)}</span>` : (p.nombre ? ` · <span class="ref-tooltip" title="${escHtml(p.nombre)}">${escHtml(truncate(p.nombre, 22))}</span>` : '')}
           </div>
@@ -1226,6 +1246,7 @@ document.getElementById('btn-toggle-dashboard').addEventListener('click', () => 
   if (dashboardVisible) renderDashboardProcesos();
 });
 document.getElementById('filtro-tipo-proceso').addEventListener('change', renderKanbanProcesos);
+document.getElementById('fOcultarConcluidos').addEventListener('change', renderKanbanProcesos);
 
 /* ---------- Picker: Oportunidades Seleccionadas (SEACE) y Radar Infra revisados ---------- */
 let seleccionadasCache = null;
