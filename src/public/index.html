@@ -101,8 +101,33 @@
       <p>Calendario de reuniones, procesos en curso (oficina técnica, expediente, consultas) y visitas a clientes.</p>
       <span class="go">Abrir pizarrón →</span>
     </a>
+    <a class="tile" href="ioarr.html" data-modulo="ioarr">
+      <div class="ico">🪑</div>
+      <h2>Radar IOARR</h2>
+      <p>IOARR de mobiliario escolar en Obras por Impuestos: seguimiento y rentabilidad del financista.</p>
+      <span class="go">Abrir radar →</span>
+    </a>
   </div>
 
   <footer>Grupo Ibero Perú S.A.C. · Radar SEACE</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+// Rol "financista": solo ve el tile de Radar IOARR. Sin sesión, la página se ve
+// igual que siempre (el login real de los demás módulos queda para la fase 2).
+(async () => {
+  try {
+    const cfg = await fetch('/api/ioarr/config').then(r => r.json());
+    if (!cfg.supabaseUrl || !cfg.supabaseKey || !window.supabase) return;
+    const sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey);
+    const { data } = await sb.auth.getSession();
+    if (!data.session) return;
+    const me = await fetch('/api/ioarr/me', { headers: { Authorization: 'Bearer ' + data.session.access_token } }).then(r => r.ok ? r.json() : null);
+    if (me?.rol === 'financista') {
+      document.querySelectorAll('.tile:not([data-modulo="ioarr"])').forEach(t => t.remove());
+    }
+  } catch (e) { console.warn('No se pudo verificar el rol', e); }
+})();
+</script>
 </body>
 </html>
