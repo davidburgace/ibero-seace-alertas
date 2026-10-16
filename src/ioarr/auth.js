@@ -1,0 +1,46 @@
+// ============================================================================
+// src/ioarr/auth.js — Autenticación con Supabase Auth + rol desde `perfiles`
+//
+// El navegador inicia sesión con Supabase Auth (email + contraseña) y envía
+// `Authorization: Bearer <access_token>`. Aquí se valida el token con Supabase
+// y se carga el rol (proveedor | financista).
+//
+// Fase 1: protege solo /api/ioarr/*. Fase 2 (pendiente): reutilizar
+// requireAuth/requireRol en las APIs existentes y endurecer el RLS de las
+// tablas que hoy lee seguimiento.html con la clave pública.
+// ============================================================================
+
+import { supabase } from './db.js';
+
+const CACHE_MS = 60 * 1000;          // evita consultar Supabase en cada request
+const cache = new Map();             // token → { usuario, expira }
+
+export async function requireAuth(req, res, next) {
+  try {
+    if (!supabase) return res.status(503).json({ error: 'Supabase no configurado' });
+    const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    if (!token) return res.status(401).json({ error: 'Inicia sesión para usar Radar IOARR' });
+
+    const enCache = cache.get(token);
+    if (enCache && enCache.expira > Date.now()) { req.usuario = enCache.usuario; return next(); }
+
+    const { data, error } = await supabase.auth.getUser(token);
+    if (error || !data?.user) return res.status(401).json({ error: 'Sesión inválida o vencida' });
+
+    const { data: perfil } = await supabase.from('perfiles').select('rol').eq('id', data.user.id).maybeSingle();
+    // Sin perfil = rol más limitado
+    const usuario = { id: data.user.id, email: data.user.email, rol: perfil?.rol || 'financista' };
+
+    if (cache.size > 500) cache.clear();
+    cache.set(token, { usuario, expira: Date.now() + CACHE_MS });
+    req.usuario = usuario;
+    next();
+  } catch (e) { next(e); }
+}
+
+// Uso: router.post('/ruta', requireRol('proveedor'), handler)
+export function requireRol(...roles) {
+  return (req, res, next) => roles.includes(req.usuario?.rol)
+    ? next()
+    : res.status(403).json({ error: 'Tu perfil no tiene acceso a esta acción' });
+}

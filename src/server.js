@@ -9,6 +9,7 @@ import multer from 'multer';
 import pdfParse from 'pdf-parse/lib/pdf-parse.js';
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 import infraRouter, { runInfraIngest } from './infra.js';
+import ioarrRouter, { sendIoarrDigest } from './ioarr/router.js';
 const app = express();
 app.use(cors({ origin: process.env.FRONTEND_URL?.split(',') || '*' }));
 app.use(express.json());
@@ -872,6 +873,7 @@ app.delete('/api/admin/contactos/:id', async (req, res, next) => {
   } catch(e) { next(e); }
 });
 app.use(infraRouter);
+app.use(ioarrRouter); // Radar IOARR (src/ioarr/)
 app.use((err, _, res, __) => {
   console.error('API error:', err);
   res.status(500).json({ error: err.message, version: VERSION });
@@ -1089,6 +1091,11 @@ cron.schedule(schedule, async () => {
 cron.schedule(process.env.INFRA_CRON || '0 9 * * 1', async () => {
   try { await runInfraIngest(); } catch (e) { console.error('[INFRA][CRON]', e.message); }
 });
+
+// Radar IOARR: correo diario con proyectos nuevos / cambios de estado
+cron.schedule(process.env.IOARR_CRON || '0 7 * * *', async () => {
+  try { console.log('[IOARR][CRON]', await sendIoarrDigest()); } catch (e) { console.error('[IOARR][CRON]', e.message); }
+}, { timezone: 'America/Lima' });
 
 // Recordatorios de reuniones: corre cada 15 min, avisa a reuniones que empiezan en la próxima hora
 cron.schedule('*/15 * * * *', async () => {

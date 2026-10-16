@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Radar IOARR</title>
+<link rel="icon" href="favicon-32.png">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+  /* Mismos tokens visuales que seguimiento.html / index.html */
+  :root{
+    --bg:#ffffff; --surface:#f7f8fa; --surface2:#eef0f4;
+    --border:rgba(0,0,0,0.08); --border2:rgba(0,0,0,0.14);
+    --text:#16181d; --muted:#5c6270;
+    --accent:#3a63e0; --accent2:#6a4fd1;
+    --green:#2ecc71; --orange:#ff9f43; --red:#e74c3c;
+    --font-display:'Syne',sans-serif; --font-body:'DM Sans',sans-serif; --font-mono:'DM Mono',monospace;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{
+    font-family:var(--font-body); background:var(--bg); color:var(--text); min-height:100vh;
+    background-image:
+      radial-gradient(circle at 50% -5%, rgba(58,99,224,0.06), transparent 55%),
+      radial-gradient(circle at 90% 10%, rgba(106,79,209,0.05), transparent 50%);
+  }
+  .topbar{
+    display:flex; align-items:center; justify-content:space-between; gap:12px;
+    padding:14px 24px; border-bottom:1px solid var(--border); background:var(--surface);
+    position:sticky; top:0; z-index:50;
+  }
+  .logo{ display:flex; align-items:center; gap:10px; font-family:var(--font-display); font-size:16px; font-weight:700; color:var(--text); text-decoration:none; }
+  .logo-dot{ width:8px; height:8px; border-radius:50%; background:var(--accent); box-shadow:0 0 10px var(--accent); }
+  .top-right{ display:flex; align-items:center; gap:10px; font-size:13px; color:var(--muted); }
+  .back{ color:var(--muted); text-decoration:none; font-size:13px; border:1px solid var(--border2); border-radius:8px; padding:7px 14px; white-space:nowrap; background:none; cursor:pointer; font-family:var(--font-body); }
+  .back:hover{ color:var(--text); border-color:var(--accent); }
+  .rol-badge{ font-family:var(--font-mono); font-size:11px; background:var(--surface2); padding:2px 8px; border-radius:20px; }
+
+  header{ padding:26px 32px 0; max-width:1320px; margin:0 auto; }
+  .title-row{ display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:16px; margin-bottom:14px; }
+  h1{ font-family:var(--font-display); font-weight:800; letter-spacing:-0.01em; font-size:clamp(24px,3.6vw,32px); }
+  h1 .accent{ background:linear-gradient(90deg,var(--accent),var(--accent2)); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .subtitle{ color:var(--muted); font-size:14px; margin-top:4px; }
+  .aviso-legal{
+    background:#FFF8EC; border:1px solid rgba(255,159,67,.45); color:#7a4a12;
+    padding:10px 14px; border-radius:10px; font-size:12.5px; line-height:1.45; margin-bottom:16px;
+  }
+  .tabs{ display:flex; gap:6px; border-bottom:1px solid var(--border); overflow-x:auto; }
+  .tab-btn{
+    font-family:var(--font-display); font-weight:700; font-size:14px; color:var(--muted); background:none; border:none;
+    padding:12px 18px; cursor:pointer; border-bottom:2px solid transparent; display:flex; align-items:center; gap:8px; white-space:nowrap;
+  }
+  .tab-btn .count{ font-family:var(--font-mono); font-size:11px; background:var(--surface2); padding:1px 7px; border-radius:20px; }
+  .tab-btn.active{ color:var(--text); border-bottom-color:var(--accent); }
+  .tab-btn.active .count{ background:var(--accent); color:#fff; }
+
+  main{ max-width:1320px; margin:0 auto; padding:22px 32px 60px; }
+  .view{ display:none; } .view.active{ display:block; }
+
+  .btn{ font-family:var(--font-display); font-weight:700; font-size:13px; border:none; border-radius:10px; padding:10px 16px; cursor:pointer; }
+  .btn-primary{ background:linear-gradient(90deg,var(--accent),var(--accent2)); color:#fff; }
+  .btn-primary:hover{ filter:brightness(1.06); }
+  .btn-ghost{ background:var(--surface); color:var(--text); border:1px solid var(--border2); }
+  .btn-ghost:hover{ background:var(--surface2); }
+  .btn:disabled{ opacity:.5; cursor:wait; }
+
+  .filtros{ display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:16px; }
+  .filtros select, .filtros input[type=text], .filtros input[type=number]{
+    font-family:var(--font-body); font-size:13px; padding:9px 11px; border-radius:10px;
+    border:1px solid var(--border2); background:var(--surface); color:var(--text);
+  }
+  .filtros input[type=number]{ width:130px; }
+  .filtros input[type=text]{ min-width:200px; flex:1; }
+  .chk{ display:flex; align-items:center; gap:6px; font-size:13px; color:var(--muted); cursor:pointer; white-space:nowrap; }
+
+  .tabla-wrap{ overflow-x:auto; border:1px solid var(--border); border-radius:12px; }
+  table.tabla{ width:100%; border-collapse:collapse; font-size:13px; }
+  .tabla th{ text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.4px; color:var(--muted); background:var(--surface); padding:10px; white-space:nowrap; }
+  .tabla td{ padding:10px; border-top:1px solid var(--border); vertical-align:top; }
+  .tabla tbody tr{ cursor:pointer; } .tabla tbody tr:hover{ background:var(--surface); }
+  .mono{ font-family:var(--font-mono); font-size:12px; }
+  .num{ text-align:right; white-space:nowrap; }
+  .sub{ color:var(--muted); font-size:12px; }
+  .badge{ display:inline-block; font-size:11px; font-weight:600; padding:2px 8px; border-radius:6px; background:var(--surface2); white-space:nowrap; }
+  .badge-oport{ background:rgba(46,204,113,.14); color:#1e8449; }
+  .badge-mob{ background:rgba(58,99,224,.12); color:var(--accent); }
+  .vacio{ padding:30px; text-align:center; color:var(--muted); font-size:14px; }
+
+  /* Kanban (mismo patrón que Seguimiento Comercial) */
+  .kanban{ display:grid; grid-template-columns:repeat(5, minmax(0,1fr)); gap:12px; }
+  .kcol{ background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:14px; min-height:200px; min-width:0; }
+  .kcol-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+  .kcol-title{ font-family:var(--font-display); font-weight:700; font-size:13px; display:flex; align-items:center; gap:8px; }
+  .kcol-dot{ width:8px; height:8px; border-radius:50%; }
+  .kcol-count{ font-family:var(--font-mono); font-size:11px; color:var(--muted); }
+  .card{ background:#fff; border:1px solid var(--border); border-radius:10px; padding:12px; margin-bottom:10px; cursor:pointer; transition:border-color .15s, transform .15s; }
+  .card:hover{ border-color:var(--accent); transform:translateY(-2px); }
+  .card-tipo{ font-family:var(--font-mono); font-size:10px; text-transform:uppercase; color:var(--muted); margin-bottom:6px; }
+  .card-nombre{ font-weight:600; font-size:13px; line-height:1.35; margin-bottom:6px; }
+  .card-meta{ font-size:12px; color:var(--muted); display:flex; flex-direction:column; gap:2px; }
+  .card-stage-row{ display:flex; gap:6px; margin-top:10px; }
+  .card-stage-btn{ flex:1; font-family:var(--font-body); font-size:11.5px; font-weight:600; border:1px solid var(--border2); background:#fff; border-radius:7px; padding:5px; cursor:pointer; }
+  .card-stage-btn:hover{ border-color:var(--accent); color:var(--accent); }
+  .card-empty{ font-size:12px; color:var(--muted); font-style:italic; padding:8px 2px; }
+
+  /* Modal / ficha */
+  .modal-overlay{ display:none; position:fixed; inset:0; background:rgba(22,24,29,.5); align-items:flex-start; justify-content:center; z-index:1000; padding:24px 16px; overflow-y:auto; }
+  .modal-overlay.open{ display:flex; }
+  .modal{ background:#fff; width:100%; max-width:920px; border-radius:16px; padding:26px; position:relative; }
+  .modal h2{ font-family:var(--font-display); font-size:19px; margin-bottom:4px; padding-right:30px; }
+  .modal h3{ font-family:var(--font-display); font-size:15px; margin:22px 0 10px; }
+  .cerrar{ position:absolute; top:16px; right:18px; background:none; border:none; font-size:22px; cursor:pointer; color:var(--muted); }
+  .grid2{ display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+  .datos{ display:grid; grid-template-columns:auto 1fr; gap:6px 14px; font-size:13px; }
+  .datos dt{ color:var(--muted); }
+  .field{ margin-bottom:12px; }
+  .field label{ display:block; font-size:12px; font-weight:600; color:var(--muted); margin-bottom:5px; }
+  .field input, .field select, .field textarea{
+    width:100%; padding:9px 11px; border:1px solid var(--border2); border-radius:9px;
+    font-family:var(--font-body); font-size:14px; background:var(--surface);
+  }
+  .field textarea{ resize:vertical; min-height:56px; }
+  .field-row{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .timeline{ border-left:2px solid var(--border2); padding-left:14px; max-height:280px; overflow-y:auto; }
+  .tl-item{ margin-bottom:12px; font-size:13px; position:relative; }
+  .tl-item::before{ content:''; position:absolute; left:-20px; top:5px; width:10px; height:10px; border-radius:50%; background:var(--accent); }
+  .tl-item.cambio_estado::before{ background:var(--orange); }
+  .tl-item.nota::before{ background:var(--muted); }
+  .tl-fecha{ font-family:var(--font-mono); font-size:11px; color:var(--muted); }
+  .calc-box{ background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:16px; }
+  .calc-res{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin:12px 0; }
+  .kpi{ background:#fff; border:1px solid var(--border); border-radius:10px; padding:10px; }
+  .kpi span{ display:block; font-size:11px; color:var(--muted); }
+  .kpi b{ font-family:var(--font-mono); font-size:14px; }
+  .pos{ color:#1e8449; } .neg{ color:#c0392b; }
+  .calc-aviso{ font-size:12px; color:#7a4a12; background:#FFF8EC; border-radius:8px; padding:8px 10px; margin-bottom:12px; line-height:1.4; }
+  .msg{ font-size:12.5px; margin-top:8px; min-height:16px; }
+  .msg.err{ color:var(--red); } .msg.ok{ color:#1e8449; }
+
+  .panel{ background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:20px; margin-bottom:18px; max-width:980px; }
+  .regiones-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(150px,1fr)); gap:6px; margin:8px 0 14px; }
+
+  /* Login */
+  .login-wrap{ display:none; min-height:70vh; align-items:center; justify-content:center; padding:20px; }
+  .login-card{ background:var(--surface); border:1px solid var(--border2); border-radius:16px; padding:34px; width:100%; max-width:380px; }
+  .login-card h2{ font-family:var(--font-display); font-size:20px; margin-bottom:6px; }
+
+  footer{ max-width:1320px; margin:0 auto; padding:0 32px 30px; font-size:11.5px; color:var(--muted); line-height:1.5; }
+
+  @media (max-width:1100px) and (min-width:641px){ .kanban{ grid-template-columns:repeat(3, minmax(0,1fr)); } }
+  @media (max-width:760px){ .grid2, .calc-res{ grid-template-columns:1fr; } }
+  @media (max-width:640px){
+    .topbar{ padding:12px 16px; } header{ padding:18px 16px 0; } main{ padding:16px 16px 40px; } footer{ padding:0 16px 24px; }
+    .kanban{ grid-auto-flow:column; grid-template-columns:none; grid-auto-columns:minmax(78vw,1fr); overflow-x:auto; scroll-snap-type:x mandatory; }
+    .kcol{ scroll-snap-align:start; }
+    .filtros input[type=number]{ width:calc(50% - 5px); }
+    .field-row{ grid-template-columns:1fr; gap:0; }
+    .modal{ padding:20px 16px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <a class="logo" href="index.html"><span class="logo-dot"></span> Radar Ibero</a>
+  <div class="top-right" id="top-right" style="display:none">
+    <span id="user-email"></span><span class="rol-badge" id="user-rol"></span>
+    <a class="back" href="index.html" id="link-inicio" style="display:none">← Inicio</a>
+    <button class="back" id="btn-salir">Salir</button>
+  </div>
+</div>
+
+<!-- ===================== LOGIN ===================== -->
+<div class="login-wrap" id="login-wrap">
+  <div class="login-card">
+    <h2>Radar IOARR</h2>
+    <p class="sub" style="margin-bottom:20px">Ingresa con tu usuario de Radar Ibero.</p>
+    <div class="field"><label>Correo</label><input type="email" id="login-email" autocomplete="username"></div>
+    <div class="field"><label>Contraseña</label><input type="password" id="login-pass" autocomplete="current-password"></div>
+    <button class="btn btn-primary" id="btn-login" style="width:100%">Ingresar</button>
+    <div class="msg err" id="login-msg"></div>
+  </div>
+</div>
+
+<div id="app" style="display:none">
+<header>
+  <div class="title-row">
+    <div>
+      <h1>Radar <span class="accent">IOARR</span></h1>
+      <div class="subtitle">IOARR de mobiliario escolar en Obras por Impuestos — vista del financista.</div>
+    </div>
+  </div>
+  <div class="aviso-legal">
+    ⚠️ La información de este módulo es <b>referencial</b>, proviene de fuentes públicas y de cálculos internos.
+    Debe verificarse con la <b>DGPPIP del MEF</b> o con un abogado antes de tomar decisiones de inversión.
+  </div>
+  <div class="tabs">
+    <button class="tab-btn active" data-tab="listado">📋 Proyectos <span class="count" id="count-proyectos">0</span></button>
+    <button class="tab-btn" data-tab="kanban">🗂️ Kanban financista</button>
+    <button class="tab-btn" data-tab="importar">⬆️ Importar</button>
+    <button class="tab-btn" data-tab="alertas">🔔 Alertas</button>
+  </div>
+</header>
+
+<main>
+  <!-- ===================== LISTADO ===================== -->
+  <section class="view active" id="view-listado">
+    <div class="filtros">
+      <select id="f-region"></select>
+      <select id="f-estado"><option value="">Todos los estados</option></select>
+      <select id="f-funcion"><option value="">Todas las funciones</option></select>
+      <input type="number" id="f-min" placeholder="Monto mín. S/" min="0">
+      <input type="number" id="f-max" placeholder="Monto máx. S/" min="0">
+      <input type="text" id="f-q" placeholder="Buscar por CUI o nombre…">
+      <label class="chk"><input type="checkbox" id="f-mob"> Solo mobiliario</label>
+      <label class="chk"><input type="checkbox" id="f-sinprio"> Viable sin priorizar en OxI</label>
+      <button class="btn btn-primary" id="btn-buscar">Buscar</button>
+      <button class="btn btn-ghost" id="btn-export">⬇️ Exportar a Excel</button>
+    </div>
+    <div class="tabla-wrap">
+      <table class="tabla">
+        <thead><tr><th>CUI</th><th>Proyecto</th><th>Ubicación</th><th>Función</th><th class="num">Monto</th><th>Estado</th><th>Etapa</th></tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+      <div class="vacio" id="vacio" style="display:none">Sin proyectos con estos filtros. Importa un archivo en la pestaña “Importar”.</div>
+    </div>
+  </section>
+
+  <!-- ===================== KANBAN ===================== -->
+  <section class="view" id="view-kanban">
+    <p class="sub" style="margin-bottom:14px">Muestra los proyectos del listado filtrado. La etapa del financista es interna e independiente del estado oficial.</p>
+    <div class="kanban" id="kanban"></div>
+  </section>
+
+  <!-- ===================== IMPORTAR ===================== -->
+  <section class="view" id="view-importar">
+    <div class="panel">
+      <h3 style="font-family:var(--font-display);margin-bottom:6px">Importar Excel / CSV</h3>
+      <p class="sub" style="margin-bottom:14px">Sube el exporte del Banco de Inversiones (Invierte.pe) o la lista de priorización de Proinversión.
+        Se actualiza por CUI; el estado solo avanza y cada cambio queda en la línea de tiempo.</p>
+      <div class="field-row">
+        <div class="field"><label>Archivo</label><input type="file" id="imp-file" accept=".xlsx,.xls,.csv"></div>
+        <div class="field"><label>Fuente</label>
+          <select id="imp-fuente">
+            <option value="invierte_pe">Banco de Inversiones (Invierte.pe)</option>
+            <option value="proinversion">Priorización Proinversión (OxI)</option>
+            <option value="otro">Otro</option>
+          </select></div>
+      </div>
+      <label class="chk" style="margin-bottom:14px"><input type="checkbox" id="imp-solo-ioarr" checked> Importar solo IOARR (si el archivo trae columna de tipo de inversión)</label>
+      <button class="btn btn-ghost" id="btn-preview">1. Previsualizar y mapear columnas</button>
+      <div class="msg" id="imp-msg"></div>
+    </div>
+    <div class="panel" id="imp-mapeo-panel" style="display:none">
+      <h3 style="font-family:var(--font-display);margin-bottom:10px">Mapeo de columnas</h3>
+      <p class="sub" style="margin-bottom:10px">Revisa la columna del archivo que corresponde a cada campo. CUI y nombre son obligatorios.</p>
+      <div id="imp-mapeo" class="field-row"></div>
+      <h3 style="font-family:var(--font-display);margin:14px 0 8px">Primeras filas</h3>
+      <div class="tabla-wrap" id="imp-muestra"></div>
+      <div style="margin-top:14px"><button class="btn btn-primary" id="btn-importar">2. Importar</button></div>
+      <div class="msg" id="imp-res"></div>
+    </div>
+  </section>
+
+  <!-- ===================== ALERTAS ===================== -->
+  <section class="view" id="view-alertas">
+    <div class="panel">
+      <h3 style="font-family:var(--font-display);margin-bottom:6px">Correo diario</h3>
+      <p class="sub" style="margin-bottom:14px">Proyectos nuevos y cambios de estado en las regiones que marques.</p>
+      <div class="field" style="max-width:380px"><label>Enviar a</label><input type="email" id="al-email"></div>
+      <label class="sub">Regiones</label>
+      <div class="regiones-grid" id="al-regiones"></div>
+      <label class="chk" style="margin-bottom:8px"><input type="checkbox" id="al-mob"> Solo proyectos de mobiliario</label>
+      <label class="chk" style="margin-bottom:16px"><input type="checkbox" id="al-activo"> Alerta activa</label>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-primary" id="btn-al-guardar">Guardar</button>
+        <button class="btn btn-ghost" id="btn-al-probar">Enviar ahora (prueba)</button>
+      </div>
+      <div class="msg" id="al-msg"></div>
+    </div>
+  </section>
+</main>
+<footer>
+  Radar IOARR · Grupo Ibero Perú. Información referencial: verifíquela con la DGPPIP del MEF o un abogado.
+  El D.S. 038-2026-EF no reconoce intereses de financiamiento; solo costos de gestión.
+</footer>
+</div>
+
+<!-- ===================== FICHA ===================== -->
+<div class="modal-overlay" id="ficha-overlay">
+  <div class="modal" id="ficha"></div>
+</div>
+
+<script type="module">
+// La misma calculadora que usa el backend (src/ioarr/calculadora.js)
+import { calcularRentabilidad, AVISO_CALCULADORA } from '/ioarr/calculadora.js';
+
+const ESTADOS = {
+  viable: 'Viable', priorizada_oxi: 'Priorizada OxI', convenio: 'Convenio', en_proceso_seleccion: 'En proceso de selección',
+  en_ejecucion: 'En ejecución', bienes_entregados: 'Bienes entregados', ciprl_emitido: 'CIPRL emitido', cerrada: 'Cerrada', descartada: 'Descartada'
+};
+const ETAPAS = [
+  { key: 'detectada', label: 'Detectada', color: '#94a3b8' },
+  { key: 'evaluando', label: 'Evaluando', color: '#ff9f43' },
+  { key: 'convenio', label: 'Convenio', color: '#3a63e0' },
+  { key: 'financiando', label: 'Financiando', color: '#6a4fd1' },
+  { key: 'ciprl_emitido', label: 'CIPRL emitido', color: '#2ecc71' }
+];
+const DEPARTAMENTOS = ['AMAZONAS', 'ANCASH', 'APURIMAC', 'AREQUIPA', 'AYACUCHO', 'CAJAMARCA', 'CALLAO', 'CUSCO', 'HUANCAVELICA',
+  'HUANUCO', 'ICA', 'JUNIN', 'LA LIBERTAD', 'LAMBAYEQUE', 'LIMA', 'LORETO', 'MADRE DE DIOS', 'MOQUEGUA', 'PASCO', 'PIURA',
+  'PUNO', 'SAN MARTIN', 'TACNA', 'TUMBES', 'UCAYALI'];
+const REGION_DEFECTO = 'LAMBAYEQUE';
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const soles = (n) => n == null || n === '' ? '—' : 'S/ ' + Number(n).toLocaleString('es-PE', { maximumFractionDigits: 0 });
+const soles2 = (n) => 'S/ ' + Number(n || 0).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fecha = (d) => new Date(d).toLocaleString('es-PE', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+const etapaLabel = (k) => ETAPAS.find(e => e.key === k)?.label || k;
+function setMsg(el, texto, tipo) { el.textContent = texto || ''; el.className = 'msg' + (tipo ? ' ' + tipo : ''); }
+
+let sb = null;
+let usuario = null;
+let lista = [];
+let actual = null; // ficha abierta
+
+/* ---------- Sesión (Supabase Auth) ---------- */
+async function api(path, opts = {}) {
+  const { data } = await sb.auth.getSession();
+  const token = data.session?.access_token;
+  const headers = { ...(opts.headers || {}), Authorization: 'Bearer ' + token };
+  if (opts.body && !(opts.body instanceof FormData)) headers['Content-Type'] = 'application/json';
+  const r = await fetch(path, { ...opts, headers });
+  const json = await r.json().catch(() => ({}));
+  if (r.status === 401) { mostrarLogin(); throw new Error(json.error || 'Sesión vencida'); }
+  if (!r.ok) throw new Error(json.error || 'Error ' + r.status);
+  return json;
+}
+
+function mostrarLogin() {
+  $('app').style.display = 'none'; $('top-right').style.display = 'none';
+  $('login-wrap').style.display = 'flex';
+}
+
+async function iniciarApp() {
+  usuario = await api('/api/ioarr/me');
+  $('login-wrap').style.display = 'none';
+  $('app').style.display = 'block'; $('top-right').style.display = 'flex';
+  $('user-email').textContent = usuario.email;
+  $('user-rol').textContent = usuario.rol;
+  // El financista solo ve Radar IOARR: sin enlaces a otros módulos
+  $('link-inicio').style.display = usuario.rol === 'proveedor' ? 'inline-block' : 'none';
+  await cargarFiltros();
+  await buscar();
+  await cargarAlertas();
+}
+
+async function arrancar() {
+  const cfg = await fetch('/api/ioarr/config').then(r => r.json());
+  if (!cfg.supabaseUrl || !cfg.supabaseKey) {
+    document.body.insertAdjacentHTML('beforeend', '<p class="vacio">Falta configurar SUPABASE_URL y SUPABASE_PUBLISHABLE_KEY en el servidor.</p>');
+    return;
+  }
+  sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey);
+  const { data } = await sb.auth.getSession();
+  if (data.session) { try { await iniciarApp(); } catch (e) { console.error(e); mostrarLogin(); } }
+  else mostrarLogin();
+}
+
+$('btn-login').addEventListener('click', async () => {
+  setMsg($('login-msg'), '');
+  const { error } = await sb.auth.signInWithPassword({ email: $('login-email').value.trim(), password: $('login-pass').value });
+  if (error) return setMsg($('login-msg'), 'No se pudo ingresar: ' + error.message, 'err');
+  try { await iniciarApp(); } catch (e) { setMsg($('login-msg'), e.message, 'err'); }
+});
+$('login-pass').addEventListener('keydown', e => { if (e.key === 'Enter') $('btn-login').click(); });
+$('btn-salir').addEventListener('click', async () => { await sb.auth.signOut(); mostrarLogin(); });
+
+/* ---------- Pestañas ---------- */
+document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click', () => {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  btn.classList.add('active');
+  $('view-' + btn.dataset.tab).classList.add('active');
+}));
+
+/* ---------- Filtros y listado ---------- */
+async function cargarFiltros() {
+  const f = await api('/api/ioarr/filtros');
+  const regiones = [...new Set([...DEPARTAMENTOS, ...f.regiones])].sort();
+  $('f-region').innerHTML = '<option value="">Todas las regiones</option>' +
+    regiones.map(r => `<option value="${esc(r)}" ${r === REGION_DEFECTO ? 'selected' : ''}>${esc(r)}</option>`).join('');
+  $('f-estado').innerHTML = '<option value="">Todos los estados</option>' +
+    Object.entries(ESTADOS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
+  $('f-funcion').innerHTML = '<option value="">Todas las funciones</option>' +
+    f.funciones.map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join('');
+}
+
+async function buscar() {
+  const p = new URLSearchParams();
+  const set = (k, v) => { if (v) p.set(k, v); };
+  set('region', $('f-region').value); set('estado', $('f-estado').value); set('funcion', $('f-funcion').value);
+  set('min', $('f-min').value); set('max', $('f-max').value); set('q', $('f-q').value.trim());
+  if ($('f-mob').checked) p.set('mobiliario', '1');
+  if ($('f-sinprio').checked) p.set('sin_priorizar', '1');
+  lista = await api('/api/ioarr/proyectos?' + p);
+  renderListado();
+  renderKanban();
+}
+
+// "Viable sin priorizar en OxI": oportunidad para convencer a la entidad
+const sinPriorizar = (p) => p.estado === 'viable';
+
+function renderListado() {
+  $('count-proyectos').textContent = lista.length;
+  $('vacio').style.display = lista.length ? 'none' : 'block';
+  $('tbody').innerHTML = lista.map(p => `
+    <tr data-id="${p.id}">
+      <td class="mono">${esc(p.cui)}</td>
+      <td>${esc(p.nombre)}<div class="sub">${esc(p.entidad || '')}${p.entidad_tipo ? ' · ' + p.entidad_tipo : ''}</div>
+        ${p.es_mobiliario ? '<span class="badge badge-mob">🪑 Mobiliario</span> ' : ''}
+        ${sinPriorizar(p) ? '<span class="badge badge-oport" title="Viable pero aún no priorizada en OxI: oportunidad para proponerla a la entidad">💡 Viable sin priorizar</span>' : ''}</td>
+      <td>${esc(p.region || '')}<div class="sub">${esc([p.provincia, p.distrito].filter(Boolean).join(' / '))}</div></td>
+      <td class="sub">${esc(p.funcion || '')}</td>
+      <td class="num">${soles(p.monto_inversion)}</td>
+      <td><span class="badge">${ESTADOS[p.estado] || p.estado}</span></td>
+      <td class="sub">${etapaLabel(p.etapa_financista)}</td>
+    </tr>`).join('');
+}
+$('tbody').addEventListener('click', e => { const tr = e.target.closest('tr[data-id]'); if (tr) abrirFicha(tr.dataset.id); });
+$('btn-buscar').addEventListener('click', () => buscar().catch(e => alert(e.message)));
+$('f-q').addEventListener('keydown', e => { if (e.key === 'Enter') $('btn-buscar').click(); });
+['f-region', 'f-estado', 'f-funcion', 'f-mob', 'f-sinprio'].forEach(id => $(id).addEventListener('change', () => buscar().catch(e => alert(e.message))));
+
+/* ---------- Exportar a Excel ---------- */
+$('btn-export').addEventListener('click', () => {
+  const filas = lista.map(p => ({
+    CUI: p.cui, Proyecto: p.nombre, Entidad: p.entidad, 'Tipo entidad': p.entidad_tipo, Región: p.region, Provincia: p.provincia,
+    Distrito: p.distrito, Función: p.funcion, 'Tipo inversión': p.tipo_inversion, 'Monto (S/)': p.monto_inversion != null ? Number(p.monto_inversion) : '',
+    Estado: ESTADOS[p.estado] || p.estado, 'Viable sin priorizar': sinPriorizar(p) ? 'Sí' : '', 'Etapa financista': etapaLabel(p.etapa_financista),
+    Mobiliario: p.es_mobiliario ? 'Sí' : 'No', Fuente: p.fuente, URL: p.url_fuente, Notas: p.notas, Actualizado: p.actualizado_en
+  }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(filas), 'Proyectos IOARR');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+    ['Aviso'], ['Información referencial obtenida de fuentes públicas. Verificar con la DGPPIP del MEF o un abogado.'],
+    ['Exportado: ' + new Date().toLocaleString('es-PE')]
+  ]), 'Aviso');
+  XLSX.writeFile(wb, `radar-ioarr-${new Date().toISOString().slice(0, 10)}.xlsx`);
+});
+
+/* ---------- Kanban financista ---------- */
+function renderKanban() {
+  $('kanban').innerHTML = ETAPAS.map((et, i) => {
+    const items = lista.filter(p => p.etapa_financista === et.key);
+    return `<div class="kcol">
+      <div class="kcol-head"><div class="kcol-title"><span class="kcol-dot" style="background:${et.color}"></span>${et.label}</div>
+        <span class="kcol-count">${items.length}</span></div>
+      ${items.length ? items.map(p => `
+        <div class="card" data-id="${p.id}">
+          <div class="card-tipo">CUI ${esc(p.cui)} · ${ESTADOS[p.estado] || p.estado}</div>
+          <div class="card-nombre" title="${esc(p.nombre)}">${esc(p.nombre.length > 90 ? p.nombre.slice(0, 90) + '…' : p.nombre)}</div>
+          <div class="card-meta"><span>${esc(p.region || '')}${p.provincia ? ' / ' + esc(p.provincia) : ''}</span><span>${soles(p.monto_inversion)}</span></div>
+          ${sinPriorizar(p) ? '<div style="margin-top:6px"><span class="badge badge-oport">💡 Viable sin priorizar</span></div>' : ''}
+          <div class="card-stage-row">
+            ${i > 0 ? `<button class="card-stage-btn" data-mover="${ETAPAS[i - 1].key}">← ${ETAPAS[i - 1].label}</button>` : ''}
+            ${i < ETAPAS.length - 1 ? `<button class="card-stage-btn" data-mover="${ETAPAS[i + 1].key}">${ETAPAS[i + 1].label} →</button>` : ''}
+          </div>
+        </div>`).join('') : '<p class="card-empty">Sin proyectos</p>'}
+    </div>`;
+  }).join('');
+}
+$('kanban').addEventListener('click', async e => {
+  const card = e.target.closest('.card'); if (!card) return;
+  const btn = e.target.closest('[data-mover]');
+  if (!btn) return abrirFicha(card.dataset.id);
+  btn.disabled = true;
+  try {
+    const p = await api('/api/ioarr/proyectos/' + card.dataset.id, { method: 'PATCH', body: JSON.stringify({ etapa_financista: btn.dataset.mover }) });
+    lista = lista.map(x => x.id === p.id ? p : x);
+    renderKanban(); renderListado();
+  } catch (err) { alert(err.message); btn.disabled = false; }
+});
+
+/* ---------- Ficha del proyecto ---------- */
+async function abrirFicha(id) {
+  $('ficha').innerHTML = '<p class="vacio">Cargando…</p>';
+  $('ficha-overlay').classList.add('open');
+  try { actual = await api('/api/ioarr/proyectos/' + id); renderFicha(); }
+  catch (e) { $('ficha').innerHTML = `<p class="vacio">${esc(e.message)}</p>`; }
+}
+function cerrarFicha() { $('ficha-overlay').classList.remove('open'); actual = null; }
+$('ficha-overlay').addEventListener('click', e => { if (e.target.id === 'ficha-overlay') cerrarFicha(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') cerrarFicha(); });
+
+function renderFicha() {
+  const { proyecto: p, eventos, evaluaciones, contrapartes } = actual;
+  $('ficha').innerHTML = `
+    <button class="cerrar" data-accion="cerrar">×</button>
+    <div class="card-tipo">CUI ${esc(p.cui)} · ${esc(p.tipo_inversion || '')}</div>
+    <h2>${esc(p.nombre)}</h2>
+    <div style="margin:6px 0 4px">${p.es_mobiliario ? '<span class="badge badge-mob">🪑 Mobiliario</span> ' : ''}
+      ${sinPriorizar(p) ? '<span class="badge badge-oport">💡 Viable sin priorizar en OxI — oportunidad para proponerla a la entidad</span>' : ''}</div>
+
+    <div class="grid2">
+      <div>
+        <h3>Datos</h3>
+        <dl class="datos">
+          <dt>Entidad</dt><dd>${esc(p.entidad || '—')} ${p.entidad_tipo ? '(' + p.entidad_tipo + ')' : ''}</dd>
+          <dt>Ubicación</dt><dd>${esc([p.region, p.provincia, p.distrito].filter(Boolean).join(' / ') || '—')}</dd>
+          <dt>Función</dt><dd>${esc(p.funcion || '—')}</dd>
+          <dt>Monto</dt><dd>${soles(p.monto_inversion)}</dd>
+          <dt>Fuente</dt><dd>${esc(p.fuente || '—')} ${p.url_fuente ? `· <a href="${esc(p.url_fuente)}" target="_blank" rel="noopener">ver</a>` : ''}</dd>
+          <dt>Actualizado</dt><dd>${fecha(p.actualizado_en)}</dd>
+        </dl>
+        <h3>Seguimiento</h3>
+        <div class="field-row">
+          <div class="field"><label>Estado oficial</label><select id="fi-estado">
+            ${Object.entries(ESTADOS).map(([k, v]) => `<option value="${k}" ${k === p.estado ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
+          <div class="field"><label>Etapa financista</label><select id="fi-etapa">
+            ${ETAPAS.map(e => `<option value="${e.key}" ${e.key === p.etapa_financista ? 'selected' : ''}>${e.label}</option>`).join('')}</select></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Tipo de entidad</label><select id="fi-tipo-ent">
+            ${['', 'GORE', 'GL', 'GN'].map(t => `<option value="${t}" ${t === (p.entidad_tipo || '') ? 'selected' : ''}>${t || '—'}</option>`).join('')}</select></div>
+          <div class="field"><label>&nbsp;</label><label class="chk"><input type="checkbox" id="fi-mob" ${p.es_mobiliario ? 'checked' : ''}> Es mobiliario</label></div>
+        </div>
+        <div class="field"><label>Notas</label><textarea id="fi-notas">${esc(p.notas || '')}</textarea></div>
+        <button class="btn btn-ghost" data-accion="guardar">Guardar cambios</button>
+        <div class="msg" id="fi-msg"></div>
+      </div>
+
+      <div>
+        <h3>Línea de tiempo</h3>
+        <div class="timeline">
+          ${eventos.length ? eventos.map(ev => `<div class="tl-item ${ev.tipo}">
+            <div class="tl-fecha">${fecha(ev.fecha)} · ${ev.tipo.replace('_', ' ')}</div>${esc(ev.detalle)}</div>`).join('')
+            : '<p class="card-empty">Sin eventos</p>'}
+        </div>
+        <div class="field" style="margin-top:12px"><label>Agregar nota / hito</label>
+          <div style="display:flex;gap:6px"><select id="ev-tipo" style="width:auto"><option value="nota">Nota</option><option value="hito">Hito</option></select>
+          <input id="ev-detalle" placeholder="Ej.: reunión con la UF, se presentó propuesta…"></div></div>
+        <button class="btn btn-ghost" data-accion="evento">Agregar</button>
+
+        <h3>Contrapartes</h3>
+        ${contrapartes.length ? contrapartes.map(c => `<div class="tl-item nota" style="margin-left:0">
+          <b>${esc(c.nombre)}</b> <span class="sub">${esc(c.tipo)}${c.ruc ? ' · RUC ' + esc(c.ruc) : ''}</span>
+          <button class="card-stage-btn" style="flex:none;padding:1px 6px;margin-left:6px" data-quitar="${c.id}">quitar</button>
+          ${c.riesgo_notas ? `<div class="sub">⚠️ ${esc(c.riesgo_notas)}</div>` : ''}
+          ${c.historial ? `<div class="sub">📁 ${esc(c.historial)}</div>` : ''}</div>`).join('') : '<p class="card-empty">Sin contrapartes</p>'}
+        <details style="margin-top:8px"><summary class="sub" style="cursor:pointer">+ Vincular contraparte</summary>
+          <div class="field-row" style="margin-top:8px">
+            <div class="field"><label>RUC</label><input id="cp-ruc"></div>
+            <div class="field"><label>Tipo</label><select id="cp-tipo"><option value="entidad">Entidad</option><option value="ejecutora">Ejecutora</option><option value="supervisora">Supervisora</option></select></div>
+          </div>
+          <div class="field"><label>Nombre</label><input id="cp-nombre"></div>
+          <div class="field"><label>Notas de riesgo</label><textarea id="cp-riesgo"></textarea></div>
+          <div class="field"><label>Historial</label><textarea id="cp-hist"></textarea></div>
+          <button class="btn btn-ghost" data-accion="contraparte">Vincular</button>
+        </details>
+      </div>
+    </div>
+
+    <h3>Calculadora de rentabilidad del financista</h3>
+    <div class="calc-box">
+      <div class="calc-aviso">⚠️ ${esc(AVISO_CALCULADORA)}</div>
+      <div class="field-row">
+        <div class="field"><label>Monto de inversión (S/)</label><input type="number" min="0" step="any" data-calc="monto_inversion" value="${p.monto_inversion ?? ''}"></div>
+        <div class="field"><label>Costos de gestión (S/) — reconocidos</label><input type="number" min="0" step="any" data-calc="costos_gestion" value="0"></div>
+        <div class="field"><label>Costo de supervisión (S/)</label><input type="number" min="0" step="any" data-calc="costo_supervision" value="0"></div>
+        <div class="field"><label>Otros costos (S/) — no reconocidos</label><input type="number" min="0" step="any" data-calc="otros_costos" value="0"></div>
+        <div class="field"><label>Descuento al negociar el CIPRL (%) — 0 = uso propio contra IR</label><input type="number" min="0" max="100" step="any" data-calc="descuento_negociacion_ciprl_pct" value="0"></div>
+        <div class="field"><label>Meses hasta el cobro</label><input type="number" min="0" step="any" data-calc="meses_hasta_cobro" value="12"></div>
+        <div class="field"><label>Tasa de costo de capital anual (%) — criterio interno</label><input type="number" min="0" step="any" data-calc="tasa_costo_capital_anual" value="0"></div>
+        <div class="field"><label>Beneficio adicional (S/) — margen de proveedor, beneficio tributario, etc. (estimado interno, no viene del CIPRL)</label><input type="number" min="0" step="any" data-calc="beneficio_adicional" value="0"></div>
+      </div>
+      <div id="calc-res"></div>
+      <button class="btn btn-primary" data-accion="evaluar">Guardar evaluación</button>
+      <div class="msg" id="calc-msg"></div>
+    </div>
+
+    <h3>Evaluaciones guardadas</h3>
+    ${evaluaciones.length ? `<div class="tabla-wrap"><table class="tabla"><thead><tr><th>Fecha</th><th class="num">Desembolso</th><th class="num">CIPRL</th>
+      <th class="num">Desc.</th><th class="num">Meses</th><th class="num">Tasa int.</th><th class="num">Benef. adic.</th><th class="num">Neto</th><th class="num">Rent.</th></tr></thead><tbody>
+      ${evaluaciones.map(ev => `<tr style="cursor:default"><td class="sub">${fecha(ev.creado_en)}</td><td class="num">${soles(ev.desembolso_total)}</td>
+        <td class="num">${soles(ev.ciprl_reconocido)}</td><td class="num">${Number(ev.descuento_negociacion_ciprl_pct)}%</td>
+        <td class="num">${Number(ev.meses_hasta_cobro)}</td><td class="num">${Number(ev.tasa_costo_capital_anual)}%</td><td class="num">${soles(ev.beneficio_adicional ?? 0)}</td>
+        <td class="num ${ev.resultado_neto >= 0 ? 'pos' : 'neg'}">${soles2(ev.resultado_neto)}</td>
+        <td class="num ${ev.rentabilidad_pct >= 0 ? 'pos' : 'neg'}">${Number(ev.rentabilidad_pct).toFixed(2)}%</td></tr>`).join('')}
+      </tbody></table></div>` : '<p class="card-empty">Aún no hay evaluaciones</p>'}
+  `;
+  recalcular();
+}
+
+function entradasCalc() {
+  return Object.fromEntries([...document.querySelectorAll('[data-calc]')].map(i => [i.dataset.calc, i.value]));
+}
+function recalcular() {
+  try {
+    const r = calcularRentabilidad(entradasCalc());
+    const cls = r.resultado_neto >= 0 ? 'pos' : 'neg';
+    $('calc-res').innerHTML = `<div class="calc-res">
+      <div class="kpi"><span>Desembolso total</span><b>${soles2(r.desembolso_total)}</b></div>
+      <div class="kpi"><span>CIPRL reconocido</span><b>${soles2(r.ciprl_reconocido)}</b></div>
+      <div class="kpi"><span>Ingreso por CIPRL</span><b>${soles2(r.ingreso_ciprl)}</b></div>
+      <div class="kpi"><span>Costo de capital (interno)</span><b>${soles2(r.costo_capital)}</b></div>
+      <div class="kpi"><span>Beneficio adicional</span><b>${soles2(r.beneficio_adicional)}</b></div>
+      <div class="kpi"><span>Resultado neto</span><b class="${cls}">${soles2(r.resultado_neto)}</b></div>
+      <div class="kpi"><span>Rentabilidad</span><b class="${cls}">${r.rentabilidad_pct.toFixed(2)} %</b></div></div>`;
+    setMsg($('calc-msg'), '');
+  } catch (e) { $('calc-res').innerHTML = ''; setMsg($('calc-msg'), e.message, 'err'); }
+}
+$('ficha').addEventListener('input', e => { if (e.target.dataset.calc) recalcular(); });
+
+$('ficha').addEventListener('click', async e => {
+  const accion = e.target.closest('[data-accion]')?.dataset.accion;
+  const quitar = e.target.closest('[data-quitar]')?.dataset.quitar;
+  if (!accion && !quitar) return;
+  if (accion === 'cerrar') return cerrarFicha();
+  const id = actual.proyecto.id;
+  try {
+    if (accion === 'guardar') {
+      await api('/api/ioarr/proyectos/' + id, { method: 'PATCH', body: JSON.stringify({
+        estado: $('fi-estado').value, etapa_financista: $('fi-etapa').value, entidad_tipo: $('fi-tipo-ent').value,
+        es_mobiliario: $('fi-mob').checked, notas: $('fi-notas').value }) });
+    } else if (accion === 'evento') {
+      await api(`/api/ioarr/proyectos/${id}/eventos`, { method: 'POST', body: JSON.stringify({ tipo: $('ev-tipo').value, detalle: $('ev-detalle').value }) });
+    } else if (accion === 'contraparte') {
+      await api(`/api/ioarr/proyectos/${id}/contrapartes`, { method: 'POST', body: JSON.stringify({
+        ruc: $('cp-ruc').value, nombre: $('cp-nombre').value, tipo: $('cp-tipo').value, riesgo_notas: $('cp-riesgo').value, historial: $('cp-hist').value }) });
+    } else if (accion === 'evaluar') {
+      await api(`/api/ioarr/proyectos/${id}/evaluaciones`, { method: 'POST', body: JSON.stringify(entradasCalc()) });
+    } else if (quitar) {
+      await api(`/api/ioarr/proyectos/${id}/contrapartes/${quitar}`, { method: 'DELETE' });
+    }
+    // Recargar ficha y listado para reflejar los cambios
+    actual = await api('/api/ioarr/proyectos/' + id);
+    renderFicha();
+    lista = lista.map(x => x.id === id ? actual.proyecto : x);
+    renderListado(); renderKanban();
+  } catch (err) {
+    const msgEl = accion === 'evaluar' ? $('calc-msg') : $('fi-msg');
+    if (msgEl) setMsg(msgEl, err.message, 'err'); else alert(err.message);
+  }
+});
+
+/* ---------- Importación ---------- */
+let impArchivo = null;
+$('btn-preview').addEventListener('click', async () => {
+  const file = $('imp-file').files[0];
+  if (!file) return setMsg($('imp-msg'), 'Selecciona un archivo', 'err');
+  impArchivo = file;
+  setMsg($('imp-msg'), 'Leyendo archivo…');
+  try {
+    const fd = new FormData(); fd.append('file', file);
+    const r = await api('/api/ioarr/importar/preview', { method: 'POST', body: fd });
+    setMsg($('imp-msg'), `${r.total_filas} filas detectadas.`, 'ok');
+    $('imp-mapeo').innerHTML = r.campos.map(c => `<div class="field"><label>${c}${['cui', 'nombre'].includes(c) ? ' *' : ''}</label>
+      <select data-campo="${c}"><option value="">— no mapear —</option>
+      ${r.headers.map(h => `<option value="${esc(h)}" ${h === r.mapeo[c] ? 'selected' : ''}>${esc(h)}</option>`).join('')}</select></div>`).join('');
+    const cols = r.headers.slice(0, 10);
+    $('imp-muestra').innerHTML = `<table class="tabla"><thead><tr>${cols.map(h => `<th>${esc(h)}</th>`).join('')}</tr></thead>
+      <tbody>${r.muestra.map(row => `<tr style="cursor:default">${cols.map(h => `<td>${esc(row[h])}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+    $('imp-mapeo-panel').style.display = 'block';
+    setMsg($('imp-res'), '');
+  } catch (e) { setMsg($('imp-msg'), e.message, 'err'); }
+});
+
+$('btn-importar').addEventListener('click', async () => {
+  const mapeo = Object.fromEntries([...document.querySelectorAll('[data-campo]')].map(s => [s.dataset.campo, s.value || null]));
+  if (!mapeo.cui || !mapeo.nombre) return setMsg($('imp-res'), 'Mapea al menos CUI y nombre', 'err');
+  const btn = $('btn-importar'); btn.disabled = true;
+  setMsg($('imp-res'), 'Importando…');
+  try {
+    const fd = new FormData();
+    fd.append('file', impArchivo); fd.append('fuente', $('imp-fuente').value);
+    fd.append('mapeo', JSON.stringify(mapeo)); fd.append('solo_ioarr', $('imp-solo-ioarr').checked ? '1' : '0');
+    const r = await api('/api/ioarr/importar', { method: 'POST', body: fd });
+    setMsg($('imp-res'), `✅ ${r.nuevos} nuevos · ${r.actualizados} actualizados (${r.cambios_estado} cambios de estado) · ${r.sin_cambios} sin cambios` +
+      ` · ${r.filas_sin_cui_o_nombre} filas sin CUI/nombre · ${r.filas_no_ioarr} no IOARR omitidas.`, 'ok');
+    await cargarFiltros(); await buscar();
+  } catch (e) { setMsg($('imp-res'), e.message, 'err'); }
+  btn.disabled = false;
+});
+
+/* ---------- Alertas ---------- */
+async function cargarAlertas() {
+  const c = await api('/api/ioarr/alertas/config');
+  $('al-email').value = c.email || '';
+  $('al-mob').checked = !!c.solo_mobiliario;
+  $('al-activo').checked = !!c.activo;
+  const marcadas = new Set(c.regiones || []);
+  $('al-regiones').innerHTML = DEPARTAMENTOS.map(r =>
+    `<label class="chk"><input type="checkbox" value="${r}" ${marcadas.has(r) ? 'checked' : ''}> ${r}</label>`).join('');
+}
+$('btn-al-guardar').addEventListener('click', async () => {
+  try {
+    await api('/api/ioarr/alertas/config', { method: 'PUT', body: JSON.stringify({
+      email: $('al-email').value.trim(), solo_mobiliario: $('al-mob').checked, activo: $('al-activo').checked,
+      regiones: [...$('al-regiones').querySelectorAll('input:checked')].map(i => i.value) }) });
+    setMsg($('al-msg'), 'Configuración guardada.', 'ok');
+  } catch (e) { setMsg($('al-msg'), e.message, 'err'); }
+});
+$('btn-al-probar').addEventListener('click', async () => {
+  setMsg($('al-msg'), 'Enviando…');
+  try {
+    const r = await api('/api/ioarr/alertas/enviar', { method: 'POST' });
+    if (!r.ok) return setMsg($('al-msg'), r.message, 'err');
+    setMsg($('al-msg'), r.configuraciones === 0 ? 'Activa y guarda la alerta primero.'
+      : r.enviados ? 'Correo enviado.' : 'No hay novedades desde el último envío.', 'ok');
+  } catch (e) { setMsg($('al-msg'), e.message, 'err'); }
+});
+
+arrancar().catch(e => { console.error(e); alert('No se pudo iniciar Radar IOARR: ' + e.message); });
+</script>
+</body>
+</html>
