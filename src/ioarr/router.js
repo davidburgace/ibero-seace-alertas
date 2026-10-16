@@ -238,7 +238,14 @@ router.post('/api/ioarr/importar', upload.single('file'), async (req, res, next)
       proyectos = proyectos.filter(p => p.tipo_inversion === 'IOARR');
       noIoarr = antes - proyectos.length;
     }
-    const resumen = await importarProyectos(supabase, proyectos, { fuente });
+    let resumen;
+    try { resumen = await importarProyectos(supabase, proyectos, { fuente }); }
+    catch (e) {
+      // PGRST204: la base no tiene una columna que el código envía (falta aplicar una migración)
+      if (e?.code === 'PGRST204' || /schema cache/i.test(e?.message || ''))
+        return res.status(500).json({ error: `La base de datos no está actualizada (${e.message}). Ejecuta las migraciones de supabase/migrations.` });
+      throw e;
+    }
     await guardarMapeo(fuente, mapeo, req.usuario);
     console.log(`[IOARR] Importación ${fuente} por ${req.usuario.email}:`, resumen);
     res.json({ ...resumen, filas_archivo: rows.length, filas_sin_cui_o_nombre: descartadas, filas_no_ioarr: noIoarr });
