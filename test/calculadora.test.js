@@ -38,6 +38,24 @@ test('costo de capital compuesto para 6 meses', () => {
   assert.equal(r.costo_capital, 10_000); // (1.21^0.5 − 1) = 0.10
 });
 
+test('beneficio adicional suma al resultado neto y a la rentabilidad', () => {
+  const r = calcularRentabilidad({
+    monto_inversion: 100_000, descuento_negociacion_ciprl_pct: 2,
+    meses_hasta_cobro: 12, tasa_costo_capital_anual: 10, beneficio_adicional: 15_000
+  });
+  // −2 000 (descuento) − 10 000 (capital) + 15 000 (beneficio)
+  assert.equal(r.resultado_neto, 3_000);
+  assert.equal(r.rentabilidad_pct, 3);
+  assert.equal(r.ciprl_reconocido, 100_000); // no altera el CIPRL
+  assert.equal(r.desembolso_total, 100_000); // ni el desembolso
+});
+
+test('beneficio adicional vacío equivale a 0', () => {
+  const r = calcularRentabilidad({ monto_inversion: 100_000, beneficio_adicional: '' });
+  assert.equal(r.beneficio_adicional, 0);
+  assert.equal(r.resultado_neto, 0);
+});
+
 test('acepta strings numéricos y vacíos', () => {
   const r = calcularRentabilidad({ monto_inversion: '50000', costos_gestion: '', otros_costos: null });
   assert.equal(r.desembolso_total, 50_000);
@@ -48,4 +66,5 @@ test('valida entradas', () => {
   assert.throws(() => calcularRentabilidad({ monto_inversion: 100, costos_gestion: -1 }), /inválido/);
   assert.throws(() => calcularRentabilidad({ monto_inversion: 100, costos_gestion: 'abc' }), /inválido/);
   assert.throws(() => calcularRentabilidad({ monto_inversion: 100, descuento_negociacion_ciprl_pct: 120 }), /100/);
+  assert.throws(() => calcularRentabilidad({ monto_inversion: 100, beneficio_adicional: -5 }), /inválido/);
 });

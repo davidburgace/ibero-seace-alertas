@@ -15,8 +15,12 @@
 //   ciprl_reconocido = inversión + gestión + supervisión   ("otros" no se reconoce)
 //   ingreso_ciprl    = ciprl_reconocido × (1 − descuento%)  (0 % = uso propio contra IR)
 //   costo_capital    = desembolso_total × ((1 + tasa%)^(meses/12) − 1)
-//   resultado_neto   = ingreso_ciprl − desembolso_total − costo_capital
+//   resultado_neto   = ingreso_ciprl − desembolso_total − costo_capital + beneficio_adicional
 //   rentabilidad_pct = resultado_neto / desembolso_total × 100
+//
+// beneficio_adicional: ganancia que NO viene del CIPRL (p. ej. margen como
+// proveedor de los bienes o un beneficio tributario). Es un estimado interno
+// del financista; el Estado no lo reconoce ni lo paga.
 // ============================================================================
 
 export const AVISO_CALCULADORA =
@@ -26,7 +30,8 @@ export const AVISO_CALCULADORA =
 
 const CAMPOS = [
   'monto_inversion', 'costos_gestion', 'costo_supervision', 'otros_costos',
-  'descuento_negociacion_ciprl_pct', 'meses_hasta_cobro', 'tasa_costo_capital_anual'
+  'descuento_negociacion_ciprl_pct', 'meses_hasta_cobro', 'tasa_costo_capital_anual',
+  'beneficio_adicional'
 ];
 
 const redondea = (n) => Math.round(n * 100) / 100;
@@ -51,7 +56,7 @@ export function calcularRentabilidad(input) {
   const ingreso_ciprl = ciprl_reconocido * (1 - e.descuento_negociacion_ciprl_pct / 100);
   const costo_capital = desembolso_total *
     (Math.pow(1 + e.tasa_costo_capital_anual / 100, e.meses_hasta_cobro / 12) - 1);
-  const resultado_neto = ingreso_ciprl - desembolso_total - costo_capital;
+  const resultado_neto = ingreso_ciprl - desembolso_total - costo_capital + e.beneficio_adicional;
   const rentabilidad_pct = (resultado_neto / desembolso_total) * 100;
 
   return {

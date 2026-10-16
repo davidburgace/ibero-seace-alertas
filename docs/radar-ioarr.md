@@ -89,8 +89,10 @@ desembolso_total = inversión + gestión + supervisión + otros
 ciprl_reconocido = inversión + gestión + supervisión        ("otros" no se reconoce)
 ingreso_ciprl    = ciprl_reconocido × (1 − descuento %)     (0 % = uso propio contra el IR)
 costo_capital    = desembolso × ((1 + tasa %)^(meses/12) − 1)   ← criterio interno
-resultado_neto   = ingreso_ciprl − desembolso_total − costo_capital
+resultado_neto   = ingreso_ciprl − desembolso_total − costo_capital + beneficio_adicional
 rentabilidad %   = resultado_neto / desembolso_total
 ```
 
-Con esta fórmula el resultado nunca es positivo: el CIPRL devuelve lo reconocido a valor nominal, así que la calculadora mide el **costo de financiar**. Si el negocio tiene otro beneficio (por ejemplo, el margen como proveedor de los bienes o una ventaja tributaria), habría que agregarlo como un campo nuevo.
+El CIPRL devuelve lo reconocido a valor nominal, así que sin `beneficio_adicional` el resultado nunca es positivo: la calculadora mide el **costo de financiar**. En `beneficio_adicional` se registra la ganancia que no viene del CIPRL, como el margen como proveedor de los bienes o una ventaja tributaria. Es un estimado interno: el Estado no lo reconoce ni lo paga.
+
+Para añadir esta columna en una base existente hay que correr también `supabase/migrations/002_ioarr_beneficio_adicional.sql`.

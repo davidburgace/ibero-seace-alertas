@@ -573,6 +573,7 @@ function renderFicha() {
         <div class="field"><label>Descuento al negociar el CIPRL (%) — 0 = uso propio contra IR</label><input type="number" min="0" max="100" step="any" data-calc="descuento_negociacion_ciprl_pct" value="0"></div>
         <div class="field"><label>Meses hasta el cobro</label><input type="number" min="0" step="any" data-calc="meses_hasta_cobro" value="12"></div>
         <div class="field"><label>Tasa de costo de capital anual (%) — criterio interno</label><input type="number" min="0" step="any" data-calc="tasa_costo_capital_anual" value="0"></div>
+        <div class="field"><label>Beneficio adicional (S/) — margen de proveedor, beneficio tributario, etc. (estimado interno, no viene del CIPRL)</label><input type="number" min="0" step="any" data-calc="beneficio_adicional" value="0"></div>
       </div>
       <div id="calc-res"></div>
       <button class="btn btn-primary" data-accion="evaluar">Guardar evaluación</button>
@@ -581,10 +582,10 @@ function renderFicha() {
 
     <h3>Evaluaciones guardadas</h3>
     ${evaluaciones.length ? `<div class="tabla-wrap"><table class="tabla"><thead><tr><th>Fecha</th><th class="num">Desembolso</th><th class="num">CIPRL</th>
-      <th class="num">Desc.</th><th class="num">Meses</th><th class="num">Tasa int.</th><th class="num">Neto</th><th class="num">Rent.</th></tr></thead><tbody>
+      <th class="num">Desc.</th><th class="num">Meses</th><th class="num">Tasa int.</th><th class="num">Benef. adic.</th><th class="num">Neto</th><th class="num">Rent.</th></tr></thead><tbody>
       ${evaluaciones.map(ev => `<tr style="cursor:default"><td class="sub">${fecha(ev.creado_en)}</td><td class="num">${soles(ev.desembolso_total)}</td>
         <td class="num">${soles(ev.ciprl_reconocido)}</td><td class="num">${Number(ev.descuento_negociacion_ciprl_pct)}%</td>
-        <td class="num">${Number(ev.meses_hasta_cobro)}</td><td class="num">${Number(ev.tasa_costo_capital_anual)}%</td>
+        <td class="num">${Number(ev.meses_hasta_cobro)}</td><td class="num">${Number(ev.tasa_costo_capital_anual)}%</td><td class="num">${soles(ev.beneficio_adicional ?? 0)}</td>
         <td class="num ${ev.resultado_neto >= 0 ? 'pos' : 'neg'}">${soles2(ev.resultado_neto)}</td>
         <td class="num ${ev.rentabilidad_pct >= 0 ? 'pos' : 'neg'}">${Number(ev.rentabilidad_pct).toFixed(2)}%</td></tr>`).join('')}
       </tbody></table></div>` : '<p class="card-empty">Aún no hay evaluaciones</p>'}
@@ -604,6 +605,7 @@ function recalcular() {
       <div class="kpi"><span>CIPRL reconocido</span><b>${soles2(r.ciprl_reconocido)}</b></div>
       <div class="kpi"><span>Ingreso por CIPRL</span><b>${soles2(r.ingreso_ciprl)}</b></div>
       <div class="kpi"><span>Costo de capital (interno)</span><b>${soles2(r.costo_capital)}</b></div>
+      <div class="kpi"><span>Beneficio adicional</span><b>${soles2(r.beneficio_adicional)}</b></div>
       <div class="kpi"><span>Resultado neto</span><b class="${cls}">${soles2(r.resultado_neto)}</b></div>
       <div class="kpi"><span>Rentabilidad</span><b class="${cls}">${r.rentabilidad_pct.toFixed(2)} %</b></div></div>`;
     setMsg($('calc-msg'), '');
