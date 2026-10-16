@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as XLSX from 'xlsx';
 import {
-  parseMonto, mapEstado, resolverEstado, detectarMapeo, filaAProyecto, leerArchivo, esMobiliario
+  parseMonto, mapEstado, resolverEstado, detectarMapeo, filaAProyecto, leerArchivo, esMobiliario, importarProyectos
 } from '../src/ioarr/ingesta.js';
 
 test('parseMonto entiende formatos peruanos e ingleses', () => {
@@ -66,4 +66,60 @@ test('leerArchivo salta filas de título', () => {
   assert.deepEqual(headers, ['CUI', 'NOMBRE']);
   assert.equal(rows.length, 1);
   assert.equal(esMobiliario('ADQUISICION DE CARPETAS'), true);
+});
+
+// ─── importarProyectos con un Supabase falso en memoria ─────────────────────
+function supabaseFalso() {
+  const db = { ioarr_proyectos: [], ioarr_eventos: [] };
+  let n = 0;
+  return {
+    db,
+    from(tabla) {
+      return {
+        select: () => ({ in: async (col, vals) => ({ data: db[tabla].filter(r => vals.includes(r[col])).map(r => ({ ...r })), error: null }) }),
+        upsert: (filas) => ({
+          select: async () => {
+            const out = filas.map(f => {
+              const i = db[tabla].findIndex(r => r.cui === f.cui);
+              if (i >= 0) { db[tabla][i] = { ...db[tabla][i], ...f }; return db[tabla][i]; }
+              const nuevo = { id: 'p' + (++n), creado_en: 'x', actualizado_en: 'x', ...f };
+              db[tabla].push(nuevo); return nuevo;
+            });
+            return { data: out.map(r => ({ id: r.id, cui: r.cui })), error: null };
+          }
+        }),
+        insert: async (filas) => { db[tabla].push(...filas); return { error: null }; }
+      };
+    }
+  };
+}
+
+test('importarProyectos: inserta, avanza estado, preserva campos manuales y no retrocede', async () => {
+  const sb = supabaseFalso();
+  const base = { cui: '100', nombre: 'Mobiliario IE 1', entidad: null, entidad_tipo: 'GL', region: 'LAMBAYEQUE', provincia: null,
+    distrito: null, funcion: 'EDUCACION', tipo_inversion: 'IOARR', monto_inversion: 1000, estado: 'viable', url_fuente: null, es_mobiliario: true, fuente: 'invierte_pe' };
+
+  let r = await importarProyectos(sb, [base, { ...base }], { fuente: 'invierte_pe' });
+  assert.deepEqual([r.recibidos, r.nuevos], [1, 1]);
+  assert.equal(sb.db.ioarr_eventos.length, 1);
+
+  // Cambio manual del financista
+  Object.assign(sb.db.ioarr_proyectos[0], { notas: 'mi nota', etapa_financista: 'evaluando' });
+
+  r = await importarProyectos(sb, [{ ...base }], { fuente: 'invierte_pe' });
+  assert.equal(r.sin_cambios, 1);
+
+  r = await importarProyectos(sb, [{ ...base, estado: 'priorizada_oxi', fuente: 'proinversion', entidad_tipo: null }], { fuente: 'proinversion' });
+  assert.deepEqual([r.actualizados, r.cambios_estado], [1, 1]);
+  const p = sb.db.ioarr_proyectos[0];
+  assert.equal(p.estado, 'priorizada_oxi');
+  assert.equal(p.notas, 'mi nota');
+  assert.equal(p.etapa_financista, 'evaluando');
+  assert.equal(p.entidad_tipo, 'GL');
+  assert.match(sb.db.ioarr_eventos.at(-1).detalle, /viable → priorizada_oxi/);
+
+  // Un exporte viejo con "viable" no hace retroceder el estado
+  r = await importarProyectos(sb, [{ ...base, fuente: 'proinversion' }], { fuente: 'invierte_pe' });
+  assert.equal(sb.db.ioarr_proyectos[0].estado, 'priorizada_oxi');
+  assert.equal(r.cambios_estado, 0);
 });
