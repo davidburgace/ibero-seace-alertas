@@ -17,7 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { supabase } from './db.js';
 import { requireAuth } from './auth.js';
 import { calcularRentabilidad } from './calculadora.js';
-import { leerArchivo, detectarMapeo, filaAProyecto, importarProyectos, normaliza, CAMPOS_MAPEABLES } from './ingesta.js';
+import { leerArchivo, detectarMapeo, aplicarMapeoGuardado, filaAProyecto, importarProyectos, normaliza, CAMPOS_MAPEABLES } from './ingesta.js';
 import { sendIoarrDigest } from './alertas.js';
 
 const router = express.Router();
@@ -187,15 +187,37 @@ router.delete('/api/ioarr/proyectos/:id/contrapartes/:cid', async (req, res, nex
 });
 
 // ─── Importación (Excel/CSV) ────────────────────────────────────────────────
-// Paso 1: previsualizar → encabezados, mapeo propuesto y primeras filas
-router.post('/api/ioarr/importar/preview', upload.single('file'), (req, res) => {
+// Mapeo confirmado en la última importación de cada fuente (tabla ioarr_mapeos,
+// migración 003). Si la tabla aún no existe, se sigue solo con el mapeo automático.
+async function mapeoGuardado(fuente) {
+  const { data, error } = await supabase.from('ioarr_mapeos').select('mapeo').eq('fuente', fuente).maybeSingle();
+  if (error) { console.warn('[IOARR] No se pudo leer el mapeo guardado:', error.message); return null; }
+  return data?.mapeo || null;
+}
+
+async function guardarMapeo(fuente, mapeo, usuario) {
+  const { error } = await supabase.from('ioarr_mapeos')
+    .upsert({ fuente, mapeo, actualizado_por: usuario.id, actualizado_en: new Date().toISOString() }, { onConflict: 'fuente' });
+  if (error) console.warn('[IOARR] No se pudo guardar el mapeo:', error.message);
+}
+
+// Paso 1: previsualizar → encabezados, mapeo propuesto (automático + el recordado
+// para la fuente) y primeras filas
+router.post('/api/ioarr/importar/preview', upload.single('file'), async (req, res, next) => {
   if (!req.file) return res.status(400).json({ error: 'Adjunta un archivo Excel o CSV' });
+  let leido;
+  try { leido = leerArchivo(req.file.buffer); }
+  catch (e) { return res.status(400).json({ error: 'No se pudo leer el archivo: ' + e.message }); }
   try {
-    const { headers, rows } = leerArchivo(req.file.buffer);
-    res.json({ headers, mapeo: detectarMapeo(headers), muestra: rows.slice(0, 5), total_filas: rows.length, campos: CAMPOS_MAPEABLES });
-  } catch (e) {
-    res.status(400).json({ error: 'No se pudo leer el archivo: ' + e.message });
-  }
+    const { headers, rows, fila_encabezado, hoja } = leido;
+    const fuente = FUENTES.includes(req.body.fuente) ? req.body.fuente : 'otro';
+    const guardado = await mapeoGuardado(fuente);
+    const mapeo = aplicarMapeoGuardado(headers, detectarMapeo(headers), guardado);
+    res.json({
+      headers, mapeo, muestra: rows.slice(0, 5), total_filas: rows.length, campos: CAMPOS_MAPEABLES,
+      fila_encabezado, hoja, usa_mapeo_guardado: !!guardado
+    });
+  } catch (e) { next(e); }
 });
 
 // Paso 2: importar con el mapeo confirmado (campos multipart: file, fuente, mapeo JSON, solo_ioarr)
@@ -217,6 +239,7 @@ router.post('/api/ioarr/importar', upload.single('file'), async (req, res, next)
       noIoarr = antes - proyectos.length;
     }
     const resumen = await importarProyectos(supabase, proyectos, { fuente });
+    await guardarMapeo(fuente, mapeo, req.usuario);
     console.log(`[IOARR] Importación ${fuente} por ${req.usuario.email}:`, resumen);
     res.json({ ...resumen, filas_archivo: rows.length, filas_sin_cui_o_nombre: descartadas, filas_no_ioarr: noIoarr });
   } catch (e) { next(e); }

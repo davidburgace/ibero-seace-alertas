@@ -254,7 +254,9 @@
     </div>
     <div class="panel" id="imp-mapeo-panel" style="display:none">
       <h3 style="font-family:var(--font-display);margin-bottom:10px">Mapeo de columnas</h3>
-      <p class="sub" style="margin-bottom:10px">Revisa la columna del archivo que corresponde a cada campo. CUI y nombre son obligatorios.</p>
+      <p class="sub" style="margin-bottom:10px">Revisa la columna del archivo que corresponde a cada campo. CUI y nombre son obligatorios.
+        Lo que confirmes al importar se recuerda para la próxima carga de esta fuente.</p>
+      <div class="msg" id="imp-aviso"></div>
       <div id="imp-mapeo" class="field-row"></div>
       <h3 style="font-family:var(--font-display);margin:14px 0 8px">Primeras filas</h3>
       <div class="tabla-wrap" id="imp-muestra"></div>
@@ -411,13 +413,15 @@ async function buscar() {
 
 // "Viable sin priorizar en OxI": oportunidad para convencer a la entidad
 const sinPriorizar = (p) => p.estado === 'viable';
+// Los códigos IDEA… aún no son CUI de un proyecto registrado
+const codigo = (p) => `${p.es_idea ? 'Idea' : 'CUI'} ${esc(p.cui)}`;
 
 function renderListado() {
   $('count-proyectos').textContent = lista.length;
   $('vacio').style.display = lista.length ? 'none' : 'block';
   $('tbody').innerHTML = lista.map(p => `
     <tr data-id="${p.id}">
-      <td class="mono">${esc(p.cui)}</td>
+      <td class="mono">${esc(p.cui)}${p.es_idea ? '<div class="sub">Idea de inversión</div>' : ''}</td>
       <td>${esc(p.nombre)}<div class="sub">${esc(p.entidad || '')}${p.entidad_tipo ? ' · ' + p.entidad_tipo : ''}</div>
         ${p.es_mobiliario ? '<span class="badge badge-mob">🪑 Mobiliario</span> ' : ''}
         ${sinPriorizar(p) ? '<span class="badge badge-oport" title="Viable pero aún no priorizada en OxI: oportunidad para proponerla a la entidad">💡 Viable sin priorizar</span>' : ''}</td>
@@ -436,9 +440,9 @@ $('f-q').addEventListener('keydown', e => { if (e.key === 'Enter') $('btn-buscar
 /* ---------- Exportar a Excel ---------- */
 $('btn-export').addEventListener('click', () => {
   const filas = lista.map(p => ({
-    CUI: p.cui, Proyecto: p.nombre, Entidad: p.entidad, 'Tipo entidad': p.entidad_tipo, Región: p.region, Provincia: p.provincia,
+    CUI: p.cui, 'Es idea': p.es_idea ? 'Sí' : '', Proyecto: p.nombre, Entidad: p.entidad, 'Tipo entidad': p.entidad_tipo, Región: p.region, Provincia: p.provincia,
     Distrito: p.distrito, Función: p.funcion, 'Tipo inversión': p.tipo_inversion, 'Monto (S/)': p.monto_inversion != null ? Number(p.monto_inversion) : '',
-    Estado: ESTADOS[p.estado] || p.estado, 'Viable sin priorizar': sinPriorizar(p) ? 'Sí' : '', 'Etapa financista': etapaLabel(p.etapa_financista),
+    Estado: ESTADOS[p.estado] || p.estado, 'Fase OxI (fuente)': p.estado_oxi_texto || '', 'Viable sin priorizar': sinPriorizar(p) ? 'Sí' : '', 'Etapa financista': etapaLabel(p.etapa_financista),
     Mobiliario: p.es_mobiliario ? 'Sí' : 'No', Fuente: p.fuente, URL: p.url_fuente, Notas: p.notas, Actualizado: p.actualizado_en
   }));
   const wb = XLSX.utils.book_new();
@@ -459,7 +463,7 @@ function renderKanban() {
         <span class="kcol-count">${items.length}</span></div>
       ${items.length ? items.map(p => `
         <div class="card" data-id="${p.id}">
-          <div class="card-tipo">CUI ${esc(p.cui)} · ${ESTADOS[p.estado] || p.estado}</div>
+          <div class="card-tipo">${codigo(p)} · ${ESTADOS[p.estado] || p.estado}</div>
           <div class="card-nombre" title="${esc(p.nombre)}">${esc(p.nombre.length > 90 ? p.nombre.slice(0, 90) + '…' : p.nombre)}</div>
           <div class="card-meta"><span>${esc(p.region || '')}${p.provincia ? ' / ' + esc(p.provincia) : ''}</span><span>${soles(p.monto_inversion)}</span></div>
           ${sinPriorizar(p) ? '<div style="margin-top:6px"><span class="badge badge-oport">💡 Viable sin priorizar</span></div>' : ''}
@@ -498,7 +502,7 @@ function renderFicha() {
   const { proyecto: p, eventos, evaluaciones, contrapartes } = actual;
   $('ficha').innerHTML = `
     <button class="cerrar" data-accion="cerrar">×</button>
-    <div class="card-tipo">CUI ${esc(p.cui)} · ${esc(p.tipo_inversion || '')}</div>
+    <div class="card-tipo">${codigo(p)} · ${esc(p.tipo_inversion || '')}</div>
     <h2>${esc(p.nombre)}</h2>
     <div style="margin:6px 0 4px">${p.es_mobiliario ? '<span class="badge badge-mob">🪑 Mobiliario</span> ' : ''}
       ${sinPriorizar(p) ? '<span class="badge badge-oport">💡 Viable sin priorizar en OxI — oportunidad para proponerla a la entidad</span>' : ''}</div>
@@ -509,7 +513,9 @@ function renderFicha() {
         <dl class="datos">
           <dt>Entidad</dt><dd>${esc(p.entidad || '—')} ${p.entidad_tipo ? '(' + p.entidad_tipo + ')' : ''}</dd>
           <dt>Ubicación</dt><dd>${esc([p.region, p.provincia, p.distrito].filter(Boolean).join(' / ') || '—')}</dd>
-          <dt>Función</dt><dd>${esc(p.funcion || '—')}</dd>
+          <dt>Función</dt><dd>${esc(p.funcion || '—')}${p.tipologia ? ' · ' + esc(p.tipologia) : ''}</dd>
+          ${p.estado_oxi_texto ? `<dt>Fase OxI (fuente)</dt><dd>${esc(p.estado_oxi_texto)}</dd>` : ''}
+          ${p.nivel_estudio ? `<dt>Nivel de estudio</dt><dd>${esc(p.nivel_estudio)}</dd>` : ''}
           <dt>Monto</dt><dd>${soles(p.monto_inversion)}</dd>
           <dt>Fuente</dt><dd>${esc(p.fuente || '—')} ${p.url_fuente ? `· <a href="${esc(p.url_fuente)}" target="_blank" rel="noopener">ver</a>` : ''}</dd>
           <dt>Actualizado</dt><dd>${fecha(p.actualizado_en)}</dd>
@@ -647,25 +653,38 @@ $('ficha').addEventListener('click', async e => {
 
 /* ---------- Importación ---------- */
 let impArchivo = null;
-$('btn-preview').addEventListener('click', async () => {
+const ETIQUETA_CAMPO = {
+  cui: 'CUI / código idea', nombre: 'Nombre', entidad: 'Entidad', nivel_gobierno: 'Nivel de gobierno', region: 'Departamento',
+  provincia: 'Provincia', distrito: 'Distrito', funcion: 'Función', tipologia: 'Tipología', tipo_inversion: 'Tipo de inversión',
+  monto_inversion: 'Monto', estado_oxi: 'Fase OxI', estado: 'Estado', nivel_estudio: 'Último nivel de estudio', url_fuente: 'Link web'
+};
+async function previsualizar() {
   const file = $('imp-file').files[0];
   if (!file) return setMsg($('imp-msg'), 'Selecciona un archivo', 'err');
   impArchivo = file;
   setMsg($('imp-msg'), 'Leyendo archivo…');
   try {
-    const fd = new FormData(); fd.append('file', file);
+    const fd = new FormData(); fd.append('file', file); fd.append('fuente', $('imp-fuente').value);
     const r = await api('/api/ioarr/importar/preview', { method: 'POST', body: fd });
-    setMsg($('imp-msg'), `${r.total_filas} filas detectadas.`, 'ok');
-    $('imp-mapeo').innerHTML = r.campos.map(c => `<div class="field"><label>${c}${['cui', 'nombre'].includes(c) ? ' *' : ''}</label>
+    setMsg($('imp-msg'), `${r.total_filas} filas de datos · encabezado en la fila ${r.fila_encabezado} de la hoja «${r.hoja}»` +
+      (r.usa_mapeo_guardado ? ' · se aplicó el mapeo recordado de esta fuente' : '') + '.', 'ok');
+    $('imp-mapeo').innerHTML = r.campos.map(c => `<div class="field"><label>${ETIQUETA_CAMPO[c] || c}${['cui', 'nombre'].includes(c) ? ' *' : ''}</label>
       <select data-campo="${c}"><option value="">— no mapear —</option>
       ${r.headers.map(h => `<option value="${esc(h)}" ${h === r.mapeo[c] ? 'selected' : ''}>${esc(h)}</option>`).join('')}</select></div>`).join('');
-    const cols = r.headers.slice(0, 10);
+    const faltan = ['cui', 'nombre'].filter(c => !r.mapeo[c]).map(c => ETIQUETA_CAMPO[c]);
+    setMsg($('imp-aviso'), faltan.length
+      ? `No se reconoció la columna de ${faltan.join(' ni de ')}. Elígela abajo entre las columnas detectadas: ${r.headers.join(' · ')}`
+      : '', faltan.length ? 'err' : '');
+    const cols = r.headers.slice(0, 12);
     $('imp-muestra').innerHTML = `<table class="tabla"><thead><tr>${cols.map(h => `<th>${esc(h)}</th>`).join('')}</tr></thead>
       <tbody>${r.muestra.map(row => `<tr style="cursor:default">${cols.map(h => `<td>${esc(row[h])}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
     $('imp-mapeo-panel').style.display = 'block';
     setMsg($('imp-res'), '');
   } catch (e) { setMsg($('imp-msg'), e.message, 'err'); }
-});
+}
+$('btn-preview').addEventListener('click', previsualizar);
+// El mapeo recordado depende de la fuente: al cambiarla se vuelve a proponer
+$('imp-fuente').addEventListener('change', () => { if (impArchivo) previsualizar(); });
 
 $('btn-importar').addEventListener('click', async () => {
   const mapeo = Object.fromEntries([...document.querySelectorAll('[data-campo]')].map(s => [s.dataset.campo, s.value || null]));

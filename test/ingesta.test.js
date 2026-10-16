@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as XLSX from 'xlsx';
 import {
-  parseMonto, mapEstado, resolverEstado, detectarMapeo, filaAProyecto, leerArchivo, esMobiliario, importarProyectos
+  parseMonto, mapEstado, resolverEstado, detectarMapeo, aplicarMapeoGuardado, filaAProyecto, leerArchivo, esMobiliario, importarProyectos
 } from '../src/ioarr/ingesta.js';
 
 test('parseMonto entiende formatos peruanos e ingleses', () => {
@@ -122,4 +122,132 @@ test('importarProyectos: inserta, avanza estado, preserva campos manuales y no r
   r = await importarProyectos(sb, [{ ...base, fuente: 'proinversion' }], { fuente: 'invierte_pe' });
   assert.equal(sb.db.ioarr_proyectos[0].estado, 'priorizada_oxi');
   assert.equal(r.cambios_estado, 0);
+});
+
+// ─── Excel de Proinversión ("Inversiones en promoción") ─────────────────────
+// Réplica del formato real: hoja PROINVERSION, banner en las filas 1-9,
+// encabezados en la fila 10 desde la columna B (A vacía), "Link web" como
+// hipervínculo con texto "Enlace" y una fila de pie.
+const ENC_PROINVERSION = ['CODIGO SNIP / INVIERTE.PE / CÓDIGO IDEA', 'NOMBRE DEL PROYECTO', 'ENTIDAD', 'NIVEL DE GOBIERNO',
+  'DEPARTAMENTO', 'PROVINCIA', 'DISTRITO', 'FUNCIÓN', 'TIPOLOGÍA', 'TIPO DE INVERSIÓN', 'MONTO DE INVERSIÓN REFERENCIAL',
+  'FASE OXI', 'ÚLTIMO NIVEL DE ESTUDIO', 'LINK WEB'];
+
+function excelProinversion() {
+  const fila = (...v) => [null, ...v];
+  const aoa = [
+    fila('INVERSIONES EN PROMOCIÓN - OBRAS POR IMPUESTOS'),
+    [],
+    fila('Última actualización: 10/10/2026'),
+    fila('Nº Registros: 4'),
+    [], [], [],
+    fila('Proyectos en cartera de Proinversión'),
+    [],
+    fila(...ENC_PROINVERSION),
+    fila(2603315, 'ADQUISICIÓN DE MOBILIARIO ESCOLAR; EN LA IE 18001 DISTRITO DE CHACHAPOYAS', 'GOBIERNO REGIONAL AMAZONAS', 'Gobierno Regional',
+      'AMAZONAS', 'CHACHAPOYAS', 'CHACHAPOYAS', 'EDUCACIÓN', 'Educación básica', 'IOARR', 'S/1,252,892.41', 'Priorizado', 'IOARR aprobada', 'Enlace'),
+    fila('2589001', 'ADQUISICIÓN DE CARPETAS Y SILLAS; EN LA IE 20188 DISTRITO DE SAN VICENTE', 'MUNICIPALIDAD PROVINCIAL DE CAÑETE', 'Gobierno Local',
+      'LIMA', 'CAÑETE', 'SAN VICENTE DE CAÑETE', 'EDUCACIÓN', 'Educación básica', 'IOARR', 'S/ 845,300.00', 'Por Priorizar', 'IOARR aprobada', 'Enlace'),
+    fila('IDEA0000110', 'ADQUISICIÓN DE EQUIPAMIENTO DE AULAS; EN LA IE 16234 BAGUA', 'MUNICIPALIDAD PROVINCIAL DE BAGUA', 'Gobierno Local',
+      'AMAZONAS', 'BAGUA', 'BAGUA', 'EDUCACIÓN', 'Educación básica', 'IOARR', 'S/310,000.50', 'Por Priorizar', 'Idea', 'Enlace'),
+    fila(2611450, 'RENOVACIÓN DE COBERTURA; EN EL ESTADIO MUNICIPAL DE HUARAL', 'MUNICIPALIDAD PROVINCIAL DE HUARAL', 'Gobierno Local',
+      'LIMA', 'HUARAL', 'HUARAL', 'DEPORTE', 'Deporte', 'IOARR', 'S/2,100,000.00', 'Por Priorizar', 'IOARR aprobada', 'Enlace'),
+    [],
+    fila('Fuente: PROINVERSIÓN')
+  ];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  // "Link web" es la columna O; datos en las filas 11-14 (índices 10-13)
+  ['2603315', '2589001', 'IDEA0000110', '2611450'].forEach((cui, i) => {
+    ws[XLSX.utils.encode_cell({ r: 10 + i, c: 14 })].l = { Target: `https://www.investinperu.pe/oxi/proyecto/${cui}` };
+  });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'PROINVERSION');
+  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+}
+
+test('Proinversión: detecta el encabezado bajo un banner de 9 filas e ignora la columna A vacía', () => {
+  const { headers, rows, fila_encabezado, hoja } = leerArchivo(excelProinversion());
+  assert.equal(hoja, 'PROINVERSION');
+  assert.equal(fila_encabezado, 10);
+  assert.deepEqual(headers, ENC_PROINVERSION);
+  assert.equal(rows.length, 4); // sin filas vacías ni la de pie
+});
+
+test('Proinversión: mapeo automático por sinónimos (sin tildes ni mayúsculas)', () => {
+  const m = detectarMapeo(ENC_PROINVERSION);
+  assert.deepEqual(m, {
+    cui: 'CODIGO SNIP / INVIERTE.PE / CÓDIGO IDEA', nombre: 'NOMBRE DEL PROYECTO', entidad: 'ENTIDAD',
+    nivel_gobierno: 'NIVEL DE GOBIERNO', region: 'DEPARTAMENTO', provincia: 'PROVINCIA', distrito: 'DISTRITO',
+    funcion: 'FUNCIÓN', tipologia: 'TIPOLOGÍA', tipo_inversion: 'TIPO DE INVERSIÓN',
+    monto_inversion: 'MONTO DE INVERSIÓN REFERENCIAL', estado_oxi: 'FASE OXI', estado: null,
+    nivel_estudio: 'ÚLTIMO NIVEL DE ESTUDIO', url_fuente: 'LINK WEB'
+  });
+  // En minúsculas y con "_" también encaja
+  assert.equal(detectarMapeo(['codigo_unico', 'nombre de la inversión', 'x', 'y']).cui, 'codigo_unico');
+});
+
+test('Proinversión: limpieza de montos, CUI/IDEA, estados, mobiliario e hipervínculos', () => {
+  const { headers, rows } = leerArchivo(excelProinversion());
+  const ps = rows.map(r => filaAProyecto(r, detectarMapeo(headers), { fuente: 'proinversion' }));
+  const [a, b, idea, d] = ps;
+
+  assert.equal(a.cui, '2603315');
+  assert.equal(a.monto_inversion, 1252892.41);
+  assert.equal(a.estado, 'priorizada_oxi');
+  assert.equal(a.estado_oxi_texto, 'Priorizado');
+  assert.equal(a.entidad_tipo, 'GORE');
+  assert.equal(a.region, 'AMAZONAS');
+  assert.equal(a.tipo_inversion, 'IOARR');
+  assert.equal(a.tipologia, 'Educación básica');
+  assert.equal(a.nivel_estudio, 'IOARR aprobada');
+  assert.equal(a.url_fuente, 'https://www.investinperu.pe/oxi/proyecto/2603315');
+  assert.equal(a.es_idea, false);
+
+  assert.equal(b.estado, 'viable');
+  assert.equal(b.estado_oxi_texto, 'Por Priorizar');
+  assert.equal(b.monto_inversion, 845300);
+  assert.equal(b.region, 'LIMA');
+  assert.equal(b.entidad_tipo, 'GL');
+
+  assert.equal(idea.cui, 'IDEA0000110');
+  assert.equal(idea.es_idea, true);
+  assert.equal(idea.monto_inversion, 310000.5);
+
+  assert.deepEqual(ps.map(p => p.es_mobiliario), [true, true, true, false]);
+  assert.deepEqual(ps.map(p => p.estado), ['priorizada_oxi', 'viable', 'viable', 'viable']);
+  assert.equal(d.region, 'LIMA');
+});
+
+test('parseMonto quita "S/" y "S/." y mapEstado distingue "Por Priorizar"', () => {
+  assert.equal(parseMonto('S/1,252,892.41'), 1252892.41);
+  assert.equal(parseMonto('S/. 1,252,892.41'), 1252892.41);
+  assert.equal(mapEstado('Por Priorizar'), 'viable');
+  assert.equal(mapEstado('Priorizado'), 'priorizada_oxi');
+  assert.equal(esMobiliario('Adquisición de bancas'), true);
+  assert.equal(esMobiliario('Servicio bancario'), false);
+});
+
+test('aplicarMapeoGuardado: el mapeo recordado gana si la columna sigue existiendo', () => {
+  const headers = ['COD', 'TITULO', 'ENTIDAD', 'REGION X'];
+  const auto = detectarMapeo(headers);
+  assert.equal(auto.cui, null);
+  const m = aplicarMapeoGuardado(headers, auto, { cui: 'COD', nombre: 'TITULO', region: 'YA NO EXISTE' });
+  assert.equal(m.cui, 'COD');
+  assert.equal(m.nombre, 'TITULO');
+  assert.equal(m.region, auto.region);
+});
+
+test('importarProyectos: "Por Priorizar" no hace retroceder a una priorizada, pero queda el evento', async () => {
+  const sb = supabaseFalso();
+  const { headers, rows } = leerArchivo(excelProinversion());
+  const mapeo = detectarMapeo(headers);
+  const primera = filaAProyecto(rows[0], mapeo, { fuente: 'proinversion' });
+  await importarProyectos(sb, [primera], { fuente: 'proinversion' });
+  assert.equal(sb.db.ioarr_proyectos[0].estado, 'priorizada_oxi');
+
+  const r = await importarProyectos(sb, [{ ...primera, estado: 'viable', estado_oxi_texto: 'Por Priorizar' }], { fuente: 'proinversion' });
+  assert.equal(r.cambios_estado, 0);
+  const p = sb.db.ioarr_proyectos[0];
+  assert.equal(p.estado, 'priorizada_oxi');
+  assert.equal(p.estado_oxi_texto, 'Por Priorizar');
+  assert.match(sb.db.ioarr_eventos.at(-1).detalle, /reporta viable, fase OxI «Por Priorizar»; se mantiene priorizada_oxi/);
 });

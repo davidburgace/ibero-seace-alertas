@@ -9,6 +9,7 @@ Seguimiento de IOARR de mobiliario escolar en Obras por Impuestos (OxI), visto d
 | Ruta | Qué hace |
 |---|---|
 | `supabase/migrations/001_radar_ioarr.sql` | Tablas `ioarr_*`, `perfiles` (roles) y RLS |
+| `supabase/migrations/003_ioarr_importacion_proinversion.sql` | Campos del Excel de Proinversión y mapeos recordados por fuente |
 | `src/ioarr/router.js` | API `/api/ioarr/*`. Se monta en `server.js` con `app.use(ioarrRouter)` |
 | `src/ioarr/auth.js` | Valida el token de Supabase Auth y carga el rol |
 | `src/ioarr/ingesta.js` | Servicio de ingestión aislado: lee Excel/CSV, mapea columnas y hace upsert por CUI |
@@ -52,12 +53,20 @@ También usa las que ya existían: `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `SMTP_
 2. En Radar IOARR, entra a **Importar**, elige el archivo y la fuente, y pulsa **Previsualizar**.
 3. Revisa el mapeo de columnas, que se propone solo. CUI y nombre son obligatorios. Luego pulsa **Importar**.
 
+> Requiere `supabase/migrations/003_ioarr_importacion_proinversion.sql` (columnas `tipologia`, `nivel_estudio`, `estado_oxi_texto`, `es_idea` y la tabla `ioarr_mapeos`). Sin ella la importación falla al guardar.
+
+Lectura del archivo:
+- La fila de encabezado se detecta sola: es la primera de las 30 primeras con al menos 4 textos y alguna palabra clave (CUI, CODIGO, NOMBRE, PROYECTO, ENTIDAD, DEPARTAMENTO). Así se salta el banner del Excel de Proinversión (título, "Última actualización", "Nº Registros"), que deja los encabezados en la fila 10. Se ignoran las columnas totalmente vacías, las filas vacías y la fila de pie ("Fuente: …", "Total …").
+- Las columnas se reconocen por sinónimos, sin importar mayúsculas ni tildes. Por ejemplo, "CODIGO SNIP / INVIERTE.PE / CÓDIGO IDEA" se toma como CUI, "FASE OXI" como fase OxI y "LINK WEB" como enlace. Si la celda del enlace es un hipervínculo, se guarda la URL y no el texto "Enlace".
+- Si no se reconoce la columna de CUI o de nombre, la previsualización lo avisa y lista las columnas detectadas para elegirlas a mano. El mapeo confirmado se recuerda por fuente para la siguiente carga.
+- Los montos aceptan formatos como "S/1,252,892.41". El CUI se guarda como texto. Un código "IDEA…" se marca como idea de inversión (`es_idea`), no como proyecto registrado.
+
 Reglas de la importación:
 - Se actualiza por **CUI**. Las notas, la etapa del financista y las marcas manuales se conservan.
 - El estado **solo avanza** (viable → priorizada → convenio → …). Un exporte antiguo no lo hace retroceder. Los estados "cerrada" o "descartada" siempre se aplican.
 - Todo proyecto nuevo y todo cambio de estado queda en la línea de tiempo (`ioarr_eventos`), y eso alimenta la alerta diaria.
-- La lista de Proinversión marca los proyectos como mínimo en `priorizada_oxi`.
-- "Mobiliario" se detecta por el nombre (mobiliario, carpetas, pupitres…) y se puede corregir en la ficha.
+- Fase OxI de Proinversión: "Priorizado" → `priorizada_oxi`; "Por Priorizar" → `viable`. El texto original se guarda en `estado_oxi_texto`. Si la fuente reporta un estado anterior al actual, el estado no retrocede, pero el reporte queda como hito en la línea de tiempo. Un archivo de Proinversión sin columna de fase OxI marca los proyectos como mínimo en `priorizada_oxi`.
+- "Mobiliario" se detecta por el nombre (mobiliario, equipamiento, carpetas, bancas, pupitres…) y se puede corregir en la ficha.
 
 Para agregar fuentes automáticas más adelante (por ejemplo datosabiertos.mef.gob.pe), los pasos están comentados al inicio de `src/ioarr/ingesta.js`.
 
