@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  extraerLineasPdf, clasificarDocumento, leerFicha07C, leerTablaCostos, preciosUnicos, anioDeLineas, dEsperado
+  extraerLineasPdf, clasificarDocumento, leerFicha07C, leerTablaCostos, preciosUnicos, anioDeLineas, dEsperado, opcionMarcada
 } from '../src/ioarr/fichas.js';
 
 // PDF mínimo con Helvetica (WinAnsi). paginas = [[ [x, y, 'texto'], ... ], ...]
@@ -37,6 +37,8 @@ const FICHA = pdfSintetico([[
   [40, 495, 'UNIDAD EJECUTORA DE INVERSIONES:'], [220, 495, 'PROGRAMA NACIONAL DE INFRAESTRUCTURA EDUCATIVA'],
   [40, 480, 'FUNCIÓN:'], [220, 480, 'EDUCACIÓN'],
   [40, 465, 'FECHA DE REGISTRO:'], [220, 465, '14/08/2024'],
+  [40, 455, 'MODALIDAD DE EJECUCIÓN:'], [220, 455, 'OBRAS POR IMPUESTOS'],
+  [40, 448, 'FUENTE DE FINANCIAMIENTO:'], [220, 448, 'RECURSOS DETERMINADOS'],
   [40, 440, 'COSTO DE INVERSIÓN'],
   [60, 425, 'Activos'], [400, 425, '36,500,000.00'],
   [40, 410, 'COSTO TOTAL DE LA INVERSIÓN (S/)'], [400, 410, '39,137,205.62']
@@ -77,6 +79,8 @@ test('ficha 07-C: CUI, nombre y costo total (caso CUI 2560356)', async () => {
   assert.equal(campos.funcion, 'EDUCACIÓN');
   assert.equal(campos.fecha, '2024-08-14');
   assert.equal(campos.anio, 2024);
+  assert.equal(campos.modalidad_ejecucion, 'OBRAS POR IMPUESTOS');
+  assert.equal(campos.fuente_financiamiento, 'RECURSOS DETERMINADOS');
   assert.deepEqual(avisos, []);
 });
 
@@ -132,4 +136,12 @@ test('preciosUnicos: uno por código, suma cantidades y avisa precios distintos'
 test('dEsperado redondea a céntimos', () => {
   assert.equal(dEsperado(250, 10, 20), 322);
   assert.equal(dEsperado(33.33, 0, 0), 38.33);
+});
+
+test('opcionMarcada: en una lista de opciones queda la marcada', () => {
+  assert.equal(opcionMarcada('ADMINISTRACION DIRECTA ( ) ADMINISTRACION INDIRECTA - POR CONTRATA ( ) OBRAS POR IMPUESTOS (X)'), 'OBRAS POR IMPUESTOS');
+  assert.equal(opcionMarcada('RECURSOS ORDINARIOS [x] RECURSOS DETERMINADOS [ ]'), 'RECURSOS ORDINARIOS');
+  assert.equal(opcionMarcada('RECURSOS ORDINARIOS (RO)'), 'RECURSOS ORDINARIOS (RO)');
+  assert.equal(opcionMarcada('A ( ) B ( )'), null);
+  assert.equal(opcionMarcada(null), null);
 });
