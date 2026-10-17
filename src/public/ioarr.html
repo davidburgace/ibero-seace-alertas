@@ -184,6 +184,14 @@
   .tabla-regiones th{ font-size:10px; color:var(--muted); border-top:none; text-transform:uppercase; }
   .aviso-fila{ font-size:11.5px; color:#7a4a12; margin-top:3px; }
   .nota-fila{ font-size:11.5px; color:#3d5a80; margin-top:3px; }
+  .chat-box{ border:1px solid var(--border2); border-radius:10px; padding:12px; background:var(--surface2); }
+  .chat-form{ display:flex; gap:8px; flex-wrap:wrap; }
+  .chat-form textarea{ flex:1 1 320px; min-height:44px; }
+  .chat-item{ margin-top:12px; padding-top:10px; border-top:1px solid var(--border2); }
+  .chat-q{ font-weight:600; }
+  .chat-a{ white-space:pre-wrap; margin-top:4px; line-height:1.45; }
+  .chat-a sup{ color:var(--accent); cursor:help; }
+  .chat-fuentes{ font-size:11.5px; color:#5b6170; margin-top:4px; }
   .badge-fin{ display:inline-block; font-size:10.5px; padding:0 6px; border-radius:10px; margin-top:2px; border:1px solid var(--border2); background:var(--surface2); color:#4a505c; }
   .badge-fin.oxi{ background:rgba(106,79,209,.12); color:#5340b0; border-color:rgba(106,79,209,.3); }
   .badge-fin.pub{ background:rgba(255,159,67,.16); color:#8a4d0f; border-color:rgba(255,159,67,.45); }
@@ -702,6 +710,9 @@ function renderFicha() {
     <h3>Ficha del Banco de Inversiones</h3>
     ${renderDocumentos()}
 
+    <h3>Preguntar a los documentos <span class="sub">· 🤖 IA</span></h3>
+    ${renderChat()}
+
     <h3>Calculadora de rentabilidad del financista</h3>
     <div class="calc-box">
       <div class="calc-aviso">⚠️ ${esc(AVISO_CALCULADORA)}</div>
@@ -741,10 +752,11 @@ let resultadosDocs = null; // resultado de la última subida, se muestra tras re
 
 function resumenCampos(tipo, c) {
   if (!c) return '';
+  const ia = c.leido_con_ia ? ` · <span title="${Array.isArray(c.leido_con_ia) ? 'Leído con IA: ' + esc(c.leido_con_ia.join(', ')) : 'Tabla leída con IA'}">🤖 con ayuda de IA</span>` : '';
   if (tipo === 'ficha_07c') return [c.cui && `CUI ${esc(c.cui)}`, c.costo_total != null && `costo total ${soles2(c.costo_total)}`, c.fecha && `fecha ${esc(c.fecha)}`]
-    .filter(Boolean).join(' · ');
+    .filter(Boolean).join(' · ') + ia;
   if (tipo === 'estructura_costos') return `${c.filas} filas · ${c.precios_unicos} precios únicos` +
-    (c.filas_no_cuadran ? ` · <b class="neg">${c.filas_no_cuadran} no cuadran</b>` : '') + (c.anio ? ` · año ${c.anio}` : ' · año desconocido');
+    (c.filas_no_cuadran ? ` · <b class="neg">${c.filas_no_cuadran} no cuadran</b>` : '') + (c.anio ? ` · año ${c.anio}` : ' · año desconocido') + ia;
   return '';
 }
 
@@ -787,6 +799,54 @@ function renderDocumentos() {
       </tbody></table></div>` : ''}
   </div>`;
 }
+
+/* ---------- Preguntar a los documentos (IA) ---------- */
+// La respuesta cita fragmentos como [1], [2]…: se muestran con el archivo y la página
+const paginas = (f) => f.pagina_desde === f.pagina_hasta ? `pág. ${f.pagina_desde}` : `págs. ${f.pagina_desde}–${f.pagina_hasta}`;
+function renderRespuesta(c) {
+  const fuentes = new Map((c.fuentes || []).map(f => [String(f.n), f]));
+  const citadas = new Set();
+  const html = esc(c.respuesta).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\[(\d+)\]/g, (m, n) => {
+    const f = fuentes.get(n); if (!f) return m;
+    citadas.add(n);
+    return `<sup title="${esc(f.nombre_archivo || 'documento')}, ${paginas(f)}">[${n}]</sup>`;
+  });
+  const lista = [...citadas].sort((a, b) => a - b).map(n => { const f = fuentes.get(n); return `[${n}] ${esc(f.nombre_archivo || 'documento')}, ${paginas(f)}`; });
+  return `<div class="chat-item"><div class="chat-q">${esc(c.pregunta)}</div><div class="chat-a">${html}</div>
+    <div class="chat-fuentes">${lista.length ? 'Fuentes: ' + lista.join(' · ') : 'Sin citas a los documentos'} · ${fecha(c.creado_en)}${c.modelo ? ' · ' + esc(c.modelo) : ''}</div></div>`;
+}
+function renderChat() {
+  const { documentos = [], chats = [], ia_disponible } = actual;
+  if (!ia_disponible) return '<p class="sub">La IA no está configurada en el servidor (falta OPENAI_API_KEY).</p>';
+  if (!documentos.length) return '<p class="sub">Sube la ficha 07-C, la estructura de costos o el informe de sustento para poder preguntarles.</p>';
+  return `<div class="chat-box">
+    <form class="chat-form" id="chat-form">
+      <textarea id="chat-pregunta" maxlength="1000" placeholder="Ej.: ¿Cuántas carpetas y sillas incluye? ¿Qué instituciones educativas atiende? ¿Cuál es el plazo de ejecución?"></textarea>
+      <button class="btn btn-primary" type="submit" id="chat-enviar">Preguntar</button>
+    </form>
+    <div class="sub" style="margin-top:6px">Responde solo con lo que dicen los ${documentos.length} documento(s) del proyecto y cita archivo y página. Verifica las cifras en el PDF antes de usarlas.</div>
+    <div class="msg" id="chat-msg"></div>
+    <div id="chat-lista">${chats.map(renderRespuesta).join('')}</div>
+  </div>`;
+}
+$('ficha').addEventListener('submit', async e => {
+  if (e.target.id !== 'chat-form') return;
+  e.preventDefault();
+  const pregunta = $('chat-pregunta').value.trim();
+  if (!pregunta) return setMsg($('chat-msg'), 'Escribe una pregunta', 'err');
+  const btn = $('chat-enviar'); btn.disabled = true;
+  const sinIndexar = (actual.documentos || []).some(d => !d.indexado_en);
+  setMsg($('chat-msg'), sinIndexar ? 'Preparando los documentos (solo la primera vez) y buscando la respuesta…' : 'Buscando en los documentos…');
+  try {
+    const c = await api(`/api/ioarr/proyectos/${actual.proyecto.id}/preguntar`, { method: 'POST', body: JSON.stringify({ pregunta }) });
+    actual.chats = [c, ...(actual.chats || [])];
+    if (sinIndexar) actual.documentos = actual.documentos.map(d => ({ ...d, indexado_en: d.indexado_en || new Date().toISOString() }));
+    $('chat-lista').innerHTML = actual.chats.map(renderRespuesta).join('');
+    $('chat-pregunta').value = '';
+    setMsg($('chat-msg'), '');
+  } catch (err) { setMsg($('chat-msg'), err.message, 'err'); }
+  btn.disabled = false;
+});
 
 function renderResultadosDocs(resultados) {
   return resultados.map(r => r.error

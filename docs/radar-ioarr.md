@@ -13,6 +13,10 @@ Seguimiento de IOARR de mobiliario escolar en Obras por Impuestos (OxI), visto d
 | `supabase/migrations/004_ioarr_documentos.sql` | Bucket privado `ioarr-docs`, tablas `ioarr_documentos` e `ioarr_precios_referencia` |
 | `supabase/migrations/005_ioarr_cruce_fuentes.sql` | Cargas por fuente (`ioarr_cargas`, `ioarr_carga_filas`), `ioarr_pmi`, `ioarr_pmi_manual` y las vistas del cruce |
 | `supabase/migrations/006_ioarr_filtros_carga.sql` | Columna `filtros` en `ioarr_cargas` (PMI importado solo con Educación / IOARR) para que el cruce no marque «fuera del PMI» a lo que la carga no podía contener |
+| `supabase/migrations/007_ioarr_pmi_opmi.sql` | OPMI de cada carga del PMI (`ioarr_cargas.opmi`) |
+| `supabase/migrations/008_ioarr_financiamiento.sql` | Fuente de financiamiento y modalidad de ejecución en proyectos y cargas del Banco |
+| `supabase/migrations/009_ioarr_ia_documentos.sql` | IA: fragmentos de los PDF con embedding (`ioarr_doc_chunks`), historial del chat (`ioarr_chats`) y `ioarr_match_chunks` |
+| `src/ioarr/ia.js` | IA (OpenAI): lectura de respaldo de los PDF, validada contra el texto, y chat «Preguntar a los documentos» |
 | `src/ioarr/cruce.js` | Cruce de fuentes por CUI: guarda cada carga y calcula la situación de cada proyecto |
 | `src/ioarr/fichas.js` | Lee los PDF del Banco de Inversiones: ficha 07-C y tabla de bienes de la estructura de costos |
 | `scripts/experimentos/` | Pruebas aisladas, fuera del servidor: sondeo del portal del MEF y diagnóstico de lectura de un PDF |
@@ -50,8 +54,10 @@ Están todas en `.env.example`. Las nuevas de este módulo son:
 |---|---|
 | `SUPABASE_PUBLISHABLE_KEY` | Clave pública (Supabase → Settings → API) para el login en el navegador |
 | `IOARR_CRON` | Hora del correo diario, en zona America/Lima (por defecto `0 7 * * *`) |
+| `IOARR_IA_MODELO_LECTURA` | Modelo para leer PDF con IA (por defecto `gpt-4o-mini`) |
+| `IOARR_IA_MODELO_CHAT` | Modelo del chat sobre los documentos (por defecto `gpt-4o`) |
 
-También usa las que ya existían: `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `SMTP_*`, `MAIL_FROM` y `FRONTEND_URL`.
+También usa las que ya existían: `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `SMTP_*`, `MAIL_FROM`, `FRONTEND_URL` y `OPENAI_API_KEY` (la del radar SEACE; sin ella, el módulo funciona sin IA).
 
 ## 4. Importar el Excel
 
@@ -99,6 +105,16 @@ node scripts/experimentos/leer-pdf.js Exportacion.pdf --lineas            # + te
 
 Si una etiqueta del PDF real no se reconoce, se agrega a `ETIQUETAS_*` en `src/ioarr/fichas.js`. Los PDF escaneados (sin texto) se guardan, pero no se leen.
 
+**Lectura de respaldo con IA.** Si las reglas no encuentran en la ficha 07-C el CUI, el nombre, el costo total, la modalidad o la fuente, se le pide a la IA (`IOARR_IA_MODELO_LECTURA`). En la estructura de costos, se le pide si las reglas no leen la tabla o si la mayoría de las filas no cuadra. Lo que devuelve la IA **solo se acepta si una regla lo valida contra el PDF**: el texto o la cifra tiene que aparecer en el documento y, en los costos, el código y el d de cada fila tienen que estar en el PDF (la fila que no cumple d = (a+b+c) × 1.15 queda marcada como «no cuadra»). La IA solo completa lo que las reglas no encontraron. Lo propuesto que no aparece en el PDF se descarta con un aviso 🤖, y lo aceptado se marca «🤖 con ayuda de IA» en la lectura y en la línea de tiempo.
+
+## 5b. Preguntar a los documentos (IA)
+
+En la ficha del proyecto, **Preguntar a los documentos** responde con lo que dicen los PDF del proyecto (por ejemplo, «¿cuántas carpetas incluye?»):
+
+- Al subir un PDF, su texto se divide en fragmentos de ~2000 caracteres con su página y un embedding (`text-embedding-3-small`), en `ioarr_doc_chunks`. Los PDF subidos antes de la migración 009 se indexan en la primera pregunta.
+- Cada pregunta busca los 8 fragmentos más parecidos (`ioarr_match_chunks`) y el modelo (`IOARR_IA_MODELO_CHAT`) responde **solo con ellos**, citando cada dato como [n] → archivo y página. Si no está en los documentos, lo dice.
+- Preguntas y respuestas quedan en `ioarr_chats` (últimas 20 en la ficha). La IA **no cambia** el estado, la situación del cruce ni ningún dato del proyecto.
+
 ## 6. Cruce de fuentes
 
 La pestaña **Cruce de fuentes** compara por CUI las tres listas y calcula la situación de cada proyecto. Requiere `supabase/migrations/005_ioarr_cruce_fuentes.sql`.
@@ -145,7 +161,7 @@ En el plan gratuito, Render apaga el servicio cuando no tiene tráfico y el cron
 
 1. Haz merge de `feature/radar-ioarr` a `main`. Render despliega solo con el `render.yaml` actual, no hace falta cambiarlo.
 2. Agrega `SUPABASE_PUBLISHABLE_KEY` (y, si quieres, `IOARR_CRON`) en Environment.
-3. Corre las migraciones (paso 1, y `002`, `003`, `004` y `005` en orden) **antes** de abrir la pantalla.
+3. Corre las migraciones (paso 1, y de `002` a `009` en orden) **antes** de abrir la pantalla.
 4. Entra a `https://<tu-servicio>.onrender.com/ioarr.html`.
 
 ## 9. Pruebas

@@ -20,6 +20,7 @@ import { calcularRentabilidad } from './calculadora.js';
 import { leerArchivo, detectarMapeo, aplicarMapeoGuardado, filaAProyecto, importarProyectos, normaliza, CAMPOS_MAPEABLES } from './ingesta.js';
 import { sendIoarrDigest } from './alertas.js';
 import { filaACarga, filtrarFilasPmi, guardarCarga, borrarCarga, obtenerDatosCruce, calcularCruce } from './cruce.js';
+import { clienteIA, respaldoFicha, respaldoCostos, indexarDocumento, preguntar, MODELO_CHAT } from './ia.js';
 import { extraerLineasPdf, clasificarDocumento, leerFicha07C, leerTablaCostos, preciosUnicos, anioDeLineas, guardarPrecios } from './fichas.js';
 
 const router = express.Router();
@@ -99,16 +100,21 @@ router.get('/api/ioarr/proyectos/:id', async (req, res, next) => {
       supabase.from('ioarr_eventos').select('*').eq('proyecto_id', id).order('fecha', { ascending: false }),
       supabase.from('ioarr_evaluaciones').select('*').eq('proyecto_id', id).order('creado_en', { ascending: false }),
       supabase.from('ioarr_proyecto_contrapartes').select('contraparte:ioarr_contrapartes(*)').eq('proyecto_id', id),
-      supabase.from('ioarr_documentos').select('id, tipo, nombre_archivo, tamano, paginas, campos, avisos, creado_en')
+      supabase.from('ioarr_documentos').select('*')
         .eq('proyecto_id', id).order('creado_en', { ascending: false })
     ]);
+    // Historial del chat (migración 009); sin ella, simplemente no hay historial
+    const chats = await supabase.from('ioarr_chats').select('id, pregunta, respuesta, fuentes, modelo, creado_en')
+      .eq('proyecto_id', id).order('creado_en', { ascending: false }).limit(20);
     for (const r of [p, ev, eva, cp]) if (r.error) throw r.error;
     if (!p.data) return res.status(404).json({ error: 'Proyecto no encontrado' });
     // Sin la migración 004 la ficha sigue funcionando, solo sin documentos
     if (docs.error) console.warn('[IOARR] No se pudieron leer los documentos:', docs.error.message);
     res.json({
       proyecto: p.data, eventos: ev.data, evaluaciones: eva.data, contrapartes: cp.data.map(x => x.contraparte),
-      documentos: docs.data || [], documentos_error: docs.error ? 'Falta ejecutar supabase/migrations/004_ioarr_documentos.sql' : null
+      documentos: (docs.data || []).map(({ ruta, subido_por, ...d }) => d),
+      documentos_error: docs.error ? 'Falta ejecutar supabase/migrations/004_ioarr_documentos.sql' : null,
+      chats: chats.error ? [] : chats.data, ia_disponible: !!process.env.OPENAI_API_KEY
     });
   } catch (e) { next(e); }
 });
@@ -218,8 +224,9 @@ const esPdf = (buf) => buf.subarray(0, 5).toString('latin1') === '%PDF-';
 const ETIQUETA_TIPO = { ficha_07c: 'Ficha 07-C', estructura_costos: 'Estructura de costos', informe_sustento: 'Informe de sustento', otro: 'Otro' };
 const fmtSoles = (n) => 'S/ ' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-// Lee el PDF (puro, sin guardar nada): tipo, campos y avisos
-async function analizarPdf(archivo, proyecto) {
+// Lee el PDF (sin guardar nada): tipo, campos y avisos. Si las reglas no encuentran
+// un dato y hay IA, se intenta con IA (src/ioarr/ia.js valida el resultado contra el PDF).
+async function analizarPdf(archivo, proyecto, ia) {
   const nombre = nombreUtf8(archivo.originalname);
   if (!esPdf(archivo.buffer)) return { nombre, error: 'No es un PDF' };
   let leido;
@@ -230,19 +237,27 @@ async function analizarPdf(archivo, proyecto) {
   const r = { nombre, tipo, paginas, lineas, avisos: [], campos: null };
 
   if (tipo === 'ficha_07c') {
-    const { campos, avisos } = leerFicha07C(lineas);
-    r.campos = campos; r.avisos.push(...avisos);
+    const leida = leerFicha07C(lineas);
+    const conIA = await respaldoFicha(leida.campos, lineas, ia);
+    const { campos } = conIA;
+    // El aviso «No se encontró…» de las reglas ya no vale para lo que completó la IA
+    const faltan = ['cui', 'nombre', 'costo_total'].filter(k => campos[k] == null);
+    const avisos = leida.avisos.filter(a => !a.startsWith('No se encontró en el PDF'));
+    if (faltan.length) avisos.push(`No se encontró en el PDF: ${faltan.join(', ')}. Revisa el documento a mano.`);
+    r.campos = campos; r.avisos.push(...avisos, ...conIA.avisos);
     if (campos.cui && campos.cui !== proyecto.cui) {
       r.cuiDistinto = true;
       r.avisos.push(`La ficha es del CUI ${campos.cui} y este proyecto es el ${proyecto.cui}: se guardó el PDF pero no se actualizaron los datos.`);
     }
   } else if (tipo === 'estructura_costos') {
-    const tabla = leerTablaCostos(lineas);
+    const conIA = await respaldoCostos(leerTablaCostos(lineas), lineas, ia);
+    const { tabla } = conIA;
     const unicos = preciosUnicos(tabla.filas);
     r.precios = unicos.precios;
-    r.campos = { filas: tabla.filas.length, precios_unicos: unicos.precios.length, filas_no_cuadran: tabla.filas.filter(f => !f.cuadra).length };
+    r.campos = { filas: tabla.filas.length, precios_unicos: unicos.precios.length, filas_no_cuadran: tabla.filas.filter(f => !f.cuadra).length,
+      ...(conIA.usada ? { leido_con_ia: true } : {}) };
     if (!tabla.filas.length) r.avisos.push('No se reconoció la tabla de bienes (código, descripción, a, b, c, d, cantidad).');
-    r.avisos.push(...tabla.avisos, ...unicos.avisos);
+    r.avisos.push(...tabla.avisos, ...conIA.avisos, ...unicos.avisos);
   }
   if (!lineas.length && tipo !== 'ficha_07c') r.avisos.push('El PDF no tiene texto (¿escaneado?): se guardó sin leer campos.');
   return r;
@@ -279,7 +294,8 @@ router.post('/api/ioarr/proyectos/:id/documentos', recibirPdfs, async (req, res,
     if (e0) throw e0;
     if (!proyecto) return res.status(404).json({ error: 'Proyecto no encontrado' });
 
-    const analizados = await Promise.all(archivos.map(a => analizarPdf(a, proyecto).then(r => ({ ...r, archivo: a }))));
+    const ia = await clienteIA();
+    const analizados = await Promise.all(archivos.map(a => analizarPdf(a, proyecto, ia).then(r => ({ ...r, archivo: a }))));
     const orden = { ficha_07c: 0, estructura_costos: 1 };
     analizados.sort((x, y) => (orden[x.tipo] ?? 2) - (orden[y.tipo] ?? 2));
 
@@ -325,11 +341,62 @@ router.post('/api/ioarr/proyectos/:id/documentos', recibirPdfs, async (req, res,
         await guardarPrecios(supabase, precios, { cui_origen: proyecto.cui, anio_ficha: anio, documento_id: doc.id, fuente: r.nombre });
         detalle += ` · ${precios.length} precios de referencia` + (r.campos.filas_no_cuadran ? `, ${r.campos.filas_no_cuadran} filas no cuadran` : '');
       }
+      if (r.campos?.leido_con_ia) detalle += ' · con ayuda de IA';
       await supabase.from('ioarr_eventos').insert({ proyecto_id: proyecto.id, tipo: 'hito', detalle: `${detalle} — ${req.usuario.email}` });
+      // Fragmentos para el chat (si falla, el PDF queda guardado y se indexa al preguntar)
+      if (ia) {
+        try { doc.fragmentos = await indexarDocumento(supabase, ia, { documento_id: doc.id, proyecto_id: proyecto.id, lineas }); }
+        catch (e) { console.warn('[IOARR] No se pudo indexar el documento para el chat:', e.message); }
+      }
       resultados.push({ ...salida, documento: doc });
     }
     console.log(`[IOARR] ${archivos.length} PDF subidos al proyecto ${proyecto.cui} por ${req.usuario.email}`);
     res.json({ resultados });
+  } catch (e) { next(e); }
+});
+
+// ─── Preguntar a los documentos (IA) ────────────────────────────────────────
+// Indexa los PDF del proyecto que aún no tienen fragmentos (p. ej. subidos antes
+// de la migración 009) y responde con los fragmentos más parecidos a la pregunta.
+async function indexarPendientes(ia, proyecto_id) {
+  const { data: docs, error } = await supabase.from('ioarr_documentos').select('id, nombre_archivo, ruta, indexado_en, fragmentos').eq('proyecto_id', proyecto_id);
+  if (error) throw error;
+  for (const d of docs.filter(x => !x.indexado_en)) {
+    const { data: blob, error: e1 } = await supabase.storage.from(BUCKET_DOCS).download(d.ruta);
+    if (e1) { console.warn(`[IOARR] No se pudo descargar ${d.nombre_archivo} para indexarlo:`, e1.message); continue; }
+    const { lineas } = await extraerLineasPdf(Buffer.from(await blob.arrayBuffer()));
+    d.fragmentos = await indexarDocumento(supabase, ia, { documento_id: d.id, proyecto_id, lineas });
+  }
+  return docs;
+}
+
+router.post('/api/ioarr/proyectos/:id/preguntar', async (req, res, next) => {
+  try {
+    const pregunta = String(req.body?.pregunta || '').trim();
+    if (!pregunta) return res.status(400).json({ error: 'Escribe una pregunta' });
+    if (pregunta.length > 1000) return res.status(400).json({ error: 'La pregunta puede tener como máximo 1000 caracteres' });
+    const ia = await clienteIA();
+    if (!ia) return res.status(503).json({ error: 'La IA no está configurada (falta OPENAI_API_KEY en el servidor)' });
+    const { data: proyecto, error } = await supabase.from('ioarr_proyectos').select('*').eq('id', req.params.id).maybeSingle();
+    if (error) throw error;
+    if (!proyecto) return res.status(404).json({ error: 'Proyecto no encontrado' });
+
+    let docs;
+    try { docs = await indexarPendientes(ia, proyecto.id); }
+    catch (e) {
+      if (faltaMigracion(e)) return res.status(500).json({ error: 'Falta ejecutar supabase/migrations/009_ioarr_ia_documentos.sql' });
+      throw e;
+    }
+    if (!docs.length) return res.status(400).json({ error: 'Este proyecto no tiene documentos. Sube la ficha 07-C o la estructura de costos para poder preguntar.' });
+    if (!docs.some(d => d.fragmentos > 0)) return res.status(400).json({ error: 'Los PDF de este proyecto no tienen texto (¿escaneados?): no se puede preguntar sobre ellos.' });
+
+    const r = await preguntar(supabase, ia, { proyecto, pregunta, documentos: docs });
+    const { data: chat, error: e2 } = await supabase.from('ioarr_chats').insert({
+      proyecto_id: proyecto.id, pregunta, respuesta: r.respuesta, fuentes: r.fuentes, modelo: r.modelo, usuario_id: req.usuario.id
+    }).select('id, pregunta, respuesta, fuentes, modelo, creado_en').single();
+    if (e2) console.warn('[IOARR] No se pudo guardar el chat:', e2.message);
+    console.log(`[IOARR] Pregunta sobre ${proyecto.cui} por ${req.usuario.email} (${MODELO_CHAT}, ${r.fuentes.length} fragmentos)`);
+    res.json(chat || { pregunta, ...r, creado_en: new Date().toISOString() });
   } catch (e) { next(e); }
 });
 
