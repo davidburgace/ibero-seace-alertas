@@ -19,7 +19,7 @@ import { requireAuth } from './auth.js';
 import { calcularRentabilidad } from './calculadora.js';
 import { leerArchivo, detectarMapeo, aplicarMapeoGuardado, filaAProyecto, importarProyectos, normaliza, CAMPOS_MAPEABLES } from './ingesta.js';
 import { sendIoarrDigest } from './alertas.js';
-import { filaACarga, filaAPmi, guardarCarga, borrarCarga, obtenerDatosCruce, calcularCruce } from './cruce.js';
+import { filaACarga, filtrarFilasPmi, guardarCarga, borrarCarga, obtenerDatosCruce, calcularCruce } from './cruce.js';
 import { extraerLineasPdf, clasificarDocumento, leerFicha07C, leerTablaCostos, preciosUnicos, anioDeLineas, guardarPrecios } from './fichas.js';
 
 const router = express.Router();
@@ -32,9 +32,10 @@ const ESTADOS = ['viable', 'priorizada_oxi', 'convenio', 'en_proceso_seleccion',
   'bienes_entregados', 'ciprl_emitido', 'cerrada', 'descartada'];
 const ETAPAS = ['detectada', 'evaluando', 'convenio', 'financiando', 'ciprl_emitido'];
 const FUENTES = ['invierte_pe', 'proinversion', 'pmi', 'otro'];
-// Campos que se muestran en el mapeo según la fuente (el PMI solo necesita CUI, entidad y periodo)
+// Campos que se muestran en el mapeo según la fuente (el PMI: CUI, entidad y periodo, más
+// función y tipo de inversión para sus filtros)
 const CAMPOS_FUENTE = {
-  pmi: ['cui', 'entidad', 'periodo'],
+  pmi: ['cui', 'entidad', 'periodo', 'funcion', 'tipo_inversion'],
   proinversion: CAMPOS_MAPEABLES.filter(c => !['fuente_financiamiento', 'pim', 'devengado', 'periodo'].includes(c)),
   invierte_pe: CAMPOS_MAPEABLES.filter(c => c !== 'periodo'),
   otro: CAMPOS_MAPEABLES.filter(c => c !== 'periodo')
@@ -399,18 +400,26 @@ router.post('/api/ioarr/importar', upload.single('file'), async (req, res, next)
     if (fuente === 'pmi') {
       if (!mapeo.cui) return res.status(400).json({ error: 'Debes mapear al menos la columna de CUI' });
       const { rows, hoja } = leerArchivo(req.file.buffer);
-      const filas = rows.map(r => filaAPmi(r, mapeo)).filter(Boolean);
-      if (!filas.length) return res.status(400).json({ error: 'El archivo no tiene filas con CUI. Si no puedes importarlo, marca el PMI a mano en la pestaña Cruce.' });
+      // Se guardan en la carga para que el cruce sepa qué proyectos pudo contener
+      const filtros = { solo_educacion: req.body.solo_educacion === '1', solo_ioarr: req.body.solo_ioarr === '1' };
+      let filas, resumen;
+      try {
+        ({ filas, resumen } = filtrarFilasPmi(rows, mapeo, { soloEducacion: filtros.solo_educacion, soloIoarr: filtros.solo_ioarr }));
+      } catch (e) { return res.status(400).json({ error: e.message }); }
+      if (!resumen.leidas || resumen.sin_cui === resumen.leidas)
+        return res.status(400).json({ error: 'El archivo no tiene filas con CUI. Si no puedes importarlo, marca el PMI a mano en la pestaña Cruce.' });
+      if (!filas.length) return res.status(400).json({ resumen, error: `Ninguna fila pasó los filtros y no se guardó nada: ${resumen.leidas} leídas, ` +
+        `${resumen.sin_cui} sin CUI, ${resumen.no_educacion} no son Educación, ${resumen.no_ioarr} no son IOARR. Revisa el mapeo de Función / Tipo de inversión.` });
       let r;
-      try { r = await guardarCarga(supabase, { fuente, filas, nombre_archivo: nombreArchivo, hoja, usuario_id: req.usuario.id }); }
+      try { r = await guardarCarga(supabase, { fuente, filas, filtros, nombre_archivo: nombreArchivo, hoja, usuario_id: req.usuario.id }); }
       catch (e) {
-        if (faltaMigracion(e)) return res.status(500).json({ error: 'Falta ejecutar supabase/migrations/005_ioarr_cruce_fuentes.sql' });
+        if (faltaMigracion(e)) return res.status(500).json({ error: 'Falta ejecutar supabase/migrations/005_ioarr_cruce_fuentes.sql y 006_ioarr_filtros_carga.sql' });
         throw e;
       }
       await guardarMapeo(fuente, mapeo, req.usuario);
-      console.log(`[IOARR] Carga PMI por ${req.usuario.email}: ${r.filas} CUI`);
-      return res.json({ fuente, carga: r.carga, filas_archivo: rows.length, cuis: r.filas, filas_repetidas: r.filas_repetidas,
-        filas_sin_cui: rows.length - filas.length, sin_entidad: filas.filter(f => !f.entidad).length });
+      console.log(`[IOARR] Carga PMI por ${req.usuario.email}: ${r.filas} CUI (${JSON.stringify(resumen)})`);
+      return res.json({ fuente, carga: r.carga, resumen, cuis: r.filas, filas_repetidas: r.filas_repetidas,
+        sin_entidad: filas.filter(f => !f.entidad).length });
     }
 
     if (!mapeo.cui || !mapeo.nombre) return res.status(400).json({ error: 'Debes mapear al menos CUI y nombre' });
