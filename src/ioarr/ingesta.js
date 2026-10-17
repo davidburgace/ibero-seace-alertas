@@ -60,7 +60,7 @@ const SINONIMOS = {
   estado_oxi:      ['FASE OXI', 'ESTADO OXI'],
   estado:          ['ESTADO DE LA INVERSION', 'ESTADO', 'SITUACION', 'FASE'],
   nombre:          ['NOMBRE DE LA INVERSION', 'NOMBRE DE INVERSION', 'NOMBRE INVERSION', 'NOMBRE DEL PROYECTO', 'INTERVENCION', 'NOMBRE', 'DESCRIPCION'],
-  entidad:         ['ENTIDAD PUBLICA', 'ENTIDAD', 'UNIDAD EJECUTORA', 'UNIDAD FORMULADORA', 'UEI'],
+  entidad:         ['ENTIDAD PUBLICA', 'ENTIDAD', 'UNIDAD EJECUTORA', 'UNIDAD FORMULADORA', 'UEI', 'OPMI'],
   region:          ['DEPARTAMENTO', 'REGION'],
   provincia:       ['PROVINCIA'],
   distrito:        ['DISTRITO'],
@@ -69,6 +69,9 @@ const SINONIMOS = {
   // Al final: «AÑO» (→ ANO) es muy genérico y no debe ganarle a otra columna
   periodo:         ['PERIODO DEL PMI', 'PERIODO PMI', 'PERIODO', 'ANO DEL PMI', 'ANO PMI', 'ANO', 'ANIO']
 };
+// Sinónimos que solo valen si el encabezado es exactamente ese: «AÑO» no debe
+// encajar en «Monto Año 2026 (S/)», que es un monto y no el periodo del PMI
+const SOLO_EXACTO = new Set(['ANO', 'ANIO']);
 
 // Palabras que delatan la fila de encabezado (ver detectarFilaEncabezado)
 const CLAVES_ENCABEZADO = ['CUI', 'CODIGO', 'NOMBRE', 'PROYECTO', 'ENTIDAD', 'DEPARTAMENTO'];
@@ -102,12 +105,15 @@ export function parseMonto(v) {
   return Number.isFinite(n) ? n : null;
 }
 
-// El CUI se guarda siempre como texto: 2603315 → "2603315"; "idea0000110" → "IDEA0000110"
+// El CUI se guarda siempre como texto de solo dígitos: 2603315 → "2603315";
+// " 2,560,356 " / "2560356.0" / "CUI 2560356" → "2560356"; "idea0000110" → "IDEA0000110".
+// Un texto sin dígitos (p. ej. «Enlace») no es un CUI → null.
 export function limpiaCui(v) {
   if (v == null) return null;
-  const s = String(v).trim().replace(/\.0+$/, '').replace(/\s+/g, '');
+  const s = String(v).trim().replace(/\s+/g, '');
   if (!s) return null;
-  return esIdea(s) ? s.toUpperCase() : s;
+  if (esIdea(s)) return s.toUpperCase();
+  return s.replace(/[.,]0+$/, '').replace(/\D/g, '') || null;
 }
 
 // Código de idea de inversión (aún no es un proyecto registrado con CUI)
@@ -213,6 +219,7 @@ function leerHoja(hoja) {
 
   const filaEnc = detectarFilaEncabezado(matriz);
   if (filaEnc < 0) return null;
+  const banner = datosDelBanner(matriz.slice(0, filaEnc));
   const datos = matriz.slice(filaEnc + 1);
 
   // Columnas: se ignoran las totalmente vacías (p. ej. la columna A del Excel de
@@ -241,7 +248,39 @@ function leerHoja(hoja) {
     if (Object.keys(links).length) row[LINKS] = links;
     rows.push(row);
   });
-  return { headers: columnas.map(x => x.titulo), rows, fila_encabezado: rango.s.r + filaEnc + 1 };
+  return { headers: columnas.map(x => x.titulo), rows, fila_encabezado: rango.s.r + filaEnc + 1,
+    opmi_detectada: banner.opmi, periodo_detectado: banner.periodo };
+}
+
+// Lo que dice el banner sobre el encabezado de la tabla (reportes del PMI):
+// la OPMI («OPMI: OPMI DEL GOBIERNO REGIONAL LAMBAYEQUE», o la etiqueta en una
+// celda y el valor en la siguiente) y el periodo («2027-2029»).
+const ETIQUETAS_OPMI = ['OPMI', 'OFICINA DE PROGRAMACION MULTIANUAL DE INVERSIONES', 'ENTIDAD', 'PLIEGO']; // en orden de preferencia
+export function datosDelBanner(filas) {
+  const candidatos = []; // [prioridad, texto]
+  let periodo = null;
+  for (const fila of filas) {
+    const celdas = fila.map(v => v == null ? '' : String(v).replace(/\s+/g, ' ').trim());
+    celdas.forEach((t, i) => {
+      if (!t) return;
+      const n = normaliza(t);
+      const rango = /\b(20\d\d)\s*[-–—]\s*(20\d\d)\b/.exec(t);
+      if (rango && !periodo) periodo = `${rango[1]}-${rango[2]}`;
+      ETIQUETAS_OPMI.forEach((et, prioridad) => {
+        if (n.startsWith(et + ':') || n.startsWith(et + ' :')) {
+          const valor = t.slice(t.indexOf(':') + 1).trim();
+          if (valor) candidatos.push([prioridad, valor]);
+        } else if (n === et || n === et + ':') {
+          const valor = celdas.slice(i + 1).find(Boolean);
+          if (valor) candidatos.push([prioridad, valor]);
+        }
+      });
+      // Celda que ya es el nombre: «OPMI DEL MINISTERIO DE EDUCACION»
+      if (/^OPMI (DEL?|DE LA|DE LOS) /.test(n)) candidatos.push([-1, t]);
+    });
+  }
+  candidatos.sort((a, b) => a[0] - b[0]);
+  return { opmi: candidatos[0]?.[1] || null, periodo };
 }
 
 // Lee Excel (.xlsx/.xls) o CSV. Usa la primera hoja donde se reconozca un
@@ -253,7 +292,7 @@ export function leerArchivo(buffer) {
     if (r) return { ...r, hoja: nombre };
   }
   const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: null });
-  return { headers: rows.length ? Object.keys(rows[0]) : [], rows, fila_encabezado: 1, hoja: wb.SheetNames[0] };
+  return { headers: rows.length ? Object.keys(rows[0]) : [], rows, fila_encabezado: 1, hoja: wb.SheetNames[0], opmi_detectada: null, periodo_detectado: null };
 }
 
 // Propone un mapeo campo → encabezado (primero coincidencia exacta, luego por palabras)
@@ -268,6 +307,7 @@ export function detectarMapeo(headers) {
     }
     if (!elegido) {
       for (const s of sinonimos) {
+        if (SOLO_EXACTO.has(s)) continue;
         elegido = headers.find(h => !usados.has(h) && contienePalabra(normaliza(h), s));
         if (elegido) break;
       }
