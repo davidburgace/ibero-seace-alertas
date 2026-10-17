@@ -183,6 +183,8 @@
   .tabla-regiones th:first-child, .tabla-regiones td:first-child{ text-align:left; }
   .tabla-regiones th{ font-size:10px; color:var(--muted); border-top:none; text-transform:uppercase; }
   .aviso-fila{ font-size:11.5px; color:#7a4a12; margin-top:3px; }
+  .nota-fila{ font-size:11.5px; color:#3d5a80; margin-top:3px; }
+  .badge-sector{ display:inline-block; font-size:11px; padding:1px 7px; border-radius:10px; background:rgba(106,79,209,.12); color:#5340b0; border:1px solid rgba(106,79,209,.3); }
   .dif-fila{ font-size:11.5px; color:#a83226; margin-top:3px; font-weight:600; }
   .pmi-btn{ font-family:var(--font-body); font-size:11px; border:1px solid var(--border2); background:#fff; border-radius:6px; padding:1px 6px; cursor:pointer; margin-left:4px; }
   .pmi-btn:hover{ border-color:var(--accent); color:var(--accent); }
@@ -284,6 +286,7 @@
       <select id="cr-region"><option value="">Todas las regiones</option></select>
       <select id="cr-nivel"><option value="">Todo nivel de gobierno</option><option value="GORE">Gobierno regional</option><option value="GL">Gobierno local</option><option value="GN">Gobierno nacional</option></select>
       <select id="cr-funcion"><option value="">Todas las funciones</option></select>
+      <select id="cr-tipo-ent" title="Calculado con la entidad y el nombre de la inversión"><option value="">Todo tipo de entidad</option></select>
       <input type="text" id="cr-entidad" placeholder="Entidad, CUI o nombre…">
       <input type="number" id="cr-min" placeholder="Monto mín. S/" min="0">
       <input type="number" id="cr-max" placeholder="Monto máx. S/" min="0">
@@ -1021,6 +1024,12 @@ function llenarFiltrosCruce() {
   sel('cr-sit', SITUACIONES, 'Todas las situaciones');
   sel('cr-region', unicos('region'), 'Todas las regiones');
   sel('cr-funcion', unicos('funcion'), 'Todas las funciones');
+  // Tipo de entidad, en el orden del backend, con cuántos proyectos hay de cada uno
+  const nTipo = cruce.filas.reduce((a, f) => (a[f.tipo_entidad] = (a[f.tipo_entidad] || 0) + 1, a), {});
+  const tipos = [...new Map(cruce.filas.map(f => [f.tipo_entidad, f.tipo_entidad_label]))];
+  const ORDEN_TIPO = ['colegio_ugel', 'instituto', 'universidad', 'gore', 'municipalidad', 'ministerio', 'otra'];
+  tipos.sort((a, b) => ORDEN_TIPO.indexOf(a[0]) - ORDEN_TIPO.indexOf(b[0]));
+  sel('cr-tipo-ent', tipos.map(([k, l]) => [k, `${l} (${nTipo[k]})`]), 'Todo tipo de entidad');
 }
 
 // Filtros con que se importó una carga (migración 006): «solo Educación e IOARR»
@@ -1060,7 +1069,7 @@ function renderPmiCargados() {
 }
 
 function filtrarCruce() {
-  const sit = $('cr-sit').value, region = $('cr-region').value, nivel = $('cr-nivel').value, funcion = $('cr-funcion').value;
+  const sit = $('cr-sit').value, region = $('cr-region').value, nivel = $('cr-nivel').value, funcion = $('cr-funcion').value, tipoEnt = $('cr-tipo-ent').value;
   const q = $('cr-entidad').value.trim().toUpperCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
   const min = $('cr-min').value === '' ? null : Number($('cr-min').value);
   const max = $('cr-max').value === '' ? null : Number($('cr-max').value);
@@ -1068,7 +1077,7 @@ function filtrarCruce() {
   const norm = (t) => String(t || '').toUpperCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
   // El resumen usa todos los filtros menos el de situación, para ver el reparto completo
   const base = cruce.filas.filter(f => (!region || f.region === region) && (!nivel || f.entidad_tipo === nivel) && (!funcion || f.funcion === funcion)
-    && (!mob || f.es_mobiliario) && (min == null || (f.monto_inversion ?? -1) >= min) && (max == null || (f.monto_inversion != null && f.monto_inversion <= max))
+    && (!tipoEnt || f.tipo_entidad === tipoEnt) && (!mob || f.es_mobiliario) && (min == null || (f.monto_inversion ?? -1) >= min) && (max == null || (f.monto_inversion != null && f.monto_inversion <= max))
     && (!q || norm(f.entidad).includes(q) || norm(f.nombre).includes(q) || norm(f.cui).includes(q)));
   return { base, filas: sit ? base.filter(f => f.situacion === sit) : base };
 }
@@ -1084,19 +1093,21 @@ function renderCruce() {
     <tr data-i="${i}" ${f.proyecto_id ? '' : 'style="cursor:default"'}>
       <td>${sitBadge(f)}</td>
       <td class="mono">${f.codigo === f.cui ? esc(f.cui) : `<span class="sub">${esc(f.codigo)}</span><div>${esc(f.cui)}</div>`}</td>
-      <td>${esc(f.nombre || '—')}<div class="sub">${esc(f.entidad || '')}${f.entidad_tipo ? ' · ' + f.entidad_tipo : ''}</div>
+      <td>${esc(f.nombre || '—')}<div class="sub">${esc(f.entidad || '')}${f.entidad_tipo ? ' · ' + f.entidad_tipo : ''} · ${esc(f.tipo_entidad_label)}</div>
         ${f.es_mobiliario ? '<span class="badge badge-mob">🪑 Mobiliario</span>' : ''}</td>
       <td>${esc(f.region || '')}<div class="sub">${esc(f.funcion || '')}</div></td>
       <td class="num">${soles(f.monto_inversion)}</td>
       <td>${f.en_banco ? '✓' : '—'}<div class="sub">${esc(f.estado_inversion || '')}</div></td>
       <td>${f.en_proinversion ? esc(f.fase_oxi || '✓') : '—'}<div class="sub">${esc(f.nivel_estudio || '')}</div></td>
-      <td style="white-space:nowrap">${PMI_TXT[f.en_pmi]}${f.en_pmi_origen === 'manual' ? ' <span class="sub">(a mano)</span>' : ''}
+      <td style="white-space:nowrap">${f.pmi_del_sector ? `<span class="badge-sector" title="${esc(f.pmi_opmi)}">En PMI (del sector)</span>` : PMI_TXT[f.en_pmi]}${f.en_pmi_origen === 'manual' ? ' <span class="sub">(a mano)</span>' : ''}
         <button class="pmi-btn" data-pmi="${i}" title="Marcar a mano si está en el PMI">✎</button>
+        ${f.pmi_del_sector ? `<div class="sub" style="white-space:normal;max-width:200px">${esc(f.pmi_opmi)}</div>` : ''}
         ${f.pmi_periodo ? `<div class="sub">${esc(f.pmi_periodo)}</div>` : ''}
         ${f.en_pmi === 'sin_verificar' && f.en_pmi_motivo ? `<div class="aviso-fila" title="${esc(f.en_pmi_motivo_texto)}">${esc(MOTIVO_PMI[f.en_pmi_motivo])}</div>` : ''}</td>
       <td style="min-width:240px">${esc(f.motivo)}
         ${f.diferencia_estado ? `<div class="dif-fila">≠ ${esc(f.diferencia_estado)}</div>` : ''}
-        ${f.avisos.map(a => `<div class="aviso-fila">⚠️ ${esc(a)}</div>`).join('')}</td>
+        ${f.avisos.map(a => `<div class="aviso-fila">⚠️ ${esc(a)}</div>`).join('')}
+        ${(f.notas || []).map(a => `<div class="nota-fila">ℹ️ ${esc(a)}</div>`).join('')}</td>
       <td class="sub" style="white-space:nowrap">${f.cargas.map(c => `${FUENTE_CARGA[c.fuente]}: ${fechaDia(c.fecha_carga)}`).join('<br>') || '—'}</td>
     </tr>`).join('');
   if (filas.length > MAX_FILAS_CRUCE)
@@ -1137,7 +1148,7 @@ $('cr-barras').addEventListener('click', e => {
   $('cr-sit').value = $('cr-sit').value === b.dataset.sit ? '' : b.dataset.sit;
   renderCruce();
 });
-['cr-sit', 'cr-region', 'cr-nivel', 'cr-funcion', 'cr-mob'].forEach(id => $(id).addEventListener('change', renderCruce));
+['cr-sit', 'cr-region', 'cr-nivel', 'cr-funcion', 'cr-tipo-ent', 'cr-mob'].forEach(id => $(id).addEventListener('change', renderCruce));
 ['cr-entidad', 'cr-min', 'cr-max'].forEach(id => $(id).addEventListener('input', renderCruce));
 $('btn-cr-recalcular').addEventListener('click', cargarCruce);
 
@@ -1201,11 +1212,12 @@ $('btn-cr-export').addEventListener('click', () => {
   if (!cruce) return;
   const cargaDe = (f, fuente) => f.cargas.find(c => c.fuente === fuente);
   const filas = cruceFiltrado.map(f => ({
-    Situación: f.situacion_label, Motivo: f.motivo, 'Diferencia con tu estado': f.diferencia_estado || '', Avisos: f.avisos.join(' | '),
+    Situación: f.situacion_label, Motivo: f.motivo, 'Diferencia con tu estado': f.diferencia_estado || '', Avisos: f.avisos.join(' | '), Notas: (f.notas || []).join(' | '),
+    'Tipo de entidad': f.tipo_entidad_label,
     CUI: f.cui, Código: f.codigo, Proyecto: f.nombre, Entidad: f.entidad, 'Nivel de gobierno': f.entidad_tipo, Región: f.region,
     Provincia: f.provincia, Distrito: f.distrito, Función: f.funcion, 'Monto (S/)': f.monto_inversion ?? '', Mobiliario: f.es_mobiliario ? 'Sí' : 'No',
     'En Banco': f.en_banco ? 'Sí' : 'No', 'Estado de la inversión': f.estado_inversion || '', 'En Proinversión': f.en_proinversion ? 'Sí' : 'No',
-    'Fase OxI': f.fase_oxi || '', 'Nivel de estudio': f.nivel_estudio || '', 'En PMI': PMI_TXT[f.en_pmi], 'Origen PMI': f.en_pmi_origen || '',
+    'Fase OxI': f.fase_oxi || '', 'Nivel de estudio': f.nivel_estudio || '', 'En PMI': f.pmi_del_sector ? 'Sí (del sector)' : PMI_TXT[f.en_pmi], 'Origen PMI': f.en_pmi_origen || '',
     'Detalle PMI': f.en_pmi_detalle || '', 'Motivo PMI sin verificar': f.en_pmi_motivo ? MOTIVO_PMI[f.en_pmi_motivo] : '',
     'OPMI': f.pmi_opmi || '', 'Periodo PMI': f.pmi_periodo || '', 'Estado en el radar': f.estado_radar ? (ESTADOS[f.estado_radar] || f.estado_radar) : '',
     'Carga Banco': cargaDe(f, 'invierte_pe') ? fechaDia(cargaDe(f, 'invierte_pe').fecha_carga) : '',
