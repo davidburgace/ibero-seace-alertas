@@ -186,7 +186,7 @@ const RE_FIN_TABLA = /^(TOTAL|SUB ?TOTAL|COSTO DIRECTO|NOTA|FUENTE|ELABORAD)/;
 const redondea = (n) => Math.round(n * 100) / 100;
 export const dEsperado = (a, b, c) => redondea((a + b + c) * FACTOR_D);
 // Tolerancia de redondeo: 2 céntimos o 0.01 % del valor
-const cuadra = (a, b, c, d) => Math.abs(d - (a + b + c) * FACTOR_D) <= Math.max(0.02, Math.abs(d) * 1e-4);
+export const cuadra = (a, b, c, d) => Math.abs(d - (a + b + c) * FACTOR_D) <= Math.max(0.02, Math.abs(d) * 1e-4);
 
 function parseFila(tokens) {
   let t = [...tokens];
