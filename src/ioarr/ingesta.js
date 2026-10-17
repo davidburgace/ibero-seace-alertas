@@ -30,7 +30,9 @@ import * as XLSX from 'xlsx';
 export const CAMPOS_MAPEABLES = [
   'cui', 'nombre', 'entidad', 'nivel_gobierno', 'region', 'provincia', 'distrito',
   'funcion', 'tipologia', 'tipo_inversion', 'monto_inversion', 'estado_oxi', 'estado',
-  'nivel_estudio', 'url_fuente'
+  'nivel_estudio', 'url_fuente',
+  // Solo para el cruce de fuentes (Banco de Inversiones y PMI)
+  'fuente_financiamiento', 'pim', 'devengado', 'periodo'
 ];
 
 // Orden del ciclo OxI. Las importaciones solo AVANZAN el estado (nunca retroceden).
@@ -51,6 +53,9 @@ const SINONIMOS = {
   tipologia:       ['TIPOLOGIA'],
   tipo_inversion:  ['TIPO DE INVERSION', 'TIPO INVERSION', 'TIPO DE FORMATO', 'TIPO FORMATO', 'TIPO DE INTERVENCION', 'NATURALEZA'],
   nivel_gobierno:  ['NIVEL DE GOBIERNO', 'NIVEL GOBIERNO', 'NIVEL'],
+  pim:             ['PIM'],
+  devengado:       ['DEVENGADO ACUMULADO', 'DEVENGADO'],
+  fuente_financiamiento: ['FUENTE DE FINANCIAMIENTO', 'FUENTE FINANCIAMIENTO', 'RUBRO'],
   monto_inversion: ['MONTO DE INVERSION REFERENCIAL', 'MONTO DE INVERSION', 'MONTO INVERSION', 'COSTO ACTUALIZADO', 'MONTO ACTUALIZADO', 'MONTO VIABLE', 'COSTO DE INVERSION', 'MONTO', 'COSTO'],
   estado_oxi:      ['FASE OXI', 'ESTADO OXI'],
   estado:          ['ESTADO DE LA INVERSION', 'ESTADO', 'SITUACION', 'FASE'],
@@ -60,7 +65,9 @@ const SINONIMOS = {
   provincia:       ['PROVINCIA'],
   distrito:        ['DISTRITO'],
   funcion:         ['FUNCION', 'SECTOR'],
-  url_fuente:      ['LINK WEB', 'URL', 'ENLACE', 'LINK']
+  url_fuente:      ['LINK WEB', 'URL', 'ENLACE', 'LINK'],
+  // Al final: «AÑO» (→ ANO) es muy genérico y no debe ganarle a otra columna
+  periodo:         ['PERIODO DEL PMI', 'PERIODO PMI', 'PERIODO', 'ANO DEL PMI', 'ANO PMI', 'ANO', 'ANIO']
 };
 
 // Palabras que delatan la fila de encabezado (ver detectarFilaEncabezado)
