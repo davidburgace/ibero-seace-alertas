@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as XLSX from 'xlsx';
 import { leerArchivo, detectarMapeo } from '../src/ioarr/ingesta.js';
-import { filaACarga, filaAPmi, deduplicarPorCui, guardarCarga, borrarCarga, calcularCruce, claseFaseOxi, IDEA_SIN_CUI } from '../src/ioarr/cruce.js';
+import { filaACarga, filaAPmi, filtrarFilasPmi, esEducacion, textoFiltros, deduplicarPorCui, guardarCarga, borrarCarga, calcularCruce, claseFaseOxi, IDEA_SIN_CUI } from '../src/ioarr/cruce.js';
 import { excelProinversion } from './helpers/proinversion.js';
 
 // ─── Réplica en memoria de las vistas de la migración 005 ───────────────────
@@ -25,7 +25,7 @@ function vistas(cargas) {
   }
   const pmiEntidades = new Map();
   for (const c of orden.filter(c => c.fuente === 'pmi')) for (const f of c.filas)
-    if (f.entidad && !pmiEntidades.has(f.entidad.toUpperCase())) pmiEntidades.set(f.entidad.toUpperCase(), { entidad: f.entidad, carga_id: c.id, fecha_carga: c.fecha_carga, periodo: f.periodo });
+    if (f.entidad && !pmiEntidades.has(f.entidad.toUpperCase())) pmiEntidades.set(f.entidad.toUpperCase(), { entidad: f.entidad, carga_id: c.id, fecha_carga: c.fecha_carga, periodo: f.periodo, filtros: c.filtros || {} });
   const pmi = orden.filter(c => c.fuente === 'pmi').flatMap(c => c.filas
     .filter(f => pmiEntidades.get(f.entidad?.toUpperCase())?.carga_id === c.id)
     .map(f => ({ ...f, carga_id: c.id, fecha_carga: c.fecha_carga })));
@@ -242,4 +242,86 @@ test('Al borrar la última carga de Proinversión, cuenta la anterior y ya no ha
   const { filas, cargas } = calcularCruce(vistas([c1]));
   assert.equal(filas.filter(f => f.situacion === 'desaparecida').length, 0);
   assert.equal(cargas.ultimas.proinversion.id, 'p1');
+});
+
+test('PMI: filtros de Educación e IOARR con conteo de descartes', () => {
+  const ws = XLSX.utils.aoa_to_sheet([
+    ['CARTERA DEL PMI'], [],
+    ['CUI', 'ENTIDAD', 'AÑO', 'FUNCIÓN', 'TIPO DE INVERSIÓN'],
+    ['601', 'Muni A', '2027', 'EDUCACIÓN', 'IOARR'],
+    ['602', 'Muni A', '2027', '22 EDUCACION', 'PROYECTO DE INVERSION'],
+    ['603', 'Muni A', '2027', 'SALUD', 'IOARR'],
+    ['', 'Muni A', '2027', 'EDUCACIÓN', 'IOARR'],
+    ['604', 'Muni A', '2027', 'Educación', 'Optimización']
+  ]);
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'PMI');
+  const { headers, rows } = leerArchivo(XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' }));
+  const mapeo = detectarMapeo(headers);
+  assert.equal(mapeo.funcion, 'FUNCIÓN');
+  assert.equal(mapeo.tipo_inversion, 'TIPO DE INVERSIÓN');
+
+  const sinFiltros = filtrarFilasPmi(rows, mapeo);
+  assert.deepEqual(sinFiltros.resumen, { leidas: 5, sin_cui: 1, no_educacion: 0, no_ioarr: 0, importadas: 4 });
+
+  const edu = filtrarFilasPmi(rows, mapeo, { soloEducacion: true });
+  assert.deepEqual(edu.filas.map(f => f.cui), ['601', '602', '604']);
+  assert.deepEqual(edu.resumen, { leidas: 5, sin_cui: 1, no_educacion: 1, no_ioarr: 0, importadas: 3 });
+
+  // Una fila que falla los dos filtros se cuenta solo en el primero (Función)
+  const ambos = filtrarFilasPmi(rows, mapeo, { soloEducacion: true, soloIoarr: true });
+  assert.deepEqual(ambos.filas.map(f => f.cui), ['601', '604']);
+  assert.deepEqual(ambos.resumen, { leidas: 5, sin_cui: 1, no_educacion: 1, no_ioarr: 1, importadas: 2 });
+
+  // Lo que se guarda en ioarr_pmi no cambia de forma
+  assert.deepEqual(ambos.filas[0], { cui: '601', entidad: 'Muni A', periodo: '2027' });
+
+  assert.throws(() => filtrarFilasPmi(rows, { ...mapeo, funcion: null }, { soloEducacion: true }), /Función/);
+  assert.throws(() => filtrarFilasPmi(rows, { ...mapeo, tipo_inversion: null }, { soloIoarr: true }), /Tipo de inversión/);
+});
+
+test('esEducacion: igualdad exacta, con o sin código delante', () => {
+  for (const v of ['EDUCACIÓN', 'educacion', '22 EDUCACIÓN', '22-EDUCACION', '22: Educación']) assert.ok(esEducacion(v), v);
+  for (const v of ['SALUD', 'CULTURA Y DEPORTE', 'EDUCACION Y CULTURA', '', null]) assert.ok(!esEducacion(v), String(v));
+});
+
+test('Cruce: un PMI cargado solo con Educación no deja «fuera del PMI» a lo que no es Educación', () => {
+  const fila = (cui, funcion) => [cui, 'ADQUISICIÓN DE MOBILIARIO EN LA IE ' + cui, 'ACTIVO', 'GL', 'MUNICIPALIDAD DE FILTRO',
+    'PIURA', 'PIURA', 'PIURA', funcion, '100,000.00', 0, 0, null];
+  const banco = leerCarga(excelBanco([fila(701, 'EDUCACIÓN'), fila(702, 'SALUD'), fila(703, 'SALUD'), fila(704, null)]));
+  const datos = vistas([
+    { id: 'b1', fuente: 'invierte_pe', fecha_carga: '2026-10-15T10:00:00Z', filas: banco },
+    { id: 'm1', fuente: 'pmi', fecha_carga: '2026-10-16T10:00:00Z', filtros: { solo_educacion: true, solo_ioarr: false },
+      filas: [{ cui: '700', entidad: 'MUNICIPALIDAD DE FILTRO', periodo: '2027-2029' }] }
+  ]);
+  datos.pmiManual = [{ cui: '703', en_pmi: 'si', revisado_en: '2026-10-10T00:00:00Z', nota: 'lo vi en el PDF' }];
+  const s = Object.fromEntries(calcularCruce(datos).filas.map(f => [f.cui, f]));
+
+  // Educación y no está en el PMI filtrado: sí está fuera
+  assert.equal(s['701'].en_pmi, 'no');
+  assert.equal(s['701'].situacion, 'viable_fuera_pmi');
+  assert.match(s['701'].en_pmi_detalle, /solo Educación/);
+  // Salud: la carga no podía contenerlo → sin verificar, con el motivo
+  assert.equal(s['702'].en_pmi, 'sin_verificar');
+  assert.equal(s['702'].situacion, 'viable_pmi_sin_verificar');
+  assert.match(s['702'].en_pmi_detalle, /solo Educación y este proyecto es de la función «SALUD»/);
+  // Salud con marca manual: vale la marca, sin aviso de discrepancia con el archivo
+  assert.equal(s['703'].en_pmi, 'si');
+  assert.equal(s['703'].en_pmi_origen, 'manual');
+  assert.ok(!s['703'].avisos?.some(a => /difiere del archivo/.test(a)));
+  // Sin función conocida: tampoco se concluye
+  assert.equal(s['704'].en_pmi, 'sin_verificar');
+  assert.match(s['704'].en_pmi_detalle, /no se sabe la función/);
+
+  // La misma carga sin filtros sí deja fuera a todos
+  datos.pmiEntidades = datos.pmiEntidades.map(e => ({ ...e, filtros: {} }));
+  datos.pmiManual = [];
+  const t = Object.fromEntries(calcularCruce(datos).filas.map(f => [f.cui, f]));
+  for (const cui of ['701', '702', '703', '704']) assert.equal(t[cui].en_pmi, 'no', cui);
+});
+
+test('textoFiltros', () => {
+  assert.equal(textoFiltros({ solo_educacion: true, solo_ioarr: true }), 'solo Educación e IOARR');
+  assert.equal(textoFiltros({ solo_educacion: false, solo_ioarr: true }), 'solo IOARR');
+  assert.equal(textoFiltros({}), '');
+  assert.equal(textoFiltros(null), '');
 });

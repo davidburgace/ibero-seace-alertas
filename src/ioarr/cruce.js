@@ -8,7 +8,7 @@
 // ioarr_proyectos: si el estado del radar no cuadra con las fuentes, lo señala.
 // ============================================================================
 
-import { normaliza, parseMonto, limpiaCui, esIdea, esMobiliario, mapEntidadTipo } from './ingesta.js';
+import { normaliza, parseMonto, limpiaCui, esIdea, esMobiliario, esIoarr, mapEntidadTipo } from './ingesta.js';
 
 export const FUENTES_CARGA = ['invierte_pe', 'proinversion', 'pmi'];
 export const ETIQUETA_FUENTE_CARGA = { invierte_pe: 'Banco de Inversiones', proinversion: 'Proinversión', pmi: 'Cartera de PMI' };
@@ -82,6 +82,28 @@ export function filaAPmi(row, mapeo) {
   return { cui, entidad: valor(row, mapeo, 'entidad'), periodo: valor(row, mapeo, 'periodo') };
 }
 
+// Función = EDUCACIÓN (acepta el código delante, p. ej. «22 EDUCACIÓN» o «22-EDUCACION»)
+export const esEducacion = (funcion) => /^(\d+\s*[-:.]?\s*)?EDUCACION$/.test(normaliza(funcion));
+
+// Filas del PMI → filas a guardar, aplicando en orden: CUI, Función, Tipo de inversión.
+// Cada fila descartada se cuenta solo en el primer filtro que la deja fuera.
+// Lanza un error si un filtro está activo pero su columna no está mapeada.
+export function filtrarFilasPmi(rows, mapeo, { soloEducacion = false, soloIoarr = false } = {}) {
+  if (soloEducacion && !mapeo.funcion) throw new Error('Para importar solo Educación, mapea la columna «Función» (o desmarca la casilla)');
+  if (soloIoarr && !mapeo.tipo_inversion) throw new Error('Para importar solo IOARR, mapea la columna «Tipo de inversión» (o desmarca la casilla)');
+  const resumen = { leidas: rows.length, sin_cui: 0, no_educacion: 0, no_ioarr: 0, importadas: 0 };
+  const filas = [];
+  for (const row of rows) {
+    const fila = filaAPmi(row, mapeo);
+    if (!fila) { resumen.sin_cui++; continue; }
+    if (soloEducacion && !esEducacion(valor(row, mapeo, 'funcion'))) { resumen.no_educacion++; continue; }
+    if (soloIoarr && !esIoarr(valor(row, mapeo, 'tipo_inversion'))) { resumen.no_ioarr++; continue; }
+    filas.push(fila);
+  }
+  resumen.importadas = filas.length;
+  return { filas, resumen };
+}
+
 // Un CUI por carga: si se repite, gana la última fila y se cuentan las repeticiones
 export function deduplicarPorCui(filas) {
   const porCui = new Map();
@@ -94,11 +116,13 @@ export function deduplicarPorCui(filas) {
 }
 
 // Guarda una carga y sus filas. Si falla a medias, se borra la carga (cascade).
-export async function guardarCarga(supabase, { fuente, filas, nombre_archivo = null, hoja = null, usuario_id = null }) {
+// `filtros` ({ solo_educacion, solo_ioarr }) exige la migración 006; si no se pasa, no se envía.
+export async function guardarCarga(supabase, { fuente, filas, nombre_archivo = null, hoja = null, usuario_id = null, filtros = null }) {
   if (!FUENTES_CARGA.includes(fuente)) throw new Error('Fuente de carga inválida');
   const { filas: unicas, repetidas } = deduplicarPorCui(filas);
   const { data: carga, error } = await supabase.from('ioarr_cargas').insert({
-    fuente, nombre_archivo, hoja, filas: unicas.length, filas_repetidas: repetidas, cargado_por: usuario_id
+    fuente, nombre_archivo, hoja, filas: unicas.length, filas_repetidas: repetidas, cargado_por: usuario_id,
+    ...(filtros ? { filtros } : {})
   }).select().single();
   if (error) throw error;
 
@@ -139,7 +163,7 @@ export async function obtenerDatosCruce(supabase) {
   const [fuentes, proyectos, pmiEntidades, pmiManual, cargas] = await Promise.all([
     todo(() => supabase.from('ioarr_cruce_fuentes').select('*').order('fuente').order('cui')),
     todo(() => supabase.from('ioarr_proyectos')
-      .select('id, cui, nombre, entidad, entidad_tipo, region, provincia, distrito, funcion, monto_inversion, estado, es_mobiliario, es_idea')
+      .select('id, cui, nombre, entidad, entidad_tipo, region, provincia, distrito, funcion, tipo_inversion, monto_inversion, estado, es_mobiliario, es_idea')
       .order('cui')),
     todo(() => supabase.from('ioarr_cruce_pmi_entidades').select('*').order('entidad_clave')),
     todo(() => supabase.from('ioarr_pmi_manual').select('*').order('cui')),
@@ -184,6 +208,26 @@ function ejecucionPublica(b) {
   return `En ejecución con fuente pública asignada en el Banco (${detalle})`;
 }
 
+// Texto corto de los filtros de una carga: «solo Educación e IOARR» ('' si no tiene)
+export function textoFiltros(filtros) {
+  const f = [filtros?.solo_educacion && 'Educación', filtros?.solo_ioarr && 'IOARR'].filter(Boolean);
+  return f.length ? `solo ${f.join(' e ')}` : '';
+}
+
+// ¿Podía este proyecto estar en una carga del PMI con esos filtros?
+// Devuelve null si sí, o el motivo por el que no se puede concluir que falta.
+function fueraDeFiltros(filtros, { funcion, tipo }) {
+  if (filtros?.solo_educacion) {
+    if (!funcion) return 'no se sabe la función de este proyecto';
+    if (!esEducacion(funcion)) return `este proyecto es de la función «${funcion}»`;
+  }
+  if (filtros?.solo_ioarr) {
+    if (!tipo) return 'no se sabe el tipo de inversión de este proyecto';
+    if (!esIoarr(tipo)) return `este proyecto es de tipo «${tipo}»`;
+  }
+  return null;
+}
+
 function cambiosDeEntidad(fila, nombreFuente) {
   if (!fila?.entidad || !fila.entidades_previas?.length) return [];
   const actual = normaliza(fila.entidad);
@@ -220,18 +264,26 @@ export function calcularCruce({ fuentes = [], proyectos = [], pmi = [], pmiEntid
     const filaPmi = pmiPorCui.get(cui);
     const entidadPmi = filaPmi ? null : entidades.map(e => pmiPorEntidad.get(normaliza(e))).find(Boolean);
     const m = manual.get(cui);
+    // Si el PMI de la entidad se cargó filtrado y el proyecto no entra en el filtro, la ausencia no prueba nada
+    const fuera = entidadPmi && fueraDeFiltros(entidadPmi.filtros,
+      { funcion: b?.funcion || p?.funcion || r?.funcion, tipo: r?.tipo_inversion });
+    const avisoFiltro = fuera && `El PMI de ${entidadPmi.entidad} se cargó ${textoFiltros(entidadPmi.filtros)} y ${fuera}`;
     let enPmi = 'sin_verificar', pmiOrigen = null, pmiDetalle = null;
     if (filaPmi) {
       enPmi = 'si'; pmiOrigen = 'archivo';
       pmiDetalle = `En el PMI ${filaPmi.periodo || ''} de ${filaPmi.entidad || 'la entidad'} (carga del ${fechaCorta(filaPmi.fecha_carga)})`.replace(/\s+/g, ' ');
       if (filaPmi.entidad && entidades.length && !entidades.some(e => normaliza(e) === normaliza(filaPmi.entidad)))
         avisos.push(`En el PMI figura con otra entidad: «${filaPmi.entidad}»`);
-    } else if (entidadPmi) {
+    } else if (entidadPmi && !fuera) {
       enPmi = 'no'; pmiOrigen = 'archivo';
-      pmiDetalle = `${entidadPmi.entidad} tiene PMI ${entidadPmi.periodo || ''} cargado (${fechaCorta(entidadPmi.fecha_carga)}) y este CUI no está`.replace(/\s+/g, ' ');
+      const filtro = textoFiltros(entidadPmi.filtros);
+      pmiDetalle = `${entidadPmi.entidad} tiene PMI ${entidadPmi.periodo || ''} cargado (${fechaCorta(entidadPmi.fecha_carga)}${filtro ? ', ' + filtro : ''}) y este CUI no está`.replace(/\s+/g, ' ');
     } else if (m) {
       enPmi = m.en_pmi; pmiOrigen = 'manual';
       pmiDetalle = `Marcado a mano el ${fechaCorta(m.revisado_en)}${m.nota ? ': ' + m.nota : ''}`;
+      if (avisoFiltro) pmiDetalle += `. ${avisoFiltro}`;
+    } else if (avisoFiltro) {
+      pmiDetalle = `${avisoFiltro}: no se puede saber si está en su PMI`;
     }
     if (pmiOrigen === 'archivo' && m && m.en_pmi !== 'sin_verificar' && m.en_pmi !== enPmi)
       avisos.push(`Tu marca manual de PMI («${m.en_pmi}», ${fechaCorta(m.revisado_en)}) difiere del archivo («${enPmi}»)`);

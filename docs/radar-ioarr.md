@@ -12,6 +12,7 @@ Seguimiento de IOARR de mobiliario escolar en Obras por Impuestos (OxI), visto d
 | `supabase/migrations/003_ioarr_importacion_proinversion.sql` | Campos del Excel de Proinversión y mapeos recordados por fuente |
 | `supabase/migrations/004_ioarr_documentos.sql` | Bucket privado `ioarr-docs`, tablas `ioarr_documentos` e `ioarr_precios_referencia` |
 | `supabase/migrations/005_ioarr_cruce_fuentes.sql` | Cargas por fuente (`ioarr_cargas`, `ioarr_carga_filas`), `ioarr_pmi`, `ioarr_pmi_manual` y las vistas del cruce |
+| `supabase/migrations/006_ioarr_filtros_carga.sql` | Columna `filtros` en `ioarr_cargas` (PMI importado solo con Educación / IOARR) para que el cruce no marque «fuera del PMI» a lo que la carga no podía contener |
 | `src/ioarr/cruce.js` | Cruce de fuentes por CUI: guarda cada carga y calcula la situación de cada proyecto |
 | `src/ioarr/fichas.js` | Lee los PDF del Banco de Inversiones: ficha 07-C y tabla de bienes de la estructura de costos |
 | `scripts/experimentos/` | Pruebas aisladas, fuera del servidor: sondeo del portal del MEF y diagnóstico de lectura de un PDF |
@@ -104,13 +105,13 @@ La pestaña **Cruce de fuentes** compara por CUI las tres listas y calcula la si
 
 **Cargas.** Cada archivo que se importa en **Importar** queda como una carga con su fecha (`ioarr_cargas`):
 - **Banco de Inversiones** (exporte de la Consulta Avanzada) y **Proinversión**: además de actualizar los proyectos como antes, se guarda el archivo completo (sin el filtro «solo IOARR») en `ioarr_carga_filas`, una fila por CUI.
-- **Cartera de PMI** (fuente nueva): solo se guarda en `ioarr_pmi` (CUI, entidad, periodo, fecha de carga). No crea proyectos. Basta con mapear el CUI; la entidad y el año o periodo son opcionales pero recomendados.
+- **Cartera de PMI** (fuente nueva): solo se guarda en `ioarr_pmi` (CUI, entidad, periodo, fecha de carga). No crea proyectos. Basta con mapear el CUI; la entidad y el año o periodo son opcionales pero recomendados. Al importar se puede filtrar «solo Educación» (columna Función, activado por defecto) y «solo IOARR» (columna Tipo de inversión); la carga guarda qué filtros se usaron y el resultado muestra filas leídas, importadas y descartadas por cada filtro.
 - La fila de encabezado se detecta igual que en las otras importaciones. Si un CUI se repite en el archivo, gana la última fila y la carga cuenta las repeticiones.
 
 **Qué se compara** (vistas `ioarr_cruce_*`; nada calculado se guarda):
 - `en_banco`: el CUI aparece en alguna carga del Banco. Se usa su fila más reciente, porque cada exporte de la Consulta Avanzada suele estar filtrado (por región, por ejemplo).
 - `en_proinversion` y `fase_oxi`: el CUI está en la **última** carga de Proinversión (esa lista se toma como completa).
-- `en_pmi`: «si» si el CUI está en el PMI vigente de su entidad (la carga de PMI más reciente donde aparece esa entidad); «no» si la entidad tiene PMI cargado y el CUI no está; si no hay archivo que cubra a la entidad, vale la marca manual (✎ en la columna PMI, con fecha de revisión y nota); si no, «sin_verificar».
+- `en_pmi`: «si» si el CUI está en el PMI vigente de su entidad (la carga de PMI más reciente donde aparece esa entidad); «no» si la entidad tiene PMI cargado y el CUI no está (si esa carga se filtró, solo cuando el proyecto entra en el filtro: su función es Educación y/o su tipo es IOARR; si no entra o no se sabe, se pasa a la marca manual o «sin_verificar» con el motivo); si no hay archivo que cubra a la entidad, vale la marca manual (✎ en la columna PMI, con fecha de revisión y nota); si no, «sin_verificar».
 
 **Situación** (la primera regla que se cumple):
 
