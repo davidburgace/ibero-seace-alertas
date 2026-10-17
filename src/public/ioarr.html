@@ -184,6 +184,9 @@
   .tabla-regiones th{ font-size:10px; color:var(--muted); border-top:none; text-transform:uppercase; }
   .aviso-fila{ font-size:11.5px; color:#7a4a12; margin-top:3px; }
   .nota-fila{ font-size:11.5px; color:#3d5a80; margin-top:3px; }
+  .badge-fin{ display:inline-block; font-size:10.5px; padding:0 6px; border-radius:10px; margin-top:2px; border:1px solid var(--border2); background:var(--surface2); color:#4a505c; }
+  .badge-fin.oxi{ background:rgba(106,79,209,.12); color:#5340b0; border-color:rgba(106,79,209,.3); }
+  .badge-fin.pub{ background:rgba(255,159,67,.16); color:#8a4d0f; border-color:rgba(255,159,67,.45); }
   .badge-sector{ display:inline-block; font-size:11px; padding:1px 7px; border-radius:10px; background:rgba(106,79,209,.12); color:#5340b0; border:1px solid rgba(106,79,209,.3); }
   .dif-fila{ font-size:11.5px; color:#a83226; margin-top:3px; font-weight:600; }
   .pmi-btn{ font-family:var(--font-body); font-size:11px; border:1px solid var(--border2); background:#fff; border-radius:6px; padding:1px 6px; cursor:pointer; margin-left:4px; }
@@ -301,7 +304,7 @@
     <div class="msg" id="cr-msg"></div>
     <div class="tabla-wrap">
       <table class="tabla">
-        <thead><tr><th>Situación</th><th>CUI</th><th>Proyecto</th><th>Región</th><th class="num">Monto</th><th>Banco</th><th>Proinversión</th><th>PMI</th><th>Motivo</th><th>Cargas</th></tr></thead>
+        <thead><tr><th>Situación</th><th>CUI</th><th>Proyecto</th><th>Región</th><th class="num">Monto</th><th>Banco</th><th>Financiamiento</th><th>Proinversión</th><th>PMI</th><th>Motivo</th><th>Cargas</th></tr></thead>
         <tbody id="cr-tbody"></tbody>
       </table>
       <div class="vacio" id="cr-vacio" style="display:none">Sin proyectos en el cruce. Importa el Banco de Inversiones, Proinversión o el PMI en la pestaña “Importar”.</div>
@@ -643,6 +646,8 @@ function renderFicha() {
           ${p.estado_oxi_texto ? `<dt>Fase OxI (fuente)</dt><dd>${esc(p.estado_oxi_texto)}</dd>` : ''}
           ${p.nivel_estudio ? `<dt>Nivel de estudio</dt><dd>${esc(p.nivel_estudio)}</dd>` : ''}
           <dt>Monto</dt><dd>${soles(p.monto_inversion)}</dd>
+          <dt>Modalidad de ejecución</dt><dd>${esc(p.modalidad_ejecucion || '—')}${esModalidadOxi(p.modalidad_ejecucion) ? ' <span class="badge-fin oxi">OxI</span>' : ''}</dd>
+          <dt>Fuente de financiamiento</dt><dd>${esc(p.fuente_financiamiento || '—')}${esFuentePublica(p.fuente_financiamiento) && !esModalidadOxi(p.modalidad_ejecucion) ? ' <span class="badge-fin pub">Presupuesto público</span>' : ''}</dd>
           <dt>Fuente</dt><dd>${esc(p.fuente || '—')} ${p.url_fuente ? `· <a href="${esc(p.url_fuente)}" target="_blank" rel="noopener">ver</a>` : ''}</dd>
           <dt>Actualizado</dt><dd>${fecha(p.actualizado_en)}</dd>
         </dl>
@@ -770,6 +775,7 @@ function renderDocumentos() {
       ${f.unidad_formuladora ? `<dt>Unidad formuladora</dt><dd>${esc(f.unidad_formuladora)}</dd>` : ''}
       ${f.uei ? `<dt>UEI</dt><dd>${esc(f.uei)}</dd>` : ''}
       ${f.modalidad_ejecucion ? `<dt>Modalidad</dt><dd>${esc(f.modalidad_ejecucion)}</dd>` : ''}
+      ${f.fuente_financiamiento ? `<dt>Fuente de financiamiento</dt><dd>${esc(f.fuente_financiamiento)}</dd>` : ''}
       <dt>Fecha de la ficha</dt><dd>${esc(f.fecha || '—')} <span class="sub">· leída ${fecha(f.leido_en)}</span></dd>
     </dl>` : ''}
     ${documentos.length ? `<div class="tabla-wrap" style="margin-top:14px"><table class="tabla"><thead><tr><th>Tipo</th><th>Archivo</th><th>Lectura</th><th>Subido</th><th></th></tr></thead><tbody>
@@ -992,6 +998,10 @@ const SITUACIONES = [
 ];
 const FUENTE_CARGA = { invierte_pe: 'Banco de Inversiones', proinversion: 'Proinversión', pmi: 'Cartera de PMI' };
 const PMI_TXT = { si: 'Sí', no: 'No', sin_verificar: 'Sin verificar' };
+// Mismas reglas que src/ioarr/cruce.js (esModalidadOxi / esFuentePublica)
+const normTxt = (t) => String(t || '').toUpperCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '').trim();
+const esModalidadOxi = (m) => /IMPUESTOS|(^|[^A-Z])OXI([^A-Z]|$)|CIPRL/.test(normTxt(m));
+const esFuentePublica = (f) => !!normTxt(f) && !/IMPUESTOS|(^|[^A-Z])OXI([^A-Z]|$)|CIPRL|PRIVAD|(^|[^A-Z])APP([^A-Z]|$)|PUBLICO PRIVADA|SIN FUENTE|NO ASIGNAD|NO DEFINID|POR DEFINIR|NINGUN|^-+$/.test(normTxt(f));
 const MOTIVO_PMI = { opmi_no_cargada: 'Su OPMI no fue cargada', cui_no_encontrado: 'CUI no encontrado' };
 const MAX_FILAS_CRUCE = 500;
 const DIAS_VIEJA = 30;
@@ -1098,6 +1108,8 @@ function renderCruce() {
       <td>${esc(f.region || '')}<div class="sub">${esc(f.funcion || '')}</div></td>
       <td class="num">${soles(f.monto_inversion)}</td>
       <td>${f.en_banco ? '✓' : '—'}<div class="sub">${esc(f.estado_inversion || '')}</div></td>
+      <td style="min-width:150px">${f.modalidad_ejecucion || f.fuente_financiamiento ? `<div>${esc(f.modalidad_ejecucion || '—')}</div><div class="sub">${esc(f.fuente_financiamiento || 'fuente —')}</div>` : '<span class="sub">—</span>'}
+        ${f.es_oxi ? '<span class="badge-fin oxi">OxI</span>' : f.con_presupuesto_publico ? '<span class="badge-fin pub">Presupuesto público</span>' : ''}</td>
       <td>${f.en_proinversion ? esc(f.fase_oxi || '✓') : '—'}<div class="sub">${esc(f.nivel_estudio || '')}</div></td>
       <td style="white-space:nowrap">${f.pmi_del_sector ? `<span class="badge-sector" title="${esc(f.pmi_opmi)}">En PMI (del sector)</span>` : PMI_TXT[f.en_pmi]}${f.en_pmi_origen === 'manual' ? ' <span class="sub">(a mano)</span>' : ''}
         <button class="pmi-btn" data-pmi="${i}" title="Marcar a mano si está en el PMI">✎</button>
@@ -1216,7 +1228,9 @@ $('btn-cr-export').addEventListener('click', () => {
     'Tipo de entidad': f.tipo_entidad_label,
     CUI: f.cui, Código: f.codigo, Proyecto: f.nombre, Entidad: f.entidad, 'Nivel de gobierno': f.entidad_tipo, Región: f.region,
     Provincia: f.provincia, Distrito: f.distrito, Función: f.funcion, 'Monto (S/)': f.monto_inversion ?? '', Mobiliario: f.es_mobiliario ? 'Sí' : 'No',
-    'En Banco': f.en_banco ? 'Sí' : 'No', 'Estado de la inversión': f.estado_inversion || '', 'En Proinversión': f.en_proinversion ? 'Sí' : 'No',
+    'En Banco': f.en_banco ? 'Sí' : 'No', 'Estado de la inversión': f.estado_inversion || '',
+    'Modalidad de ejecución': f.modalidad_ejecucion || '', 'Fuente de financiamiento': f.fuente_financiamiento || '',
+    'OxI (modalidad)': f.es_oxi ? 'Sí' : 'No', 'Presupuesto público': f.con_presupuesto_publico ? 'Sí' : 'No', 'En Proinversión': f.en_proinversion ? 'Sí' : 'No',
     'Fase OxI': f.fase_oxi || '', 'Nivel de estudio': f.nivel_estudio || '', 'En PMI': f.pmi_del_sector ? 'Sí (del sector)' : PMI_TXT[f.en_pmi], 'Origen PMI': f.en_pmi_origen || '',
     'Detalle PMI': f.en_pmi_detalle || '', 'Motivo PMI sin verificar': f.en_pmi_motivo ? MOTIVO_PMI[f.en_pmi_motivo] : '',
     'OPMI': f.pmi_opmi || '', 'Periodo PMI': f.pmi_periodo || '', 'Estado en el radar': f.estado_radar ? (ESTADOS[f.estado_radar] || f.estado_radar) : '',

@@ -144,7 +144,7 @@ test('Proinversión: mapeo automático por sinónimos (sin tildes ni mayúsculas
     funcion: 'FUNCIÓN', tipologia: 'TIPOLOGÍA', tipo_inversion: 'TIPO DE INVERSIÓN',
     monto_inversion: 'MONTO DE INVERSIÓN REFERENCIAL', estado_oxi: 'FASE OXI', estado: null,
     nivel_estudio: 'ÚLTIMO NIVEL DE ESTUDIO', url_fuente: 'LINK WEB',
-    fuente_financiamiento: null, pim: null, devengado: null, periodo: null
+    fuente_financiamiento: null, modalidad_ejecucion: null, pim: null, devengado: null, periodo: null
   });
   // En minúsculas y con "_" también encaja
   assert.equal(detectarMapeo(['codigo_unico', 'nombre de la inversión', 'x', 'y']).cui, 'codigo_unico');

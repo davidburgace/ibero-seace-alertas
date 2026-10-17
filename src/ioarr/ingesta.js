@@ -30,9 +30,9 @@ import * as XLSX from 'xlsx';
 export const CAMPOS_MAPEABLES = [
   'cui', 'nombre', 'entidad', 'nivel_gobierno', 'region', 'provincia', 'distrito',
   'funcion', 'tipologia', 'tipo_inversion', 'monto_inversion', 'estado_oxi', 'estado',
-  'nivel_estudio', 'url_fuente',
+  'nivel_estudio', 'url_fuente', 'fuente_financiamiento', 'modalidad_ejecucion',
   // Solo para el cruce de fuentes (Banco de Inversiones y PMI)
-  'fuente_financiamiento', 'pim', 'devengado', 'periodo'
+  'pim', 'devengado', 'periodo'
 ];
 
 // Orden del ciclo OxI. Las importaciones solo AVANZAN el estado (nunca retroceden).
@@ -55,7 +55,8 @@ const SINONIMOS = {
   nivel_gobierno:  ['NIVEL DE GOBIERNO', 'NIVEL GOBIERNO', 'NIVEL'],
   pim:             ['PIM'],
   devengado:       ['DEVENGADO ACUMULADO', 'DEVENGADO'],
-  fuente_financiamiento: ['FUENTE DE FINANCIAMIENTO', 'FUENTE FINANCIAMIENTO', 'RUBRO'],
+  fuente_financiamiento: ['FUENTE DE FINANCIAMIENTO', 'FUENTES DE FINANCIAMIENTO', 'FUENTE FINANCIAMIENTO', 'RUBRO'],
+  modalidad_ejecucion: ['MODALIDAD DE EJECUCION', 'MODALIDAD EJECUCION', 'MODALIDAD'],
   monto_inversion: ['MONTO DE INVERSION REFERENCIAL', 'MONTO DE INVERSION', 'MONTO INVERSION', 'COSTO ACTUALIZADO', 'MONTO ACTUALIZADO', 'MONTO VIABLE', 'COSTO DE INVERSION', 'MONTO', 'COSTO'],
   estado_oxi:      ['FASE OXI', 'ESTADO OXI'],
   estado:          ['ESTADO DE LA INVERSION', 'ESTADO', 'SITUACION', 'FASE'],
@@ -370,6 +371,8 @@ export function filaAProyecto(row, mapeo, { fuente }) {
     estado: estado || 'viable',
     estado_oxi_texto: estadoOxiTexto,
     nivel_estudio: val('nivel_estudio'),
+    fuente_financiamiento: val('fuente_financiamiento'),
+    modalidad_ejecucion: val('modalidad_ejecucion'),
     url_fuente: url && /^(https?:\/\/|www\.)/i.test(url) ? url : null,
     es_mobiliario: esMobiliario(nombre),
     es_idea: esIdea(cui),
@@ -380,7 +383,7 @@ export function filaAProyecto(row, mapeo, { fuente }) {
 // ─── Upsert en Supabase ─────────────────────────────────────────────────────
 const CAMPOS_COMPARABLES = ['nombre', 'entidad', 'entidad_tipo', 'region', 'provincia', 'distrito',
   'funcion', 'tipologia', 'tipo_inversion', 'monto_inversion', 'estado', 'estado_oxi_texto', 'nivel_estudio',
-  'url_fuente', 'es_mobiliario', 'es_idea', 'fuente'];
+  'fuente_financiamiento', 'modalidad_ejecucion', 'url_fuente', 'es_mobiliario', 'es_idea', 'fuente'];
 
 const textoFuente = (p) => p.estado_oxi_texto ? `, fase OxI «${p.estado_oxi_texto}»` : '';
 

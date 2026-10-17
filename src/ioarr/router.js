@@ -36,7 +36,7 @@ const FUENTES = ['invierte_pe', 'proinversion', 'pmi', 'otro'];
 // función y tipo de inversión para sus filtros)
 const CAMPOS_FUENTE = {
   pmi: ['cui', 'entidad', 'periodo', 'funcion', 'tipo_inversion'],
-  proinversion: CAMPOS_MAPEABLES.filter(c => !['fuente_financiamiento', 'pim', 'devengado', 'periodo'].includes(c)),
+  proinversion: CAMPOS_MAPEABLES.filter(c => !['fuente_financiamiento', 'modalidad_ejecucion', 'pim', 'devengado', 'periodo'].includes(c)),
   invierte_pe: CAMPOS_MAPEABLES.filter(c => c !== 'periodo'),
   otro: CAMPOS_MAPEABLES.filter(c => c !== 'periodo')
 };
@@ -255,6 +255,7 @@ async function aplicarFicha(proyecto, campos, documento_id) {
   if (vacio('monto_inversion') && campos.costo_total != null) patch.monto_inversion = campos.costo_total;
   if (vacio('funcion') && campos.funcion) patch.funcion = campos.funcion;
   if (vacio('entidad') && campos.uei) patch.entidad = campos.uei;
+  for (const k of ['fuente_financiamiento', 'modalidad_ejecucion']) if (vacio(k) && campos[k]) patch[k] = campos[k];
   for (const [k, c] of [['region', 'departamento'], ['provincia', 'provincia'], ['distrito', 'distrito']])
     if (vacio(k) && campos[c]) patch[k] = normaliza(campos[c]);
   const { data, error } = await supabase.from('ioarr_proyectos').update(patch).eq('id', proyecto.id).select().single();
@@ -302,6 +303,10 @@ router.post('/api/ioarr/proyectos/:id/documentos', recibirPdfs, async (req, res,
       const costoFicha = r.tipo === 'ficha_07c' && !cuiDistinto ? r.campos.costo_total : null;
       if (costoFicha != null && proyecto.monto_inversion != null && Math.abs(Number(proyecto.monto_inversion) - costoFicha) > 0.01)
         r.avisos.push(`El monto del proyecto (${fmtSoles(proyecto.monto_inversion)}) difiere del costo total de la ficha (${fmtSoles(costoFicha)}); se mantiene el del proyecto.`);
+      if (r.tipo === 'ficha_07c' && !cuiDistinto)
+        for (const [k, nombre] of [['fuente_financiamiento', 'La fuente de financiamiento'], ['modalidad_ejecucion', 'La modalidad de ejecución']])
+          if (r.campos[k] && proyecto[k] && normaliza(r.campos[k]) !== normaliza(proyecto[k]))
+            r.avisos.push(`${nombre} del proyecto («${proyecto[k]}») difiere de la ficha («${r.campos[k]}»); se mantiene la del proyecto.`);
       const { data: doc, error: eDoc } = await supabase.from('ioarr_documentos').insert({
         proyecto_id: proyecto.id, tipo: r.tipo, nombre_archivo: r.nombre, ruta, tamano: archivo.size,
         paginas: r.paginas, campos: r.campos, avisos: r.avisos, subido_por: req.usuario.id

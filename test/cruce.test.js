@@ -3,6 +3,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as XLSX from 'xlsx';
 import { leerArchivo, detectarMapeo, limpiaCui, datosDelBanner } from '../src/ioarr/ingesta.js';
+import { filaAProyecto } from '../src/ioarr/ingesta.js';
+import { financiamiento, esFuentePublica, esModalidadOxi } from '../src/ioarr/cruce.js';
 import { filaACarga, filaAPmi, filtrarFilasPmi, esEducacion, textoFiltros, deduplicarPorCui, guardarCarga, borrarCarga, calcularCruce, claseFaseOxi, claveOpmi, tipoEntidad, IDEA_SIN_CUI } from '../src/ioarr/cruce.js';
 import { excelProinversion } from './helpers/proinversion.js';
 
@@ -119,11 +121,12 @@ test('En ejecución o descartada: desactivada, ejecución con fuente pública o 
   assert.equal(s['111'].situacion, 'ejecucion_descartada');
   assert.match(s['111'].motivo, /DESACTIVADO/);
   assert.equal(s['222'].situacion, 'ejecucion_descartada');
-  assert.match(s['222'].motivo, /fuente pública.*devengado S\/ 50,000/);
+  assert.match(s['222'].motivo, /presupuesto público.*devengado S\/ 50,000, fuente «RECURSOS DETERMINADOS» y PIM S\/ 80,000/);
   assert.equal(s['333'].situacion, 'ejecucion_descartada');
   assert.equal(s['333'].motivo, 'La marcaste como descartada en el radar');
-  // Financiada por OxI: no cuenta como fuente pública
-  assert.equal(s['444'].situacion, 'viable_pmi_sin_verificar');
+  // Fuente «Obras por Impuestos»: no es presupuesto público, va por OxI
+  assert.equal(s['444'].situacion, 'priorizada');
+  assert.equal(s['444'].es_oxi, true);
   // Las descartadas van al final
   assert.equal(filas.at(-1).situacion, 'ejecucion_descartada');
 });
@@ -504,4 +507,68 @@ test('tipoEntidad: separa colegios/UGEL de institutos, universidades y el resto'
     ['SEGURO SOCIAL', 'OFICINAS', 'otra']
   ];
   for (const [entidad, nombre, tipo] of casos) assert.equal(tipoEntidad(entidad, nombre), tipo, `${entidad} | ${nombre}`);
+});
+
+// ─── Fuente de financiamiento y modalidad de ejecución ──────────────────────
+// Consulta Avanzada con las dos columnas nuevas
+function excelBancoFin(filas) {
+  const enc = ['CÓDIGO ÚNICO DE INVERSIÓN', 'NOMBRE DE LA INVERSIÓN', 'ESTADO DE LA INVERSIÓN', 'ENTIDAD', 'FUNCIÓN',
+    'COSTO ACTUALIZADO', 'DEVENGADO ACUMULADO', 'PIM 2026', 'FUENTE DE FINANCIAMIENTO', 'MODALIDAD DE EJECUCIÓN'];
+  const ws = XLSX.utils.aoa_to_sheet([['CONSULTA AVANZADA DE INVERSIONES'], [], enc, ...filas]);
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Consulta');
+  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+}
+
+test('Banco con fuente y modalidad: se mapean solas y llegan al proyecto y a la carga', () => {
+  const { headers, rows } = leerArchivo(excelBancoFin([[801, 'MOBILIARIO EN LA IE 801', 'ACTIVO', 'GOBIERNO REGIONAL PIURA', 'EDUCACIÓN', 100, 0, 0, 'RECURSOS ORDINARIOS', 'ADMINISTRACIÓN INDIRECTA - POR CONTRATA']]));
+  const mapeo = detectarMapeo(headers);
+  assert.equal(mapeo.fuente_financiamiento, 'FUENTE DE FINANCIAMIENTO');
+  assert.equal(mapeo.modalidad_ejecucion, 'MODALIDAD DE EJECUCIÓN');
+  const p = filaAProyecto(rows[0], mapeo, { fuente: 'invierte_pe' });
+  assert.equal(p.fuente_financiamiento, 'RECURSOS ORDINARIOS');
+  assert.equal(p.modalidad_ejecucion, 'ADMINISTRACIÓN INDIRECTA - POR CONTRATA');
+  assert.equal(filaACarga(rows[0], mapeo).modalidad_ejecucion, 'ADMINISTRACIÓN INDIRECTA - POR CONTRATA');
+});
+
+test('Reglas: modalidad con IMPUESTOS = OxI; fuente pública o PIM > 0 = presupuesto público', () => {
+  assert.ok(esModalidadOxi('OBRAS POR IMPUESTOS'));
+  assert.ok(esModalidadOxi('Modalidad: Obras por Impuestos (OxI)'));
+  assert.ok(!esModalidadOxi('ADMINISTRACION DIRECTA'));
+  for (const f of ['RECURSOS ORDINARIOS', 'RECURSOS DIRECTAMENTE RECAUDADOS', 'RECURSOS DETERMINADOS', 'DONACIONES Y TRANSFERENCIAS', '1. RECURSOS ORDINARIOS'])
+    assert.ok(esFuentePublica(f), f);
+  for (const f of ['OBRAS POR IMPUESTOS', 'PRIVADO', 'NO ASIGNADO', '', null]) assert.ok(!esFuentePublica(f), String(f));
+  assert.equal(financiamiento({ fuente: null, modalidad: null, pim: 5000 }).presupuesto_publico, true);
+  assert.equal(financiamiento({ fuente: null, modalidad: null, pim: 0 }).presupuesto_publico, false);
+  // Una OxI con fuente «Recursos determinados» (el CIPRL se paga con canon) sigue siendo OxI
+  const oxi = financiamiento({ fuente: 'RECURSOS DETERMINADOS', modalidad: 'OBRAS POR IMPUESTOS', pim: 0 });
+  assert.equal(oxi.oxi, true);
+});
+
+test('Cruce: OxI por modalidad → priorizada; presupuesto público en ejecución o con PIM → ejecución', () => {
+  const banco = leerCarga(excelBancoFin([
+    [901, 'IE 901', 'ACTIVO', 'GR PIURA', 'EDUCACIÓN', 100, 0, 0, 'RECURSOS DETERMINADOS', 'OBRAS POR IMPUESTOS'],          // OxI
+    [902, 'IE 902', 'ACTIVO', 'GR PIURA', 'EDUCACIÓN', 100, 0, 250000, 'RECURSOS ORDINARIOS', 'ADMINISTRACION DIRECTA'],   // PIM > 0
+    [903, 'IE 903', 'ACTIVO', 'GR PIURA', 'EDUCACIÓN', 100, 0, 0, 'RECURSOS ORDINARIOS', 'ADMINISTRACION INDIRECTA'],      // solo fuente pública
+    [904, 'IE 904', 'ACTIVO', 'GR PIURA', 'EDUCACIÓN', 100, 0, 0, null, null],                                              // sin datos
+    [905, 'IE 905', 'ACTIVO', 'GR PIURA', 'EDUCACIÓN', 100, 40000, 90000, 'RECURSOS DETERMINADOS', 'OBRAS POR IMPUESTOS']  // OxI con devengado
+  ]));
+  const datos = vistas([{ id: 'b1', fuente: 'invierte_pe', fecha_carga: '2026-10-15T10:00:00Z', filas: banco }]);
+  // Sin carga del Banco: la modalidad de la ficha 07-C (guardada en el proyecto) también cuenta
+  datos.proyectos = [{ id: 'r1', cui: '906', nombre: 'IE 906', entidad: 'GR PIURA', estado: 'viable', modalidad_ejecucion: 'OBRAS POR IMPUESTOS', fuente_financiamiento: null }];
+  const s = Object.fromEntries(calcularCruce(datos).filas.map(f => [f.cui, f]));
+
+  assert.equal(s['901'].situacion, 'priorizada');
+  assert.match(s['901'].motivo, /Va por Obras por Impuestos: modalidad de ejecución «OBRAS POR IMPUESTOS»/);
+  assert.equal(s['901'].es_oxi, true);
+  assert.equal(s['901'].con_presupuesto_publico, true);   // fuente RD, pero manda OxI
+  assert.equal(s['902'].situacion, 'ejecucion_descartada');
+  assert.match(s['902'].motivo, /Con presupuesto público asignado en el Banco \(fuente «RECURSOS ORDINARIOS» y PIM S\/ 250,000\)/);
+  assert.equal(s['903'].situacion, 'viable_pmi_sin_verificar');
+  assert.equal(s['903'].con_presupuesto_publico, true);
+  assert.match(s['903'].avisos.join(' '), /Con presupuesto público \(fuente «RECURSOS ORDINARIOS»\): podría financiarse sin OxI/);
+  assert.equal(s['904'].con_presupuesto_publico, false);
+  assert.equal(s['904'].es_oxi, false);
+  assert.equal(s['905'].situacion, 'priorizada');
+  assert.equal(s['906'].situacion, 'priorizada');
+  assert.equal(s['906'].modalidad_ejecucion, 'OBRAS POR IMPUESTOS');
 });

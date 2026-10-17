@@ -68,6 +68,7 @@ export function filaACarga(row, mapeo) {
     monto_inversion: parseMonto(mapeo.monto_inversion ? row[mapeo.monto_inversion] : null),
     estado_inversion: valor(row, mapeo, 'estado'),
     fuente_financiamiento: valor(row, mapeo, 'fuente_financiamiento'),
+    modalidad_ejecucion: valor(row, mapeo, 'modalidad_ejecucion'),
     pim: parseMonto(mapeo.pim ? row[mapeo.pim] : null),
     devengado: parseMonto(mapeo.devengado ? row[mapeo.devengado] : null),
     fase_oxi: valor(row, mapeo, 'estado_oxi'),
@@ -237,7 +238,7 @@ export async function obtenerDatosCruce(supabase) {
   const [fuentes, proyectos, pmiEntidadesCarga, pmiManual, cargas] = await Promise.all([
     todo(() => supabase.from('ioarr_cruce_fuentes').select('*').order('fuente').order('cui')),
     todo(() => supabase.from('ioarr_proyectos')
-      .select('id, cui, nombre, entidad, entidad_tipo, region, provincia, distrito, funcion, tipo_inversion, monto_inversion, estado, es_mobiliario, es_idea')
+      .select('id, cui, nombre, entidad, entidad_tipo, region, provincia, distrito, funcion, tipo_inversion, monto_inversion, estado, es_mobiliario, es_idea, fuente_financiamiento, modalidad_ejecucion')
       .order('cui')),
     todo(() => supabase.from('ioarr_pmi_entidades_carga').select('*').order('carga_id').order('entidad')),
     todo(() => supabase.from('ioarr_pmi_manual').select('*').order('cui')),
@@ -269,18 +270,43 @@ export function claseFaseOxi(texto) {
   return 'otra';
 }
 
-// ¿En ejecución con fuente pública asignada? (devuelve el motivo o null)
-function ejecucionPublica(b) {
-  const estado = normaliza(b.estado_inversion);
-  const fuente = normaliza(b.fuente_financiamiento);
-  const pim = num(b.pim) || 0, devengado = num(b.devengado) || 0;
-  if (/OBRAS POR IMPUESTOS|\bOXI\b|CIPRL/.test(fuente)) return null; // financiada vía OxI: no es fuente pública directa
-  const enEjecucion = /EJECUCION/.test(estado) || devengado > 0;
-  const conFuente = pim > 0 || devengado > 0 || !!fuente;
-  if (!enEjecucion || !conFuente) return null;
-  const detalle = [devengado > 0 && `devengado ${soles(devengado)}`, pim > 0 && `PIM ${soles(pim)}`, fuente && `fuente «${b.fuente_financiamiento}»`]
-    .filter(Boolean).join(', ');
-  return `En ejecución con fuente pública asignada en el Banco (${detalle})`;
+// ─── Financiamiento ─────────────────────────────────────────────────────────
+// Modalidad de ejecución con «IMPUESTOS» → va por Obras por Impuestos (OxI).
+// Fuente de recursos públicos (RO, RDR, ROOC, donaciones, recursos determinados…)
+// o PIM > 0 → con presupuesto público. Si es OxI, manda OxI: los CIPRL se pagan
+// con canon, así que una OxI suele figurar con fuente «Recursos determinados».
+const RE_OXI = /IMPUESTOS|(^|[^A-Z])OXI([^A-Z]|$)|CIPRL/;
+const RE_NO_PUBLICA = /IMPUESTOS|(^|[^A-Z])OXI([^A-Z]|$)|CIPRL|PRIVAD|(^|[^A-Z])APP([^A-Z]|$)|PUBLICO PRIVADA|SIN FUENTE|NO ASIGNAD|NO DEFINID|POR DEFINIR|NINGUN|^-+$/;
+export const esModalidadOxi = (modalidad) => RE_OXI.test(normaliza(modalidad));
+export function esFuentePublica(fuente) {
+  const f = normaliza(fuente);
+  return !!f && !RE_NO_PUBLICA.test(f);
+}
+
+export function financiamiento({ fuente, modalidad, pim }) {
+  const pimN = num(pim) || 0;
+  const oxi = esModalidadOxi(modalidad) || RE_OXI.test(normaliza(fuente));
+  const fuentePublica = esFuentePublica(fuente);
+  const presupuestoPublico = fuentePublica || pimN > 0;
+  const por = [fuentePublica && `fuente «${fuente}»`, pimN > 0 && `PIM ${soles(pimN)}`].filter(Boolean).join(' y ');
+  return {
+    oxi,
+    oxi_motivo: oxi ? (esModalidadOxi(modalidad) ? `modalidad de ejecución «${modalidad}»` : `fuente «${fuente}»`) : null,
+    presupuesto_publico: presupuestoPublico,
+    presupuesto_motivo: presupuestoPublico ? por : null,
+    pim: pimN
+  };
+}
+
+// ¿Se ejecuta con presupuesto público? (devuelve el motivo o null). Cuenta si tiene
+// presupuesto público y está en ejecución, o si ya tiene PIM asignado. Nunca si va por OxI.
+function ejecucionPublica(b, fin) {
+  if (!b || fin.oxi || !fin.presupuesto_publico) return null;
+  const devengado = num(b.devengado) || 0;
+  const enEjecucion = /EJECUCION/.test(normaliza(b.estado_inversion)) || devengado > 0;
+  if (!enEjecucion && fin.pim <= 0) return null;
+  const detalle = [devengado > 0 && `devengado ${soles(devengado)}`, fin.presupuesto_motivo].filter(Boolean).join(', ');
+  return enEjecucion ? `En ejecución con presupuesto público en el Banco (${detalle})` : `Con presupuesto público asignado en el Banco (${detalle})`;
 }
 
 // Texto corto de los filtros de una carga: «solo Educación e IOARR» ('' si no tiene)
@@ -398,7 +424,11 @@ export function calcularCruce({ fuentes = [], proyectos = [], pmi = [], pmiEntid
     const viableSinOxi = (enBanco || !!r) && !enPro;
     const base = enBanco ? 'En el Banco, no en Proinversión' : 'En el radar (sin carga del Banco), no en Proinversión';
     const estadoBanco = normaliza(b?.estado_inversion);
-    const ejecucion = b ? ejecucionPublica(b) : null;
+    // Financiamiento: el Banco manda; si no, lo del radar (ficha 07-C o importación)
+    const fuenteFin = b?.fuente_financiamiento || r?.fuente_financiamiento || null;
+    const modalidad = b?.modalidad_ejecucion || r?.modalidad_ejecucion || null;
+    const fin = financiamiento({ fuente: fuenteFin, modalidad, pim: b?.pim });
+    const ejecucion = ejecucionPublica(b, fin);
     if (b && /DESACTIV/.test(estadoBanco)) {
       situacion = 'ejecucion_descartada'; motivo = `Estado de la inversión «${b.estado_inversion}» en el Banco`;
     } else if (b && /CERRAD|CANCELAD|ANULAD/.test(estadoBanco)) {
@@ -414,6 +444,10 @@ export function calcularCruce({ fuentes = [], proyectos = [], pmi = [], pmiEntid
       situacion = 'priorizada'; motivo = `Está en Proinversión como «${faseOxi}»`;
     } else if (clase === 'por_priorizar') {
       situacion = 'por_priorizar'; motivo = `Está en Proinversión como «${faseOxi}»`;
+      if (fin.oxi) avisos.push(`Tiene ${fin.oxi_motivo}, pero Proinversión la lista como «${faseOxi}»`);
+    } else if (fin.oxi) {
+      situacion = 'priorizada';
+      motivo = `Va por Obras por Impuestos: ${fin.oxi_motivo}${enPro ? ` (en Proinversión con fase «${faseOxi || 'sin dato'}»)` : ' (no figura como Priorizado en Proinversión)'}`;
     } else if (viableSinOxi && enPmi === 'si') {
       situacion = 'viable_pmi'; motivo = `${base}. ${pmiDetalle}`;
     } else if (viableSinOxi && enPmi === 'no') {
@@ -424,6 +458,9 @@ export function calcularCruce({ fuentes = [], proyectos = [], pmi = [], pmiEntid
       else if (viableSinOxi) motivo = `${base}; PMI sin verificar${pmiDetalle ? ` (${pmiDetalle})` : ''}`;
       else motivo = 'No aparece en ninguna carga del Banco ni de Proinversión';
     }
+
+    if (fin.presupuesto_publico && !fin.oxi && !ejecucion && situacion !== 'ejecucion_descartada')
+      avisos.push(`Con presupuesto público (${fin.presupuesto_motivo}): podría financiarse sin OxI`);
 
     // ── Casos borde
     for (const [f, de, en] of [[b, 'del Banco', 'el Banco'], [p, 'de Proinversión', 'Proinversión']]) {
@@ -460,6 +497,10 @@ export function calcularCruce({ fuentes = [], proyectos = [], pmi = [], pmiEntid
       es_mobiliario: esMobiliario(nombre) || !!r?.es_mobiliario,
       en_banco: enBanco,
       estado_inversion: b?.estado_inversion || null,
+      fuente_financiamiento: fuenteFin,
+      modalidad_ejecucion: modalidad,
+      es_oxi: fin.oxi,                                  // modalidad (o fuente) de Obras por Impuestos
+      con_presupuesto_publico: fin.presupuesto_publico, // fuente pública o PIM > 0
       en_proinversion: enPro,
       fase_oxi: faseOxi,
       nivel_estudio: (enPro ? p.nivel_estudio : null) || null,

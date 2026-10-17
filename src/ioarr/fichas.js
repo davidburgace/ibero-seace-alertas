@@ -79,7 +79,8 @@ const ETIQUETAS_TEXTO = {
   unidad_formuladora:  ['UNIDAD FORMULADORA'],
   uei:                 ['UNIDAD EJECUTORA DE INVERSIONES', 'UNIDAD EJECUTORA DE INVERSION', 'UEI'],
   funcion:             ['FUNCION'],
-  modalidad_ejecucion: ['MODALIDAD DE EJECUCION'],
+  modalidad_ejecucion: ['MODALIDAD DE EJECUCION PREVISTA', 'MODALIDAD DE EJECUCION'],
+  fuente_financiamiento: ['FUENTE DE FINANCIAMIENTO', 'FUENTES DE FINANCIAMIENTO'],
   departamento:        ['DEPARTAMENTO'],
   provincia:           ['PROVINCIA'],
   distrito:            ['DISTRITO']
@@ -129,6 +130,15 @@ function buscarMonto(lineasN, etiquetas) {
   return null;
 }
 
+// «A ( ) B (X) C ( )» → «B»; un texto sin marcas queda igual; con marcas pero ninguna marcada → null
+export function opcionMarcada(texto) {
+  if (!texto || !/[(\[]\s*[Xx✓✔]?\s*[)\]]/.test(texto)) return texto;
+  const re = /([^()[\]]+?)\s*[(\[]\s*([Xx✓✔]?)\s*[)\]]/g;
+  const marcadas = [];
+  for (let m; (m = re.exec(texto));) if (m[2]) marcadas.push(m[1].replace(/^[\s,;:\-–]+/, '').trim());
+  return marcadas.length ? marcadas.join(', ') : null;
+}
+
 export function leerFicha07C(lineas) {
   const lineasN = lineas.map(l => normaliza(l.texto));
   const textoN = lineasN.join('\n');
@@ -139,6 +149,8 @@ export function leerFicha07C(lineas) {
   campos.cui = limpiaCui(mCui ? mCui[mCui.length - 1] : (/\b(\d{7})\b/.exec(textoN)?.[1] ?? null));
 
   for (const [campo, etiquetas] of Object.entries(ETIQUETAS_TEXTO)) campos[campo] = buscarTexto(lineas, lineasN, etiquetas);
+  // Si el formato lista las opciones y marca una («… POR CONTRATA ( ) OBRAS POR IMPUESTOS (X)»), queda la marcada
+  for (const k of ['modalidad_ejecucion', 'fuente_financiamiento']) campos[k] = opcionMarcada(campos[k]);
 
   const costo = buscarMonto(lineasN, ETIQUETAS_COSTO_TOTAL);
   campos.costo_total = costo?.valor ?? null;
