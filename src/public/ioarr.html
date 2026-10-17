@@ -996,9 +996,10 @@ function renderFrescura() {
       <div class="fr-fecha">${fecha(c.fecha_carga)} · ${dias === 0 ? 'hoy' : `hace ${dias} día${dias === 1 ? '' : 's'}`}${dias > DIAS_VIEJA ? ' ⚠️' : ''}</div>
       <div class="sub">${esc(c.nombre_archivo || 'archivo sin nombre')} · ${c.filas} CUI${c.filas_repetidas ? ` · ${c.filas_repetidas} repetidos` : ''} · ${totales[k]} carga${totales[k] === 1 ? '' : 's'} en total</div></div>`;
   }).join('');
-  $('cr-historial').innerHTML = historial.length ? `<table class="tabla"><thead><tr><th>Fecha</th><th>Fuente</th><th>Archivo</th><th class="num">CUI</th><th class="num">Repetidos</th></tr></thead><tbody>
+  $('cr-historial').innerHTML = historial.length ? `<table class="tabla"><thead><tr><th>Fecha</th><th>Fuente</th><th>Archivo</th><th class="num">CUI</th><th class="num">Repetidos</th><th></th></tr></thead><tbody>
     ${historial.map(c => `<tr style="cursor:default"><td class="sub">${fecha(c.fecha_carga)}</td><td>${FUENTE_CARGA[c.fuente] || c.fuente}</td>
-      <td>${esc(c.nombre_archivo || '—')}${c.hoja ? ` <span class="sub">(hoja ${esc(c.hoja)})</span>` : ''}</td><td class="num">${c.filas}</td><td class="num">${c.filas_repetidas || ''}</td></tr>`).join('')}
+      <td>${esc(c.nombre_archivo || '—')}${c.hoja ? ` <span class="sub">(hoja ${esc(c.hoja)})</span>` : ''}</td><td class="num">${c.filas}</td><td class="num">${c.filas_repetidas || ''}</td>
+      <td><button class="card-stage-btn" style="flex:none;padding:3px 10px" data-borrar-carga="${c.id}" title="Borrar esta carga y sus filas">🗑 Borrar</button></td></tr>`).join('')}
     </tbody></table>` : '<p class="vacio">Aún no hay cargas.</p>';
 }
 
@@ -1082,6 +1083,26 @@ $('cr-barras').addEventListener('click', e => {
 ['cr-sit', 'cr-region', 'cr-nivel', 'cr-funcion', 'cr-mob'].forEach(id => $(id).addEventListener('change', renderCruce));
 ['cr-entidad', 'cr-min', 'cr-max'].forEach(id => $(id).addEventListener('input', renderCruce));
 $('btn-cr-recalcular').addEventListener('click', cargarCruce);
+
+// Borrar una carga equivocada
+$('cr-historial').addEventListener('click', async e => {
+  const btn = e.target.closest('[data-borrar-carga]'); if (!btn) return;
+  const c = cruce.cargas.historial.find(x => x.id === btn.dataset.borrarCarga); if (!c) return;
+  const ultima = cruce.cargas.ultimas[c.fuente]?.id === c.id;
+  const texto = `¿Borrar la carga de ${FUENTE_CARGA[c.fuente]} del ${fecha(c.fecha_carga)}?\n\n` +
+    `Archivo: ${c.nombre_archivo || '—'} · ${c.filas} CUI\n\n` +
+    `Se borran sus filas y el cruce se recalcula sin ella` +
+    (ultima ? ' (pasa a contar la carga anterior de esta fuente)' : '') + '.' +
+    (c.fuente === 'pmi' ? '' : '\nLos proyectos que esa importación creó o actualizó NO se deshacen.') +
+    '\n\nNo se puede deshacer.';
+  if (!confirm(texto)) return;
+  btn.disabled = true;
+  try {
+    await api('/api/ioarr/cargas/' + c.id, { method: 'DELETE' });
+    await cargarCruce();
+    setMsg($('cr-msg'), `Carga de ${FUENTE_CARGA[c.fuente]} del ${fecha(c.fecha_carga)} borrada.`, 'ok');
+  } catch (err) { btn.disabled = false; alert(err.message); }
+});
 
 $('cr-tbody').addEventListener('click', e => {
   const pmi = e.target.closest('[data-pmi]');

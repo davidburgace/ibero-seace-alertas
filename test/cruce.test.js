@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as XLSX from 'xlsx';
 import { leerArchivo, detectarMapeo } from '../src/ioarr/ingesta.js';
-import { filaACarga, filaAPmi, deduplicarPorCui, guardarCarga, calcularCruce, claseFaseOxi, IDEA_SIN_CUI } from '../src/ioarr/cruce.js';
+import { filaACarga, filaAPmi, deduplicarPorCui, guardarCarga, borrarCarga, calcularCruce, claseFaseOxi, IDEA_SIN_CUI } from '../src/ioarr/cruce.js';
 import { excelProinversion } from './helpers/proinversion.js';
 
 // ─── Réplica en memoria de las vistas de la migración 005 ───────────────────
@@ -220,4 +220,26 @@ test('guardarCarga: una carga con sus filas; si fallan las filas, se borra la ca
   llamadas.length = 0;
   await assert.rejects(guardarCarga(sb(true), { fuente: 'invierte_pe', filas: [{ cui: '1' }] }), { message: 'boom' });
   assert.deepEqual(llamadas.at(-1), ['ioarr_cargas', 'delete', 'c1']);
+});
+
+test('borrarCarga: borra por id y devuelve la carga, o null si no existía', async () => {
+  const cargas = [{ id: 'c1', fuente: 'pmi' }];
+  const sb = { from: (tabla) => ({ delete: () => ({ eq: (col, v) => ({ select: () => ({ maybeSingle: async () => {
+    assert.equal(tabla, 'ioarr_cargas');
+    const i = cargas.findIndex(c => c[col] === v);
+    return { data: i >= 0 ? cargas.splice(i, 1)[0] : null, error: null };
+  } }) }) }) }) };
+  assert.deepEqual(await borrarCarga(sb, 'c1'), { id: 'c1', fuente: 'pmi' });
+  assert.equal(cargas.length, 0);
+  assert.equal(await borrarCarga(sb, 'c1'), null);
+});
+
+test('Al borrar la última carga de Proinversión, cuenta la anterior y ya no hay «desaparecidas»', () => {
+  const pro = leerCarga(excelProinversion());
+  const c1 = { id: 'p1', fuente: 'proinversion', fecha_carga: '2026-09-01T10:00:00Z', filas: pro };
+  const c2 = { id: 'p2', fuente: 'proinversion', fecha_carga: '2026-10-10T10:00:00Z', filas: pro.slice(0, 1) };
+  assert.equal(calcularCruce(vistas([c1, c2])).filas.filter(f => f.situacion === 'desaparecida').length, 3);
+  const { filas, cargas } = calcularCruce(vistas([c1]));
+  assert.equal(filas.filter(f => f.situacion === 'desaparecida').length, 0);
+  assert.equal(cargas.ultimas.proinversion.id, 'p1');
 });

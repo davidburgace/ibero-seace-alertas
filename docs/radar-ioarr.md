@@ -132,6 +132,8 @@ Cada fila muestra el motivo («Está en Proinversión como «Priorizado»») y d
 
 **Frescura.** Arriba se ve la última carga de cada fuente (fecha, archivo, CUI, hace cuántos días; se resalta si pasa de 30 días) y el historial de cargas. El botón **Exportar a Excel** baja las filas filtradas con todas las columnas calculadas y una hoja con las cargas.
 
+**Borrar una carga equivocada.** En el historial de cargas, **🗑 Borrar** elimina la carga y sus filas (pide confirmación y no se puede deshacer). El cruce se recalcula sin ella: si era la última de su fuente, pasa a contar la anterior. Los proyectos que esa importación creó o actualizó en `ioarr_proyectos` **no** se deshacen.
+
 ## 7. Alertas
 
 En la pestaña **Alertas** cada usuario elige el correo, las regiones y si quiere solo mobiliario. El cron envía cada día los proyectos nuevos y los cambios de estado desde el último envío. El botón **Enviar ahora** sirve para probar.

@@ -19,7 +19,7 @@ import { requireAuth } from './auth.js';
 import { calcularRentabilidad } from './calculadora.js';
 import { leerArchivo, detectarMapeo, aplicarMapeoGuardado, filaAProyecto, importarProyectos, normaliza, CAMPOS_MAPEABLES } from './ingesta.js';
 import { sendIoarrDigest } from './alertas.js';
-import { filaACarga, filaAPmi, guardarCarga, obtenerDatosCruce, calcularCruce } from './cruce.js';
+import { filaACarga, filaAPmi, guardarCarga, borrarCarga, obtenerDatosCruce, calcularCruce } from './cruce.js';
 import { extraerLineasPdf, clasificarDocumento, leerFicha07C, leerTablaCostos, preciosUnicos, anioDeLineas, guardarPrecios } from './fichas.js';
 
 const router = express.Router();
@@ -463,6 +463,18 @@ router.get('/api/ioarr/cruce', async (_, res, next) => {
       throw e;
     }
     res.json({ ...calcularCruce(datos), generado_en: new Date().toISOString() });
+  } catch (e) { next(e); }
+});
+
+// Borra una carga equivocada (y sus filas). Los proyectos que esa importación
+// creó o actualizó no se tocan.
+router.delete('/api/ioarr/cargas/:id', async (req, res, next) => {
+  try {
+    if (!/^[0-9a-f-]{36}$/i.test(req.params.id)) return res.status(400).json({ error: 'Carga inválida' });
+    const carga = await borrarCarga(supabase, req.params.id);
+    if (!carga) return res.status(404).json({ error: 'La carga no existe (¿ya se borró?)' });
+    console.log(`[IOARR] Carga ${carga.fuente} «${carga.nombre_archivo}» del ${carga.fecha_carga} borrada por ${req.usuario.email}`);
+    res.json({ ok: true, carga });
   } catch (e) { next(e); }
 });
 
