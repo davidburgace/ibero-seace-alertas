@@ -19,6 +19,7 @@ import { requireAuth } from './auth.js';
 import { calcularRentabilidad } from './calculadora.js';
 import { leerArchivo, detectarMapeo, aplicarMapeoGuardado, filaAProyecto, importarProyectos, normaliza, CAMPOS_MAPEABLES } from './ingesta.js';
 import { sendIoarrDigest } from './alertas.js';
+import { filaACarga, filaAPmi, guardarCarga, obtenerDatosCruce, calcularCruce } from './cruce.js';
 import { extraerLineasPdf, clasificarDocumento, leerFicha07C, leerTablaCostos, preciosUnicos, anioDeLineas, guardarPrecios } from './fichas.js';
 
 const router = express.Router();
@@ -30,7 +31,15 @@ const URL_FIRMADA_SEG = 10 * 60;
 const ESTADOS = ['viable', 'priorizada_oxi', 'convenio', 'en_proceso_seleccion', 'en_ejecucion',
   'bienes_entregados', 'ciprl_emitido', 'cerrada', 'descartada'];
 const ETAPAS = ['detectada', 'evaluando', 'convenio', 'financiando', 'ciprl_emitido'];
-const FUENTES = ['invierte_pe', 'proinversion', 'otro'];
+const FUENTES = ['invierte_pe', 'proinversion', 'pmi', 'otro'];
+// Campos que se muestran en el mapeo según la fuente (el PMI solo necesita CUI, entidad y periodo)
+const CAMPOS_FUENTE = {
+  pmi: ['cui', 'entidad', 'periodo'],
+  proinversion: CAMPOS_MAPEABLES.filter(c => !['fuente_financiamiento', 'pim', 'devengado', 'periodo'].includes(c)),
+  invierte_pe: CAMPOS_MAPEABLES.filter(c => c !== 'periodo'),
+  otro: CAMPOS_MAPEABLES.filter(c => c !== 'periodo')
+};
+const faltaMigracion = (e) => e?.code === 'PGRST204' || e?.code === 'PGRST205' || e?.code === '42P01' || /schema cache|does not exist/i.test(e?.message || '');
 
 // ─── Rutas públicas (sin sesión) ────────────────────────────────────────────
 // Datos para que el navegador inicie sesión con Supabase Auth (clave pública)
@@ -370,22 +379,43 @@ router.post('/api/ioarr/importar/preview', upload.single('file'), async (req, re
     const guardado = await mapeoGuardado(fuente);
     const mapeo = aplicarMapeoGuardado(headers, detectarMapeo(headers), guardado);
     res.json({
-      headers, mapeo, muestra: rows.slice(0, 5), total_filas: rows.length, campos: CAMPOS_MAPEABLES,
+      headers, mapeo, muestra: rows.slice(0, 5), total_filas: rows.length, campos: CAMPOS_FUENTE[fuente],
       fila_encabezado, hoja, usa_mapeo_guardado: !!guardado
     });
   } catch (e) { next(e); }
 });
 
 // Paso 2: importar con el mapeo confirmado (campos multipart: file, fuente, mapeo JSON, solo_ioarr)
+// Banco y Proinversión: actualizan los proyectos Y quedan como carga para el cruce.
+// PMI: solo se guarda como carga (tabla ioarr_pmi); no crea proyectos.
 router.post('/api/ioarr/importar', upload.single('file'), async (req, res, next) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'Adjunta un archivo Excel o CSV' });
     const fuente = FUENTES.includes(req.body.fuente) ? req.body.fuente : 'otro';
     let mapeo;
     try { mapeo = JSON.parse(req.body.mapeo || '{}'); } catch { return res.status(400).json({ error: 'Mapeo inválido' }); }
+    const nombreArchivo = nombreUtf8(req.file.originalname);
+
+    if (fuente === 'pmi') {
+      if (!mapeo.cui) return res.status(400).json({ error: 'Debes mapear al menos la columna de CUI' });
+      const { rows, hoja } = leerArchivo(req.file.buffer);
+      const filas = rows.map(r => filaAPmi(r, mapeo)).filter(Boolean);
+      if (!filas.length) return res.status(400).json({ error: 'El archivo no tiene filas con CUI. Si no puedes importarlo, marca el PMI a mano en la pestaña Cruce.' });
+      let r;
+      try { r = await guardarCarga(supabase, { fuente, filas, nombre_archivo: nombreArchivo, hoja, usuario_id: req.usuario.id }); }
+      catch (e) {
+        if (faltaMigracion(e)) return res.status(500).json({ error: 'Falta ejecutar supabase/migrations/005_ioarr_cruce_fuentes.sql' });
+        throw e;
+      }
+      await guardarMapeo(fuente, mapeo, req.usuario);
+      console.log(`[IOARR] Carga PMI por ${req.usuario.email}: ${r.filas} CUI`);
+      return res.json({ fuente, carga: r.carga, filas_archivo: rows.length, cuis: r.filas, filas_repetidas: r.filas_repetidas,
+        filas_sin_cui: rows.length - filas.length, sin_entidad: filas.filter(f => !f.entidad).length });
+    }
+
     if (!mapeo.cui || !mapeo.nombre) return res.status(400).json({ error: 'Debes mapear al menos CUI y nombre' });
 
-    const { rows } = leerArchivo(req.file.buffer);
+    const { rows, hoja } = leerArchivo(req.file.buffer);
     let proyectos = rows.map(r => filaAProyecto(r, mapeo, { fuente })).filter(Boolean);
     const descartadas = rows.length - proyectos.length;
     let noIoarr = 0;
@@ -403,8 +433,54 @@ router.post('/api/ioarr/importar', upload.single('file'), async (req, res, next)
       throw e;
     }
     await guardarMapeo(fuente, mapeo, req.usuario);
+
+    // Carga para el cruce: el archivo completo (sin el filtro de IOARR), para
+    // poder saber después qué CUI desaparecieron de una carga a otra
+    let carga = null, carga_error = null;
+    if (fuente === 'invierte_pe' || fuente === 'proinversion') {
+      try {
+        const r = await guardarCarga(supabase, { fuente, filas: rows.map(x => filaACarga(x, mapeo)).filter(Boolean),
+          nombre_archivo: nombreArchivo, hoja, usuario_id: req.usuario.id });
+        carga = { ...r.carga, filas_repetidas: r.filas_repetidas };
+      } catch (e) {
+        carga_error = faltaMigracion(e) ? 'No se guardó la carga para el cruce: falta ejecutar supabase/migrations/005_ioarr_cruce_fuentes.sql' : e.message;
+        console.warn('[IOARR] No se pudo guardar la carga:', e.message);
+      }
+    }
     console.log(`[IOARR] Importación ${fuente} por ${req.usuario.email}:`, resumen);
-    res.json({ ...resumen, filas_archivo: rows.length, filas_sin_cui_o_nombre: descartadas, filas_no_ioarr: noIoarr });
+    res.json({ ...resumen, filas_archivo: rows.length, filas_sin_cui_o_nombre: descartadas, filas_no_ioarr: noIoarr, carga, carga_error });
+  } catch (e) { next(e); }
+});
+
+// ─── Cruce de fuentes ───────────────────────────────────────────────────────
+// Calcula al vuelo la situación de cada CUI; no guarda ni cambia nada.
+router.get('/api/ioarr/cruce', async (_, res, next) => {
+  try {
+    let datos;
+    try { datos = await obtenerDatosCruce(supabase); }
+    catch (e) {
+      if (faltaMigracion(e)) return res.status(500).json({ error: 'Falta ejecutar supabase/migrations/005_ioarr_cruce_fuentes.sql' });
+      throw e;
+    }
+    res.json({ ...calcularCruce(datos), generado_en: new Date().toISOString() });
+  } catch (e) { next(e); }
+});
+
+// Marca manual del PMI (cuando el archivo no se pudo importar)
+router.put('/api/ioarr/cruce/pmi/:cui', async (req, res, next) => {
+  try {
+    const { en_pmi, nota } = req.body || {};
+    if (!['si', 'no', 'sin_verificar'].includes(en_pmi)) return res.status(400).json({ error: 'en_pmi debe ser si, no o sin_verificar' });
+    const cui = String(req.params.cui).trim();
+    if (!cui) return res.status(400).json({ error: 'Falta el CUI' });
+    const { data, error } = await supabase.from('ioarr_pmi_manual').upsert({
+      cui, en_pmi, nota: nota?.trim() || null, revisado_en: new Date().toISOString(), revisado_por: req.usuario.id
+    }, { onConflict: 'cui' }).select().single();
+    if (error) {
+      if (faltaMigracion(error)) return res.status(500).json({ error: 'Falta ejecutar supabase/migrations/005_ioarr_cruce_fuentes.sql' });
+      throw error;
+    }
+    res.json(data);
   } catch (e) { next(e); }
 });
 

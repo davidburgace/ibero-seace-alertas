@@ -153,10 +153,44 @@
   .login-card{ background:var(--surface); border:1px solid var(--border2); border-radius:16px; padding:34px; width:100%; max-width:380px; }
   .login-card h2{ font-family:var(--font-display); font-size:20px; margin-bottom:6px; }
 
+  /* Cruce de fuentes */
+  .sit{ display:inline-block; font-size:11px; font-weight:700; padding:3px 8px; border-radius:6px; white-space:nowrap; border:1px solid transparent; }
+  .sit-priorizada{ background:rgba(46,204,113,.16); color:#1e7a45; border-color:rgba(46,204,113,.4); }
+  .sit-por_priorizar{ background:rgba(58,99,224,.12); color:#2a4fb8; border-color:rgba(58,99,224,.3); }
+  .sit-viable_pmi{ background:rgba(106,79,209,.12); color:#5340b0; border-color:rgba(106,79,209,.3); }
+  .sit-viable_pmi_sin_verificar{ background:rgba(255,159,67,.16); color:#8a4d0f; border-color:rgba(255,159,67,.45); }
+  .sit-viable_fuera_pmi{ background:var(--surface2); color:#4a505c; border-color:var(--border2); }
+  .sit-desaparecida{ background:rgba(231,76,60,.10); color:#a83226; border-color:rgba(231,76,60,.35); }
+  .sit-ejecucion_descartada{ background:#e4e6eb; color:#5c6270; border-color:var(--border2); text-decoration:none; }
+  .frescura{ display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:12px; margin-bottom:16px; }
+  .fr-card{ background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:12px 14px; font-size:13px; min-width:0; }
+  .fr-card b{ font-family:var(--font-display); font-size:14px; }
+  .fr-card .fr-fecha{ font-family:var(--font-mono); font-size:12px; margin-top:4px; }
+  .fr-vieja{ border-color:rgba(255,159,67,.6); }
+  .fr-nada{ border-style:dashed; }
+  .resumen{ display:grid; grid-template-columns:minmax(0,1.1fr) minmax(0,1fr); gap:14px; margin-bottom:16px; }
+  .res-box{ background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:14px; min-width:0; }
+  .res-box h4{ font-family:var(--font-display); font-size:13px; margin-bottom:10px; }
+  .barras{ display:flex; flex-direction:column; gap:6px; }
+  .barra{ display:grid; grid-template-columns:minmax(0,210px) minmax(0,1fr) 48px; gap:8px; align-items:center; font-size:12px; cursor:pointer; border-radius:6px; padding:2px 4px; }
+  .barra:hover{ background:var(--surface2); }
+  .barra.activa{ background:rgba(58,99,224,.08); }
+  .barra-pista{ height:14px; border-radius:0 4px 4px 0; background:transparent; }
+  .barra-fill{ height:100%; border-radius:0 4px 4px 0; background:var(--accent); min-width:2px; }
+  .barra-n{ font-family:var(--font-mono); text-align:right; color:var(--text); }
+  .tabla-regiones{ font-size:12px; width:100%; border-collapse:collapse; }
+  .tabla-regiones th, .tabla-regiones td{ padding:4px 6px; text-align:right; border-top:1px solid var(--border); white-space:nowrap; }
+  .tabla-regiones th:first-child, .tabla-regiones td:first-child{ text-align:left; }
+  .tabla-regiones th{ font-size:10px; color:var(--muted); border-top:none; text-transform:uppercase; }
+  .aviso-fila{ font-size:11.5px; color:#7a4a12; margin-top:3px; }
+  .dif-fila{ font-size:11.5px; color:#a83226; margin-top:3px; font-weight:600; }
+  .pmi-btn{ font-family:var(--font-body); font-size:11px; border:1px solid var(--border2); background:#fff; border-radius:6px; padding:1px 6px; cursor:pointer; margin-left:4px; }
+  .pmi-btn:hover{ border-color:var(--accent); color:var(--accent); }
+
   footer{ max-width:1320px; margin:0 auto; padding:0 32px 30px; font-size:11.5px; color:var(--muted); line-height:1.5; }
 
   @media (max-width:1100px) and (min-width:641px){ .kanban{ grid-template-columns:repeat(3, minmax(0,1fr)); } }
-  @media (max-width:760px){ .grid2, .calc-res{ grid-template-columns:1fr; } }
+  @media (max-width:760px){ .grid2, .calc-res, .resumen, .frescura{ grid-template-columns:1fr; } .barra{ grid-template-columns:minmax(0,140px) minmax(0,1fr) 40px; } }
   @media (max-width:640px){
     .topbar{ padding:12px 16px; } header{ padding:18px 16px 0; } main{ padding:16px 16px 40px; } footer{ padding:0 16px 24px; }
     .kanban{ grid-auto-flow:column; grid-template-columns:none; grid-auto-columns:minmax(78vw,1fr); overflow-x:auto; scroll-snap-type:x mandatory; }
@@ -204,6 +238,7 @@
   </div>
   <div class="tabs">
     <button class="tab-btn active" data-tab="listado">📋 Proyectos <span class="count" id="count-proyectos">0</span></button>
+    <button class="tab-btn" data-tab="cruce">🔀 Cruce de fuentes</button>
     <button class="tab-btn" data-tab="kanban">🗂️ Kanban financista</button>
     <button class="tab-btn" data-tab="importar">⬆️ Importar</button>
     <button class="tab-btn" data-tab="precios">💲 Precios de referencia</button>
@@ -235,6 +270,40 @@
     </div>
   </section>
 
+  <!-- ===================== CRUCE ===================== -->
+  <section class="view" id="view-cruce">
+    <p class="sub" style="margin-bottom:12px">Compara por CUI la última información del Banco de Inversiones, Proinversión y el PMI.
+      La situación se calcula al vuelo y <b>no cambia</b> el estado de tus proyectos: si no coincide con lo que fijaste, se señala en rojo.
+      Las cargas se suben en la pestaña «Importar».</p>
+    <div class="frescura" id="cr-frescura"></div>
+    <details style="margin:-6px 0 16px"><summary class="sub" style="cursor:pointer">Historial de cargas</summary>
+      <div class="tabla-wrap" style="margin-top:8px" id="cr-historial"></div></details>
+    <div class="filtros">
+      <select id="cr-sit"><option value="">Todas las situaciones</option></select>
+      <select id="cr-region"><option value="">Todas las regiones</option></select>
+      <select id="cr-nivel"><option value="">Todo nivel de gobierno</option><option value="GORE">Gobierno regional</option><option value="GL">Gobierno local</option><option value="GN">Gobierno nacional</option></select>
+      <select id="cr-funcion"><option value="">Todas las funciones</option></select>
+      <input type="text" id="cr-entidad" placeholder="Entidad, CUI o nombre…">
+      <input type="number" id="cr-min" placeholder="Monto mín. S/" min="0">
+      <input type="number" id="cr-max" placeholder="Monto máx. S/" min="0">
+      <label class="chk"><input type="checkbox" id="cr-mob"> Solo mobiliario</label>
+      <button class="btn btn-ghost" id="btn-cr-recalcular">↻ Recalcular</button>
+      <button class="btn btn-ghost" id="btn-cr-export">⬇️ Exportar a Excel</button>
+    </div>
+    <div class="resumen">
+      <div class="res-box"><h4>Proyectos por situación <span class="sub" id="cr-total"></span></h4><div class="barras" id="cr-barras"></div></div>
+      <div class="res-box"><h4>Por región</h4><div style="overflow-x:auto" id="cr-regiones"></div></div>
+    </div>
+    <div class="msg" id="cr-msg"></div>
+    <div class="tabla-wrap">
+      <table class="tabla">
+        <thead><tr><th>Situación</th><th>CUI</th><th>Proyecto</th><th>Región</th><th class="num">Monto</th><th>Banco</th><th>Proinversión</th><th>PMI</th><th>Motivo</th><th>Cargas</th></tr></thead>
+        <tbody id="cr-tbody"></tbody>
+      </table>
+      <div class="vacio" id="cr-vacio" style="display:none">Sin proyectos en el cruce. Importa el Banco de Inversiones, Proinversión o el PMI en la pestaña “Importar”.</div>
+    </div>
+  </section>
+
   <!-- ===================== KANBAN ===================== -->
   <section class="view" id="view-kanban">
     <p class="sub" style="margin-bottom:14px">Muestra los proyectos del listado filtrado. La etapa del financista es interna e independiente del estado oficial.</p>
@@ -253,6 +322,7 @@
           <select id="imp-fuente">
             <option value="invierte_pe">Banco de Inversiones (Invierte.pe)</option>
             <option value="proinversion">Priorización Proinversión (OxI)</option>
+            <option value="pmi">Cartera de PMI</option>
             <option value="otro">Otro</option>
           </select></div>
       </div>
@@ -314,6 +384,21 @@
   Radar IOARR · Grupo Ibero Perú. Información referencial: verifíquela con la DGPPIP del MEF o un abogado.
   El D.S. 038-2026-EF no reconoce intereses de financiamiento; solo costos de gestión.
 </footer>
+</div>
+
+<!-- ===================== PMI MANUAL ===================== -->
+<div class="modal-overlay" id="pmi-overlay">
+  <div class="modal" style="max-width:460px">
+    <button class="cerrar" id="pmi-cerrar">×</button>
+    <h2>¿Está en el PMI?</h2>
+    <p class="sub" id="pmi-sub" style="margin-bottom:14px"></p>
+    <div class="field"><label>En el PMI</label><select id="pmi-valor">
+      <option value="sin_verificar">Sin verificar</option><option value="si">Sí</option><option value="no">No</option></select></div>
+    <div class="field"><label>Nota (dónde lo revisaste, periodo…)</label><textarea id="pmi-nota"></textarea></div>
+    <p class="sub" id="pmi-revisado" style="margin-bottom:12px"></p>
+    <button class="btn btn-primary" id="pmi-guardar">Guardar</button>
+    <div class="msg" id="pmi-msg"></div>
+  </div>
 </div>
 
 <!-- ===================== FICHA ===================== -->
@@ -413,6 +498,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click
   btn.classList.add('active');
   $('view-' + btn.dataset.tab).classList.add('active');
   if (btn.dataset.tab === 'precios') cargarPrecios().catch(e => alert(e.message));
+  if (btn.dataset.tab === 'cruce' && !cruce) cargarCruce();
 }));
 
 /* ---------- Filtros y listado ---------- */
@@ -524,7 +610,7 @@ async function abrirFicha(id) {
 }
 function cerrarFicha() { $('ficha-overlay').classList.remove('open'); actual = null; }
 $('ficha-overlay').addEventListener('click', e => { if (e.target.id === 'ficha-overlay') cerrarFicha(); });
-document.addEventListener('keydown', e => { if (e.key === 'Escape') cerrarFicha(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { cerrarFicha(); cerrarPmi(); } });
 
 function renderFicha() {
   const { proyecto: p, eventos, evaluaciones, contrapartes } = actual;
@@ -800,8 +886,11 @@ let impArchivo = null;
 const ETIQUETA_CAMPO = {
   cui: 'CUI / código idea', nombre: 'Nombre', entidad: 'Entidad', nivel_gobierno: 'Nivel de gobierno', region: 'Departamento',
   provincia: 'Provincia', distrito: 'Distrito', funcion: 'Función', tipologia: 'Tipología', tipo_inversion: 'Tipo de inversión',
-  monto_inversion: 'Monto', estado_oxi: 'Fase OxI', estado: 'Estado', nivel_estudio: 'Último nivel de estudio', url_fuente: 'Link web'
+  monto_inversion: 'Monto', estado_oxi: 'Fase OxI', estado: 'Estado de la inversión', nivel_estudio: 'Último nivel de estudio', url_fuente: 'Link web',
+  fuente_financiamiento: 'Fuente de financiamiento', pim: 'PIM', devengado: 'Devengado acumulado', periodo: 'Año o periodo del PMI'
 };
+// CUI y nombre son obligatorios, salvo en el PMI (solo CUI)
+const obligatorios = () => $('imp-fuente').value === 'pmi' ? ['cui'] : ['cui', 'nombre'];
 async function previsualizar() {
   const file = $('imp-file').files[0];
   if (!file) return setMsg($('imp-msg'), 'Selecciona un archivo', 'err');
@@ -812,10 +901,10 @@ async function previsualizar() {
     const r = await api('/api/ioarr/importar/preview', { method: 'POST', body: fd });
     setMsg($('imp-msg'), `${r.total_filas} filas de datos · encabezado en la fila ${r.fila_encabezado} de la hoja «${r.hoja}»` +
       (r.usa_mapeo_guardado ? ' · se aplicó el mapeo recordado de esta fuente' : '') + '.', 'ok');
-    $('imp-mapeo').innerHTML = r.campos.map(c => `<div class="field"><label>${ETIQUETA_CAMPO[c] || c}${['cui', 'nombre'].includes(c) ? ' *' : ''}</label>
+    $('imp-mapeo').innerHTML = r.campos.map(c => `<div class="field"><label>${ETIQUETA_CAMPO[c] || c}${obligatorios().includes(c) ? ' *' : ''}</label>
       <select data-campo="${c}"><option value="">— no mapear —</option>
       ${r.headers.map(h => `<option value="${esc(h)}" ${h === r.mapeo[c] ? 'selected' : ''}>${esc(h)}</option>`).join('')}</select></div>`).join('');
-    const faltan = ['cui', 'nombre'].filter(c => !r.mapeo[c]).map(c => ETIQUETA_CAMPO[c]);
+    const faltan = obligatorios().filter(c => !r.mapeo[c]).map(c => ETIQUETA_CAMPO[c]);
     setMsg($('imp-aviso'), faltan.length
       ? `No se reconoció la columna de ${faltan.join(' ni de ')}. Elígela abajo entre las columnas detectadas: ${r.headers.join(' · ')}`
       : '', faltan.length ? 'err' : '');
@@ -832,7 +921,7 @@ $('imp-fuente').addEventListener('change', () => { if (impArchivo) previsualizar
 
 $('btn-importar').addEventListener('click', async () => {
   const mapeo = Object.fromEntries([...document.querySelectorAll('[data-campo]')].map(s => [s.dataset.campo, s.value || null]));
-  if (!mapeo.cui || !mapeo.nombre) return setMsg($('imp-res'), 'Mapea al menos CUI y nombre', 'err');
+  if (obligatorios().some(c => !mapeo[c])) return setMsg($('imp-res'), obligatorios().length > 1 ? 'Mapea al menos CUI y nombre' : 'Mapea al menos la columna de CUI', 'err');
   const btn = $('btn-importar'); btn.disabled = true;
   setMsg($('imp-res'), 'Importando…');
   try {
@@ -840,11 +929,220 @@ $('btn-importar').addEventListener('click', async () => {
     fd.append('file', impArchivo); fd.append('fuente', $('imp-fuente').value);
     fd.append('mapeo', JSON.stringify(mapeo)); fd.append('solo_ioarr', $('imp-solo-ioarr').checked ? '1' : '0');
     const r = await api('/api/ioarr/importar', { method: 'POST', body: fd });
-    setMsg($('imp-res'), `✅ ${r.nuevos} nuevos · ${r.actualizados} actualizados (${r.cambios_estado} cambios de estado) · ${r.sin_cambios} sin cambios` +
-      ` · ${r.filas_sin_cui_o_nombre} filas sin CUI/nombre · ${r.filas_no_ioarr} no IOARR omitidas.`, 'ok');
-    await cargarFiltros(); await buscar();
+    cruce = null; // la próxima vez que se abra el cruce, se recalcula
+    if (r.fuente === 'pmi') {
+      setMsg($('imp-res'), `✅ Carga del PMI guardada: ${r.cuis} CUI` + (r.filas_repetidas ? ` (${r.filas_repetidas} filas con CUI repetido)` : '') +
+        ` · ${r.filas_sin_cui} filas sin CUI` + (r.sin_entidad ? ` · ${r.sin_entidad} sin entidad (solo cuentan mientras esta sea la última carga del PMI)` : '') +
+        '. Revisa la pestaña «Cruce de fuentes».', 'ok');
+    } else {
+      setMsg($('imp-res'), `✅ ${r.nuevos} nuevos · ${r.actualizados} actualizados (${r.cambios_estado} cambios de estado) · ${r.sin_cambios} sin cambios` +
+        ` · ${r.filas_sin_cui_o_nombre} filas sin CUI/nombre · ${r.filas_no_ioarr} no IOARR omitidas.` +
+        (r.carga ? ` Carga para el cruce: ${r.carga.filas} CUI${r.carga.filas_repetidas ? `, ${r.carga.filas_repetidas} repetidos` : ''}.` : '') +
+        (r.carga_error ? ` ⚠️ ${r.carga_error}` : ''), r.carga_error ? 'err' : 'ok');
+      await cargarFiltros(); await buscar();
+    }
   } catch (e) { setMsg($('imp-res'), e.message, 'err'); }
   btn.disabled = false;
+});
+
+/* ---------- Cruce de fuentes ---------- */
+// Mismo orden que la prioridad del backend (src/ioarr/cruce.js): priorizadas primero
+const SITUACIONES = [
+  ['priorizada', 'Priorizada en búsqueda de financista'], ['por_priorizar', 'Por priorizar'], ['viable_pmi', 'Viable, en PMI, sin OxI'],
+  ['viable_pmi_sin_verificar', 'Viable, PMI sin verificar'], ['viable_fuera_pmi', 'Viable, fuera del PMI'],
+  ['desaparecida', 'Desaparecida de Proinversión'], ['ejecucion_descartada', 'En ejecución o descartada']
+];
+const FUENTE_CARGA = { invierte_pe: 'Banco de Inversiones', proinversion: 'Proinversión', pmi: 'Cartera de PMI' };
+const PMI_TXT = { si: 'Sí', no: 'No', sin_verificar: 'Sin verificar' };
+const MAX_FILAS_CRUCE = 500;
+const DIAS_VIEJA = 30;
+let cruce = null;       // respuesta de /api/ioarr/cruce
+let cruceFiltrado = [];
+let pmiEditando = null; // fila del cruce cuya marca de PMI se edita
+
+const fechaDia = (d) => d ? new Date(d).toLocaleDateString('es-PE', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+const diasDesde = (d) => Math.floor((Date.now() - new Date(d)) / 86400000);
+const sitBadge = (f) => `<span class="sit sit-${f.situacion}">${esc(f.situacion_label)}</span>`;
+
+async function cargarCruce() {
+  setMsg($('cr-msg'), 'Calculando el cruce…');
+  try {
+    cruce = await api('/api/ioarr/cruce');
+    setMsg($('cr-msg'), '');
+    llenarFiltrosCruce();
+    renderFrescura();
+    renderCruce();
+  } catch (e) { setMsg($('cr-msg'), e.message, 'err'); }
+}
+
+function llenarFiltrosCruce() {
+  const sel = (id, valores, todos) => {
+    const prev = $(id).value;
+    $(id).innerHTML = `<option value="">${todos}</option>` + valores.map(([v, t]) => `<option value="${esc(v)}" ${v === prev ? 'selected' : ''}>${esc(t)}</option>`).join('');
+  };
+  const unicos = (k) => [...new Set(cruce.filas.map(f => f[k]).filter(Boolean))].sort().map(v => [v, v]);
+  sel('cr-sit', SITUACIONES, 'Todas las situaciones');
+  sel('cr-region', unicos('region'), 'Todas las regiones');
+  sel('cr-funcion', unicos('funcion'), 'Todas las funciones');
+}
+
+function renderFrescura() {
+  const { ultimas, totales, historial } = cruce.cargas;
+  $('cr-frescura').innerHTML = Object.entries(FUENTE_CARGA).map(([k, nombre]) => {
+    const c = ultimas[k];
+    if (!c) return `<div class="fr-card fr-nada"><b>${nombre}</b><div class="sub" style="margin-top:4px">Sin cargas todavía${k === 'pmi' ? ' · puedes marcar el PMI a mano en cada fila' : ''}.</div></div>`;
+    const dias = diasDesde(c.fecha_carga);
+    return `<div class="fr-card ${dias > DIAS_VIEJA ? 'fr-vieja' : ''}"><b>${nombre}</b>
+      <div class="fr-fecha">${fecha(c.fecha_carga)} · ${dias === 0 ? 'hoy' : `hace ${dias} día${dias === 1 ? '' : 's'}`}${dias > DIAS_VIEJA ? ' ⚠️' : ''}</div>
+      <div class="sub">${esc(c.nombre_archivo || 'archivo sin nombre')} · ${c.filas} CUI${c.filas_repetidas ? ` · ${c.filas_repetidas} repetidos` : ''} · ${totales[k]} carga${totales[k] === 1 ? '' : 's'} en total</div></div>`;
+  }).join('');
+  $('cr-historial').innerHTML = historial.length ? `<table class="tabla"><thead><tr><th>Fecha</th><th>Fuente</th><th>Archivo</th><th class="num">CUI</th><th class="num">Repetidos</th></tr></thead><tbody>
+    ${historial.map(c => `<tr style="cursor:default"><td class="sub">${fecha(c.fecha_carga)}</td><td>${FUENTE_CARGA[c.fuente] || c.fuente}</td>
+      <td>${esc(c.nombre_archivo || '—')}${c.hoja ? ` <span class="sub">(hoja ${esc(c.hoja)})</span>` : ''}</td><td class="num">${c.filas}</td><td class="num">${c.filas_repetidas || ''}</td></tr>`).join('')}
+    </tbody></table>` : '<p class="vacio">Aún no hay cargas.</p>';
+}
+
+function filtrarCruce() {
+  const sit = $('cr-sit').value, region = $('cr-region').value, nivel = $('cr-nivel').value, funcion = $('cr-funcion').value;
+  const q = $('cr-entidad').value.trim().toUpperCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+  const min = $('cr-min').value === '' ? null : Number($('cr-min').value);
+  const max = $('cr-max').value === '' ? null : Number($('cr-max').value);
+  const mob = $('cr-mob').checked;
+  const norm = (t) => String(t || '').toUpperCase().normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
+  // El resumen usa todos los filtros menos el de situación, para ver el reparto completo
+  const base = cruce.filas.filter(f => (!region || f.region === region) && (!nivel || f.entidad_tipo === nivel) && (!funcion || f.funcion === funcion)
+    && (!mob || f.es_mobiliario) && (min == null || (f.monto_inversion ?? -1) >= min) && (max == null || (f.monto_inversion != null && f.monto_inversion <= max))
+    && (!q || norm(f.entidad).includes(q) || norm(f.nombre).includes(q) || norm(f.cui).includes(q)));
+  return { base, filas: sit ? base.filter(f => f.situacion === sit) : base };
+}
+
+function renderCruce() {
+  if (!cruce) return;
+  const { base, filas } = filtrarCruce();
+  cruceFiltrado = filas;
+  renderResumen(base, filas);
+  $('cr-vacio').style.display = filas.length ? 'none' : 'block';
+  const visibles = filas.slice(0, MAX_FILAS_CRUCE);
+  $('cr-tbody').innerHTML = visibles.map((f, i) => `
+    <tr data-i="${i}" ${f.proyecto_id ? '' : 'style="cursor:default"'}>
+      <td>${sitBadge(f)}</td>
+      <td class="mono">${f.codigo === f.cui ? esc(f.cui) : `<span class="sub">${esc(f.codigo)}</span><div>${esc(f.cui)}</div>`}</td>
+      <td>${esc(f.nombre || '—')}<div class="sub">${esc(f.entidad || '')}${f.entidad_tipo ? ' · ' + f.entidad_tipo : ''}</div>
+        ${f.es_mobiliario ? '<span class="badge badge-mob">🪑 Mobiliario</span>' : ''}</td>
+      <td>${esc(f.region || '')}<div class="sub">${esc(f.funcion || '')}</div></td>
+      <td class="num">${soles(f.monto_inversion)}</td>
+      <td>${f.en_banco ? '✓' : '—'}<div class="sub">${esc(f.estado_inversion || '')}</div></td>
+      <td>${f.en_proinversion ? esc(f.fase_oxi || '✓') : '—'}<div class="sub">${esc(f.nivel_estudio || '')}</div></td>
+      <td style="white-space:nowrap">${PMI_TXT[f.en_pmi]}${f.en_pmi_origen === 'manual' ? ' <span class="sub">(a mano)</span>' : ''}
+        <button class="pmi-btn" data-pmi="${i}" title="Marcar a mano si está en el PMI">✎</button>
+        ${f.pmi_periodo ? `<div class="sub">${esc(f.pmi_periodo)}</div>` : ''}</td>
+      <td style="min-width:240px">${esc(f.motivo)}
+        ${f.diferencia_estado ? `<div class="dif-fila">≠ ${esc(f.diferencia_estado)}</div>` : ''}
+        ${f.avisos.map(a => `<div class="aviso-fila">⚠️ ${esc(a)}</div>`).join('')}</td>
+      <td class="sub" style="white-space:nowrap">${f.cargas.map(c => `${FUENTE_CARGA[c.fuente]}: ${fechaDia(c.fecha_carga)}`).join('<br>') || '—'}</td>
+    </tr>`).join('');
+  if (filas.length > MAX_FILAS_CRUCE)
+    setMsg($('cr-msg'), `Se muestran ${MAX_FILAS_CRUCE} de ${filas.length} filas (ordenadas por prioridad). Usa los filtros o exporta a Excel para ver todas.`);
+  else if ($('cr-msg').textContent.startsWith('Se muestran')) setMsg($('cr-msg'), '');
+}
+
+function renderResumen(base, filas) {
+  const sitActiva = $('cr-sit').value;
+  const conteo = Object.fromEntries(SITUACIONES.map(([k]) => [k, 0]));
+  base.forEach(f => conteo[f.situacion]++);
+  const maximo = Math.max(1, ...Object.values(conteo));
+  $('cr-total').textContent = `· ${base.length} en total${sitActiva ? `, ${filas.length} con la situación elegida` : ''}`;
+  $('cr-barras').innerHTML = SITUACIONES.map(([k, label]) => `
+    <div class="barra ${sitActiva === k ? 'activa' : ''}" data-sit="${k}" title="${esc(label)}: ${conteo[k]} proyecto(s). Clic para filtrar.">
+      <span><span class="sit sit-${k}">${esc(label)}</span></span>
+      <div class="barra-pista"><div class="barra-fill" style="width:${(conteo[k] / maximo) * 100}%"></div></div>
+      <span class="barra-n">${conteo[k]}</span>
+    </div>`).join('');
+
+  const porRegion = new Map();
+  base.forEach(f => {
+    const r = f.region || 'SIN REGIÓN';
+    if (!porRegion.has(r)) porRegion.set(r, Object.fromEntries(SITUACIONES.map(([k]) => [k, 0])));
+    porRegion.get(r)[f.situacion]++;
+  });
+  const regiones = [...porRegion.entries()].map(([r, c]) => [r, c, Object.values(c).reduce((a, b) => a + b, 0)]).sort((a, b) => b[2] - a[2]);
+  const cortas = { priorizada: 'Prior.', por_priorizar: 'Por prior.', viable_pmi: 'En PMI', viable_pmi_sin_verificar: 'PMI s/v', viable_fuera_pmi: 'Fuera PMI', desaparecida: 'Desap.', ejecucion_descartada: 'Ejec./desc.' };
+  $('cr-regiones').innerHTML = regiones.length ? `<table class="tabla-regiones"><thead><tr><th>Región</th><th>Total</th>
+    ${SITUACIONES.map(([k, label]) => `<th title="${esc(label)}">${cortas[k]}</th>`).join('')}</tr></thead><tbody>
+    ${regiones.slice(0, 12).map(([r, c, t]) => `<tr><td>${esc(r)}</td><td><b>${t}</b></td>${SITUACIONES.map(([k]) => `<td>${c[k] || '<span class="sub">·</span>'}</td>`).join('')}</tr>`).join('')}
+    </tbody></table>${regiones.length > 12 ? `<div class="sub" style="margin-top:6px">… y ${regiones.length - 12} regiones más (filtra por región o exporta).</div>` : ''}`
+    : '<p class="sub">Sin datos.</p>';
+}
+
+$('cr-barras').addEventListener('click', e => {
+  const b = e.target.closest('[data-sit]'); if (!b) return;
+  $('cr-sit').value = $('cr-sit').value === b.dataset.sit ? '' : b.dataset.sit;
+  renderCruce();
+});
+['cr-sit', 'cr-region', 'cr-nivel', 'cr-funcion', 'cr-mob'].forEach(id => $(id).addEventListener('change', renderCruce));
+['cr-entidad', 'cr-min', 'cr-max'].forEach(id => $(id).addEventListener('input', renderCruce));
+$('btn-cr-recalcular').addEventListener('click', cargarCruce);
+
+$('cr-tbody').addEventListener('click', e => {
+  const pmi = e.target.closest('[data-pmi]');
+  if (pmi) return abrirPmi(cruceFiltrado[Number(pmi.dataset.pmi)]);
+  const tr = e.target.closest('tr[data-i]');
+  const f = tr && cruceFiltrado[Number(tr.dataset.i)];
+  if (f?.proyecto_id) abrirFicha(f.proyecto_id);
+});
+
+/* PMI a mano */
+function abrirPmi(f) {
+  pmiEditando = f;
+  const m = f.pmi_manual;
+  $('pmi-sub').textContent = `${f.codigo === f.cui ? 'CUI ' + f.cui : f.codigo + ' · ' + f.cui} · ${f.nombre || ''}`;
+  $('pmi-valor').value = m?.en_pmi || 'sin_verificar';
+  $('pmi-nota').value = m?.nota || '';
+  $('pmi-revisado').textContent = (m ? `Última revisión: ${fecha(m.revisado_en)}. ` : 'Aún no se revisó a mano. ') +
+    (f.en_pmi_origen === 'archivo' ? `Ojo: el archivo del PMI ya decide este CUI («${PMI_TXT[f.en_pmi]}»); tu marca queda como constancia y se señala si difiere.` : '');
+  setMsg($('pmi-msg'), '');
+  $('pmi-overlay').classList.add('open');
+}
+function cerrarPmi() { $('pmi-overlay').classList.remove('open'); pmiEditando = null; }
+$('pmi-cerrar').addEventListener('click', cerrarPmi);
+$('pmi-overlay').addEventListener('click', e => { if (e.target.id === 'pmi-overlay') cerrarPmi(); });
+$('pmi-guardar').addEventListener('click', async () => {
+  if (!pmiEditando) return;
+  const btn = $('pmi-guardar'); btn.disabled = true;
+  try {
+    await api('/api/ioarr/cruce/pmi/' + encodeURIComponent(pmiEditando.cui), { method: 'PUT',
+      body: JSON.stringify({ en_pmi: $('pmi-valor').value, nota: $('pmi-nota').value }) });
+    cerrarPmi();
+    await cargarCruce();
+  } catch (e) { setMsg($('pmi-msg'), e.message, 'err'); }
+  btn.disabled = false;
+});
+
+/* Exportar el cruce (filas filtradas, todas las columnas calculadas) */
+$('btn-cr-export').addEventListener('click', () => {
+  if (!cruce) return;
+  const cargaDe = (f, fuente) => f.cargas.find(c => c.fuente === fuente);
+  const filas = cruceFiltrado.map(f => ({
+    Situación: f.situacion_label, Motivo: f.motivo, 'Diferencia con tu estado': f.diferencia_estado || '', Avisos: f.avisos.join(' | '),
+    CUI: f.cui, Código: f.codigo, Proyecto: f.nombre, Entidad: f.entidad, 'Nivel de gobierno': f.entidad_tipo, Región: f.region,
+    Provincia: f.provincia, Distrito: f.distrito, Función: f.funcion, 'Monto (S/)': f.monto_inversion ?? '', Mobiliario: f.es_mobiliario ? 'Sí' : 'No',
+    'En Banco': f.en_banco ? 'Sí' : 'No', 'Estado de la inversión': f.estado_inversion || '', 'En Proinversión': f.en_proinversion ? 'Sí' : 'No',
+    'Fase OxI': f.fase_oxi || '', 'Nivel de estudio': f.nivel_estudio || '', 'En PMI': PMI_TXT[f.en_pmi], 'Origen PMI': f.en_pmi_origen || '',
+    'Detalle PMI': f.en_pmi_detalle || '', 'Periodo PMI': f.pmi_periodo || '', 'Estado en el radar': f.estado_radar ? (ESTADOS[f.estado_radar] || f.estado_radar) : '',
+    'Carga Banco': cargaDe(f, 'invierte_pe') ? fechaDia(cargaDe(f, 'invierte_pe').fecha_carga) : '',
+    'Carga Proinversión': cargaDe(f, 'proinversion') ? fechaDia(cargaDe(f, 'proinversion').fecha_carga) : '',
+    'Carga PMI': cargaDe(f, 'pmi') ? fechaDia(cargaDe(f, 'pmi').fecha_carga) : ''
+  }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(filas), 'Cruce');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(cruce.cargas.historial.map(c => ({
+    Fecha: fecha(c.fecha_carga), Fuente: FUENTE_CARGA[c.fuente] || c.fuente, Archivo: c.nombre_archivo || '', Hoja: c.hoja || '', CUI: c.filas, Repetidos: c.filas_repetidas
+  }))), 'Cargas');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+    ['Aviso'], ['Información referencial obtenida de fuentes públicas. Verificar con la DGPPIP del MEF o un abogado.'],
+    ['Cruce calculado: ' + new Date(cruce.generado_en).toLocaleString('es-PE')]
+  ]), 'Aviso');
+  XLSX.writeFile(wb, `radar-ioarr-cruce-${new Date().toISOString().slice(0, 10)}.xlsx`);
 });
 
 /* ---------- Precios de referencia ---------- */

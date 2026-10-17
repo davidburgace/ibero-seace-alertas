@@ -11,6 +11,8 @@ Seguimiento de IOARR de mobiliario escolar en Obras por Impuestos (OxI), visto d
 | `supabase/migrations/001_radar_ioarr.sql` | Tablas `ioarr_*`, `perfiles` (roles) y RLS |
 | `supabase/migrations/003_ioarr_importacion_proinversion.sql` | Campos del Excel de Proinversión y mapeos recordados por fuente |
 | `supabase/migrations/004_ioarr_documentos.sql` | Bucket privado `ioarr-docs`, tablas `ioarr_documentos` e `ioarr_precios_referencia` |
+| `supabase/migrations/005_ioarr_cruce_fuentes.sql` | Cargas por fuente (`ioarr_cargas`, `ioarr_carga_filas`), `ioarr_pmi`, `ioarr_pmi_manual` y las vistas del cruce |
+| `src/ioarr/cruce.js` | Cruce de fuentes por CUI: guarda cada carga y calcula la situación de cada proyecto |
 | `src/ioarr/fichas.js` | Lee los PDF del Banco de Inversiones: ficha 07-C y tabla de bienes de la estructura de costos |
 | `scripts/experimentos/` | Pruebas aisladas, fuera del servidor: sondeo del portal del MEF y diagnóstico de lectura de un PDF |
 | `src/ioarr/router.js` | API `/api/ioarr/*`. Se monta en `server.js` con `app.use(ioarrRouter)` |
@@ -96,26 +98,60 @@ node scripts/experimentos/leer-pdf.js Exportacion.pdf --lineas            # + te
 
 Si una etiqueta del PDF real no se reconoce, se agrega a `ETIQUETAS_*` en `src/ioarr/fichas.js`. Los PDF escaneados (sin texto) se guardan, pero no se leen.
 
-## 6. Alertas
+## 6. Cruce de fuentes
+
+La pestaña **Cruce de fuentes** compara por CUI las tres listas y calcula la situación de cada proyecto. Requiere `supabase/migrations/005_ioarr_cruce_fuentes.sql`.
+
+**Cargas.** Cada archivo que se importa en **Importar** queda como una carga con su fecha (`ioarr_cargas`):
+- **Banco de Inversiones** (exporte de la Consulta Avanzada) y **Proinversión**: además de actualizar los proyectos como antes, se guarda el archivo completo (sin el filtro «solo IOARR») en `ioarr_carga_filas`, una fila por CUI.
+- **Cartera de PMI** (fuente nueva): solo se guarda en `ioarr_pmi` (CUI, entidad, periodo, fecha de carga). No crea proyectos. Basta con mapear el CUI; la entidad y el año o periodo son opcionales pero recomendados.
+- La fila de encabezado se detecta igual que en las otras importaciones. Si un CUI se repite en el archivo, gana la última fila y la carga cuenta las repeticiones.
+
+**Qué se compara** (vistas `ioarr_cruce_*`; nada calculado se guarda):
+- `en_banco`: el CUI aparece en alguna carga del Banco. Se usa su fila más reciente, porque cada exporte de la Consulta Avanzada suele estar filtrado (por región, por ejemplo).
+- `en_proinversion` y `fase_oxi`: el CUI está en la **última** carga de Proinversión (esa lista se toma como completa).
+- `en_pmi`: «si» si el CUI está en el PMI vigente de su entidad (la carga de PMI más reciente donde aparece esa entidad); «no» si la entidad tiene PMI cargado y el CUI no está; si no hay archivo que cubra a la entidad, vale la marca manual (✎ en la columna PMI, con fecha de revisión y nota); si no, «sin_verificar».
+
+**Situación** (la primera regla que se cumple):
+
+| | Situación | Regla |
+|---|---|---|
+| a | En ejecución o descartada | Banco con estado desactivada (o cerrada/cancelada), o en ejecución con fuente pública (devengado o PIM > 0, o fuente de financiamiento que no sea OxI), o la marcaste como descartada en el radar |
+| b | Desaparecida de Proinversión | Estaba en una carga anterior de Proinversión y no en la última |
+| c | Priorizada en búsqueda de financista | En Proinversión con fase OxI «Priorizado» |
+| d | Por priorizar | En Proinversión con fase OxI «Por Priorizar» |
+| e | Viable, en PMI, sin OxI | En el Banco, no en Proinversión, `en_pmi = si` |
+| f | Viable, fuera del PMI | En el Banco, no en Proinversión, `en_pmi = no` |
+| g | Viable, PMI sin verificar | El resto |
+
+Cada fila muestra el motivo («Está en Proinversión como «Priorizado»») y de qué cargas viene. La tabla se ordena por prioridad: priorizadas, por priorizar, en PMI, PMI sin verificar, fuera del PMI, desaparecidas y, al final, en ejecución o descartadas.
+
+**Avisos.** Se señalan: CUI repetido en una carga, cambio de entidad entre cargas de la misma fuente, un PMI que trae otra entidad, una marca manual de PMI que contradice el archivo, y los códigos IDEA de Proinversión que no están en el Banco («Idea, sin CUI registrado»).
+
+**Tu estado no se toca.** El cruce no escribe en `ioarr_proyectos`. Si la situación no encaja con el estado del proyecto en el radar (por ejemplo, Proinversión dice «Por Priorizar» y tú la tienes como «Priorizada OxI»), la fila lo marca en rojo.
+
+**Frescura.** Arriba se ve la última carga de cada fuente (fecha, archivo, CUI, hace cuántos días; se resalta si pasa de 30 días) y el historial de cargas. El botón **Exportar a Excel** baja las filas filtradas con todas las columnas calculadas y una hoja con las cargas.
+
+## 7. Alertas
 
 En la pestaña **Alertas** cada usuario elige el correo, las regiones y si quiere solo mobiliario. El cron envía cada día los proyectos nuevos y los cambios de estado desde el último envío. El botón **Enviar ahora** sirve para probar.
 
 En el plan gratuito, Render apaga el servicio cuando no tiene tráfico y el cron interno no corre. Lo mismo pasa con los crons que ya existían.
 
-## 7. Desplegar en Render
+## 8. Desplegar en Render
 
 1. Haz merge de `feature/radar-ioarr` a `main`. Render despliega solo con el `render.yaml` actual, no hace falta cambiarlo.
 2. Agrega `SUPABASE_PUBLISHABLE_KEY` (y, si quieres, `IOARR_CRON`) en Environment.
-3. Corre las migraciones (paso 1, y `002`, `003` y `004` en orden) **antes** de abrir la pantalla.
+3. Corre las migraciones (paso 1, y `002`, `003`, `004` y `005` en orden) **antes** de abrir la pantalla.
 4. Entra a `https://<tu-servicio>.onrender.com/ioarr.html`.
 
-## 8. Pruebas
+## 9. Pruebas
 
 ```bash
 npm test
 ```
 
-Cubren la calculadora, el parseo de montos y estados, la detección de columnas, la fusión del upsert y la lectura de PDF (ficha 07-C y tabla de costos, con PDF sintéticos).
+Cubren la calculadora, el parseo de montos y estados, la detección de columnas, la fusión del upsert, la lectura de PDF (ficha 07-C y tabla de costos, con PDF sintéticos) y el cruce de fuentes (CUI 2560356, el Excel de Proinversión de 4 filas, desaparecidas, PMI y casos borde).
 
 ## Calculadora
 
