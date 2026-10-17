@@ -10,6 +10,9 @@ Seguimiento de IOARR de mobiliario escolar en Obras por Impuestos (OxI), visto d
 |---|---|
 | `supabase/migrations/001_radar_ioarr.sql` | Tablas `ioarr_*`, `perfiles` (roles) y RLS |
 | `supabase/migrations/003_ioarr_importacion_proinversion.sql` | Campos del Excel de Proinversión y mapeos recordados por fuente |
+| `supabase/migrations/004_ioarr_documentos.sql` | Bucket privado `ioarr-docs`, tablas `ioarr_documentos` e `ioarr_precios_referencia` |
+| `src/ioarr/fichas.js` | Lee los PDF del Banco de Inversiones: ficha 07-C y tabla de bienes de la estructura de costos |
+| `scripts/experimentos/` | Pruebas aisladas, fuera del servidor: sondeo del portal del MEF y diagnóstico de lectura de un PDF |
 | `src/ioarr/router.js` | API `/api/ioarr/*`. Se monta en `server.js` con `app.use(ioarrRouter)` |
 | `src/ioarr/auth.js` | Valida el token de Supabase Auth y carga el rol |
 | `src/ioarr/ingesta.js` | Servicio de ingestión aislado: lee Excel/CSV, mapea columnas y hace upsert por CUI |
@@ -70,26 +73,49 @@ Reglas de la importación:
 
 Para agregar fuentes automáticas más adelante (por ejemplo datosabiertos.mef.gob.pe), los pasos están comentados al inicio de `src/ioarr/ingesta.js`.
 
-## 5. Alertas
+## 5. Fichas del Banco de Inversiones (PDF)
+
+**Por qué es manual.** El servidor no consulta el portal del MEF. La consulta pública (`ofi5.mef.gob.pe/invierte/consultapublica/consultainversiones`) no responde desde IPs fuera de Perú, y Render está fuera. Además, el MEF no publica condiciones para el acceso automatizado. Por eso el flujo es semiautomático:
+
+1. En la ficha del proyecto, **↗ Abrir en el Banco de Inversiones** copia el CUI al portapapeles y abre la consulta en otra pestaña con `?cui=<CUI>`. Si la consulta no trae el CUI puesto, se pega en el buscador.
+2. Ahí se descarga el PDF (la «Exportación» del Formato 07-C, la estructura de costos, el informe de sustento).
+3. Se sueltan en **Subir ficha (PDF)**. Se pueden subir hasta 10 a la vez, de 40 MB como máximo cada uno.
+
+Los PDF se clasifican por el nombre del archivo, en este orden: «sustento/informe» → informe de sustento; «costo/presupuesto/estructura» → estructura de costos; «07-C/formato/ficha/exportación/registro» → ficha 07-C. Si el nombre no dice nada, se clasifican por el contenido. Se guardan en el bucket **privado** `ioarr-docs` y se abren con **Abrir**, que pide una URL firmada de 10 minutos. Cada subida queda como hito en la línea de tiempo.
+
+**Ficha 07-C.** Se leen el CUI, el nombre, el tipo, la UF, la UEI, la función, la modalidad, la ubicación, el **costo total** y la fecha. Se guardan en `ioarr_proyectos.ficha_07c` y completan los campos del proyecto que estaban vacíos (el monto solo si no tenía). Si el CUI del PDF es de otro proyecto, el PDF se guarda pero no se toca el proyecto. Si el monto del proyecto difiere del costo de la ficha, se avisa.
+
+**Estructura de costos.** Se lee la tabla de bienes: código, descripción, a (adquisición), b (embalaje), c (entrega), d (costo unitario final) y cantidad. Las columnas se ubican buscando cuatro números seguidos que cumplan **d = (a + b + c) × 1.15**. Si ninguna combinación cumple, se asume el orden a, b, c, d, cantidad y la fila se marca como **no cuadra**, con un aviso que indica la página y el valor esperado. Se guarda un precio **único por código** en `ioarr_precios_referencia`, con upsert por (CUI de origen, código). Si un código trae precios distintos, gana el más repetido y se avisa. La cantidad se suma. El año (`anio_ficha`) sale de la fecha de la ficha 07-C del proyecto o, si no la hay, de la primera fecha del PDF de costos. La pestaña **Precios de referencia** muestra la columna «Fuente y fecha» (CUI, año y documento) y exporta a Excel.
+
+**Para revisar un PDF real sin subirlo:**
+
+```bash
+node scripts/experimentos/leer-pdf.js Exportacion.pdf Costos.pdf          # campos y tabla
+node scripts/experimentos/leer-pdf.js Exportacion.pdf --lineas            # + texto reconstruido
+```
+
+Si una etiqueta del PDF real no se reconoce, se agrega a `ETIQUETAS_*` en `src/ioarr/fichas.js`. Los PDF escaneados (sin texto) se guardan, pero no se leen.
+
+## 6. Alertas
 
 En la pestaña **Alertas** cada usuario elige el correo, las regiones y si quiere solo mobiliario. El cron envía cada día los proyectos nuevos y los cambios de estado desde el último envío. El botón **Enviar ahora** sirve para probar.
 
 En el plan gratuito, Render apaga el servicio cuando no tiene tráfico y el cron interno no corre. Lo mismo pasa con los crons que ya existían.
 
-## 6. Desplegar en Render
+## 7. Desplegar en Render
 
 1. Haz merge de `feature/radar-ioarr` a `main`. Render despliega solo con el `render.yaml` actual, no hace falta cambiarlo.
 2. Agrega `SUPABASE_PUBLISHABLE_KEY` (y, si quieres, `IOARR_CRON`) en Environment.
-3. Corre la migración (paso 1) **antes** de abrir la pantalla.
+3. Corre las migraciones (paso 1, y `002`, `003` y `004` en orden) **antes** de abrir la pantalla.
 4. Entra a `https://<tu-servicio>.onrender.com/ioarr.html`.
 
-## 7. Pruebas
+## 8. Pruebas
 
 ```bash
 npm test
 ```
 
-Cubren la calculadora, el parseo de montos y estados, la detección de columnas y la fusión del upsert.
+Cubren la calculadora, el parseo de montos y estados, la detección de columnas, la fusión del upsert y la lectura de PDF (ficha 07-C y tabla de costos, con PDF sintéticos).
 
 ## Calculadora
 
