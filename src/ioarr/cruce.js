@@ -116,6 +116,14 @@ export async function guardarCarga(supabase, { fuente, filas, nombre_archivo = n
   return { carga, filas: unicas.length, filas_repetidas: repetidas };
 }
 
+// Borra una carga y, en cascada, sus filas (ioarr_carga_filas o ioarr_pmi).
+// No deshace lo que la importación ya escribió en ioarr_proyectos.
+export async function borrarCarga(supabase, id) {
+  const { data, error } = await supabase.from('ioarr_cargas').delete().eq('id', id).select().maybeSingle();
+  if (error) throw error;
+  return data; // null si no existía
+}
+
 // ─── Leer los datos del cruce ───────────────────────────────────────────────
 async function todo(consulta) {
   const out = [];
