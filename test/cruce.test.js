@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as XLSX from 'xlsx';
 import { leerArchivo, detectarMapeo, limpiaCui, datosDelBanner } from '../src/ioarr/ingesta.js';
-import { filaACarga, filaAPmi, filtrarFilasPmi, esEducacion, textoFiltros, deduplicarPorCui, guardarCarga, borrarCarga, calcularCruce, claseFaseOxi, claveOpmi, IDEA_SIN_CUI } from '../src/ioarr/cruce.js';
+import { filaACarga, filaAPmi, filtrarFilasPmi, esEducacion, textoFiltros, deduplicarPorCui, guardarCarga, borrarCarga, calcularCruce, claseFaseOxi, claveOpmi, tipoEntidad, IDEA_SIN_CUI } from '../src/ioarr/cruce.js';
 import { excelProinversion } from './helpers/proinversion.js';
 
 // ─── Réplica en memoria de lo que lee obtenerDatosCruce() ───────────────────
@@ -423,9 +423,16 @@ test('CUI 2560356 (PMI del MINEDU) y 2649342 (PMI del GR Lambayeque) → «En PM
   assert.equal(s['2649500'].en_pmi_motivo, 'cui_no_encontrado');
   assert.equal(s['2649500'].en_pmi_motivo_label, 'CUI no encontrado');
   assert.match(s['2649500'].en_pmi_motivo_texto, /solo Educación y este proyecto es de la función «SALUD»/);
-  // Regla 4: el CUI está en un PMI cargado aunque la entidad no case
+  // Regla 4: el CUI está en un PMI cargado aunque la entidad no case → «En PMI (del sector)», con nota, sin aviso
   assert.equal(s['2560999'].en_pmi, 'si');
-  assert.match(s['2560999'].avisos.join(' '), /no es la OPMI de su entidad/);
+  assert.equal(s['2560999'].situacion, 'viable_pmi');
+  assert.equal(s['2560999'].pmi_del_sector, true);
+  assert.equal(s['2560999'].pmi_opmi, 'OPMI DEL MINISTERIO DE EDUCACION');
+  assert.deepEqual(s['2560999'].avisos, []);
+  assert.deepEqual(s['2560999'].notas, ['Programado en el PMI de «OPMI DEL MINISTERIO DE EDUCACION», que no es la OPMI de su entidad ' +
+    '«MUNICIPALIDAD DISTRITAL DE OTRA». Es frecuente en universidades públicas, cuyas inversiones se programan en el PMI del sector.']);
+  assert.equal(s['2560356'].pmi_del_sector, false);
+  assert.deepEqual(s['2560356'].notas, []);
 
   // Panel «PMI cargados»
   assert.deepEqual(pmi_cargados.cargas.map(c => [c.opmi, c.filas, c.vigente, c.proyectos_cubiertos, c.proyectos_en_pmi]), [
@@ -455,4 +462,46 @@ test('Una carga nueva de la misma OPMI reemplaza a la anterior; la de otra OPMI 
   const l1 = pmi_cargados.cargas.find(c => c.id === 'l1');
   assert.equal(l1.vigente, false);
   assert.equal(l1.reemplazada_por.id, 'l2');
+});
+
+test('PMI del sector: una universidad en el PMI del MINEDU sigue «En PMI», nunca «sin verificar» ni «fuera»', () => {
+  const minedu = importarPmi(excelCarteraPmi('OPMI DEL MINISTERIO DE EDUCACION', [filaCartera(2480001)]));
+  const lamba = importarPmi(excelCarteraPmi('OPMI DEL GOBIERNO REGIONAL LAMBAYEQUE', [filaCartera(2649342)]));
+  const datos = vistas([
+    { id: 'm', fuente: 'pmi', fecha_carga: '2026-10-17T20:47:21Z', opmi: minedu.leido.opmi_detectada, filas: minedu.filas },
+    { id: 'u', fuente: 'pmi', fecha_carga: '2026-10-17T20:50:00Z', opmi: 'OPMI DE LA UNIVERSIDAD NACIONAL PEDRO RUIZ GALLO', filas: [{ cui: '2480002' }] },
+    { id: 'l', fuente: 'pmi', fecha_carga: '2026-10-17T20:36:01Z', opmi: lamba.leido.opmi_detectada, filas: lamba.filas }
+  ]);
+  // Su propia OPMI está cargada y no lo tiene, y la OPMI de su GORE tampoco: igual está en el PMI del sector
+  datos.proyectos = [{ id: 'x', cui: '2480001', entidad: 'UNIVERSIDAD NACIONAL PEDRO RUIZ GALLO', nombre: 'LABORATORIO DE LA FACULTAD DE AGRONOMIA', estado: 'viable' }];
+  const f = calcularCruce(datos).filas.find(x => x.cui === '2480001');
+  assert.equal(f.en_pmi, 'si');
+  assert.equal(f.situacion, 'viable_pmi');
+  assert.equal(f.pmi_del_sector, true);
+  assert.equal(f.en_pmi_motivo, null);
+  assert.equal(f.tipo_entidad, 'universidad');
+  assert.match(f.notas[0], /^Programado en el PMI de «OPMI DEL MINISTERIO DE EDUCACION», que no es la OPMI de su entidad «UNIVERSIDAD NACIONAL PEDRO RUIZ GALLO»/);
+});
+
+test('tipoEntidad: separa colegios/UGEL de institutos, universidades y el resto', () => {
+  const casos = [
+    ['GOBIERNO REGIONAL LAMBAYEQUE', 'ADQUISICION DE MOBILIARIO; EN EL(LA) I.E. N° 10234 DISTRITO DE CHICLAYO', 'colegio_ugel'],
+    ['MUNICIPALIDAD DISTRITAL DE SAN MARCOS', 'MEJORAMIENTO DE LA INSTITUCIÓN EDUCATIVA INICIAL 123', 'colegio_ugel'],
+    ['MUNICIPALIDAD DISTRITAL DE X', 'MOBILIARIO EN EL(LA) IE SANTA ROSA', 'colegio_ugel'],
+    ['GOBIERNO REGIONAL PUNO', 'EQUIPAMIENTO DE LA UGEL AZANGARO', 'colegio_ugel'],
+    ['UGEL 03', 'OFICINAS', 'colegio_ugel'],
+    ['GOBIERNO REGIONAL ICA', 'EQUIPO DE TALLER; EN EL(LA) INSTITUTO SUPERIOR TECNOLÓGICO PUBLICO NASCA', 'instituto'],
+    ['GOBIERNO REGIONAL APURIMAC', 'SALA DE USOS MULTIPLES EN EL(LA) IESPP JOSE CARLOS MARIATEGUI', 'instituto'],
+    ['UNIVERSIDAD NACIONAL DE PIURA', 'LABORATORIO DE QUIMICA', 'universidad'],
+    ['UNIVERSIDAD NACIONAL DE EDUCACION ENRIQUE GUZMAN Y VALLE', 'AULAS DEL COLEGIO DE APLICACION', 'universidad'],
+    ['GOBIERNO REGIONAL JUNIN', 'EDIFICACION EN EL(LA) DIRECCIÓN REGIONAL DE TRABAJO', 'gore'],
+    ['MANCOMUNIDAD MUNICIPAL ECOTURISTICA', 'MIRADOR', 'municipalidad'],
+    ['MINISTERIO DE EDUCACION', 'SISTEMA DE GESTION', 'ministerio'],
+    ['CENTRO DE FORMACION EN TURISMO - CENFOTUR', 'AULAS', 'instituto'],
+    ['GOBIERNO REGIONAL AMAZONAS', 'EQUIPAMIENTO DE AULA EN EL(LA) CENTRO TECNICO PRODUCTIVO CHACHAPOYAS', 'instituto'],
+    ['GOBIERNO REGIONAL UCAYALI', 'ADQUISICION DE MOBILIARIO DE AULA; EN SETENTA Y CINCO A NIVEL DEPARTAMENTAL (UCAYALI)', 'colegio_ugel'],
+    ['MUNICIPALIDAD DISTRITAL DE Y', 'EN EL(LA) PRESTACION DE SERVICIOS EDUCATIVOS EN EL AMBITO DISTRITAL', 'colegio_ugel'],
+    ['SEGURO SOCIAL', 'OFICINAS', 'otra']
+  ];
+  for (const [entidad, nombre, tipo] of casos) assert.equal(tipoEntidad(entidad, nombre), tipo, `${entidad} | ${nombre}`);
 });

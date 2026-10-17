@@ -108,6 +108,37 @@ export function claveOpmi(texto) {
   return partes[0] || t;
 }
 
+// ─── Tipo de entidad (para filtrar educación básica de lo demás) ────────────
+// El Banco registra el pliego (GORE, municipalidad…), no la UGEL ni el colegio:
+// por eso se mira también el nombre de la inversión («… EN EL(LA) I.E. N° 123 …»).
+// Se evalúa en este orden; gana el primero que encaja.
+export const TIPOS_ENTIDAD = [
+  { key: 'colegio_ugel', label: 'Colegios / UGEL' },
+  { key: 'instituto', label: 'Institutos superiores / CETPRO' },
+  { key: 'universidad', label: 'Universidades' },
+  { key: 'gore', label: 'Gobierno regional' },
+  { key: 'municipalidad', label: 'Municipalidad' },
+  { key: 'ministerio', label: 'Ministerio / programa nacional' },
+  { key: 'otra', label: 'Otra' }
+];
+const TIPO_ENTIDAD_LABEL = Object.fromEntries(TIPOS_ENTIDAD.map(t => [t.key, t.label]));
+const RE_UNIVERSIDAD = /UNIVERSIDAD|FACULTAD|ESCUELAS? PROFESIONAL/;
+const RE_INSTITUTO = /INSTITUTO( DE EDUCACION)? SUPERIOR|ESCUELA (DE EDUCACION )?SUPERIOR|EDUCACION SUPERIOR (PEDAGOGICA|TECNOLOGICA)|(^|[^A-Z])(IEST|IESTP|IESP|IESPP|EESP|EEST|IES|ISTP|ISP|CETPRO)([^A-Z]|$)|CENTRO TECNICO PRODUCTIVO|EDUCACION OCUPACIONAL/;
+const RE_BASICA = /(^|[^A-Z])(I\s?\.?\s?E\s?\.?\s?([IPS]\.?)?|IIEE|UGEL|PRONOEI|CEBA|CEBE)([^A-Z]|$)|INSTITUCI(ON|ONES) EDUCATIVA|COLEGIO|UNIDAD DE GESTION EDUCATIVA|(DIRECCION|GERENCIA) REGIONAL DE EDUCACION|EDUCACION (BASICA|INICIAL|PRIMARIA|SECUNDARIA)|(^|[^A-Z])(INICIAL|PRIMARIA|SECUNDARIA)([^A-Z]|$)|N(RO)?\s?[°º]\s?\d|SERVICIOS? EDUCATIVOS?|AULAS? DE INNOVACION PEDAGOGICA|(MOBILIARIO|EQUIPAMIENTO|EQUIPO) DE AULA/;
+export function tipoEntidad(entidad, nombre) {
+  const e = normaliza(entidad), n = normaliza(nombre);
+  if (/UNIVERSIDAD/.test(e)) return 'universidad';
+  if (/INSTITUTO SUPERIOR|ESCUELA (DE EDUCACION )?SUPERIOR|CENFOTUR/.test(e)) return 'instituto';
+  if (RE_BASICA.test(e)) return 'colegio_ugel';
+  if (RE_UNIVERSIDAD.test(n)) return 'universidad';
+  if (RE_INSTITUTO.test(n)) return 'instituto';
+  if (RE_BASICA.test(n)) return 'colegio_ugel';
+  if (/GOBIERNO REGIONAL/.test(e)) return 'gore';
+  if (/MUNICIPAL/.test(e)) return 'municipalidad';
+  if (/MINISTERIO|PROGRAMA NACIONAL/.test(e)) return 'ministerio';
+  return 'otra';
+}
+
 const masReciente = (a, b) => new Date(b.fecha_carga) - new Date(a.fecha_carga) || String(b.id).localeCompare(String(a.id));
 
 // Qué OPMI cubre cada carga del PMI (la de la carga y las entidades de sus filas)
@@ -317,7 +348,7 @@ export function calcularCruce({ fuentes = [], proyectos = [], pmi = [], pmiEntid
     const faseOxi = enPro ? p.fase_oxi : null;
     const clase = enPro ? claseFaseOxi(faseOxi) : null;
     const idea = esIdea(cui);
-    const avisos = [];
+    const avisos = [], notas = [];
 
     // ── PMI. Regla 4: si el CUI está en un PMI cargado, está en el PMI (aunque la
     // entidad no case). Regla 5: si no está y la OPMI de su entidad sí se cargó,
@@ -331,12 +362,16 @@ export function calcularCruce({ fuentes = [], proyectos = [], pmi = [], pmiEntid
     const fuera = cargaOpmi && fueraDeFiltros(cargaOpmi.filtros,
       { funcion: b?.funcion || p?.funcion || r?.funcion, tipo: r?.tipo_inversion });
     const nombreOpmi = (c) => c.opmi || 'la OPMI';
-    let enPmi = 'sin_verificar', pmiOrigen = null, pmiDetalle = null, motivoSv = null;
+    let enPmi = 'sin_verificar', pmiOrigen = null, pmiDetalle = null, motivoSv = null, pmiDelSector = false;
     if (filaPmi) {
+      // Está en el PMI aunque lo programe otra OPMI (p. ej. la del sector): eso no
+      // cambia la situación, solo se anota
       enPmi = 'si'; pmiOrigen = 'archivo';
-      pmiDetalle = `En el PMI ${filaPmi.periodo || ''} de ${filaPmi.opmi || 'una OPMI sin nombre'} (carga del ${fechaCorta(filaPmi.fecha_carga)})`.replace(/\s+/g, ' ');
-      if (filaPmi.clave && clavesEntidad.length && !clavesEntidad.includes(filaPmi.clave))
-        avisos.push(`Está en el PMI de «${filaPmi.opmi}», que no es la OPMI de su entidad («${entidades[0]}»)`);
+      pmiDelSector = !!filaPmi.clave && clavesEntidad.length > 0 && !clavesEntidad.includes(filaPmi.clave);
+      pmiDetalle = `En el PMI ${filaPmi.periodo || ''} de ${filaPmi.opmi || 'una OPMI sin nombre'}${pmiDelSector ? ' (del sector)' : ''} (carga del ${fechaCorta(filaPmi.fecha_carga)})`.replace(/\s+/g, ' ');
+      if (pmiDelSector)
+        notas.push(`Programado en el PMI de «${filaPmi.opmi}», que no es la OPMI de su entidad «${entidades[0]}». ` +
+          'Es frecuente en universidades públicas, cuyas inversiones se programan en el PMI del sector.');
     } else if (cargaOpmi && !fuera) {
       enPmi = 'no'; pmiOrigen = 'archivo';
       const filtro = textoFiltros(cargaOpmi.filtros);
@@ -435,14 +470,18 @@ export function calcularCruce({ fuentes = [], proyectos = [], pmi = [], pmiEntid
       en_pmi_motivo_label: motivoSv ? MOTIVO_PMI[motivoSv.clave] : null,
       en_pmi_motivo_texto: motivoSv?.texto || null,
       pmi_opmi: filaPmi?.opmi || cargaOpmi?.opmi || null,
+      pmi_del_sector: pmiDelSector,                    // en el PMI de una OPMI que no es la de su entidad
       pmi_periodo: filaPmi?.periodo || null,
       pmi_manual: m ? { en_pmi: m.en_pmi, revisado_en: m.revisado_en, nota: m.nota } : null,
       situacion,
       situacion_label: SITUACION[situacion].label,
       prioridad: SITUACION[situacion].prioridad,
       motivo,
+      tipo_entidad: tipoEntidad(b?.entidad || p?.entidad || r?.entidad, nombre),
+      tipo_entidad_label: TIPO_ENTIDAD_LABEL[tipoEntidad(b?.entidad || p?.entidad || r?.entidad, nombre)],
       cargas: cargasFila,
       avisos,
+      notas,                                           // informativas (no son problemas)
       claves_opmi: clavesEntidad,
       proyecto_id: r?.id || null,
       estado_radar: r?.estado || null,
