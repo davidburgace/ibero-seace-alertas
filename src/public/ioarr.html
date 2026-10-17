@@ -276,6 +276,7 @@
       La situación se calcula al vuelo y <b>no cambia</b> el estado de tus proyectos: si no coincide con lo que fijaste, se señala en rojo.
       Las cargas se suben en la pestaña «Importar».</p>
     <div class="frescura" id="cr-frescura"></div>
+    <div class="res-box" style="margin:0 0 16px"><h4>PMI cargados <span class="sub">· de qué OPMI hay datos</span></h4><div id="cr-pmi-cargados"></div></div>
     <details style="margin:-6px 0 16px"><summary class="sub" style="cursor:pointer">Historial de cargas</summary>
       <div class="tabla-wrap" style="margin-top:8px" id="cr-historial"></div></details>
     <div class="filtros">
@@ -328,6 +329,9 @@
       </div>
       <label class="chk" style="margin-bottom:14px" id="imp-solo-ioarr-wrap"><input type="checkbox" id="imp-solo-ioarr" checked> Importar solo IOARR (si el archivo trae columna de tipo de inversión)</label>
       <div id="imp-filtros-pmi" style="display:none;margin-bottom:14px">
+        <div class="field" style="max-width:520px;margin-bottom:10px"><label>OPMI de este PMI *</label>
+          <input type="text" id="imp-pmi-opmi" placeholder="p. ej. OPMI DEL GOBIERNO REGIONAL LAMBAYEQUE">
+          <div class="sub" id="imp-pmi-opmi-ayuda" style="margin-top:4px">Se lee del encabezado del archivo al previsualizar. Sirve para saber qué entidades cubre este PMI.</div></div>
         <label class="chk" style="margin-bottom:6px"><input type="checkbox" id="imp-pmi-educacion" checked> Importar solo Educación (columna Función = EDUCACIÓN)</label>
         <label class="chk"><input type="checkbox" id="imp-pmi-ioarr"> Solo IOARR (columna Tipo de inversión)</label>
       </div>
@@ -915,6 +919,12 @@ async function previsualizar() {
     const cols = r.headers.slice(0, 12);
     $('imp-muestra').innerHTML = `<table class="tabla"><thead><tr>${cols.map(h => `<th>${esc(h)}</th>`).join('')}</tr></thead>
       <tbody>${r.muestra.map(row => `<tr style="cursor:default">${cols.map(h => `<td>${esc(row[h])}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+    if ($('imp-fuente').value === 'pmi') {
+      $('imp-pmi-opmi').value = r.opmi_detectada || '';
+      $('imp-pmi-opmi-ayuda').textContent = r.opmi_detectada
+        ? `Detectada en el encabezado del archivo${r.periodo_detectado ? ` · periodo ${r.periodo_detectado}` : ''}. Corrígela si no es la correcta.`
+        : 'No se encontró en el encabezado del archivo: escríbela tal como figura en el PMI.';
+    }
     $('imp-mapeo-panel').style.display = 'block';
     setMsg($('imp-res'), '');
   } catch (e) { setMsg($('imp-msg'), e.message, 'err'); }
@@ -933,6 +943,8 @@ $('imp-fuente').addEventListener('change', () => { filtrosPorFuente(); if (impAr
 $('btn-importar').addEventListener('click', async () => {
   const mapeo = Object.fromEntries([...document.querySelectorAll('[data-campo]')].map(s => [s.dataset.campo, s.value || null]));
   if (obligatorios().some(c => !mapeo[c])) return setMsg($('imp-res'), obligatorios().length > 1 ? 'Mapea al menos CUI y nombre' : 'Mapea al menos la columna de CUI', 'err');
+  if ($('imp-fuente').value === 'pmi' && !$('imp-pmi-opmi').value.trim() && !mapeo.entidad)
+    return setMsg($('imp-res'), 'Indica la OPMI de este PMI (p. ej. «OPMI DEL GOBIERNO REGIONAL LAMBAYEQUE»)', 'err');
   const btn = $('btn-importar'); btn.disabled = true;
   setMsg($('imp-res'), 'Importando…');
   try {
@@ -942,6 +954,7 @@ $('btn-importar').addEventListener('click', async () => {
     if ($('imp-fuente').value === 'pmi') {
       fd.append('solo_educacion', $('imp-pmi-educacion').checked ? '1' : '0');
       fd.append('solo_ioarr', $('imp-pmi-ioarr').checked ? '1' : '0');
+      fd.append('opmi', $('imp-pmi-opmi').value.trim());
     } else fd.append('solo_ioarr', $('imp-solo-ioarr').checked ? '1' : '0');
     const r = await api('/api/ioarr/importar', { method: 'POST', body: fd });
     cruce = null; // la próxima vez que se abra el cruce, se recalcula
@@ -952,10 +965,9 @@ $('btn-importar').addEventListener('click', async () => {
         fd.get('solo_educacion') === '1' && `${x.no_educacion} por no ser Educación`,
         fd.get('solo_ioarr') === '1' && `${x.no_ioarr} por no ser IOARR`
       ].filter(Boolean);
-      setMsg($('imp-res'), `✅ Carga del PMI guardada. Filas leídas: ${x.leidas} · importadas: ${x.importadas}` +
+      setMsg($('imp-res'), `✅ Carga del PMI${r.opmi ? ` de ${r.opmi}` : ''} guardada. Filas leídas: ${x.leidas} · importadas: ${x.importadas}` +
         ` · descartadas: ${x.leidas - x.importadas}${descartes.length ? ` (${descartes.join(', ')})` : ''}.` +
         ` Quedan ${r.cuis} CUI` + (r.filas_repetidas ? ` (${r.filas_repetidas} filas con CUI repetido)` : '') +
-        (r.sin_entidad ? ` · ${r.sin_entidad} sin entidad (solo cuentan mientras esta sea la última carga del PMI)` : '') +
         '. Revisa la pestaña «Cruce de fuentes».', 'ok');
     } else {
       setMsg($('imp-res'), `✅ ${r.nuevos} nuevos · ${r.actualizados} actualizados (${r.cambios_estado} cambios de estado) · ${r.sin_cambios} sin cambios` +
@@ -977,6 +989,7 @@ const SITUACIONES = [
 ];
 const FUENTE_CARGA = { invierte_pe: 'Banco de Inversiones', proinversion: 'Proinversión', pmi: 'Cartera de PMI' };
 const PMI_TXT = { si: 'Sí', no: 'No', sin_verificar: 'Sin verificar' };
+const MOTIVO_PMI = { opmi_no_cargada: 'Su OPMI no fue cargada', cui_no_encontrado: 'CUI no encontrado' };
 const MAX_FILAS_CRUCE = 500;
 const DIAS_VIEJA = 30;
 let cruce = null;       // respuesta de /api/ioarr/cruce
@@ -994,6 +1007,7 @@ async function cargarCruce() {
     setMsg($('cr-msg'), '');
     llenarFiltrosCruce();
     renderFrescura();
+    renderPmiCargados();
     renderCruce();
   } catch (e) { setMsg($('cr-msg'), e.message, 'err'); }
 }
@@ -1023,9 +1037,26 @@ function renderFrescura() {
   }).join('');
   $('cr-historial').innerHTML = historial.length ? `<table class="tabla"><thead><tr><th>Fecha</th><th>Fuente</th><th>Archivo</th><th class="num">CUI</th><th class="num">Repetidos</th><th></th></tr></thead><tbody>
     ${historial.map(c => `<tr style="cursor:default"><td class="sub">${fecha(c.fecha_carga)}</td><td>${FUENTE_CARGA[c.fuente] || c.fuente}</td>
-      <td>${esc(c.nombre_archivo || '—')}${c.hoja ? ` <span class="sub">(hoja ${esc(c.hoja)})</span>` : ''}${textoFiltros(c.filtros) ? ` <span class="sub">· ${textoFiltros(c.filtros)}</span>` : ''}</td><td class="num">${c.filas}</td><td class="num">${c.filas_repetidas || ''}</td>
+      <td>${c.opmi ? `<b>${esc(c.opmi)}</b> · ` : ''}${esc(c.nombre_archivo || '—')}${c.hoja ? ` <span class="sub">(hoja ${esc(c.hoja)})</span>` : ''}${textoFiltros(c.filtros) ? ` <span class="sub">· ${textoFiltros(c.filtros)}</span>` : ''}</td><td class="num">${c.filas}</td><td class="num">${c.filas_repetidas || ''}</td>
       <td><button class="card-stage-btn" style="flex:none;padding:3px 10px" data-borrar-carga="${c.id}" title="Borrar esta carga y sus filas">🗑 Borrar</button></td></tr>`).join('')}
     </tbody></table>` : '<p class="vacio">Aún no hay cargas.</p>';
+}
+
+// Panel «PMI cargados»: cada carga del PMI con su OPMI, filas y fecha, y las OPMI que faltan
+function renderPmiCargados() {
+  const p = cruce.pmi_cargados || { cargas: [], opmi_faltantes: [], total_opmi_faltantes: 0 };
+  const lista = p.cargas.length ? `<table class="tabla"><thead><tr><th>OPMI</th><th class="num">Filas</th><th>Fecha de carga</th><th>Archivo</th>
+      <th class="num" title="Proyectos del cruce cuya entidad corresponde a esta OPMI">Proyectos de su entidad</th><th class="num" title="Proyectos del cruce encontrados en este PMI">En este PMI</th><th>Estado</th></tr></thead><tbody>
+    ${p.cargas.map(c => `<tr style="cursor:default">
+      <td><b>${esc(c.opmi || 'Sin OPMI (por la entidad de cada fila)')}</b></td><td class="num">${c.filas}</td>
+      <td class="sub" style="white-space:nowrap">${fecha(c.fecha_carga)}</td>
+      <td class="sub">${esc(c.nombre_archivo || '—')}${textoFiltros(c.filtros) ? ` · ${textoFiltros(c.filtros)}` : ''}</td>
+      <td class="num">${c.proyectos_cubiertos}</td><td class="num">${c.proyectos_en_pmi}</td>
+      <td class="sub">${c.vigente ? '✓ Vigente' : `Reemplazada por la carga del ${fechaDia(c.reemplazada_por?.fecha_carga)}`}</td></tr>`).join('')}
+    </tbody></table>` : '<p class="sub">Aún no se cargó ningún PMI. Súbelo en la pestaña «Importar» (fuente: Cartera de PMI).</p>';
+  const faltan = p.opmi_faltantes.length ? `<div class="sub" style="margin-top:8px"><b>OPMI que faltan</b> (entidades con proyectos «sin verificar» porque su OPMI no fue cargada${p.total_opmi_faltantes > p.opmi_faltantes.length ? `; se muestran ${p.opmi_faltantes.length} de ${p.total_opmi_faltantes}` : ''}):
+    ${p.opmi_faltantes.map(x => `${esc(x.entidad)} (${x.proyectos})`).join(' · ')}</div>` : '';
+  $('cr-pmi-cargados').innerHTML = `<div class="tabla-wrap">${lista}</div>${faltan}`;
 }
 
 function filtrarCruce() {
@@ -1061,7 +1092,8 @@ function renderCruce() {
       <td>${f.en_proinversion ? esc(f.fase_oxi || '✓') : '—'}<div class="sub">${esc(f.nivel_estudio || '')}</div></td>
       <td style="white-space:nowrap">${PMI_TXT[f.en_pmi]}${f.en_pmi_origen === 'manual' ? ' <span class="sub">(a mano)</span>' : ''}
         <button class="pmi-btn" data-pmi="${i}" title="Marcar a mano si está en el PMI">✎</button>
-        ${f.pmi_periodo ? `<div class="sub">${esc(f.pmi_periodo)}</div>` : ''}</td>
+        ${f.pmi_periodo ? `<div class="sub">${esc(f.pmi_periodo)}</div>` : ''}
+        ${f.en_pmi === 'sin_verificar' && f.en_pmi_motivo ? `<div class="aviso-fila" title="${esc(f.en_pmi_motivo_texto)}">${esc(MOTIVO_PMI[f.en_pmi_motivo])}</div>` : ''}</td>
       <td style="min-width:240px">${esc(f.motivo)}
         ${f.diferencia_estado ? `<div class="dif-fila">≠ ${esc(f.diferencia_estado)}</div>` : ''}
         ${f.avisos.map(a => `<div class="aviso-fila">⚠️ ${esc(a)}</div>`).join('')}</td>
@@ -1174,7 +1206,8 @@ $('btn-cr-export').addEventListener('click', () => {
     Provincia: f.provincia, Distrito: f.distrito, Función: f.funcion, 'Monto (S/)': f.monto_inversion ?? '', Mobiliario: f.es_mobiliario ? 'Sí' : 'No',
     'En Banco': f.en_banco ? 'Sí' : 'No', 'Estado de la inversión': f.estado_inversion || '', 'En Proinversión': f.en_proinversion ? 'Sí' : 'No',
     'Fase OxI': f.fase_oxi || '', 'Nivel de estudio': f.nivel_estudio || '', 'En PMI': PMI_TXT[f.en_pmi], 'Origen PMI': f.en_pmi_origen || '',
-    'Detalle PMI': f.en_pmi_detalle || '', 'Periodo PMI': f.pmi_periodo || '', 'Estado en el radar': f.estado_radar ? (ESTADOS[f.estado_radar] || f.estado_radar) : '',
+    'Detalle PMI': f.en_pmi_detalle || '', 'Motivo PMI sin verificar': f.en_pmi_motivo ? MOTIVO_PMI[f.en_pmi_motivo] : '',
+    'OPMI': f.pmi_opmi || '', 'Periodo PMI': f.pmi_periodo || '', 'Estado en el radar': f.estado_radar ? (ESTADOS[f.estado_radar] || f.estado_radar) : '',
     'Carga Banco': cargaDe(f, 'invierte_pe') ? fechaDia(cargaDe(f, 'invierte_pe').fecha_carga) : '',
     'Carga Proinversión': cargaDe(f, 'proinversion') ? fechaDia(cargaDe(f, 'proinversion').fecha_carga) : '',
     'Carga PMI': cargaDe(f, 'pmi') ? fechaDia(cargaDe(f, 'pmi').fecha_carga) : ''
@@ -1182,7 +1215,7 @@ $('btn-cr-export').addEventListener('click', () => {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(filas), 'Cruce');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(cruce.cargas.historial.map(c => ({
-    Fecha: fecha(c.fecha_carga), Fuente: FUENTE_CARGA[c.fuente] || c.fuente, Archivo: c.nombre_archivo || '', Hoja: c.hoja || '', CUI: c.filas, Repetidos: c.filas_repetidas
+    Fecha: fecha(c.fecha_carga), Fuente: FUENTE_CARGA[c.fuente] || c.fuente, OPMI: c.opmi || '', Archivo: c.nombre_archivo || '', Hoja: c.hoja || '', CUI: c.filas, Repetidos: c.filas_repetidas
   }))), 'Cargas');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
     ['Aviso'], ['Información referencial obtenida de fuentes públicas. Verificar con la DGPPIP del MEF o un abogado.'],

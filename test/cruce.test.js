@@ -2,12 +2,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import * as XLSX from 'xlsx';
-import { leerArchivo, detectarMapeo } from '../src/ioarr/ingesta.js';
-import { filaACarga, filaAPmi, filtrarFilasPmi, esEducacion, textoFiltros, deduplicarPorCui, guardarCarga, borrarCarga, calcularCruce, claseFaseOxi, IDEA_SIN_CUI } from '../src/ioarr/cruce.js';
+import { leerArchivo, detectarMapeo, limpiaCui, datosDelBanner } from '../src/ioarr/ingesta.js';
+import { filaACarga, filaAPmi, filtrarFilasPmi, esEducacion, textoFiltros, deduplicarPorCui, guardarCarga, borrarCarga, calcularCruce, claseFaseOxi, claveOpmi, IDEA_SIN_CUI } from '../src/ioarr/cruce.js';
 import { excelProinversion } from './helpers/proinversion.js';
 
-// ─── Réplica en memoria de las vistas de la migración 005 ───────────────────
-// cargas: [{ id, fuente, fecha_carga, nombre_archivo, filas: [...] }]
+// ─── Réplica en memoria de lo que lee obtenerDatosCruce() ───────────────────
+// cargas: [{ id, fuente, fecha_carga, nombre_archivo, opmi?, filtros?, filas: [...] }]
 function vistas(cargas) {
   const orden = [...cargas].sort((a, b) => new Date(b.fecha_carga) - new Date(a.fecha_carga));
   const fuentes = [];
@@ -23,13 +23,12 @@ function vistas(cargas) {
     }
     fuentes.push(...vistos.values());
   }
-  const pmiEntidades = new Map();
-  for (const c of orden.filter(c => c.fuente === 'pmi')) for (const f of c.filas)
-    if (f.entidad && !pmiEntidades.has(f.entidad.toUpperCase())) pmiEntidades.set(f.entidad.toUpperCase(), { entidad: f.entidad, carga_id: c.id, fecha_carga: c.fecha_carga, periodo: f.periodo, filtros: c.filtros || {} });
-  const pmi = orden.filter(c => c.fuente === 'pmi').flatMap(c => c.filas
-    .filter(f => pmiEntidades.get(f.entidad?.toUpperCase())?.carga_id === c.id)
-    .map(f => ({ ...f, carga_id: c.id, fecha_carga: c.fecha_carga })));
-  return { fuentes, pmi, pmiEntidades: [...pmiEntidades.values()], cargas: cargas.map(({ filas, ...c }) => c) };
+  // ioarr_pmi (todas las cargas) y la vista ioarr_pmi_entidades_carga (migración 007)
+  const dePmi = cargas.filter(c => c.fuente === 'pmi');
+  const pmi = dePmi.flatMap(c => c.filas.map(f => ({ entidad: null, periodo: null, ...f, carga_id: c.id, fecha_carga: c.fecha_carga })));
+  const pmiEntidadesCarga = [...new Map(pmi.filter(f => f.entidad).map(f => [`${f.carga_id}|${f.entidad}`, { carga_id: f.carga_id, entidad: f.entidad }])).values()];
+  return { fuentes, pmi, pmiEntidadesCarga,
+    cargas: cargas.map(({ filas, ...c }) => ({ filtros: {}, opmi: null, ...c, filas: c.fuente === 'pmi' ? filas.length : c.filas?.length })) };
 }
 
 // Exporte de la Consulta Avanzada del Banco: banner de 3 filas y encabezado en la 4
@@ -313,7 +312,7 @@ test('Cruce: un PMI cargado solo con Educación no deja «fuera del PMI» a lo q
   assert.match(s['704'].en_pmi_detalle, /no se sabe la función/);
 
   // La misma carga sin filtros sí deja fuera a todos
-  datos.pmiEntidades = datos.pmiEntidades.map(e => ({ ...e, filtros: {} }));
+  datos.cargas = datos.cargas.map(c => ({ ...c, filtros: {} }));
   datos.pmiManual = [];
   const t = Object.fromEntries(calcularCruce(datos).filas.map(f => [f.cui, f]));
   for (const cui of ['701', '702', '703', '704']) assert.equal(t[cui].en_pmi, 'no', cui);
@@ -324,4 +323,136 @@ test('textoFiltros', () => {
   assert.equal(textoFiltros({ solo_educacion: false, solo_ioarr: true }), 'solo IOARR');
   assert.equal(textoFiltros({}), '');
   assert.equal(textoFiltros(null), '');
+});
+
+// ─── PMI por OPMI (el caso del 17/10/2026) ──────────────────────────────────
+// Exporte «Cartera de inversiones» del PMI: banner de 5 filas con la OPMI y el
+// encabezado en la fila 6; sin columna de entidad; con «Monto Año 2026 (S/)».
+function excelCarteraPmi(opmi, filas) {
+  const enc = ['Prioridad', 'Código Único', 'Nombre de la inversión', 'Tipo inversión', 'Función', 'Estado', 'Monto Año 2026 (S/)', 'Monto Año 2027 (S/)'];
+  const ws = XLSX.utils.aoa_to_sheet([
+    ['PROGRAMACIÓN MULTIANUAL DE INVERSIONES 2027-2029'], ['Cartera de inversiones'], ['OPMI:', opmi], ['Fecha de reporte: 17/10/2026'], [],
+    enc, ...filas]);
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Cartera');
+  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+}
+const filaCartera = (cui, funcion = 'EDUCACIÓN') => [1, cui, 'MEJORAMIENTO DE LA IE ' + cui, 'IOARR', funcion, 'ACTIVO', 1051206, 0];
+
+// Importa un archivo del PMI como lo hace POST /api/ioarr/importar
+function importarPmi(buffer, opciones = { soloEducacion: true }) {
+  const leido = leerArchivo(buffer);
+  const mapeo = detectarMapeo(leido.headers);
+  const { filas } = filtrarFilasPmi(leido.rows, mapeo, { ...opciones, periodo: leido.periodo_detectado });
+  return { leido, mapeo, filas: deduplicarPorCui(filas).filas };
+}
+
+test('Cartera del PMI: encabezado en la fila 6, OPMI y periodo del banner, «Monto Año 2026» no es el periodo', () => {
+  const { leido, mapeo, filas } = importarPmi(excelCarteraPmi('OPMI DEL GOBIERNO REGIONAL LAMBAYEQUE', [filaCartera(2649342), filaCartera(' 2649343 '), filaCartera(2649344, 'SALUD')]));
+  assert.equal(leido.fila_encabezado, 6);
+  assert.equal(leido.opmi_detectada, 'OPMI DEL GOBIERNO REGIONAL LAMBAYEQUE');
+  assert.equal(leido.periodo_detectado, '2027-2029');
+  assert.equal(mapeo.cui, 'Código Único');
+  assert.equal(mapeo.periodo, null);
+  assert.equal(mapeo.entidad, null);
+  assert.deepEqual(filas.map(f => [f.cui, f.periodo]), [['2649342', '2027-2029'], ['2649343', '2027-2029']]);
+});
+
+test('limpiaCui: texto de solo dígitos (espacios, decimales, «.0», separadores); sin dígitos no es CUI', () => {
+  for (const v of [2560356, '2560356', ' 2560356 ', '2560356.0', '2560356,00', '2,560,356', '2 560 356', 'CUI 2560356']) assert.equal(limpiaCui(v), '2560356', String(v));
+  assert.equal(limpiaCui('idea0000110'), 'IDEA0000110');
+  assert.equal(limpiaCui('Enlace'), null);
+  assert.equal(limpiaCui(''), null);
+  assert.equal(limpiaCui(null), null);
+});
+
+test('claveOpmi: la entidad del proyecto y la OPMI casan por equivalencia, no por texto idéntico', () => {
+  const igual = (a, b) => assert.equal(claveOpmi(a), claveOpmi(b), `${a} ↔ ${b}`);
+  igual('GOBIERNO REGIONAL LAMBAYEQUE', 'OPMI DEL GOBIERNO REGIONAL LAMBAYEQUE');
+  igual('Gobierno Regional de Lambayeque', 'OPMI DEL GOBIERNO REGIONAL LAMBAYEQUE');
+  igual('GOB. REGIONAL LAMBAYEQUE - SEDE CENTRAL', 'OPMI DEL GOBIERNO REGIONAL LAMBAYEQUE');
+  igual('MINISTERIO DE EDUCACION', 'OPMI DEL MINISTERIO DE EDUCACION');
+  igual('MINISTERIO DE EDUCACIÓN', 'OPMI del Ministerio de Educación');
+  igual('PROGRAMA NACIONAL DE INFRAESTRUCTURA EDUCATIVA - PRONIED', 'OPMI DEL MINISTERIO DE EDUCACION');
+  igual('MUNICIPALIDAD PROVINCIAL CHICLAYO', 'OPMI de la Municipalidad Provincial de Chiclayo');
+  assert.notEqual(claveOpmi('GOBIERNO REGIONAL LAMBAYEQUE'), claveOpmi('GOBIERNO REGIONAL LA LIBERTAD'));
+  assert.equal(datosDelBanner([['OPMI: OPMI DEL MINISTERIO DE EDUCACION']]).opmi, 'OPMI DEL MINISTERIO DE EDUCACION');
+});
+
+test('CUI 2560356 (PMI del MINEDU) y 2649342 (PMI del GR Lambayeque) → «En PMI», aunque no haya carga del Banco', () => {
+  const minedu = importarPmi(excelCarteraPmi('OPMI DEL MINISTERIO DE EDUCACION', [filaCartera(2560356), filaCartera(2560999)]));
+  const lamba = importarPmi(excelCarteraPmi('OPMI DEL GOBIERNO REGIONAL LAMBAYEQUE', [filaCartera(2649342)]));
+  const datos = vistas([
+    // La de Lambayeque se cargó antes: no debe perderse al cargar la del MINEDU
+    { id: 'pmi-lamba', fuente: 'pmi', fecha_carga: '2026-10-17T20:36:01Z', nombre_archivo: 'Cartera_261017-112354.xlsx',
+      opmi: lamba.leido.opmi_detectada, filtros: { solo_educacion: true, solo_ioarr: false }, filas: lamba.filas },
+    { id: 'pmi-minedu', fuente: 'pmi', fecha_carga: '2026-10-17T20:47:21Z', nombre_archivo: 'Cartera_261017-111601.xlsx',
+      opmi: minedu.leido.opmi_detectada, filtros: { solo_educacion: true, solo_ioarr: false }, filas: minedu.filas }
+  ]);
+  // Proyectos del radar importados del Banco antes de que existieran las cargas
+  const proy = (cui, entidad, extra = {}) => ({ id: 'r' + cui, cui, nombre: 'IE ' + cui, entidad, funcion: 'EDUCACIÓN', tipo_inversion: 'IOARR', estado: 'viable', ...extra });
+  datos.proyectos = [
+    proy('2560356', 'MINISTERIO DE EDUCACION'),
+    proy('2649342', 'GOBIERNO REGIONAL LAMBAYEQUE'),
+    proy('2649400', 'GOBIERNO REGIONAL LAMBAYEQUE'),                  // su OPMI está cargada y el CUI no
+    proy('2700001', 'GOBIERNO REGIONAL PIURA'),                       // su OPMI no se cargó
+    proy('2649500', 'GOBIERNO REGIONAL LAMBAYEQUE', { funcion: 'SALUD' }), // la carga era solo Educación
+    proy('2560999', 'MUNICIPALIDAD DISTRITAL DE OTRA')                // está en el PMI del MINEDU con otra entidad
+  ];
+  const { filas, pmi_cargados } = calcularCruce(datos);
+  const s = Object.fromEntries(filas.map(f => [f.cui, f]));
+
+  assert.equal(s['2560356'].en_pmi, 'si');
+  assert.equal(s['2560356'].situacion, 'viable_pmi');
+  assert.equal(s['2560356'].situacion_label, 'Viable, en PMI, sin OxI');
+  assert.equal(s['2560356'].pmi_opmi, 'OPMI DEL MINISTERIO DE EDUCACION');
+  assert.equal(s['2560356'].pmi_periodo, '2027-2029');
+
+  assert.equal(s['2649342'].en_pmi, 'si');
+  assert.equal(s['2649342'].situacion, 'viable_pmi');
+  assert.equal(s['2649342'].pmi_opmi, 'OPMI DEL GOBIERNO REGIONAL LAMBAYEQUE');
+  assert.match(s['2649342'].motivo, /En el radar \(sin carga del Banco\), no en Proinversión\. En el PMI 2027-2029 de OPMI DEL GOBIERNO REGIONAL LAMBAYEQUE/);
+
+  // Regla 5: la OPMI de su entidad sí se cargó y el CUI no está → fuera del PMI
+  assert.equal(s['2649400'].en_pmi, 'no');
+  assert.equal(s['2649400'].situacion, 'viable_fuera_pmi');
+  assert.equal(s['2649400'].en_pmi_motivo, null);
+  // Sin verificar, con el motivo exacto
+  assert.equal(s['2700001'].situacion, 'viable_pmi_sin_verificar');
+  assert.equal(s['2700001'].en_pmi_motivo, 'opmi_no_cargada');
+  assert.equal(s['2700001'].en_pmi_motivo_label, 'Su OPMI no fue cargada');
+  assert.equal(s['2649500'].en_pmi_motivo, 'cui_no_encontrado');
+  assert.equal(s['2649500'].en_pmi_motivo_label, 'CUI no encontrado');
+  assert.match(s['2649500'].en_pmi_motivo_texto, /solo Educación y este proyecto es de la función «SALUD»/);
+  // Regla 4: el CUI está en un PMI cargado aunque la entidad no case
+  assert.equal(s['2560999'].en_pmi, 'si');
+  assert.match(s['2560999'].avisos.join(' '), /no es la OPMI de su entidad/);
+
+  // Panel «PMI cargados»
+  assert.deepEqual(pmi_cargados.cargas.map(c => [c.opmi, c.filas, c.vigente, c.proyectos_cubiertos, c.proyectos_en_pmi]), [
+    ['OPMI DEL MINISTERIO DE EDUCACION', 2, true, 1, 2],
+    ['OPMI DEL GOBIERNO REGIONAL LAMBAYEQUE', 1, true, 3, 1]
+  ]);
+  assert.deepEqual(pmi_cargados.opmi_faltantes, [{ entidad: 'GOBIERNO REGIONAL PIURA', proyectos: 1 }]);
+});
+
+test('Una carga nueva de la misma OPMI reemplaza a la anterior; la de otra OPMI sigue contando', () => {
+  const lamba1 = importarPmi(excelCarteraPmi('OPMI DEL GOBIERNO REGIONAL LAMBAYEQUE', [filaCartera(2649342), filaCartera(2649400)]));
+  const lamba2 = importarPmi(excelCarteraPmi('OPMI del Gobierno Regional de Lambayeque', [filaCartera(2649342)]));
+  const minedu = importarPmi(excelCarteraPmi('OPMI DEL MINISTERIO DE EDUCACION', [filaCartera(2560356)]));
+  const datos = vistas([
+    { id: 'l1', fuente: 'pmi', fecha_carga: '2026-09-01T10:00:00Z', opmi: lamba1.leido.opmi_detectada, filas: lamba1.filas },
+    { id: 'm1', fuente: 'pmi', fecha_carga: '2026-09-15T10:00:00Z', opmi: minedu.leido.opmi_detectada, filas: minedu.filas },
+    { id: 'l2', fuente: 'pmi', fecha_carga: '2026-10-01T10:00:00Z', opmi: lamba2.leido.opmi_detectada, filas: lamba2.filas }
+  ]);
+  datos.proyectos = [
+    { id: 'a', cui: '2649400', entidad: 'GOBIERNO REGIONAL LAMBAYEQUE', estado: 'viable' },
+    { id: 'b', cui: '2560356', entidad: 'MINISTERIO DE EDUCACION', estado: 'viable' }
+  ];
+  const { filas, pmi_cargados } = calcularCruce(datos);
+  const s = Object.fromEntries(filas.map(f => [f.cui, f]));
+  assert.equal(s['2649400'].en_pmi, 'no');   // salió del PMI en la carga nueva de Lambayeque
+  assert.equal(s['2560356'].en_pmi, 'si');   // la del MINEDU no se pierde por ser más antigua
+  const l1 = pmi_cargados.cargas.find(c => c.id === 'l1');
+  assert.equal(l1.vigente, false);
+  assert.equal(l1.reemplazada_por.id, 'l2');
 });

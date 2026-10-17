@@ -375,18 +375,29 @@ router.post('/api/ioarr/importar/preview', upload.single('file'), async (req, re
   try { leido = leerArchivo(req.file.buffer); }
   catch (e) { return res.status(400).json({ error: 'No se pudo leer el archivo: ' + e.message }); }
   try {
-    const { headers, rows, fila_encabezado, hoja } = leido;
+    const { headers, rows, fila_encabezado, hoja, opmi_detectada, periodo_detectado } = leido;
     const fuente = FUENTES.includes(req.body.fuente) ? req.body.fuente : 'otro';
     const guardado = await mapeoGuardado(fuente);
     const mapeo = aplicarMapeoGuardado(headers, detectarMapeo(headers), guardado);
     res.json({
       headers, mapeo, muestra: rows.slice(0, 5), total_filas: rows.length, campos: CAMPOS_FUENTE[fuente],
-      fila_encabezado, hoja, usa_mapeo_guardado: !!guardado
+      fila_encabezado, hoja, usa_mapeo_guardado: !!guardado,
+      ...(fuente === 'pmi' ? { opmi_detectada: opmiDelArchivo(leido, mapeo), periodo_detectado } : {})
     });
   } catch (e) { next(e); }
 });
 
-// Paso 2: importar con el mapeo confirmado (campos multipart: file, fuente, mapeo JSON, solo_ioarr)
+// OPMI de un archivo del PMI: la del encabezado o, si el archivo tiene columna de
+// entidad con un único valor, ese valor
+function opmiDelArchivo({ rows, opmi_detectada }, mapeo) {
+  if (opmi_detectada) return opmi_detectada;
+  if (!mapeo?.entidad) return null;
+  const valores = [...new Set(rows.map(r => r[mapeo.entidad]).filter(v => v != null && String(v).trim()).map(v => String(v).trim()))];
+  return valores.length === 1 ? valores[0] : null;
+}
+const MIGRACIONES_CRUCE = 'supabase/migrations/005_ioarr_cruce_fuentes.sql, 006_ioarr_filtros_carga.sql y 007_ioarr_pmi_opmi.sql';
+
+// Paso 2: importar con el mapeo confirmado (campos multipart: file, fuente, mapeo JSON, solo_ioarr; PMI: opmi)
 // Banco y Proinversión: actualizan los proyectos Y quedan como carga para el cruce.
 // PMI: solo se guarda como carga (tabla ioarr_pmi); no crea proyectos.
 router.post('/api/ioarr/importar', upload.single('file'), async (req, res, next) => {
@@ -399,27 +410,30 @@ router.post('/api/ioarr/importar', upload.single('file'), async (req, res, next)
 
     if (fuente === 'pmi') {
       if (!mapeo.cui) return res.status(400).json({ error: 'Debes mapear al menos la columna de CUI' });
-      const { rows, hoja } = leerArchivo(req.file.buffer);
+      const leido = leerArchivo(req.file.buffer);
+      const { rows, hoja } = leido;
+      // La OPMI dice de qué entidades es este PMI: sin ella no se puede decir que un proyecto está fuera
+      const opmi = String(req.body.opmi || '').replace(/\s+/g, ' ').trim() || opmiDelArchivo(leido, mapeo);
+      if (!opmi && !mapeo.entidad) return res.status(400).json({ error: 'Indica la OPMI de este PMI (p. ej. «OPMI DEL GOBIERNO REGIONAL LAMBAYEQUE»): no se encontró en el encabezado del archivo.' });
       // Se guardan en la carga para que el cruce sepa qué proyectos pudo contener
       const filtros = { solo_educacion: req.body.solo_educacion === '1', solo_ioarr: req.body.solo_ioarr === '1' };
       let filas, resumen;
       try {
-        ({ filas, resumen } = filtrarFilasPmi(rows, mapeo, { soloEducacion: filtros.solo_educacion, soloIoarr: filtros.solo_ioarr }));
+        ({ filas, resumen } = filtrarFilasPmi(rows, mapeo, { soloEducacion: filtros.solo_educacion, soloIoarr: filtros.solo_ioarr, periodo: leido.periodo_detectado }));
       } catch (e) { return res.status(400).json({ error: e.message }); }
       if (!resumen.leidas || resumen.sin_cui === resumen.leidas)
         return res.status(400).json({ error: 'El archivo no tiene filas con CUI. Si no puedes importarlo, marca el PMI a mano en la pestaña Cruce.' });
       if (!filas.length) return res.status(400).json({ resumen, error: `Ninguna fila pasó los filtros y no se guardó nada: ${resumen.leidas} leídas, ` +
         `${resumen.sin_cui} sin CUI, ${resumen.no_educacion} no son Educación, ${resumen.no_ioarr} no son IOARR. Revisa el mapeo de Función / Tipo de inversión.` });
       let r;
-      try { r = await guardarCarga(supabase, { fuente, filas, filtros, nombre_archivo: nombreArchivo, hoja, usuario_id: req.usuario.id }); }
+      try { r = await guardarCarga(supabase, { fuente, filas, filtros, opmi, nombre_archivo: nombreArchivo, hoja, usuario_id: req.usuario.id }); }
       catch (e) {
-        if (faltaMigracion(e)) return res.status(500).json({ error: 'Falta ejecutar supabase/migrations/005_ioarr_cruce_fuentes.sql y 006_ioarr_filtros_carga.sql' });
+        if (faltaMigracion(e)) return res.status(500).json({ error: `Falta ejecutar ${MIGRACIONES_CRUCE}` });
         throw e;
       }
       await guardarMapeo(fuente, mapeo, req.usuario);
-      console.log(`[IOARR] Carga PMI por ${req.usuario.email}: ${r.filas} CUI (${JSON.stringify(resumen)})`);
-      return res.json({ fuente, carga: r.carga, resumen, cuis: r.filas, filas_repetidas: r.filas_repetidas,
-        sin_entidad: filas.filter(f => !f.entidad).length });
+      console.log(`[IOARR] Carga PMI «${opmi || 'por entidad de cada fila'}» por ${req.usuario.email}: ${r.filas} CUI (${JSON.stringify(resumen)})`);
+      return res.json({ fuente, carga: r.carga, opmi, resumen, cuis: r.filas, filas_repetidas: r.filas_repetidas });
     }
 
     if (!mapeo.cui || !mapeo.nombre) return res.status(400).json({ error: 'Debes mapear al menos CUI y nombre' });
@@ -468,7 +482,7 @@ router.get('/api/ioarr/cruce', async (_, res, next) => {
     let datos;
     try { datos = await obtenerDatosCruce(supabase); }
     catch (e) {
-      if (faltaMigracion(e)) return res.status(500).json({ error: 'Falta ejecutar supabase/migrations/005_ioarr_cruce_fuentes.sql' });
+      if (faltaMigracion(e)) return res.status(500).json({ error: `Falta ejecutar ${MIGRACIONES_CRUCE}` });
       throw e;
     }
     res.json({ ...calcularCruce(datos), generado_en: new Date().toISOString() });
