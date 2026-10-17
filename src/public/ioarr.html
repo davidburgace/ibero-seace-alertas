@@ -138,6 +138,13 @@
   .msg{ font-size:12.5px; margin-top:8px; min-height:16px; }
   .msg.err{ color:var(--red); } .msg.ok{ color:#1e8449; }
 
+  .bi-box{ background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:16px; }
+  .dropzone{ border:2px dashed var(--border2); border-radius:12px; padding:18px; text-align:center; margin-top:12px; cursor:pointer; color:var(--muted); font-size:13px; line-height:1.45; background:#fff; }
+  .dropzone b{ color:var(--text); }
+  .dropzone.over{ border-color:var(--accent); background:rgba(58,99,224,.06); }
+  .doc-res{ font-size:12.5px; margin-top:10px; }
+  .doc-res li{ margin:2px 0 2px 18px; }
+  .avisos{ color:#7a4a12; }
   .panel{ background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:20px; margin-bottom:18px; max-width:980px; }
   .regiones-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(150px,1fr)); gap:6px; margin:8px 0 14px; }
 
@@ -199,6 +206,7 @@
     <button class="tab-btn active" data-tab="listado">📋 Proyectos <span class="count" id="count-proyectos">0</span></button>
     <button class="tab-btn" data-tab="kanban">🗂️ Kanban financista</button>
     <button class="tab-btn" data-tab="importar">⬆️ Importar</button>
+    <button class="tab-btn" data-tab="precios">💲 Precios de referencia</button>
     <button class="tab-btn" data-tab="alertas">🔔 Alertas</button>
   </div>
 </header>
@@ -262,6 +270,25 @@
       <div class="tabla-wrap" id="imp-muestra"></div>
       <div style="margin-top:14px"><button class="btn btn-primary" id="btn-importar">2. Importar</button></div>
       <div class="msg" id="imp-res"></div>
+    </div>
+  </section>
+
+  <!-- ===================== PRECIOS ===================== -->
+  <section class="view" id="view-precios">
+    <p class="sub" style="margin-bottom:14px">Precios únicos por código de bien, leídos de las estructuras de costos subidas en cada proyecto.
+      d = (a + b + c) × 1.15. Revisa la columna «Fuente y fecha»: un precio de una ficha antigua puede estar desactualizado.</p>
+    <div class="filtros">
+      <input type="text" id="pr-q" placeholder="Buscar por código, descripción o CUI…">
+      <button class="btn btn-primary" id="btn-pr-buscar">Buscar</button>
+      <button class="btn btn-ghost" id="btn-pr-export">⬇️ Exportar a Excel</button>
+    </div>
+    <div class="tabla-wrap">
+      <table class="tabla">
+        <thead><tr><th>Código</th><th>Descripción</th><th class="num">a · Adquisición</th><th class="num">b · Embalaje</th><th class="num">c · Entrega</th>
+          <th class="num">d · Unitario final</th><th class="num">Cantidad</th><th>Fuente y fecha</th></tr></thead>
+        <tbody id="pr-tbody"></tbody>
+      </table>
+      <div class="vacio" id="pr-vacio" style="display:none">Sin precios. Sube la estructura de costos (PDF) en la ficha de un proyecto.</div>
     </div>
   </section>
 
@@ -385,6 +412,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => btn.addEventListener('click
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   btn.classList.add('active');
   $('view-' + btn.dataset.tab).classList.add('active');
+  if (btn.dataset.tab === 'precios') cargarPrecios().catch(e => alert(e.message));
 }));
 
 /* ---------- Filtros y listado ---------- */
@@ -500,6 +528,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') cerrarFicha(
 
 function renderFicha() {
   const { proyecto: p, eventos, evaluaciones, contrapartes } = actual;
+  if (resultadosDocs?.proyectoId !== p.id) resultadosDocs = null;
   $('ficha').innerHTML = `
     <button class="cerrar" data-accion="cerrar">×</button>
     <div class="card-tipo">${codigo(p)} · ${esc(p.tipo_inversion || '')}</div>
@@ -568,6 +597,9 @@ function renderFicha() {
       </div>
     </div>
 
+    <h3>Ficha del Banco de Inversiones</h3>
+    ${renderDocumentos()}
+
     <h3>Calculadora de rentabilidad del financista</h3>
     <div class="calc-box">
       <div class="calc-aviso">⚠️ ${esc(AVISO_CALCULADORA)}</div>
@@ -599,6 +631,113 @@ function renderFicha() {
   recalcular();
 }
 
+/* ---------- Documentos del Banco de Inversiones ---------- */
+// El servidor no consulta el portal del MEF: se abre en el navegador del usuario
+const URL_BI = 'https://ofi5.mef.gob.pe/invierte/consultapublica/consultainversiones?cui=';
+const TIPO_DOC = { ficha_07c: 'Ficha 07-C', estructura_costos: 'Estructura de costos', informe_sustento: 'Informe de sustento', otro: 'Otro' };
+let resultadosDocs = null; // resultado de la última subida, se muestra tras recargar la ficha
+
+function resumenCampos(tipo, c) {
+  if (!c) return '';
+  if (tipo === 'ficha_07c') return [c.cui && `CUI ${esc(c.cui)}`, c.costo_total != null && `costo total ${soles2(c.costo_total)}`, c.fecha && `fecha ${esc(c.fecha)}`]
+    .filter(Boolean).join(' · ');
+  if (tipo === 'estructura_costos') return `${c.filas} filas · ${c.precios_unicos} precios únicos` +
+    (c.filas_no_cuadran ? ` · <b class="neg">${c.filas_no_cuadran} no cuadran</b>` : '') + (c.anio ? ` · año ${c.anio}` : ' · año desconocido');
+  return '';
+}
+
+function listaAvisos(avisos) {
+  if (!avisos?.length) return '';
+  const primeros = avisos.slice(0, 8).map(a => `<li>${esc(a)}</li>`).join('');
+  return `<ul class="avisos">${primeros}${avisos.length > 8 ? `<li>… y ${avisos.length - 8} avisos más</li>` : ''}</ul>`;
+}
+
+function renderDocumentos() {
+  const { proyecto: p, documentos = [], documentos_error } = actual;
+  const f = p.ficha_07c;
+  return `<div class="bi-box">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <button class="btn btn-ghost" data-accion="abrir-bi" ${p.es_idea ? 'disabled title="Una idea de inversión aún no tiene CUI"' : ''}>↗ Abrir en el Banco de Inversiones</button>
+      <span class="sub" id="bi-msg">Copia el CUI y abre la consulta pública en otra pestaña. Ahí descarga el PDF y suéltalo abajo.</span>
+    </div>
+    <div class="dropzone" id="dropzone" role="button" tabindex="0">
+      <b>Subir ficha (PDF)</b><br>Arrastra aquí la ficha 07-C, la estructura de costos o el informe de sustento (varios a la vez) o haz clic para elegirlos.
+      <div class="sub">Se clasifican por el nombre del archivo.</div>
+      <input type="file" id="doc-files" accept="application/pdf,.pdf" multiple hidden>
+    </div>
+    <div class="doc-res" id="doc-res">${resultadosDocs ? renderResultadosDocs(resultadosDocs.resultados) : ''}</div>
+    ${documentos_error ? `<div class="msg err">${esc(documentos_error)}</div>` : ''}
+    ${f ? `<dl class="datos" style="margin-top:14px">
+      <dt>Costo total (ficha 07-C)</dt><dd><b>${f.costo_total != null ? soles2(f.costo_total) : '—'}</b>${f.costo_total_etiqueta ? ` <span class="sub">(${esc(f.costo_total_etiqueta.toLowerCase())})</span>` : ''}</dd>
+      ${f.tipo_ioarr ? `<dt>Tipo</dt><dd>${esc(f.tipo_ioarr)}</dd>` : ''}
+      ${f.unidad_formuladora ? `<dt>Unidad formuladora</dt><dd>${esc(f.unidad_formuladora)}</dd>` : ''}
+      ${f.uei ? `<dt>UEI</dt><dd>${esc(f.uei)}</dd>` : ''}
+      ${f.modalidad_ejecucion ? `<dt>Modalidad</dt><dd>${esc(f.modalidad_ejecucion)}</dd>` : ''}
+      <dt>Fecha de la ficha</dt><dd>${esc(f.fecha || '—')} <span class="sub">· leída ${fecha(f.leido_en)}</span></dd>
+    </dl>` : ''}
+    ${documentos.length ? `<div class="tabla-wrap" style="margin-top:14px"><table class="tabla"><thead><tr><th>Tipo</th><th>Archivo</th><th>Lectura</th><th>Subido</th><th></th></tr></thead><tbody>
+      ${documentos.map(d => `<tr style="cursor:default"><td><span class="badge">${TIPO_DOC[d.tipo] || d.tipo}</span></td>
+        <td>${esc(d.nombre_archivo)}<div class="sub">${d.paginas ? d.paginas + ' pág.' : ''}</div></td>
+        <td class="sub">${resumenCampos(d.tipo, d.campos)}${d.avisos?.length ? `<details><summary class="avisos" style="cursor:pointer">${d.avisos.length} aviso(s)</summary>${listaAvisos(d.avisos)}</details>` : ''}</td>
+        <td class="sub">${fecha(d.creado_en)}</td>
+        <td><button class="card-stage-btn" style="flex:none;padding:4px 10px" data-abrir-doc="${d.id}">Abrir</button></td></tr>`).join('')}
+      </tbody></table></div>` : ''}
+  </div>`;
+}
+
+function renderResultadosDocs(resultados) {
+  return resultados.map(r => r.error
+    ? `<div class="msg err">❌ ${esc(r.nombre)}: ${esc(r.error)}</div>`
+    : `<div class="msg ok">✅ ${esc(r.nombre)} → ${TIPO_DOC[r.tipo]}${resumenCampos(r.tipo, r.campos) ? ' · ' + resumenCampos(r.tipo, r.campos) : ''}</div>${listaAvisos(r.avisos)}`).join('');
+}
+
+async function subirDocumentos(files) {
+  const pdfs = [...files].filter(f => /\.pdf$/i.test(f.name) || f.type === 'application/pdf');
+  if (!pdfs.length) return setMsg($('doc-res'), 'Solo se aceptan archivos PDF.', 'err');
+  if (pdfs.length > 10) return setMsg($('doc-res'), 'Máximo 10 PDF por vez.', 'err');
+  const id = actual.proyecto.id;
+  setMsg($('doc-res'), `Subiendo y leyendo ${pdfs.length} PDF… (un PDF de muchas páginas puede tardar)`);
+  try {
+    const fd = new FormData();
+    pdfs.forEach(f => fd.append('files', f));
+    const r = await api(`/api/ioarr/proyectos/${id}/documentos`, { method: 'POST', body: fd });
+    resultadosDocs = { proyectoId: id, resultados: r.resultados };
+    actual = await api('/api/ioarr/proyectos/' + id);
+    renderFicha();
+    lista = lista.map(x => x.id === id ? actual.proyecto : x);
+    renderListado(); renderKanban();
+  } catch (e) { setMsg($('doc-res'), e.message, 'err'); }
+}
+
+function abrirBancoInversiones() {
+  const cui = actual.proyecto.cui;
+  // Ambas cosas dentro del mismo clic (el navegador lo exige para copiar y abrir pestañas)
+  const copia = navigator.clipboard?.writeText(cui);
+  window.open(URL_BI + encodeURIComponent(cui), '_blank', 'noopener');
+  Promise.resolve(copia).then(
+    () => setMsg($('bi-msg'), `CUI ${cui} copiado. Si la consulta no lo trae puesto, pégalo en el buscador y exporta el PDF.`, 'ok'),
+    () => setMsg($('bi-msg'), `No se pudo copiar: el CUI es ${cui}.`, 'err'));
+}
+
+async function abrirDocumento(docId) {
+  // La pestaña se abre en el clic (si no, el navegador la bloquea) y luego recibe la URL firmada
+  const w = window.open('', '_blank');
+  try {
+    const { url } = await api(`/api/ioarr/documentos/${docId}/url`);
+    if (w) { w.opener = null; w.location.href = url; } else location.href = url;
+  } catch (e) { if (w) w.close(); alert(e.message); }
+}
+
+$('ficha').addEventListener('dragover', e => { const dz = e.target.closest('#dropzone'); if (dz) { e.preventDefault(); dz.classList.add('over'); } });
+$('ficha').addEventListener('dragleave', e => { const dz = e.target.closest('#dropzone'); if (dz && !dz.contains(e.relatedTarget)) dz.classList.remove('over'); });
+$('ficha').addEventListener('drop', e => {
+  const dz = e.target.closest('#dropzone'); if (!dz) return;
+  e.preventDefault(); dz.classList.remove('over');
+  subirDocumentos(e.dataTransfer.files);
+});
+$('ficha').addEventListener('change', e => { if (e.target.id === 'doc-files' && e.target.files.length) subirDocumentos(e.target.files); });
+$('ficha').addEventListener('keydown', e => { if (e.target.id === 'dropzone' && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); $('doc-files').click(); } });
+
 function entradasCalc() {
   return Object.fromEntries([...document.querySelectorAll('[data-calc]')].map(i => [i.dataset.calc, i.value]));
 }
@@ -622,8 +761,13 @@ $('ficha').addEventListener('input', e => { if (e.target.dataset.calc) recalcula
 $('ficha').addEventListener('click', async e => {
   const accion = e.target.closest('[data-accion]')?.dataset.accion;
   const quitar = e.target.closest('[data-quitar]')?.dataset.quitar;
-  if (!accion && !quitar) return;
+  // El click() del input oculto también burbujea hasta aquí: se ignora
+  if (e.target.id === 'doc-files' || (!accion && !quitar && !e.target.closest('[data-abrir-doc], #dropzone'))) return;
   if (accion === 'cerrar') return cerrarFicha();
+  if (accion === 'abrir-bi') return abrirBancoInversiones();
+  const abrirDoc = e.target.closest('[data-abrir-doc]')?.dataset.abrirDoc;
+  if (abrirDoc) return abrirDocumento(abrirDoc);
+  if (e.target.closest('#dropzone')) return $('doc-files').click();
   const id = actual.proyecto.id;
   try {
     if (accion === 'guardar') {
@@ -701,6 +845,32 @@ $('btn-importar').addEventListener('click', async () => {
     await cargarFiltros(); await buscar();
   } catch (e) { setMsg($('imp-res'), e.message, 'err'); }
   btn.disabled = false;
+});
+
+/* ---------- Precios de referencia ---------- */
+let precios = [];
+const fuenteYFecha = (p) => `CUI ${p.cui_origen} · ${p.anio_ficha || 'año s/d'}` ;
+async function cargarPrecios() {
+  const q = $('pr-q').value.trim();
+  precios = await api('/api/ioarr/precios' + (q ? '?q=' + encodeURIComponent(q) : ''));
+  $('pr-vacio').style.display = precios.length ? 'none' : 'block';
+  $('pr-tbody').innerHTML = precios.map(p => `<tr style="cursor:default">
+    <td class="mono">${esc(p.codigo_bien)}</td><td>${esc(p.descripcion)}${p.cuadra ? '' : ' <span class="badge" style="color:#c0392b" title="d no es (a+b+c) × 1.15 en el PDF">no cuadra</span>'}</td>
+    <td class="num">${soles2(p.a)}</td><td class="num">${soles2(p.b)}</td><td class="num">${soles2(p.c)}</td><td class="num"><b>${soles2(p.d)}</b></td>
+    <td class="num">${p.cantidad != null ? Number(p.cantidad).toLocaleString('es-PE') : '—'}</td>
+    <td class="sub">${esc(fuenteYFecha(p))}<div>${esc(p.fuente || '')}</div></td></tr>`).join('');
+}
+$('btn-pr-buscar').addEventListener('click', () => cargarPrecios().catch(e => alert(e.message)));
+$('pr-q').addEventListener('keydown', e => { if (e.key === 'Enter') $('btn-pr-buscar').click(); });
+$('btn-pr-export').addEventListener('click', () => {
+  const filas = precios.map(p => ({
+    Código: p.codigo_bien, Descripción: p.descripcion, 'a Adquisición': Number(p.a), 'b Embalaje': Number(p.b), 'c Entrega': Number(p.c),
+    'd Unitario final': Number(p.d), Cantidad: p.cantidad != null ? Number(p.cantidad) : '', 'Cuadra (a+b+c)×1.15': p.cuadra ? 'Sí' : 'No',
+    'CUI origen': p.cui_origen, 'Año ficha': p.anio_ficha || '', 'Documento': p.fuente || ''
+  }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(filas), 'Precios referencia');
+  XLSX.writeFile(wb, `precios-referencia-${new Date().toISOString().slice(0, 10)}.xlsx`);
 });
 
 /* ---------- Alertas ---------- */

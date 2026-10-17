@@ -19,9 +19,13 @@ import { requireAuth } from './auth.js';
 import { calcularRentabilidad } from './calculadora.js';
 import { leerArchivo, detectarMapeo, aplicarMapeoGuardado, filaAProyecto, importarProyectos, normaliza, CAMPOS_MAPEABLES } from './ingesta.js';
 import { sendIoarrDigest } from './alertas.js';
+import { extraerLineasPdf, clasificarDocumento, leerFicha07C, leerTablaCostos, preciosUnicos, anioDeLineas, guardarPrecios } from './fichas.js';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 40 * 1024 * 1024 } });
+const uploadPdfs = multer({ storage: multer.memoryStorage(), limits: { fileSize: 40 * 1024 * 1024, files: 10 } });
+const BUCKET_DOCS = 'ioarr-docs';
+const URL_FIRMADA_SEG = 10 * 60;
 
 const ESTADOS = ['viable', 'priorizada_oxi', 'convenio', 'en_proceso_seleccion', 'en_ejecucion',
   'bienes_entregados', 'ciprl_emitido', 'cerrada', 'descartada'];
@@ -76,19 +80,26 @@ router.get('/api/ioarr/proyectos', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// Ficha: proyecto + eventos + evaluaciones + contrapartes
+// Ficha: proyecto + eventos + evaluaciones + contrapartes + documentos
 router.get('/api/ioarr/proyectos/:id', async (req, res, next) => {
   try {
     const id = req.params.id;
-    const [p, ev, eva, cp] = await Promise.all([
+    const [p, ev, eva, cp, docs] = await Promise.all([
       supabase.from('ioarr_proyectos').select('*').eq('id', id).maybeSingle(),
       supabase.from('ioarr_eventos').select('*').eq('proyecto_id', id).order('fecha', { ascending: false }),
       supabase.from('ioarr_evaluaciones').select('*').eq('proyecto_id', id).order('creado_en', { ascending: false }),
-      supabase.from('ioarr_proyecto_contrapartes').select('contraparte:ioarr_contrapartes(*)').eq('proyecto_id', id)
+      supabase.from('ioarr_proyecto_contrapartes').select('contraparte:ioarr_contrapartes(*)').eq('proyecto_id', id),
+      supabase.from('ioarr_documentos').select('id, tipo, nombre_archivo, tamano, paginas, campos, avisos, creado_en')
+        .eq('proyecto_id', id).order('creado_en', { ascending: false })
     ]);
     for (const r of [p, ev, eva, cp]) if (r.error) throw r.error;
     if (!p.data) return res.status(404).json({ error: 'Proyecto no encontrado' });
-    res.json({ proyecto: p.data, eventos: ev.data, evaluaciones: eva.data, contrapartes: cp.data.map(x => x.contraparte) });
+    // Sin la migración 004 la ficha sigue funcionando, solo sin documentos
+    if (docs.error) console.warn('[IOARR] No se pudieron leer los documentos:', docs.error.message);
+    res.json({
+      proyecto: p.data, eventos: ev.data, evaluaciones: eva.data, contrapartes: cp.data.map(x => x.contraparte),
+      documentos: docs.data || [], documentos_error: docs.error ? 'Falta ejecutar supabase/migrations/004_ioarr_documentos.sql' : null
+    });
   } catch (e) { next(e); }
 });
 
@@ -183,6 +194,151 @@ router.delete('/api/ioarr/proyectos/:id/contrapartes/:cid', async (req, res, nex
       .delete().eq('proyecto_id', req.params.id).eq('contraparte_id', req.params.cid);
     if (error) throw error;
     res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+// ─── Documentos del Banco de Inversiones (PDF subidos a mano) ───────────────
+// El servidor NO consulta el portal del MEF: el usuario abre la consulta en su
+// navegador, descarga el PDF y lo suelta en la ficha. Ver src/ioarr/fichas.js.
+
+// multer 1.x entrega el nombre en latin1; los nombres con tildes llegan rotos
+const nombreUtf8 = (n) => { try { return Buffer.from(n, 'latin1').toString('utf8'); } catch { return n; } };
+const nombreSeguro = (n) => n.normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^\w.-]+/g, '_').slice(-120);
+const esPdf = (buf) => buf.subarray(0, 5).toString('latin1') === '%PDF-';
+const ETIQUETA_TIPO = { ficha_07c: 'Ficha 07-C', estructura_costos: 'Estructura de costos', informe_sustento: 'Informe de sustento', otro: 'Otro' };
+const fmtSoles = (n) => 'S/ ' + Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// Lee el PDF (puro, sin guardar nada): tipo, campos y avisos
+async function analizarPdf(archivo, proyecto) {
+  const nombre = nombreUtf8(archivo.originalname);
+  if (!esPdf(archivo.buffer)) return { nombre, error: 'No es un PDF' };
+  let leido;
+  try { leido = await extraerLineasPdf(archivo.buffer); }
+  catch (e) { return { nombre, error: 'No se pudo leer el PDF: ' + e.message }; }
+  const { lineas, paginas } = leido;
+  const tipo = clasificarDocumento(nombre, lineas);
+  const r = { nombre, tipo, paginas, lineas, avisos: [], campos: null };
+
+  if (tipo === 'ficha_07c') {
+    const { campos, avisos } = leerFicha07C(lineas);
+    r.campos = campos; r.avisos.push(...avisos);
+    if (campos.cui && campos.cui !== proyecto.cui) {
+      r.cuiDistinto = true;
+      r.avisos.push(`La ficha es del CUI ${campos.cui} y este proyecto es el ${proyecto.cui}: se guardó el PDF pero no se actualizaron los datos.`);
+    }
+  } else if (tipo === 'estructura_costos') {
+    const tabla = leerTablaCostos(lineas);
+    const unicos = preciosUnicos(tabla.filas);
+    r.precios = unicos.precios;
+    r.campos = { filas: tabla.filas.length, precios_unicos: unicos.precios.length, filas_no_cuadran: tabla.filas.filter(f => !f.cuadra).length };
+    if (!tabla.filas.length) r.avisos.push('No se reconoció la tabla de bienes (código, descripción, a, b, c, d, cantidad).');
+    r.avisos.push(...tabla.avisos, ...unicos.avisos);
+  }
+  if (!lineas.length && tipo !== 'ficha_07c') r.avisos.push('El PDF no tiene texto (¿escaneado?): se guardó sin leer campos.');
+  return r;
+}
+
+// Datos de la ficha 07-C → proyecto: completa los campos vacíos y guarda lo leído
+async function aplicarFicha(proyecto, campos, documento_id) {
+  const patch = { ficha_07c: { ...campos, documento_id, leido_en: new Date().toISOString() } };
+  const vacio = (k) => proyecto[k] == null || proyecto[k] === '';
+  if (vacio('monto_inversion') && campos.costo_total != null) patch.monto_inversion = campos.costo_total;
+  if (vacio('funcion') && campos.funcion) patch.funcion = campos.funcion;
+  if (vacio('entidad') && campos.uei) patch.entidad = campos.uei;
+  for (const [k, c] of [['region', 'departamento'], ['provincia', 'provincia'], ['distrito', 'distrito']])
+    if (vacio(k) && campos[c]) patch[k] = normaliza(campos[c]);
+  const { data, error } = await supabase.from('ioarr_proyectos').update(patch).eq('id', proyecto.id).select().single();
+  if (error) throw error;
+  return data;
+}
+
+// Sube uno o varios PDF (campo «files»), los clasifica por nombre y los lee.
+// La ficha 07-C se procesa primero para que su año sirva a los precios.
+const recibirPdfs = (req, res, next) => uploadPdfs.array('files', 10)(req, res, err => {
+  if (!err) return next();
+  const msg = { LIMIT_FILE_SIZE: 'Cada PDF puede pesar como máximo 40 MB', LIMIT_FILE_COUNT: 'Máximo 10 PDF por vez', LIMIT_UNEXPECTED_FILE: 'Máximo 10 PDF por vez' }[err.code];
+  res.status(400).json({ error: msg || err.message });
+});
+
+router.post('/api/ioarr/proyectos/:id/documentos', recibirPdfs, async (req, res, next) => {
+  try {
+    const archivos = req.files || [];
+    if (!archivos.length) return res.status(400).json({ error: 'Suelta al menos un PDF' });
+    let { data: proyecto, error: e0 } = await supabase.from('ioarr_proyectos').select('*').eq('id', req.params.id).maybeSingle();
+    if (e0) throw e0;
+    if (!proyecto) return res.status(404).json({ error: 'Proyecto no encontrado' });
+
+    const analizados = await Promise.all(archivos.map(a => analizarPdf(a, proyecto).then(r => ({ ...r, archivo: a }))));
+    const orden = { ficha_07c: 0, estructura_costos: 1 };
+    analizados.sort((x, y) => (orden[x.tipo] ?? 2) - (orden[y.tipo] ?? 2));
+
+    const resultados = [];
+    for (const r of analizados) {
+      const { archivo, lineas, precios, cuiDistinto, ...salida } = r;
+      if (r.error) { resultados.push(salida); continue; }
+
+      const ruta = `${proyecto.id}/${Date.now()}_${nombreSeguro(r.nombre)}`;
+      const { error: eUp } = await supabase.storage.from(BUCKET_DOCS).upload(ruta, archivo.buffer, { contentType: 'application/pdf' });
+      if (eUp) {
+        resultados.push({ ...salida, error: `No se pudo guardar el PDF (${eUp.message}). ¿Se ejecutó supabase/migrations/004_ioarr_documentos.sql?` });
+        continue;
+      }
+
+      let anio = null;
+      if (r.tipo === 'estructura_costos') {
+        anio = proyecto.ficha_07c?.anio ?? anioDeLineas(lineas);
+        r.campos.anio = anio;
+      }
+      const costoFicha = r.tipo === 'ficha_07c' && !cuiDistinto ? r.campos.costo_total : null;
+      if (costoFicha != null && proyecto.monto_inversion != null && Math.abs(Number(proyecto.monto_inversion) - costoFicha) > 0.01)
+        r.avisos.push(`El monto del proyecto (${fmtSoles(proyecto.monto_inversion)}) difiere del costo total de la ficha (${fmtSoles(costoFicha)}); se mantiene el del proyecto.`);
+      const { data: doc, error: eDoc } = await supabase.from('ioarr_documentos').insert({
+        proyecto_id: proyecto.id, tipo: r.tipo, nombre_archivo: r.nombre, ruta, tamano: archivo.size,
+        paginas: r.paginas, campos: r.campos, avisos: r.avisos, subido_por: req.usuario.id
+      }).select('id, tipo, nombre_archivo, tamano, paginas, campos, avisos, creado_en').single();
+      if (eDoc) {
+        await supabase.storage.from(BUCKET_DOCS).remove([ruta]);
+        throw eDoc;
+      }
+
+      let detalle = `Documento subido: ${r.nombre} (${ETIQUETA_TIPO[r.tipo]})`;
+      if (r.tipo === 'ficha_07c' && !cuiDistinto) {
+        proyecto = await aplicarFicha(proyecto, r.campos, doc.id);
+        if (r.campos.costo_total != null) detalle += ` · costo total ${fmtSoles(r.campos.costo_total)}`;
+      }
+      if (r.tipo === 'estructura_costos' && precios.length) {
+        await guardarPrecios(supabase, precios, { cui_origen: proyecto.cui, anio_ficha: anio, documento_id: doc.id, fuente: r.nombre });
+        detalle += ` · ${precios.length} precios de referencia` + (r.campos.filas_no_cuadran ? `, ${r.campos.filas_no_cuadran} filas no cuadran` : '');
+      }
+      await supabase.from('ioarr_eventos').insert({ proyecto_id: proyecto.id, tipo: 'hito', detalle: `${detalle} — ${req.usuario.email}` });
+      resultados.push({ ...salida, documento: doc });
+    }
+    console.log(`[IOARR] ${archivos.length} PDF subidos al proyecto ${proyecto.cui} por ${req.usuario.email}`);
+    res.json({ resultados });
+  } catch (e) { next(e); }
+});
+
+// URL firmada de 10 minutos para abrir un documento del bucket privado
+router.get('/api/ioarr/documentos/:docId/url', async (req, res, next) => {
+  try {
+    const { data: doc, error } = await supabase.from('ioarr_documentos').select('ruta').eq('id', req.params.docId).maybeSingle();
+    if (error) throw error;
+    if (!doc) return res.status(404).json({ error: 'Documento no encontrado' });
+    const { data, error: e2 } = await supabase.storage.from(BUCKET_DOCS).createSignedUrl(doc.ruta, URL_FIRMADA_SEG);
+    if (e2) throw e2;
+    res.json({ url: data.signedUrl, expira_en_seg: URL_FIRMADA_SEG });
+  } catch (e) { next(e); }
+});
+
+// Precios de referencia (de las estructuras de costos subidas); q = código o descripción
+router.get('/api/ioarr/precios', async (req, res, next) => {
+  try {
+    let query = supabase.from('ioarr_precios_referencia').select('*');
+    const limpio = String(req.query.q || '').replace(/[,()%*\\]/g, ' ').trim();
+    if (limpio) query = query.or(`codigo_bien.ilike.%${limpio}%,descripcion.ilike.%${limpio}%,cui_origen.ilike.%${limpio}%`);
+    const { data, error } = await query.order('codigo_bien').order('anio_ficha', { ascending: false }).limit(2000);
+    if (error) throw error;
+    res.json(data);
   } catch (e) { next(e); }
 });
 
