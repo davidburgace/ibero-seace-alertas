@@ -600,6 +600,22 @@
     .topbar { padding: 12px 16px; }
   }
 
+  @media (max-width: 640px) {
+    /* Banner de decisión: el puntaje ya no se sale por la derecha */
+    .decision-banner { padding: 16px; gap: 12px; }
+    .decision-icon { font-size: 28px; }
+    .decision-text { min-width: 0; }
+    .decision-text h2 { font-size: 17px; }
+    .score-circle { width: 58px; height: 58px; font-size: 18px; }
+    /* Riesgos y Acciones uno debajo del otro */
+    #risksActionsGrid { grid-template-columns: 1fr !important; }
+    /* Visor de documento: PDF arriba y chat debajo (la columna de 500px no cabe) */
+    .viewer-head { padding: 12px 16px !important; }
+    .viewer-body { grid-template-columns: 1fr !important; grid-template-rows: 60vh auto; height: auto !important; }
+    .viewer-body > div:first-child { border-right: none !important; border-bottom: 1px solid var(--border); }
+    .viewer-body textarea { font-size: 16px; } /* evita el zoom automático de iPhone */
+  }
+
   .ai-loading-text {
     display: flex;
     align-items: center;
@@ -827,7 +843,7 @@
 
 <!-- Visor de documento + Chat -->
 <div id="docViewer" style="display:none; border-top: 1px solid var(--border);">
-  <div style="display:flex; align-items:center; justify-content:space-between; padding:14px 32px; background:var(--surface); border-bottom:1px solid var(--border);">
+  <div class="viewer-head" style="display:flex; align-items:center; justify-content:space-between; padding:14px 32px; background:var(--surface); border-bottom:1px solid var(--border);">
     <div style="display:flex; align-items:center; gap:12px;">
       <span style="font-family:var(--font-display); font-size:15px; font-weight:700;">📄</span>
       <span id="viewerDocName" style="font-size:14px; font-weight:500; color:var(--text);">Documento</span>
@@ -837,7 +853,7 @@
       <button onclick="closeViewer()" style="background:transparent;border:1px solid var(--border2);color:var(--muted);border-radius:8px;padding:6px 14px;font-family:var(--font-body);font-size:13px;cursor:pointer;">✕ Cerrar</button>
     </div>
   </div>
-  <div style="display:grid; grid-template-columns:1fr 500px; height:calc(100vh - 57px - 57px);">
+  <div class="viewer-body" style="display:grid; grid-template-columns:1fr 500px; height:calc(100vh - 57px - 57px);">
     <!-- PDF -->
     <div style="border-right:1px solid var(--border); overflow:hidden;">
       <iframe id="pdfFrame" src="" style="width:100%; height:100%; border:none; background:white;"></iframe>
