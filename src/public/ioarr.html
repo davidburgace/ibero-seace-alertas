@@ -211,6 +211,30 @@
     .filtros input[type=number]{ width:calc(50% - 5px); }
     .field-row{ grid-template-columns:1fr; gap:0; }
     .modal{ padding:20px 16px; }
+
+    /* Tablas → tarjetas: cada fila es una tarjeta y cada dato lleva el nombre de su columna (data-label lo pone etiquetarTablas) */
+    .tabla-wrap{ overflow:visible; border:none; border-radius:0; }
+    table.tabla, table.tabla tbody, table.tabla tr, table.tabla td{ display:block; width:100%; }
+    table.tabla thead{ display:none; }
+    table.tabla tr{ display:flex; flex-direction:column; background:#fff; border:1px solid var(--border); border-radius:12px; padding:10px 12px; margin-bottom:10px; }
+    .tabla tbody tr:hover{ background:#fff; border-color:var(--accent); }
+    table.tabla td{ position:relative; border:none; padding:4px 0 4px 38%; min-height:22px; text-align:left; white-space:normal !important; min-width:0 !important; overflow-wrap:anywhere; }
+    table.tabla td::before{ content:attr(data-label); position:absolute; left:0; top:5px; width:35%; font-size:10.5px; text-transform:uppercase; letter-spacing:.3px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    table.tabla td:not([data-label])::before, table.tabla td[data-label=""]::before{ content:none; }
+    table.tabla td:not([data-label]), table.tabla td[data-label=""]{ padding-left:0; }
+    table.tabla td:empty{ display:none; }
+    table.tabla td.td-titulo{ order:-1; padding:0 0 8px; margin-bottom:4px; border-bottom:1px solid var(--border); font-weight:600; font-size:14px; }
+    table.tabla td.td-titulo::before{ content:none; }
+    table.tabla td.td-titulo .sub{ font-weight:400; }
+    /* Resumen por región: una tarjeta compacta por región, situaciones en línea */
+    .tabla-regiones, .tabla-regiones tbody, .tabla-regiones tr{ display:block; width:100%; }
+    .tabla-regiones thead{ display:none; }
+    .tabla-regiones tr{ border-top:1px solid var(--border); padding:8px 0; }
+    .tabla-regiones td{ display:inline-block; border:none; padding:2px 10px 2px 0; text-align:left !important; }
+    .tabla-regiones td::before{ content:attr(data-label) ' '; color:var(--muted); font-size:11px; }
+    .tabla-regiones td:first-child{ display:block; font-weight:600; font-size:12.5px; }
+    .tabla-regiones td:first-child::before{ content:none; }
+    .tabla-regiones td.cero{ display:none; }
   }
 </style>
 </head>
@@ -1210,7 +1234,7 @@ function renderResumen(base, filas) {
   const cortas = { priorizada: 'Prior.', por_priorizar: 'Por prior.', viable_pmi: 'En PMI', viable_pmi_sin_verificar: 'PMI s/v', viable_fuera_pmi: 'Fuera PMI', desaparecida: 'Desap.', ejecucion_descartada: 'Ejec./desc.' };
   $('cr-regiones').innerHTML = regiones.length ? `<table class="tabla-regiones"><thead><tr><th>Región</th><th>Total</th>
     ${SITUACIONES.map(([k, label]) => `<th title="${esc(label)}">${cortas[k]}</th>`).join('')}</tr></thead><tbody>
-    ${regiones.slice(0, 12).map(([r, c, t]) => `<tr><td>${esc(r)}</td><td><b>${t}</b></td>${SITUACIONES.map(([k]) => `<td>${c[k] || '<span class="sub">·</span>'}</td>`).join('')}</tr>`).join('')}
+    ${regiones.slice(0, 12).map(([r, c, t]) => `<tr><td>${esc(r)}</td><td><b>${t}</b></td>${SITUACIONES.map(([k]) => (c[k] ? `<td>${c[k]}</td>` : '<td class="cero"><span class="sub">·</span></td>')).join('')}</tr>`).join('')}
     </tbody></table>${regiones.length > 12 ? `<div class="sub" style="margin-top:6px">… y ${regiones.length - 12} regiones más (filtra por región o exporta).</div>` : ''}`
     : '<p class="sub">Sin datos.</p>';
 }
@@ -1363,6 +1387,26 @@ $('btn-al-probar').addEventListener('click', async () => {
       : r.enviados ? 'Correo enviado.' : 'No hay novedades desde el último envío.', 'ok');
   } catch (e) { setMsg($('al-msg'), e.message, 'err'); }
 });
+
+// En celular las tablas se ven como tarjetas (CSS @media 640px): cada celda necesita el nombre de su columna.
+const COLUMNAS_TITULO = new Set(['Proyecto', 'Descripción', 'Archivo', 'OPMI']);
+function etiquetarTablas() {
+  document.querySelectorAll('table.tabla, table.tabla-regiones').forEach(t => {
+    const ths = [...t.querySelectorAll('thead th')];
+    if (!ths.length) return;
+    const etiquetas = ths.map(th => (t.classList.contains('tabla-regiones') && th.title) || th.textContent.trim());
+    t.querySelectorAll('tbody tr').forEach(tr => [...tr.children].forEach((td, i) => {
+      td.dataset.label = etiquetas[i] || '';
+      td.classList.toggle('td-titulo', t.classList.contains('tabla') && COLUMNAS_TITULO.has(etiquetas[i]));
+    }));
+  });
+}
+let etiquetarPendiente = false;
+new MutationObserver(() => {
+  if (etiquetarPendiente) return;
+  etiquetarPendiente = true;
+  requestAnimationFrame(() => { etiquetarPendiente = false; etiquetarTablas(); });
+}).observe(document.body, { childList: true, subtree: true });
 
 arrancar().catch(e => { console.error(e); alert('No se pudo iniciar Radar IOARR: ' + e.message); });
 </script>
