@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  extraerLineasPdf, clasificarDocumento, leerFicha07C, leerTablaCostos, preciosUnicos, anioDeLineas, dEsperado, opcionMarcada
+  extraerLineasPdf, clasificarDocumento, leerFicha07C, leerTablaCostos, preciosUnicos, anioDeLineas, dEsperado, opcionMarcada, borrarDocumento
 } from '../src/ioarr/fichas.js';
 
 // PDF mínimo con Helvetica (WinAnsi). paginas = [[ [x, y, 'texto'], ... ], ...]
@@ -179,4 +179,57 @@ test('estructura de costos con códigos de catálogo (Anexo 03)', () => {
 test('«…_Exportacion.pdf» con una tabla de costos se clasifica como estructura de costos', () => {
   assert.equal(clasificarDocumento('20261016_Exportacion.pdf', ANEXO_03), 'estructura_costos');
   assert.equal(clasificarDocumento('20261016_Exportacion.pdf', L(1, 'FORMATO N° 07-C: REGISTRO DE IOARR')), 'ficha_07c');
+});
+
+// Supabase en memoria: lo justo para borrarDocumento (select/delete/update con eq)
+function supabaseFalso(tablas) {
+  const bucket = [];
+  const consulta = (tabla, op, valores) => {
+    const filtros = [];
+    const filas = () => tablas[tabla].filter(f => filtros.every(([c, v]) => f[c] === v));
+    const q = {
+      select: () => q, eq: (c, v) => { filtros.push([c, v]); return q; },
+      maybeSingle: async () => ({ data: run()[0] ?? null, error: null }),
+      then: (ok, ko) => Promise.resolve({ data: run(), error: null }).then(ok, ko)
+    };
+    const run = () => {
+      const fs = filas();
+      if (op === 'delete') tablas[tabla] = tablas[tabla].filter(f => !fs.includes(f));
+      if (op === 'update') fs.forEach(f => Object.assign(f, valores));
+      return fs;
+    };
+    return q;
+  };
+  return {
+    bucket,
+    from: (t) => ({ select: () => consulta(t, 'select'), delete: () => consulta(t, 'delete'), update: (v) => consulta(t, 'update', v) }),
+    storage: { from: () => ({ remove: async (rutas) => { bucket.push(...rutas); return { error: null }; } }) }
+  };
+}
+
+test('borrarDocumento: quita sus precios, la ficha 07-C que salió de él y el PDF', async () => {
+  const tablas = {
+    ioarr_documentos: [
+      { id: 'd1', proyecto_id: 'p1', tipo: 'ficha_07c', nombre_archivo: 'Exportacion.pdf', ruta: 'p1/1_Exportacion.pdf' },
+      { id: 'd2', proyecto_id: 'p1', tipo: 'estructura_costos', nombre_archivo: 'costos.pdf', ruta: 'p1/2_costos.pdf' }
+    ],
+    ioarr_precios_referencia: [{ id: 'x1', documento_id: 'd2' }, { id: 'x2', documento_id: 'd2' }, { id: 'x3', documento_id: 'otro' }],
+    ioarr_proyectos: [{ id: 'p1', monto_inversion: 100, ficha_07c: { documento_id: 'd1', cui: '2560356' } }]
+  };
+  const sb = supabaseFalso(tablas);
+
+  const r2 = await borrarDocumento(sb, 'd2', 'ioarr-docs');
+  assert.equal(r2.precios_borrados, 2);
+  assert.equal(r2.ficha_quitada, false);
+  assert.deepEqual(tablas.ioarr_precios_referencia.map(p => p.id), ['x3']);
+  assert.ok(tablas.ioarr_proyectos[0].ficha_07c);
+
+  const r1 = await borrarDocumento(sb, 'd1', 'ioarr-docs');
+  assert.equal(r1.ficha_quitada, true);
+  assert.equal(tablas.ioarr_proyectos[0].ficha_07c, null);
+  assert.equal(tablas.ioarr_proyectos[0].monto_inversion, 100);
+  assert.equal(tablas.ioarr_documentos.length, 0);
+  assert.deepEqual(sb.bucket, ['p1/2_costos.pdf', 'p1/1_Exportacion.pdf']);
+
+  assert.equal(await borrarDocumento(sb, 'd1', 'ioarr-docs'), null);
 });
