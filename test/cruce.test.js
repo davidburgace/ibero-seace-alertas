@@ -364,6 +364,14 @@ test('limpiaCui: texto de solo dígitos (espacios, decimales, «.0», separadore
   for (const v of [2560356, '2560356', ' 2560356 ', '2560356.0', '2560356,00', '2,560,356', '2 560 356', 'CUI 2560356']) assert.equal(limpiaCui(v), '2560356', String(v));
   assert.equal(limpiaCui('idea0000110'), 'IDEA0000110');
   assert.equal(limpiaCui('Enlace'), null);
+});
+
+test('limpiaCui: un paquete con varios CUI en la celda se queda con el primero (no los pega)', () => {
+  for (const v of ['2703202, 2703203, 2703201', '2703202 / 2703203', '2703202\n2703203', '2703202 2703203', '2703202;2703203', 'CUI 2703202 y 2703203']) {
+    assert.equal(limpiaCui(v), '2703202', JSON.stringify(v));
+  }
+  assert.equal(limpiaCui('26774022676914'), '2677402');
+  assert.equal(limpiaCui('2703202270320327032012703200270319927031982703197270319627031952703194270319327031922703191'), '2703202');
   assert.equal(limpiaCui(''), null);
   assert.equal(limpiaCui(null), null);
 });

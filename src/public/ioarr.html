@@ -78,7 +78,18 @@
   table.tabla{ width:100%; border-collapse:collapse; font-size:13px; }
   .tabla th{ text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.4px; color:var(--muted); background:var(--surface); padding:10px; white-space:nowrap; }
   .tabla td{ padding:10px; border-top:1px solid var(--border); vertical-align:top; }
-  .tabla tbody tr{ cursor:pointer; } .tabla tbody tr:hover{ background:var(--surface); }
+  .tabla tbody tr{ cursor:pointer; }
+  /* Proyectos: anchos fijos, para que no cambien según los datos que deja el filtro */
+  table.tabla-proyectos{ table-layout:fixed; width:100%; min-width:920px; }
+  .tabla-proyectos col.c-cui{ width:90px; } .tabla-proyectos col.c-ubi{ width:140px; } .tabla-proyectos col.c-fun{ width:110px; }
+  .tabla-proyectos col.c-monto{ width:110px; } .tabla-proyectos col.c-estado{ width:160px; } .tabla-proyectos col.c-etapa{ width:120px; }
+  .tabla-proyectos td{ overflow-wrap:anywhere; }
+  /* CUI: entra un código IDEA de 11 caracteres; uno anómalo se corta con «…» y se ve entero al pasar el mouse */
+  .tabla-proyectos td:nth-child(1){ white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:11.5px; padding-left:8px; padding-right:4px; }
+  .tabla-proyectos td:nth-child(1) .sub{ white-space:normal; font-family:var(--font-body); }
+  .tabla-proyectos td:nth-child(5){ white-space:nowrap; text-align:right; padding-left:4px; padding-right:8px; }
+  .tabla-proyectos td:nth-child(6) .badge{ white-space:normal; }
+  .tabla tbody tr:hover{ background:var(--surface); }
   .mono{ font-family:var(--font-mono); font-size:12px; }
   .num{ text-align:right; white-space:nowrap; }
   .sub{ color:var(--muted); font-size:12px; }
@@ -224,6 +235,8 @@
     .tabla-wrap{ overflow:visible; border:none; border-radius:0; }
     table.tabla, table.tabla tbody, table.tabla tr, table.tabla td{ display:block; width:100%; }
     table.tabla thead{ display:none; }
+    table.tabla-proyectos{ min-width:0; table-layout:auto; } .tabla-proyectos colgroup{ display:none; }
+    .tabla-proyectos td:nth-child(1), .tabla-proyectos td:nth-child(5){ padding:4px 0 4px 38%; text-align:left; font-size:inherit; }
     table.tabla tr{ display:flex; flex-direction:column; background:#fff; border:1px solid var(--border); border-radius:12px; padding:10px 12px; margin-bottom:10px; }
     .tabla tbody tr:hover{ background:#fff; border-color:var(--accent); }
     table.tabla td{ position:relative; border:none; padding:4px 0 4px 38%; min-height:22px; text-align:left; white-space:normal !important; min-width:0 !important; overflow-wrap:anywhere; }
@@ -309,7 +322,8 @@
       <button class="btn btn-ghost" id="btn-export">⬇️ Exportar a Excel</button>
     </div>
     <div class="tabla-wrap">
-      <table class="tabla">
+      <table class="tabla tabla-proyectos">
+        <colgroup><col class="c-cui"><col><col class="c-ubi"><col class="c-fun"><col class="c-monto"><col class="c-estado"><col class="c-etapa"></colgroup>
         <thead><tr><th>CUI</th><th>Proyecto</th><th>Ubicación</th><th>Función</th><th class="num">Monto</th><th>Estado</th><th>Etapa</th></tr></thead>
         <tbody id="tbody"></tbody>
       </table>
@@ -591,7 +605,7 @@ function renderListado() {
   $('vacio').style.display = lista.length ? 'none' : 'block';
   $('tbody').innerHTML = lista.map(p => `
     <tr data-id="${p.id}">
-      <td class="mono">${esc(p.cui)}${p.es_idea ? '<div class="sub">Idea de inversión</div>' : ''}</td>
+      <td class="mono" title="${esc(p.cui)}">${esc(p.cui)}${p.es_idea ? '<div class="sub">Idea de inversión</div>' : ''}</td>
       <td>${esc(p.nombre)}<div class="sub">${esc(p.entidad || '')}${p.entidad_tipo ? ' · ' + p.entidad_tipo : ''}</div>
         ${p.es_mobiliario ? '<span class="badge badge-mob">🪑 Mobiliario</span> ' : ''}
         ${sinPriorizar(p) ? '<span class="badge badge-oport" title="Viable pero aún no priorizada en OxI: oportunidad para proponerla a la entidad">💡 Viable sin priorizar</span>' : ''}</td>
