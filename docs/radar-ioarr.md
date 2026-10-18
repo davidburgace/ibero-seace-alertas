@@ -36,7 +36,9 @@ Seguimiento de IOARR de mobiliario escolar en Obras por Impuestos (OxI), visto d
 
 ## 2. Usuarios y roles
 
-- Crea los usuarios en **Admin → Usuarios → Crear usuario**: eliges el correo y el rol, y aparece una contraseña temporal para entregarle a la persona (se muestra una sola vez). También se pueden crear en Supabase, en **Authentication → Users → Add user**.
+- Invita a los usuarios en **Admin → Usuarios → Invitar usuario**: eliges el correo y el rol, y a la persona le llega un correo (por el SMTP del radar) con un enlace para crear su propia contraseña. Mientras no entre, figura como «Invitación pendiente» y se le puede **reenviar** la invitación. Si el correo falla, Admin muestra el enlace para copiarlo y enviarlo a mano.
+- El enlace usa la misma pantalla que «Olvidé mi contraseña» (`login.html?modo=bienvenida`), así que necesita la configuración de **URL Configuration** de la sección Contraseñas. Vence según **Email OTP Expiration** de Supabase (por defecto 1 hora; se puede subir hasta 24 horas).
+- También se pueden crear usuarios en Supabase, en **Authentication → Users → Add user**.
 - Si se crea desde Supabase, el usuario recibe automáticamente el rol **`financista`**, que es el limitado: solo ve Radar IOARR.
 - Para darle acceso completo, cámbiale el rol a **Proveedor** en **Admin → Usuarios**. También se puede editar la columna `rol` de la tabla `perfiles` en Supabase:
 

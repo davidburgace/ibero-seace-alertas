@@ -11,7 +11,7 @@ import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 import infraRouter, { runInfraIngest } from './infra.js';
 import ioarrRouter, { sendIoarrDigest } from './ioarr/router.js';
 import { crearProteccionApi } from './ioarr/auth.js';
-import { listarUsuarios, cambiarRol, crearUsuario } from './ioarr/usuarios.js';
+import { listarUsuarios, cambiarRol, invitarUsuario, reenviarInvitacion } from './ioarr/usuarios.js';
 const app = express();
 app.use(cors({ origin: process.env.FRONTEND_URL?.split(',') || '*' }));
 app.use(express.json());
@@ -883,12 +883,34 @@ app.get('/api/admin/usuarios', async (req, res, next) => {
     res.json({ ok: true, yo: req.usuario.id, usuarios: await listarUsuarios(supabase) });
   } catch(e) { next(e); }
 });
+// Invitaciones: se envían con el mismo SMTP de las alertas
+async function enviarCorreoSmtp({ to, subject, html }) {
+  if (!process.env.SMTP_HOST) throw new Error('SMTP no configurado');
+  const transport = nodemailer.createTransport({
+    host: process.env.SMTP_HOST,
+    port: Number(process.env.SMTP_PORT || 587),
+    secure: String(process.env.SMTP_SECURE || 'false') === 'true',
+    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+    connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 15000
+  });
+  await transport.sendMail({ from: process.env.MAIL_FROM || process.env.SMTP_USER, to, subject, html });
+}
+const URL_APP = FRONTEND_URL.split(',')[0].replace(/\/$/, '');
+
 app.post('/api/admin/usuarios', async (req, res, next) => {
   try {
     if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
-    const r = await crearUsuario(supabase, { email: req.body?.email, rol: req.body?.rol });
-    if (r.error) return res.status(r.status).json({ ok: false, error: r.error });
-    res.status(201).json({ ok: true, usuario: r.usuario, contrasena: r.contrasena });
+    const { status, error, ...r } = await invitarUsuario(supabase, enviarCorreoSmtp, { email: req.body?.email, rol: req.body?.rol, baseUrl: URL_APP });
+    if (error) return res.status(status).json({ ok: false, error });
+    res.status(status).json({ ok: true, ...r });
+  } catch(e) { next(e); }
+});
+app.post('/api/admin/usuarios/:id/invitacion', async (req, res, next) => {
+  try {
+    if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
+    const { status, error, ...r } = await reenviarInvitacion(supabase, enviarCorreoSmtp, { id: req.params.id, baseUrl: URL_APP });
+    if (error) return res.status(status).json({ ok: false, error });
+    res.json({ ok: true, ...r });
   } catch(e) { next(e); }
 });
 app.patch('/api/admin/usuarios/:id', async (req, res, next) => {

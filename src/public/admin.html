@@ -194,7 +194,6 @@
     .topbar{ flex-wrap:wrap; row-gap:10px; }
     .topbar-actions{ width:100%; justify-content:flex-end; }
     .topbar-actions a, .logout-btn{ white-space:nowrap; }
-    #listoPass{ font-size:16px !important; white-space:nowrap; overflow-wrap:normal !important; }
 
     .content{ padding:20px 14px; }
 
@@ -303,7 +302,7 @@
         <div class="section-title">Usuarios</div>
         <div class="section-sub"><b>Proveedor</b> ve todo el radar; <b>financista</b> solo Radar IOARR.</div>
       </div>
-      <button class="btn-add" onclick="abrirCrearUsuario()">＋ Crear usuario</button>
+      <button class="btn-add" onclick="abrirCrearUsuario()">＋ Invitar usuario</button>
     </div>
     <div class="card" id="usuariosList">
       <div class="loading-row">Cargando...</div>
@@ -386,11 +385,12 @@
   </div>
 </div>
 
-<!-- Modal Crear usuario -->
+<!-- Modal Invitar usuario -->
 <div class="modal-overlay" id="modalUsuario">
   <div class="modal">
     <div id="usuarioForm">
-      <div class="modal-title">Crear usuario</div>
+      <div class="modal-title">Invitar usuario</div>
+      <p style="font-size:13px;color:var(--muted);line-height:1.5;margin:-6px 0 16px;">Le llegará un correo con un enlace para crear su propia contraseña.</p>
       <div class="form-group">
         <label class="form-label">Correo</label>
         <input type="email" class="input-field" id="usuarioEmail" placeholder="persona@grupoibero.pe" style="margin-bottom:0" onkeydown="if(event.key==='Enter')guardarUsuario()">
@@ -405,18 +405,20 @@
       <div id="usuarioError" style="color:var(--red);font-size:13px;min-height:18px;"></div>
       <div class="modal-actions">
         <button class="btn-cancel" onclick="closeModal('usuario')">Cancelar</button>
-        <button class="btn-save" id="usuarioGuardar" onclick="guardarUsuario()">Crear</button>
+        <button class="btn-save" id="usuarioGuardar" onclick="guardarUsuario()">Enviar invitación</button>
       </div>
     </div>
     <div id="usuarioListo" style="display:none">
-      <div class="modal-title">Usuario creado</div>
-      <p style="font-size:13.5px;line-height:1.5;margin-bottom:14px;">Pásale estos datos a <b id="listoEmail"></b>. Puede cambiar la contraseña con el botón «Contraseña».</p>
-      <div class="form-label" style="margin-bottom:6px;">Contraseña temporal</div>
-      <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
-        <code id="listoPass" style="flex:1;font-size:18px;letter-spacing:.06em;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:10px 12px;user-select:all;overflow-wrap:anywhere;"></code>
-        <button class="btn-cancel" onclick="copiarPass(this)">Copiar</button>
+      <div class="modal-title" id="listoTitulo"></div>
+      <p style="font-size:13.5px;line-height:1.5;margin-bottom:14px;" id="listoTexto"></p>
+      <div id="listoEnlaceBox" style="display:none">
+        <div class="form-label" style="margin-bottom:6px;">Enlace para crear su contraseña</div>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
+          <code id="listoEnlace" style="flex:1;min-width:0;font-size:12px;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:10px 12px;user-select:all;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"></code>
+          <button class="btn-cancel" onclick="copiarEnlace(this)">Copiar</button>
+        </div>
+        <p style="font-size:12px;color:var(--amber);margin-bottom:16px;">⚠️ Es personal: envíaselo solo a esa persona. Sirve una vez y vence en unas horas; si vence, usa «Reenviar».</p>
       </div>
-      <p style="font-size:12px;color:var(--amber);margin-bottom:16px;">⚠️ Guárdala ahora: no se vuelve a mostrar. Si se pierde, la persona puede usar «¿Olvidaste tu contraseña?».</p>
       <div class="modal-actions">
         <button class="btn-save" onclick="closeModal('usuario')">Listo</button>
       </div>
@@ -525,9 +527,10 @@ async function loadUsuarios() {
       <div class="item-row">
         <div class="item-info">
           <div class="item-name">${escAttr(u.email || '(sin correo)')}${yo ? ' <span class="badge badge-gray">tú</span>' : ''}</div>
-          <div class="item-meta">Último ingreso: ${fechaHora(u.ultimo_ingreso)}</div>
+          <div class="item-meta">${u.ultimo_ingreso ? 'Último ingreso: ' + fechaHora(u.ultimo_ingreso) : '<span style="color:var(--amber)">Invitación pendiente</span> · aún no ha entrado'}</div>
         </div>
         <div class="item-actions" style="display:flex;align-items:center;gap:10px;">
+          ${!u.ultimo_ingreso && !yo ? `<button class="btn-delete btn-reenviar" data-id="${escAttr(u.id)}" data-email="${escAttr(u.email)}">Reenviar</button>` : ''}
           <select class="form-select rol-select" data-id="${escAttr(u.id)}" data-rol="${u.rol}" ${yo ? 'disabled title="No puedes quitarte tu propio acceso"' : ''}>
             <option value="proveedor" ${u.rol === 'proveedor' ? 'selected' : ''}>Proveedor</option>
             <option value="financista" ${u.rol === 'financista' ? 'selected' : ''}>Financista</option>
@@ -536,6 +539,7 @@ async function loadUsuarios() {
       </div>`;
     }).join('');
     el.querySelectorAll('.rol-select').forEach(sel => sel.addEventListener('change', () => cambiarRolUsuario(sel)));
+    el.querySelectorAll('.btn-reenviar').forEach(btn => btn.addEventListener('click', () => reenviarInvitacionUsuario(btn)));
   } catch (e) { el.innerHTML = '<div class="empty-state">No se pudieron cargar los usuarios: ' + escAttr(e.message) + '</div>'; }
 }
 
@@ -549,12 +553,26 @@ function abrirCrearUsuario() {
   document.getElementById('usuarioEmail').focus();
 }
 
+// Muestra el resultado del envío: enviado, o el enlace para mandarlo a mano si el correo falló
+function mostrarResultadoInvitacion(email, data) {
+  const enviado = data.enviado;
+  document.getElementById('listoTitulo').textContent = enviado ? '✓ Invitación enviada' : 'Falta enviar el enlace';
+  document.getElementById('listoTexto').innerHTML = enviado
+    ? 'Le llegó a <b>' + escAttr(email) + '</b> un correo para crear su contraseña. Cuando entre, dejará de figurar como «Invitación pendiente».'
+    : escAttr(data.aviso || 'No se pudo enviar el correo.') + ' Cuenta: <b>' + escAttr(email) + '</b>.';
+  document.getElementById('listoEnlaceBox').style.display = enviado ? 'none' : '';
+  document.getElementById('listoEnlace').textContent = data.enlace || '';
+  document.getElementById('usuarioForm').style.display = 'none';
+  document.getElementById('usuarioListo').style.display = '';
+  openModal('usuario');
+}
+
 async function guardarUsuario() {
   const btn = document.getElementById('usuarioGuardar');
   const err = document.getElementById('usuarioError');
   const email = document.getElementById('usuarioEmail').value.trim();
   if (!email) { err.textContent = 'Escribe el correo'; return; }
-  btn.disabled = true; err.textContent = '';
+  btn.disabled = true; btn.textContent = 'Enviando…'; err.textContent = '';
   try {
     const res = await fetch(API + '/api/admin/usuarios', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -562,26 +580,35 @@ async function guardarUsuario() {
     });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error);
-    document.getElementById('listoEmail').textContent = data.usuario.email;
-    document.getElementById('listoPass').textContent = data.contrasena;
-    document.getElementById('usuarioForm').style.display = 'none';
-    document.getElementById('usuarioListo').style.display = '';
+    mostrarResultadoInvitacion(data.usuario.email, data);
     loadUsuarios();
-  } catch (e) { err.textContent = 'No se pudo crear: ' + e.message; }
-  btn.disabled = false;
+  } catch (e) { err.textContent = 'No se pudo invitar: ' + e.message; }
+  btn.disabled = false; btn.textContent = 'Enviar invitación';
 }
 
-async function copiarPass(btn) {
-  const el = document.getElementById('listoPass');
-  let copiada = false;
-  try { await navigator.clipboard.writeText(el.textContent); copiada = true; }
+async function reenviarInvitacionUsuario(btn) {
+  if (!confirm('¿Reenviar la invitación a ' + btn.dataset.email + '? El enlace anterior deja de servir.')) return;
+  btn.disabled = true; btn.textContent = 'Enviando…';
+  try {
+    const res = await fetch(API + '/api/admin/usuarios/' + encodeURIComponent(btn.dataset.id) + '/invitacion', { method: 'POST' });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error);
+    mostrarResultadoInvitacion(btn.dataset.email, data);
+  } catch (e) { alert('No se pudo reenviar: ' + e.message); }
+  btn.disabled = false; btn.textContent = 'Reenviar';
+}
+
+async function copiarEnlace(btn) {
+  const el = document.getElementById('listoEnlace');
+  let copiado = false;
+  try { await navigator.clipboard.writeText(el.textContent); copiado = true; }
   catch {
     // Respaldo: seleccionar el texto y copiar a la antigua
     const rango = document.createRange(); rango.selectNodeContents(el);
     const sel = getSelection(); sel.removeAllRanges(); sel.addRange(rango);
-    try { copiada = document.execCommand('copy'); } catch {}
+    try { copiado = document.execCommand('copy'); } catch {}
   }
-  btn.textContent = copiada ? '✓ Copiada' : 'Selecciónala y copia';
+  btn.textContent = copiado ? '✓ Copiado' : 'Selecciónalo y copia';
   setTimeout(() => btn.textContent = 'Copiar', 2000);
 }
 
@@ -719,8 +746,8 @@ async function deleteContacto(id) {
 document.querySelectorAll('.modal-overlay').forEach(m => {
   m.addEventListener('click', function(e) {
     if (e.target !== m) return;
-    // Con la contraseña temporal a la vista, solo se cierra con «Listo» (no se vuelve a mostrar)
-    if (m.id === 'modalUsuario' && document.getElementById('usuarioListo').style.display !== 'none') return;
+    // Con el enlace de invitación a la vista, solo se cierra con «Listo»
+    if (m.id === 'modalUsuario' && document.getElementById('listoEnlaceBox').style.display !== 'none' && document.getElementById('usuarioListo').style.display !== 'none') return;
     m.classList.remove('open');
   });
 });

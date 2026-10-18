@@ -6,7 +6,6 @@
 // en el servidor, detrás de crearProteccionApi (rol proveedor).
 // ============================================================================
 
-import { randomInt } from 'node:crypto';
 import { olvidarUsuario } from './auth.js';
 
 export const ROLES = ['proveedor', 'financista'];
@@ -45,32 +44,67 @@ export async function cambiarRol(supabase, { id, rol, usuarioActual }) {
   return { status: 200, usuario: { id, email: data.user.email, rol } };
 }
 
-// Contraseña temporal fácil de dictar: sin 0/O ni 1/l/I
-const LETRAS = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-export function contrasenaTemporal(largo = 12) {
-  return Array.from({ length: largo }, () => LETRAS[randomInt(LETRAS.length)]).join('');
+const EMAIL_VALIDO = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+// Correo de bienvenida con el enlace para crear la contraseña
+export function correoInvitacion({ email, enlace, rol }) {
+  const acceso = rol === 'proveedor' ? 'todo el Radar Ibero' : 'Radar IOARR';
+  return {
+    to: email,
+    subject: 'Tu acceso a Radar Ibero',
+    html: `<div style="font-family:Arial,sans-serif;max-width:520px;margin:auto;color:#16181d;line-height:1.5">
+      <h2 style="margin:0 0 12px">Bienvenido a Radar Ibero</h2>
+      <p>Se creó tu cuenta con el correo <b>${esc(email)}</b>, con acceso a ${acceso}.</p>
+      <p>Para entrar, crea tu contraseña con este botón:</p>
+      <p style="margin:22px 0"><a href="${esc(enlace)}" style="background:#3a63e0;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:bold;display:inline-block">Crear mi contraseña</a></p>
+      <p style="font-size:13px;color:#5c6270">El enlace sirve una sola vez y vence en unas horas. Si vence, pide que te reenvíen la invitación o usa «¿Olvidaste tu contraseña?» en la pantalla de ingreso.</p>
+    </div>`
+  };
 }
 
-const EMAIL_VALIDO = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+// Genera el enlace (tipo recovery: lleva a login.html para elegir contraseña) y lo envía.
+// Si el correo falla, devuelve el enlace para que Admin lo copie y lo envíe a mano.
+async function enviarInvitacion(supabase, enviarCorreo, { email, rol, baseUrl }) {
+  const redirectTo = `${baseUrl}/login.html?modo=bienvenida`;
+  const { data, error } = await supabase.auth.admin.generateLink({ type: 'recovery', email, options: { redirectTo } });
+  if (error) throw error;
+  const enlace = data.properties.action_link;
+  try {
+    await enviarCorreo(correoInvitacion({ email, enlace, rol }));
+    return { enviado: true };
+  } catch (e) {
+    return { enviado: false, enlace, aviso: 'No se pudo enviar el correo (' + e.message + '). Copia el enlace y envíaselo.' };
+  }
+}
 
-// Crea la cuenta ya confirmada (no espera el correo de Supabase) con una contraseña
-// temporal que se muestra una sola vez en Admin. Devuelve { status, error } o
-// { status: 201, usuario, contrasena }.
-export async function crearUsuario(supabase, { email, rol }) {
+// Crea la cuenta sin contraseña y envía la invitación. Devuelve { status, error } o
+// { status: 201, usuario, enviado, enlace?, aviso? }.
+export async function invitarUsuario(supabase, enviarCorreo, { email, rol, baseUrl }) {
   email = String(email || '').trim().toLowerCase();
   if (!EMAIL_VALIDO.test(email)) return { status: 400, error: 'Escribe un correo válido' };
   if (!ROLES.includes(rol)) return { status: 400, error: 'Rol inválido' };
 
-  const contrasena = contrasenaTemporal();
-  const { data, error } = await supabase.auth.admin.createUser({ email, password: contrasena, email_confirm: true });
+  const { data, error } = await supabase.auth.admin.createUser({ email, email_confirm: true });
   if (error) {
     if (error.status === 422 || /already|registered|exists/i.test(error.message || '')) {
-      return { status: 409, error: 'Ya existe una cuenta con ese correo' };
+      return { status: 409, error: 'Ya existe una cuenta con ese correo. Si no ha entrado nunca, usa «Reenviar invitación».' };
     }
     throw error;
   }
   // El trigger de la migración 001 crea el perfil como financista; aquí se fija el rol elegido
   const { error: errPerfil } = await supabase.from('perfiles').upsert({ id: data.user.id, email, rol }, { onConflict: 'id' });
   if (errPerfil) throw errPerfil;
-  return { status: 201, usuario: { id: data.user.id, email, rol, ultimo_ingreso: null }, contrasena };
+
+  const envio = await enviarInvitacion(supabase, enviarCorreo, { email, rol, baseUrl });
+  return { status: 201, usuario: { id: data.user.id, email, rol, ultimo_ingreso: null }, ...envio };
+}
+
+// Vuelve a enviar la invitación (enlace nuevo) a una cuenta existente
+export async function reenviarInvitacion(supabase, enviarCorreo, { id, baseUrl }) {
+  const { data, error } = await supabase.auth.admin.getUserById(id);
+  if (error || !data?.user) return { status: 404, error: 'Usuario no encontrado' };
+  const { data: perfil } = await supabase.from('perfiles').select('rol').eq('id', id).maybeSingle();
+  const envio = await enviarInvitacion(supabase, enviarCorreo, { email: data.user.email, rol: perfil?.rol || 'financista', baseUrl });
+  return { status: 200, ...envio };
 }

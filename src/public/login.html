@@ -152,7 +152,14 @@ $('volver').href = destino();
   const { data } = await sb.auth.getSession();
   const sesion = data.session;
 
-  if (vieneDelCorreo && sesion) mostrar('nueva');
+  if (vieneDelCorreo && sesion) {
+    if (params.get('modo') === 'bienvenida') {
+      document.querySelector('#f-nueva h1').textContent = 'Bienvenido a Radar Ibero';
+      $('nueva-sub').textContent = 'Crea tu contraseña para ' + sesion.user.email + '. La usarás para entrar de ahora en adelante.';
+      $('f-nueva').querySelector('button').textContent = 'Crear contraseña y entrar';
+    }
+    mostrar('nueva');
+  }
   else if (params.get('modo') === 'cambiar' && sesion) {
     $('cambiar-sub').textContent = 'Cuenta: ' + sesion.user.email;
     mostrar('cambiar');

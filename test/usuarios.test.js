@@ -71,55 +71,86 @@ test('cambiarRol de una cuenta que no existe da 404', async () => {
   assert.equal((await cambiarRol(sb, { id: 'zzz', rol: 'proveedor', usuarioActual: { id: 'a' } })).status, 404);
 });
 
-// ─── Crear usuario ───────────────────────────────────────────────────────────
-import { crearUsuario, contrasenaTemporal } from '../src/ioarr/usuarios.js';
+// ─── Invitar usuario ─────────────────────────────────────────────────────────
+import { invitarUsuario, reenviarInvitacion, correoInvitacion } from '../src/ioarr/usuarios.js';
 
-function supabaseCrear({ existentes = [] } = {}) {
-  const creados = [], upserts = [];
+function supabaseInvitar({ existentes = [] } = {}) {
+  const creados = [], upserts = [], enlaces = [];
+  const cuentas = new Map(existentes.map((email, i) => [ 'old' + i, { id: 'old' + i, email } ]));
   return {
-    creados, upserts,
-    auth: { admin: { createUser: async ({ email, password, email_confirm }) => {
-      if (existentes.includes(email)) return { data: null, error: { status: 422, message: 'A user with this email address has already been registered' } };
-      creados.push({ email, password, email_confirm });
-      return { data: { user: { id: 'nuevo-' + creados.length, email } }, error: null };
-    } } },
-    from: () => ({ upsert: async (fila, opciones) => { upserts.push({ fila, opciones }); return { error: null }; } })
+    creados, upserts, enlaces,
+    auth: { admin: {
+      createUser: async ({ email, password, email_confirm }) => {
+        if ([...cuentas.values()].some(u => u.email === email)) return { data: null, error: { status: 422, message: 'A user with this email address has already been registered' } };
+        const user = { id: 'nuevo-' + (creados.length + 1), email };
+        creados.push({ email, password, email_confirm }); cuentas.set(user.id, user);
+        return { data: { user }, error: null };
+      },
+      getUserById: async id => cuentas.has(id) ? { data: { user: cuentas.get(id) }, error: null } : { data: { user: null }, error: { message: 'not found' } },
+      generateLink: async ({ type, email, options }) => {
+        enlaces.push({ type, email, redirectTo: options.redirectTo });
+        return { data: { properties: { action_link: `https://sb.test/verify?token=t${enlaces.length}&redirect_to=${encodeURIComponent(options.redirectTo)}` } }, error: null };
+      }
+    } },
+    from: () => ({
+      upsert: async (fila, opciones) => { upserts.push({ fila, opciones }); return { error: null }; },
+      select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: { rol: 'proveedor' } }) }) })
+    })
   };
 }
+const BASE = 'https://radar.test';
 
-test('crearUsuario crea la cuenta confirmada, fija el rol y devuelve la contraseña temporal', async () => {
-  const sb = supabaseCrear();
-  const r = await crearUsuario(sb, { email: '  Maria.Perez@Ibero.pe ', rol: 'proveedor' });
+test('invitarUsuario crea la cuenta sin contraseña, fija el rol y envía el enlace por correo', async () => {
+  const sb = supabaseInvitar(); const correos = [];
+  const r = await invitarUsuario(sb, async c => { correos.push(c); }, { email: '  Maria.Perez@Ibero.pe ', rol: 'proveedor', baseUrl: BASE });
   assert.equal(r.status, 201);
-  assert.equal(r.usuario.email, 'maria.perez@ibero.pe');
-  assert.equal(sb.creados[0].email_confirm, true);
-  assert.equal(sb.creados[0].password, r.contrasena);
-  assert.deepEqual(sb.upserts[0], { fila: { id: 'nuevo-1', email: 'maria.perez@ibero.pe', rol: 'proveedor' }, opciones: { onConflict: 'id' } });
+  assert.equal(r.enviado, true);
+  assert.equal(r.enlace, undefined); // si el correo salió, el enlace no se muestra en Admin
+  assert.deepEqual(sb.creados, [{ email: 'maria.perez@ibero.pe', password: undefined, email_confirm: true }]);
+  assert.deepEqual(sb.upserts[0].fila, { id: 'nuevo-1', email: 'maria.perez@ibero.pe', rol: 'proveedor' });
+  assert.deepEqual(sb.enlaces, [{ type: 'recovery', email: 'maria.perez@ibero.pe', redirectTo: 'https://radar.test/login.html?modo=bienvenida' }]);
+  assert.equal(correos[0].to, 'maria.perez@ibero.pe');
+  assert.match(correos[0].html, /https:\/\/sb\.test\/verify\?token=t1/);
 });
 
-test('crearUsuario rechaza correos y roles inválidos sin crear nada', async () => {
-  const sb = supabaseCrear();
+test('si el correo falla, la cuenta queda creada y se devuelve el enlace para enviarlo a mano', async () => {
+  const sb = supabaseInvitar();
+  const r = await invitarUsuario(sb, async () => { throw new Error('SMTP no configurado'); }, { email: 'a@ibero.pe', rol: 'financista', baseUrl: BASE });
+  assert.equal(r.status, 201);
+  assert.equal(r.enviado, false);
+  assert.match(r.enlace, /^https:\/\/sb\.test\/verify/);
+  assert.match(r.aviso, /SMTP no configurado/);
+});
+
+test('invitarUsuario rechaza correos y roles inválidos sin crear nada', async () => {
+  const sb = supabaseInvitar();
   for (const datos of [{ email: 'sin-arroba', rol: 'proveedor' }, { email: '', rol: 'proveedor' }, { email: 'a@b.pe', rol: 'admin' }]) {
-    assert.equal((await crearUsuario(sb, datos)).status, 400);
+    assert.equal((await invitarUsuario(sb, async () => {}, { ...datos, baseUrl: BASE })).status, 400);
   }
   assert.equal(sb.creados.length, 0);
 });
 
-test('crearUsuario con un correo ya registrado da 409', async () => {
-  const sb = supabaseCrear({ existentes: ['ya@ibero.pe'] });
-  const r = await crearUsuario(sb, { email: 'ya@ibero.pe', rol: 'financista' });
+test('invitar un correo ya registrado da 409 y sugiere reenviar', async () => {
+  const sb = supabaseInvitar({ existentes: ['ya@ibero.pe'] });
+  const r = await invitarUsuario(sb, async () => {}, { email: 'ya@ibero.pe', rol: 'financista', baseUrl: BASE });
   assert.equal(r.status, 409);
-  assert.match(r.error, /Ya existe/);
+  assert.match(r.error, /Reenviar invitación/);
   assert.equal(sb.upserts.length, 0);
 });
 
-test('contrasenaTemporal: 12 caracteres, sin letras confusas, distinta cada vez', () => {
-  const vistas = new Set();
-  for (let i = 0; i < 200; i++) {
-    const c = contrasenaTemporal();
-    assert.equal(c.length, 12);
-    assert.doesNotMatch(c, /[0O1lI]/);
-    vistas.add(c);
-  }
-  assert.equal(vistas.size, 200);
+test('reenviarInvitacion genera un enlace nuevo para la cuenta existente', async () => {
+  const sb = supabaseInvitar({ existentes: ['ya@ibero.pe'] }); const correos = [];
+  const r = await reenviarInvitacion(sb, async c => { correos.push(c); }, { id: 'old0', baseUrl: BASE });
+  assert.equal(r.status, 200);
+  assert.equal(r.enviado, true);
+  assert.equal(correos[0].to, 'ya@ibero.pe');
+  assert.equal((await reenviarInvitacion(sb, async () => {}, { id: 'no-existe', baseUrl: BASE })).status, 404);
+});
+
+test('el correo de invitación escapa el correo y dice el acceso según el rol', () => {
+  const c = correoInvitacion({ email: '<x>@ibero.pe', enlace: 'https://sb.test/v?a=1&b=2', rol: 'financista' });
+  assert.match(c.html, /&lt;x&gt;@ibero\.pe/);
+  assert.match(c.html, /href="https:\/\/sb\.test\/v\?a=1&amp;b=2"/);
+  assert.match(c.html, /Radar IOARR/);
+  assert.match(correoInvitacion({ email: 'a@b.pe', enlace: 'x', rol: 'proveedor' }).html, /todo el Radar Ibero/);
 });
