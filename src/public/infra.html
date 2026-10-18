@@ -115,8 +115,17 @@
     .stat{ flex:1; min-width:calc(50% - 5px); padding:12px 14px; }
     .stat .n{ font-size:20px; }
 
-    .filters{ gap:8px; }
-    #q{ min-width:0 !important; width:100%; }
+    /* Botones: los de subir/web de dos en dos; Puntuar + lote + Recargar en una fila */
+    .toolbar .btn{ flex:1 1 calc(50% - 4px); justify-content:center; text-align:center; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .toolbar #btnScore, .toolbar #btnReload{ flex:1 1 0; }
+    .toolbar select{ flex:0 0 68px; }
+    .toolbar .spacer{ display:none; }
+
+    /* Filtros: buscador arriba a todo el ancho, listas y casillas de dos en dos */
+    .filters{ display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:8px; }
+    .filters input:not([type=checkbox]), .filters select{ width:100%; min-width:0 !important; font-size:16px; } /* 16px evita el zoom automático de iPhone */
+    #q{ grid-column:1 / -1; }
+    .filters select:nth-of-type(odd):last-of-type{ grid-column:1 / -1; }
 
     .card{ flex-direction:column; align-items:stretch; gap:10px; padding:14px; }
     .card .score{ align-self:flex-start; width:44px; height:44px; font-size:16px; }

@@ -290,8 +290,9 @@
     .subtitle{ font-size:13px; }
     #status-pill{ font-size:11px; }
 
-    .tabs{ overflow-x:auto; -webkit-overflow-scrolling:touch; flex-wrap:nowrap; }
-    .tab-btn{ padding:10px 12px; font-size:13px; white-space:nowrap; flex-shrink:0; }
+    /* Las tres pestañas a lo ancho (antes la tercera quedaba fuera de pantalla) */
+    .tabs{ display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:0; overflow:visible; }
+    .tab-btn{ padding:10px 4px; font-size:12px; line-height:1.25; white-space:normal; flex-direction:column; justify-content:center; gap:4px; text-align:center; }
 
     main{ padding:16px 14px 40px 14px; }
 
@@ -299,9 +300,8 @@
     .toolbar .btn-primary{ width:100%; }
     select.filter{ width:100%; }
 
-    .kanban{ grid-template-columns:none !important; grid-auto-flow:column; grid-auto-columns: minmax(78vw, 1fr); overflow-x:auto; gap:10px; }
-    .kcol{ padding:12px; scroll-snap-align:start; }
-    .kanban{ scroll-snap-type:x mandatory; }
+    .kanban{ grid-template-columns:1fr !important; gap:10px; }
+    .kcol{ padding:12px; min-height:0; }
 
     .panel{ padding:14px; }
 
@@ -1675,11 +1675,14 @@ document.getElementById('btn-export-visitas').addEventListener('click', () => {
    ========================================================= */
 document.addEventListener('DOMContentLoaded', async () => {
   const calendarEl = document.getElementById('calendar');
+  const esCelular = window.matchMedia('(max-width: 640px)').matches;
   calendar = new FullCalendar.Calendar(calendarEl, {
-    initialView: 'dayGridMonth', height:'auto', locale:'es',
+    // En celular la cuadrícula del mes no se lee: se abre en lista (se puede volver a Mes con el botón)
+    initialView: esCelular ? 'listMonth' : 'dayGridMonth', height:'auto', locale:'es',
     dayMaxEvents: 3,
-    headerToolbar: { left:'prev,next today', center:'title', right:'dayGridMonth,timeGridWeek,timeGridDay' },
-    buttonText: { today:'Hoy', month:'Mes', week:'Semana', day:'Día' },
+    headerToolbar: { left:'prev,next today', center:'title', right: esCelular ? 'listMonth,dayGridMonth' : 'dayGridMonth,timeGridWeek,timeGridDay' },
+    buttonText: { today:'Hoy', month:'Mes', week:'Semana', day:'Día', list:'Lista' },
+    noEventsContent: 'Sin reuniones ni visitas este mes',
     events: [],
     eventClick: info => {
       const ep = info.event.extendedProps;
