@@ -135,7 +135,8 @@
   }
   .kcol-title{ font-family:var(--font-display); font-weight:700; font-size:13px; display:flex; align-items:center; gap:8px; }
   .kcol-dot{ width:8px; height:8px; border-radius:50%; }
-  .kcol-count{ font-family:var(--font-mono); font-size:11px; color:var(--muted); }
+  .kcol-count{ font-family:var(--font-mono); font-size:11px; color:var(--muted); display:flex; align-items:center; gap:8px; }
+  .kcol-toggle{ display:none; font-size:14px; transition:transform .15s; }
 
   .card{
     background:#fff; border:1px solid var(--border); border-radius:10px;
@@ -302,6 +303,12 @@
 
     .kanban{ grid-template-columns:1fr !important; gap:10px; }
     .kcol{ padding:12px; min-height:0; }
+    /* Etapas plegables: tocar el título oculta o muestra sus tarjetas */
+    .kcol-head{ cursor:pointer; user-select:none; -webkit-tap-highlight-color:transparent; }
+    .kcol-toggle{ display:inline-block; }
+    .kcol.plegada .kcol-toggle{ transform:rotate(-90deg); }
+    .kcol.plegada .kcol-head{ margin-bottom:0; }
+    .kcol.plegada > :not(.kcol-head){ display:none; }
 
     .panel{ padding:14px; }
 
@@ -1072,6 +1079,21 @@ async function avanzarEtapaProceso(id, nuevaEtapa){
   if (error) return alert('Error: ' + error.message);
   await refreshProcesos();
 }
+/* En celular cada etapa del kanban se pliega tocando su título.
+   Se recuerda en este navegador para que sobreviva a recargas y cambios en vivo. */
+const CLAVE_PLEGADAS = 'seguimiento_etapas_plegadas';
+const etapasPlegadas = new Set((() => { try { return JSON.parse(localStorage.getItem(CLAVE_PLEGADAS)) || []; } catch { return []; } })());
+const esCelularKanban = () => window.matchMedia('(max-width: 640px)').matches;
+function etapaPlegada(tablero, etapa){ return etapasPlegadas.has(tablero + '|' + etapa); }
+document.addEventListener('click', e => {
+  const head = e.target.closest('.kanban .kcol-head');
+  if (!head || !esCelularKanban()) return;
+  const col = head.closest('.kcol');
+  const clave = col.dataset.plegable;
+  if (col.classList.toggle('plegada')) etapasPlegadas.add(clave); else etapasPlegadas.delete(clave);
+  try { localStorage.setItem(CLAVE_PLEGADAS, JSON.stringify([...etapasPlegadas])); } catch {}
+});
+
 function renderKanbanProcesos(){
   const filtro = document.getElementById('filtro-tipo-proceso').value;
   const ocultarConcluidos = document.getElementById('fOcultarConcluidos').checked;
@@ -1083,10 +1105,10 @@ function renderKanbanProcesos(){
   el.innerHTML = ETAPAS_PROCESO.map(et => {
     const items = lista.filter(p => p.etapa === et.key);
     return `
-    <div class="kcol">
+    <div class="kcol${etapaPlegada('procesos', et.key) ? ' plegada' : ''}" data-plegable="${escHtml('procesos|' + et.key)}">
       <div class="kcol-head">
         <div class="kcol-title"><span class="kcol-dot" style="background:${et.color}"></span>${et.key}</div>
-        <span class="kcol-count">${items.length}</span>
+        <span class="kcol-count">${items.length}<span class="kcol-toggle" aria-hidden="true">▾</span></span>
       </div>
       ${items.length === 0 ? '<p class="card-empty">Sin procesos</p>' : items.map(p => {
         const sem = semaforoFecha(p.fecha_limite);
@@ -1490,10 +1512,10 @@ function renderKanbanVisitas(){
       .map(([k, arr]) => ({ key:k, latest:arr[0], total:arr.length }))
       .filter(x => x.latest.estado === es.key);
     return `
-    <div class="kcol">
+    <div class="kcol${etapaPlegada('visitas', es.key) ? ' plegada' : ''}" data-plegable="${escHtml('visitas|' + es.key)}">
       <div class="kcol-head">
         <div class="kcol-title"><span class="kcol-dot" style="background:${es.color}"></span>${es.key}</div>
-        <span class="kcol-count">${items.length}</span>
+        <span class="kcol-count">${items.length}<span class="kcol-toggle" aria-hidden="true">▾</span></span>
       </div>
       ${items.length === 0 ? '<p class="card-empty">Sin visitas</p>' : items.map(({key, latest, total}) => `
         <div class="card" data-id="${latest.id}">
