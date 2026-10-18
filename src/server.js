@@ -10,10 +10,13 @@ import pdfParse from 'pdf-parse/lib/pdf-parse.js';
 import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 import infraRouter, { runInfraIngest } from './infra.js';
 import ioarrRouter, { sendIoarrDigest } from './ioarr/router.js';
+import { crearProteccionApi } from './ioarr/auth.js';
 const app = express();
 app.use(cors({ origin: process.env.FRONTEND_URL?.split(',') || '*' }));
 app.use(express.json());
 app.use(express.static('src/public'));
+// Toda la API exige sesión de Supabase y rol proveedor (salvo /api/health y /api/ioarr/*, ver auth.js)
+app.use('/api', crearProteccionApi());
 
 const VERSION = '1.1.0';
 const MODE = 'seace-api-direct';

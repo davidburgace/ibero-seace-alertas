@@ -44,7 +44,14 @@ Seguimiento de IOARR de mobiliario escolar en Obras por Impuestos (OxI), visto d
   update perfiles set rol = 'proveedor' where email = 'persona@grupoibero.pe';
   ```
 
-**Límite de la fase 1:** el rol se exige en `/api/ioarr/*` y en el inicio se ocultan los demás módulos. Pero las otras páginas y APIs (SEACE, Infra, Seguimiento) siguen sin login, igual que antes. Bloquearlas, y endurecer el RLS de `procesos_seguimiento`, `reuniones` y `visitas_comerciales` (que hoy se leen con la clave pública), queda para la fase 2. Se pueden reutilizar `requireAuth` y `requireRol` de `src/ioarr/auth.js`.
+**Qué protege cada rol:**
+
+- `/api/ioarr/*` exige sesión con cualquier rol.
+- El resto de la API (SEACE, Infra, Seguimiento y Admin) exige sesión con rol **`proveedor`** (`crearProteccionApi` en `src/ioarr/auth.js`). Solo quedan abiertas `/api/health` y `/api/ioarr/config`.
+- Las páginas Admin, Infra, Oportunidad, Seleccionadas y Seguimiento cargan `src/public/sesion.js`. Si no hay sesión mandan a `login.html`; si el usuario es financista lo mandan a Radar IOARR. Además, agregan el token a cada llamada a `/api/*`.
+- El panel Admin ya no tiene contraseña propia: usa esta misma cuenta.
+
+**Pendiente:** endurecer el RLS de `procesos_seguimiento`, `reuniones`, `visitas_comerciales` y `contactos_frecuentes`. Hoy `seguimiento.html` las lee directo con la clave pública.
 
 ## 3. Variables de entorno (Render → Environment)
 
