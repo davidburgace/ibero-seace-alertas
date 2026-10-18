@@ -47,6 +47,8 @@
 
   window.radarSesion = {
     listo,
+    // Cliente de Supabase con la sesión del usuario (para leer tablas directo desde la página)
+    async cliente() { await listo; return sb; },
     async salir() { await listo; await sb.auth.signOut(); location.replace('/login.html'); }
   };
 })();
