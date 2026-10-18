@@ -11,6 +11,7 @@ import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 import infraRouter, { runInfraIngest } from './infra.js';
 import ioarrRouter, { sendIoarrDigest } from './ioarr/router.js';
 import { crearProteccionApi } from './ioarr/auth.js';
+import { listarUsuarios, cambiarRol } from './ioarr/usuarios.js';
 const app = express();
 app.use(cors({ origin: process.env.FRONTEND_URL?.split(',') || '*' }));
 app.use(express.json());
@@ -873,6 +874,21 @@ app.delete('/api/admin/contactos/:id', async (req, res, next) => {
     const { error } = await supabase.from('contactos_frecuentes').delete().eq('id', req.params.id);
     if (error) throw error;
     res.json({ ok: true });
+  } catch(e) { next(e); }
+});
+// Usuarios y roles (cuentas de Supabase Auth + tabla perfiles)
+app.get('/api/admin/usuarios', async (req, res, next) => {
+  try {
+    if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
+    res.json({ ok: true, yo: req.usuario.id, usuarios: await listarUsuarios(supabase) });
+  } catch(e) { next(e); }
+});
+app.patch('/api/admin/usuarios/:id', async (req, res, next) => {
+  try {
+    if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
+    const r = await cambiarRol(supabase, { id: req.params.id, rol: req.body?.rol, usuarioActual: req.usuario });
+    if (r.error) return res.status(r.status).json({ ok: false, error: r.error });
+    res.json({ ok: true, usuario: r.usuario });
   } catch(e) { next(e); }
 });
 app.use(infraRouter);

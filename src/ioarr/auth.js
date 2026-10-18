@@ -38,6 +38,11 @@ export async function requireAuth(req, res, next) {
   } catch (e) { next(e); }
 }
 
+// Tras cambiar el rol de alguien, que el cambio rija ya (sin esperar CACHE_MS)
+export function olvidarUsuario(id) {
+  for (const [token, v] of cache) if (v.usuario.id === id) cache.delete(token);
+}
+
 // Uso: router.post('/ruta', requireRol('proveedor'), handler)
 export function requireRol(...roles) {
   return (req, res, next) => roles.includes(req.usuario?.rol)

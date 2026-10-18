@@ -38,11 +38,14 @@ Seguimiento de IOARR de mobiliario escolar en Obras por Impuestos (OxI), visto d
 
 - Crea los usuarios en **Authentication → Users → Add user**, con correo y contraseña.
 - Cada usuario nuevo recibe automáticamente el rol **`financista`**, que es el limitado: solo ve Radar IOARR.
-- Para darle acceso completo:
+- Para darle acceso completo, cámbiale el rol a **Proveedor** en **Admin → Usuarios**. También se puede editar la columna `rol` de la tabla `perfiles` en Supabase:
 
   ```sql
   update perfiles set rol = 'proveedor' where email = 'persona@grupoibero.pe';
   ```
+
+  El primer proveedor hay que crearlo así, desde Supabase, porque la sección de Admin solo la pueden usar los proveedores.
+- Nadie se puede quitar su propio acceso de proveedor desde Admin, para que no se quede afuera por error.
 
 **Qué protege cada rol:**
 

@@ -135,6 +135,8 @@
     border-radius: 8px; padding: 10px 14px; color: var(--text);
     font-family: var(--font-body); font-size: 14px; outline: none;
   }
+  .rol-select { width: auto; min-width: 140px; cursor: pointer; }
+  .rol-select:disabled { cursor: not-allowed; opacity: .7; }
   .modal-actions { display: flex; gap: 10px; margin-top: 20px; }
   .btn-cancel {
     flex: 1; background: transparent; border: 1px solid var(--border2);
@@ -205,6 +207,7 @@
 
     .item-row{ flex-wrap:wrap; gap:10px; padding:14px; }
     .item-actions{ width:100%; justify-content:space-between !important; }
+    .rol-select{ width:100%; font-size:16px; } /* 16px evita el zoom automático de iPhone */
 
 
     .modal{ padding:22px 18px; max-width:100%; }
@@ -285,6 +288,17 @@
       <button class="btn-add" onclick="openModal('contacto')">＋ Agregar</button>
     </div>
     <div class="card" id="contactosList">
+      <div class="loading-row">Cargando...</div>
+    </div>
+
+    <!-- Usuarios y roles -->
+    <div class="section-header">
+      <div>
+        <div class="section-title">Usuarios</div>
+        <div class="section-sub"><b>Proveedor</b> ve todo el radar; <b>financista</b> solo Radar IOARR. Las cuentas nuevas se crean en Supabase → Authentication → Users y empiezan como financista.</div>
+      </div>
+    </div>
+    <div class="card" id="usuariosList">
       <div class="loading-row">Cargando...</div>
     </div>
 
@@ -452,6 +466,49 @@ function renderKeywords(keywords) {
   `).join('');
 }
 
+const escAttr = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+const fechaHora = iso => iso ? new Date(iso).toLocaleString('es-PE', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit' }) : 'nunca';
+
+async function loadUsuarios() {
+  const el = document.getElementById('usuariosList');
+  try {
+    const data = await fetch(API + '/api/admin/usuarios').then(r => r.json());
+    if (!data.ok) throw new Error(data.error);
+    if (!data.usuarios.length) { el.innerHTML = '<div class="empty-state">No hay cuentas.</div>'; return; }
+    el.innerHTML = data.usuarios.map(u => {
+      const yo = u.id === data.yo;
+      return `
+      <div class="item-row">
+        <div class="item-info">
+          <div class="item-name">${escAttr(u.email || '(sin correo)')}${yo ? ' <span class="badge badge-gray">tú</span>' : ''}</div>
+          <div class="item-meta">Último ingreso: ${fechaHora(u.ultimo_ingreso)}</div>
+        </div>
+        <div class="item-actions" style="display:flex;align-items:center;gap:10px;">
+          <select class="form-select rol-select" data-id="${escAttr(u.id)}" data-rol="${u.rol}" ${yo ? 'disabled title="No puedes quitarte tu propio acceso"' : ''}>
+            <option value="proveedor" ${u.rol === 'proveedor' ? 'selected' : ''}>Proveedor</option>
+            <option value="financista" ${u.rol === 'financista' ? 'selected' : ''}>Financista</option>
+          </select>
+        </div>
+      </div>`;
+    }).join('');
+    el.querySelectorAll('.rol-select').forEach(sel => sel.addEventListener('change', () => cambiarRolUsuario(sel)));
+  } catch (e) { el.innerHTML = '<div class="empty-state">No se pudieron cargar los usuarios: ' + escAttr(e.message) + '</div>'; }
+}
+
+async function cambiarRolUsuario(sel) {
+  const anterior = sel.dataset.rol;
+  sel.disabled = true;
+  try {
+    const res = await fetch(API + '/api/admin/usuarios/' + encodeURIComponent(sel.dataset.id), {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ rol: sel.value })
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error);
+    sel.dataset.rol = sel.value;
+  } catch (e) { sel.value = anterior; alert('No se pudo cambiar el rol: ' + e.message); }
+  sel.disabled = false;
+}
+
 function renderContactos(contactos) {
   const el = document.getElementById('contactosList');
   if (!contactos.length) { el.innerHTML = '<div class="empty-state">No hay contactos frecuentes. Agrega el primero.</div>'; return; }
@@ -574,6 +631,7 @@ document.querySelectorAll('.modal-overlay').forEach(m => {
 });
 
 loadAll(); // espera la sesión (sesion.js) antes de pedir los datos
+loadUsuarios();
 </script>
 </body>
 </html>
