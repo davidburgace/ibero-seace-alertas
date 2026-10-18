@@ -321,3 +321,29 @@ export async function guardarPrecios(supabase, precios, { cui_origen, anio_ficha
   }
   return filas.length;
 }
+
+// Borra un documento subido: los precios de referencia que aún vienen de él, la
+// ficha 07-C leída de él, sus fragmentos del chat (on delete cascade) y el PDF
+// del bucket. Los campos del proyecto que la ficha completó (monto, función…)
+// no se deshacen. Devuelve null si el documento no existe.
+export async function borrarDocumento(supabase, id, bucket) {
+  const { data: doc, error } = await supabase.from('ioarr_documentos')
+    .select('id, proyecto_id, tipo, nombre_archivo, ruta').eq('id', id).maybeSingle();
+  if (error) throw error;
+  if (!doc) return null;
+
+  const { data: precios, error: e1 } = await supabase.from('ioarr_precios_referencia').delete().eq('documento_id', id).select('id');
+  if (e1) throw e1;
+  const { data: proyecto, error: e2 } = await supabase.from('ioarr_proyectos').select('id, ficha_07c').eq('id', doc.proyecto_id).maybeSingle();
+  if (e2) throw e2;
+  const fichaQuitada = proyecto?.ficha_07c?.documento_id === id;
+  if (fichaQuitada) {
+    const { error: e3 } = await supabase.from('ioarr_proyectos').update({ ficha_07c: null }).eq('id', proyecto.id);
+    if (e3) throw e3;
+  }
+  const { error: e4 } = await supabase.from('ioarr_documentos').delete().eq('id', id);
+  if (e4) throw e4;
+  // El PDF al final: si falla, queda suelto en el bucket pero la ficha ya está limpia
+  const { error: e5 } = await supabase.storage.from(bucket).remove([doc.ruta]);
+  return { ...doc, precios_borrados: precios?.length ?? 0, ficha_quitada: fichaQuitada, error_pdf: e5?.message ?? null };
+}

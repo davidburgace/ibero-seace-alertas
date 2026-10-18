@@ -21,7 +21,7 @@ import { leerArchivo, detectarMapeo, aplicarMapeoGuardado, filaAProyecto, import
 import { sendIoarrDigest } from './alertas.js';
 import { filaACarga, filtrarFilasPmi, guardarCarga, borrarCarga, obtenerDatosCruce, calcularCruce } from './cruce.js';
 import { clienteIA, respaldoFicha, respaldoCostos, indexarDocumento, preguntar, MODELO_CHAT } from './ia.js';
-import { extraerLineasPdf, clasificarDocumento, leerFicha07C, leerTablaCostos, preciosUnicos, anioDeLineas, guardarPrecios } from './fichas.js';
+import { extraerLineasPdf, clasificarDocumento, leerFicha07C, leerTablaCostos, preciosUnicos, anioDeLineas, guardarPrecios, borrarDocumento } from './fichas.js';
 
 const router = express.Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 40 * 1024 * 1024 } });
@@ -409,6 +409,22 @@ router.get('/api/ioarr/documentos/:docId/url', async (req, res, next) => {
     const { data, error: e2 } = await supabase.storage.from(BUCKET_DOCS).createSignedUrl(doc.ruta, URL_FIRMADA_SEG);
     if (e2) throw e2;
     res.json({ url: data.signedUrl, expira_en_seg: URL_FIRMADA_SEG });
+  } catch (e) { next(e); }
+});
+
+// Borra un documento subido por error (ver borrarDocumento en fichas.js)
+router.delete('/api/ioarr/documentos/:docId', async (req, res, next) => {
+  try {
+    if (!/^[0-9a-f-]{36}$/i.test(req.params.docId)) return res.status(400).json({ error: 'Documento inválido' });
+    const doc = await borrarDocumento(supabase, req.params.docId, BUCKET_DOCS);
+    if (!doc) return res.status(404).json({ error: 'El documento no existe (¿ya se borró?)' });
+    if (doc.error_pdf) console.warn(`[IOARR] No se pudo borrar ${doc.ruta} del bucket:`, doc.error_pdf);
+    let detalle = `Documento borrado: ${doc.nombre_archivo} (${ETIQUETA_TIPO[doc.tipo] || doc.tipo})`;
+    if (doc.precios_borrados) detalle += ` · ${doc.precios_borrados} precios de referencia quitados`;
+    if (doc.ficha_quitada) detalle += ' · se quitaron los datos leídos de la ficha 07-C';
+    await supabase.from('ioarr_eventos').insert({ proyecto_id: doc.proyecto_id, tipo: 'nota', detalle: `${detalle} — ${req.usuario.email}` });
+    console.log(`[IOARR] ${detalle} — ${req.usuario.email}`);
+    res.json({ ok: true, documento: doc });
   } catch (e) { next(e); }
 });
 

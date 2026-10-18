@@ -843,7 +843,8 @@ function renderDocumentos() {
         <td>${esc(d.nombre_archivo)}<div class="sub">${d.paginas ? d.paginas + ' pág.' : ''}</div></td>
         <td class="sub">${resumenCampos(d.tipo, d.campos)}${d.avisos?.length ? `<details><summary class="avisos" style="cursor:pointer">${d.avisos.length} aviso(s)</summary>${listaAvisos(d.avisos)}</details>` : ''}</td>
         <td class="sub">${fecha(d.creado_en)}</td>
-        <td><button class="card-stage-btn" style="flex:none;padding:4px 10px" data-abrir-doc="${d.id}">Abrir</button></td></tr>`).join('')}
+        <td style="white-space:nowrap"><button class="card-stage-btn" style="flex:none;padding:4px 10px" data-abrir-doc="${d.id}">Abrir</button>
+          <button class="card-stage-btn" style="flex:none;padding:4px 8px" data-borrar-doc="${d.id}" title="Borrar este documento">🗑</button></td></tr>`).join('')}
       </tbody></table></div>` : ''}
   </div>`;
 }
@@ -939,6 +940,24 @@ async function abrirDocumento(docId) {
   } catch (e) { if (w) w.close(); alert(e.message); }
 }
 
+async function borrarDocumento(docId) {
+  const d = (actual.documentos || []).find(x => x.id === docId); if (!d) return;
+  const precios = d.tipo === 'estructura_costos' && d.campos?.precios_unicos ? `\nSe quitan los precios de referencia que salieron de este PDF.` : '';
+  const ficha = actual.proyecto.ficha_07c?.documento_id === d.id
+    ? '\nEs la ficha 07-C vigente: se quitan sus datos leídos (el monto y los demás campos del proyecto se mantienen).' : '';
+  if (!confirm(`¿Borrar «${d.nombre_archivo}» (${TIPO_DOC[d.tipo] || d.tipo})?${precios}${ficha}\n\nNo se puede deshacer.`)) return;
+  const id = actual.proyecto.id;
+  try {
+    await api('/api/ioarr/documentos/' + docId, { method: 'DELETE' });
+    resultadosDocs = null;
+    actual = await api('/api/ioarr/proyectos/' + id);
+    renderFicha();
+    lista = lista.map(x => x.id === id ? actual.proyecto : x);
+    renderListado(); renderKanban();
+    setMsg($('doc-res'), `✅ «${d.nombre_archivo}» borrado.`, 'ok');
+  } catch (e) { alert(e.message); }
+}
+
 $('ficha').addEventListener('dragover', e => { const dz = e.target.closest('#dropzone'); if (dz) { e.preventDefault(); dz.classList.add('over'); } });
 $('ficha').addEventListener('dragleave', e => { const dz = e.target.closest('#dropzone'); if (dz && !dz.contains(e.relatedTarget)) dz.classList.remove('over'); });
 $('ficha').addEventListener('drop', e => {
@@ -973,11 +992,13 @@ $('ficha').addEventListener('click', async e => {
   const accion = e.target.closest('[data-accion]')?.dataset.accion;
   const quitar = e.target.closest('[data-quitar]')?.dataset.quitar;
   // El click() del input oculto también burbujea hasta aquí: se ignora
-  if (e.target.id === 'doc-files' || (!accion && !quitar && !e.target.closest('[data-abrir-doc], #dropzone'))) return;
+  if (e.target.id === 'doc-files' || (!accion && !quitar && !e.target.closest('[data-abrir-doc], [data-borrar-doc], #dropzone'))) return;
   if (accion === 'cerrar') return cerrarFicha();
   if (accion === 'abrir-bi') return abrirBancoInversiones();
   const abrirDoc = e.target.closest('[data-abrir-doc]')?.dataset.abrirDoc;
   if (abrirDoc) return abrirDocumento(abrirDoc);
+  const borrarDoc = e.target.closest('[data-borrar-doc]')?.dataset.borrarDoc;
+  if (borrarDoc) return borrarDocumento(borrarDoc);
   if (e.target.closest('#dropzone')) return $('doc-files').click();
   const id = actual.proyecto.id;
   try {
