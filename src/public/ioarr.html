@@ -206,8 +206,8 @@
   @media (max-width:760px){ .grid2, .calc-res, .resumen, .frescura{ grid-template-columns:1fr; } .barra{ grid-template-columns:minmax(0,140px) minmax(0,1fr) 40px; } }
   @media (max-width:640px){
     .topbar{ padding:12px 16px; } header{ padding:18px 16px 0; } main{ padding:16px 16px 40px; } footer{ padding:0 16px 24px; }
-    .kanban{ grid-auto-flow:column; grid-template-columns:none; grid-auto-columns:minmax(78vw,1fr); overflow-x:auto; scroll-snap-type:x mandatory; }
-    .kcol{ scroll-snap-align:start; }
+    .kanban{ grid-template-columns:1fr; }
+    .kcol{ min-height:0; }
     .filtros input[type=number]{ width:calc(50% - 5px); }
     .field-row{ grid-template-columns:1fr; gap:0; }
     .modal{ padding:20px 16px; }
