@@ -11,7 +11,7 @@ import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 import infraRouter, { runInfraIngest } from './infra.js';
 import ioarrRouter, { sendIoarrDigest } from './ioarr/router.js';
 import { crearProteccionApi } from './ioarr/auth.js';
-import { listarUsuarios, cambiarRol } from './ioarr/usuarios.js';
+import { listarUsuarios, cambiarRol, crearUsuario } from './ioarr/usuarios.js';
 const app = express();
 app.use(cors({ origin: process.env.FRONTEND_URL?.split(',') || '*' }));
 app.use(express.json());
@@ -881,6 +881,14 @@ app.get('/api/admin/usuarios', async (req, res, next) => {
   try {
     if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
     res.json({ ok: true, yo: req.usuario.id, usuarios: await listarUsuarios(supabase) });
+  } catch(e) { next(e); }
+});
+app.post('/api/admin/usuarios', async (req, res, next) => {
+  try {
+    if (!supabase) return res.status(503).json({ ok: false, error: 'Supabase no configurado' });
+    const r = await crearUsuario(supabase, { email: req.body?.email, rol: req.body?.rol });
+    if (r.error) return res.status(r.status).json({ ok: false, error: r.error });
+    res.status(201).json({ ok: true, usuario: r.usuario, contrasena: r.contrasena });
   } catch(e) { next(e); }
 });
 app.patch('/api/admin/usuarios/:id', async (req, res, next) => {

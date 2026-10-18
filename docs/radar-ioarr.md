@@ -36,8 +36,8 @@ Seguimiento de IOARR de mobiliario escolar en Obras por Impuestos (OxI), visto d
 
 ## 2. Usuarios y roles
 
-- Crea los usuarios en **Authentication → Users → Add user**, con correo y contraseña.
-- Cada usuario nuevo recibe automáticamente el rol **`financista`**, que es el limitado: solo ve Radar IOARR.
+- Crea los usuarios en **Admin → Usuarios → Crear usuario**: eliges el correo y el rol, y aparece una contraseña temporal para entregarle a la persona (se muestra una sola vez). También se pueden crear en Supabase, en **Authentication → Users → Add user**.
+- Si se crea desde Supabase, el usuario recibe automáticamente el rol **`financista`**, que es el limitado: solo ve Radar IOARR.
 - Para darle acceso completo, cámbiale el rol a **Proveedor** en **Admin → Usuarios**. También se puede editar la columna `rol` de la tabla `perfiles` en Supabase:
 
   ```sql
