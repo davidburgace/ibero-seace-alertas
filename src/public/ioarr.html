@@ -208,7 +208,14 @@
     .topbar{ padding:12px 16px; } header{ padding:18px 16px 0; } main{ padding:16px 16px 40px; } footer{ padding:0 16px 24px; }
     .kanban{ grid-template-columns:1fr; }
     .kcol{ min-height:0; }
-    .filtros input[type=number]{ width:calc(50% - 5px); }
+    /* Filtros: buscador arriba, listas en dos columnas, montos mín./máx. juntos, casillas y botones al final */
+    .filtros{ display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:8px; }
+    .filtros select, .filtros input[type=text], .filtros input[type=number]{ font-size:16px; min-width:0; width:100%; padding:9px 10px; } /* 16px evita el zoom automático de iPhone */
+    .filtros input[type=text]{ grid-column:1 / -1; order:-1; }
+    .filtros select:nth-of-type(odd):last-of-type{ grid-column:1 / -1; } /* si las listas son impares, la última ocupa la fila */
+    .filtros input[type=number]{ order:1; }
+    .filtros .chk{ grid-column:1 / -1; white-space:normal; padding:2px 0; order:2; }
+    .filtros .btn{ font-size:14px; white-space:nowrap; order:3; }
     .field-row{ grid-template-columns:1fr; gap:0; }
     .modal{ padding:20px 16px; }
 
