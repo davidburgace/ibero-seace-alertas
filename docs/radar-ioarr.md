@@ -47,6 +47,22 @@ Seguimiento de IOARR de mobiliario escolar en Obras por Impuestos (OxI), visto d
   El primer proveedor hay que crearlo así, desde Supabase, porque la sección de Admin solo la pueden usar los proveedores.
 - Nadie se puede quitar su propio acceso de proveedor desde Admin, para que no se quede afuera por error.
 
+### Contraseñas
+
+- **Olvidé mi contraseña:** en `login.html` (y en el login de IOARR) se pide un enlace por correo. Supabase lo envía, y al abrirlo vuelve a `login.html` para elegir una contraseña nueva.
+- **Cambiar contraseña:** botón «Contraseña» en Admin y en Radar IOARR. Pide la contraseña actual.
+- Mínimo 8 caracteres.
+
+Para que el correo de recuperación funcione, en Supabase:
+
+1. **Authentication → URL Configuration:**
+   - **Site URL:** `https://ibero-seace-alertas.onrender.com`
+   - En **Redirect URLs**, agrega `https://ibero-seace-alertas.onrender.com/login.html**`
+
+   Si falta, el enlace del correo lleva al inicio en vez de a la pantalla de contraseña nueva.
+2. **Authentication → Emails → SMTP Settings:** activa un SMTP propio (puede ser el mismo SendGrid de `SMTP_*`). El correo que trae Supabase por defecto envía muy pocos mensajes por hora y, en proyectos nuevos, solo a los miembros del equipo de Supabase.
+3. *(Opcional)* **Authentication → Emails → Templates → Reset Password:** traduce el texto del correo al español.
+
 **Qué protege cada rol:**
 
 - `/api/ioarr/*` exige sesión con cualquier rol.
