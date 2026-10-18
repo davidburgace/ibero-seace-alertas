@@ -70,3 +70,56 @@ test('cambiarRol de una cuenta que no existe da 404', async () => {
   const sb = supabaseFalso({ cuentas: CUENTAS, perfiles: PERFILES });
   assert.equal((await cambiarRol(sb, { id: 'zzz', rol: 'proveedor', usuarioActual: { id: 'a' } })).status, 404);
 });
+
+// ─── Crear usuario ───────────────────────────────────────────────────────────
+import { crearUsuario, contrasenaTemporal } from '../src/ioarr/usuarios.js';
+
+function supabaseCrear({ existentes = [] } = {}) {
+  const creados = [], upserts = [];
+  return {
+    creados, upserts,
+    auth: { admin: { createUser: async ({ email, password, email_confirm }) => {
+      if (existentes.includes(email)) return { data: null, error: { status: 422, message: 'A user with this email address has already been registered' } };
+      creados.push({ email, password, email_confirm });
+      return { data: { user: { id: 'nuevo-' + creados.length, email } }, error: null };
+    } } },
+    from: () => ({ upsert: async (fila, opciones) => { upserts.push({ fila, opciones }); return { error: null }; } })
+  };
+}
+
+test('crearUsuario crea la cuenta confirmada, fija el rol y devuelve la contraseña temporal', async () => {
+  const sb = supabaseCrear();
+  const r = await crearUsuario(sb, { email: '  Maria.Perez@Ibero.pe ', rol: 'proveedor' });
+  assert.equal(r.status, 201);
+  assert.equal(r.usuario.email, 'maria.perez@ibero.pe');
+  assert.equal(sb.creados[0].email_confirm, true);
+  assert.equal(sb.creados[0].password, r.contrasena);
+  assert.deepEqual(sb.upserts[0], { fila: { id: 'nuevo-1', email: 'maria.perez@ibero.pe', rol: 'proveedor' }, opciones: { onConflict: 'id' } });
+});
+
+test('crearUsuario rechaza correos y roles inválidos sin crear nada', async () => {
+  const sb = supabaseCrear();
+  for (const datos of [{ email: 'sin-arroba', rol: 'proveedor' }, { email: '', rol: 'proveedor' }, { email: 'a@b.pe', rol: 'admin' }]) {
+    assert.equal((await crearUsuario(sb, datos)).status, 400);
+  }
+  assert.equal(sb.creados.length, 0);
+});
+
+test('crearUsuario con un correo ya registrado da 409', async () => {
+  const sb = supabaseCrear({ existentes: ['ya@ibero.pe'] });
+  const r = await crearUsuario(sb, { email: 'ya@ibero.pe', rol: 'financista' });
+  assert.equal(r.status, 409);
+  assert.match(r.error, /Ya existe/);
+  assert.equal(sb.upserts.length, 0);
+});
+
+test('contrasenaTemporal: 12 caracteres, sin letras confusas, distinta cada vez', () => {
+  const vistas = new Set();
+  for (let i = 0; i < 200; i++) {
+    const c = contrasenaTemporal();
+    assert.equal(c.length, 12);
+    assert.doesNotMatch(c, /[0O1lI]/);
+    vistas.add(c);
+  }
+  assert.equal(vistas.size, 200);
+});

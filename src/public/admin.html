@@ -190,6 +190,11 @@
     .topbar-actions{ gap:8px !important; }
     .topbar-actions a{ font-size:12px !important; padding:6px 10px !important; }
     .logout-btn{ font-size:12px; padding:6px 10px; }
+    /* Barra en dos líneas: título arriba, botones abajo sin cortar el texto */
+    .topbar{ flex-wrap:wrap; row-gap:10px; }
+    .topbar-actions{ width:100%; justify-content:flex-end; }
+    .topbar-actions a, .logout-btn{ white-space:nowrap; }
+    #listoPass{ font-size:16px !important; white-space:nowrap; overflow-wrap:normal !important; }
 
     .content{ padding:20px 14px; }
 
@@ -296,8 +301,9 @@
     <div class="section-header">
       <div>
         <div class="section-title">Usuarios</div>
-        <div class="section-sub"><b>Proveedor</b> ve todo el radar; <b>financista</b> solo Radar IOARR. Las cuentas nuevas se crean en Supabase → Authentication → Users y empiezan como financista.</div>
+        <div class="section-sub"><b>Proveedor</b> ve todo el radar; <b>financista</b> solo Radar IOARR.</div>
       </div>
+      <button class="btn-add" onclick="abrirCrearUsuario()">＋ Crear usuario</button>
     </div>
     <div class="card" id="usuariosList">
       <div class="loading-row">Cargando...</div>
@@ -380,8 +386,45 @@
   </div>
 </div>
 
+<!-- Modal Crear usuario -->
+<div class="modal-overlay" id="modalUsuario">
+  <div class="modal">
+    <div id="usuarioForm">
+      <div class="modal-title">Crear usuario</div>
+      <div class="form-group">
+        <label class="form-label">Correo</label>
+        <input type="email" class="input-field" id="usuarioEmail" placeholder="persona@grupoibero.pe" style="margin-bottom:0" onkeydown="if(event.key==='Enter')guardarUsuario()">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Rol</label>
+        <select class="form-select" id="usuarioRol">
+          <option value="proveedor">Proveedor — ve todo el radar</option>
+          <option value="financista">Financista — solo Radar IOARR</option>
+        </select>
+      </div>
+      <div id="usuarioError" style="color:var(--red);font-size:13px;min-height:18px;"></div>
+      <div class="modal-actions">
+        <button class="btn-cancel" onclick="closeModal('usuario')">Cancelar</button>
+        <button class="btn-save" id="usuarioGuardar" onclick="guardarUsuario()">Crear</button>
+      </div>
+    </div>
+    <div id="usuarioListo" style="display:none">
+      <div class="modal-title">Usuario creado</div>
+      <p style="font-size:13.5px;line-height:1.5;margin-bottom:14px;">Pásale estos datos a <b id="listoEmail"></b>. Puede cambiar la contraseña con el botón «Contraseña».</p>
+      <div class="form-label" style="margin-bottom:6px;">Contraseña temporal</div>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
+        <code id="listoPass" style="flex:1;font-size:18px;letter-spacing:.06em;background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:10px 12px;user-select:all;overflow-wrap:anywhere;"></code>
+        <button class="btn-cancel" onclick="copiarPass(this)">Copiar</button>
+      </div>
+      <p style="font-size:12px;color:var(--amber);margin-bottom:16px;">⚠️ Guárdala ahora: no se vuelve a mostrar. Si se pierde, la persona puede usar «¿Olvidaste tu contraseña?».</p>
+      <div class="modal-actions">
+        <button class="btn-save" onclick="closeModal('usuario')">Listo</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
-const ADMIN_PASSWORD = 'ibero2024';
 const API = '';
 
 const BADGE_COLORS = {
@@ -496,6 +539,52 @@ async function loadUsuarios() {
   } catch (e) { el.innerHTML = '<div class="empty-state">No se pudieron cargar los usuarios: ' + escAttr(e.message) + '</div>'; }
 }
 
+function abrirCrearUsuario() {
+  document.getElementById('usuarioForm').style.display = '';
+  document.getElementById('usuarioListo').style.display = 'none';
+  document.getElementById('usuarioEmail').value = '';
+  document.getElementById('usuarioRol').value = 'proveedor';
+  document.getElementById('usuarioError').textContent = '';
+  openModal('usuario');
+  document.getElementById('usuarioEmail').focus();
+}
+
+async function guardarUsuario() {
+  const btn = document.getElementById('usuarioGuardar');
+  const err = document.getElementById('usuarioError');
+  const email = document.getElementById('usuarioEmail').value.trim();
+  if (!email) { err.textContent = 'Escribe el correo'; return; }
+  btn.disabled = true; err.textContent = '';
+  try {
+    const res = await fetch(API + '/api/admin/usuarios', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, rol: document.getElementById('usuarioRol').value })
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error);
+    document.getElementById('listoEmail').textContent = data.usuario.email;
+    document.getElementById('listoPass').textContent = data.contrasena;
+    document.getElementById('usuarioForm').style.display = 'none';
+    document.getElementById('usuarioListo').style.display = '';
+    loadUsuarios();
+  } catch (e) { err.textContent = 'No se pudo crear: ' + e.message; }
+  btn.disabled = false;
+}
+
+async function copiarPass(btn) {
+  const el = document.getElementById('listoPass');
+  let copiada = false;
+  try { await navigator.clipboard.writeText(el.textContent); copiada = true; }
+  catch {
+    // Respaldo: seleccionar el texto y copiar a la antigua
+    const rango = document.createRange(); rango.selectNodeContents(el);
+    const sel = getSelection(); sel.removeAllRanges(); sel.addRange(rango);
+    try { copiada = document.execCommand('copy'); } catch {}
+  }
+  btn.textContent = copiada ? '✓ Copiada' : 'Selecciónala y copia';
+  setTimeout(() => btn.textContent = 'Copiar', 2000);
+}
+
 async function cambiarRolUsuario(sel) {
   const anterior = sel.dataset.rol;
   sel.disabled = true;
@@ -538,7 +627,7 @@ async function toggleKeyword(id, active) {
   } catch(e) { alert('Error: ' + e.message); }
 }
 
-const MODAL_IDS = { vendor: 'Vendor', keyword: 'Keyword', contacto: 'Contacto' };
+const MODAL_IDS = { vendor: 'Vendor', keyword: 'Keyword', contacto: 'Contacto', usuario: 'Usuario' };
 function openModal(type) { document.getElementById('modal' + MODAL_IDS[type]).classList.add('open'); }
 function closeModal(type) { document.getElementById('modal' + MODAL_IDS[type]).classList.remove('open'); }
 
@@ -628,7 +717,12 @@ async function deleteContacto(id) {
 
 // Cerrar modal clickando fuera
 document.querySelectorAll('.modal-overlay').forEach(m => {
-  m.addEventListener('click', function(e) { if (e.target === m) m.classList.remove('open'); });
+  m.addEventListener('click', function(e) {
+    if (e.target !== m) return;
+    // Con la contraseña temporal a la vista, solo se cierra con «Listo» (no se vuelve a mostrar)
+    if (m.id === 'modalUsuario' && document.getElementById('usuarioListo').style.display !== 'none') return;
+    m.classList.remove('open');
+  });
 });
 
 loadAll(); // espera la sesión (sesion.js) antes de pedir los datos
