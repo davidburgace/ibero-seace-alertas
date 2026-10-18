@@ -824,7 +824,7 @@ function renderDocumentos() {
     </div>
     <div class="dropzone" id="dropzone" role="button" tabindex="0">
       <b>Subir ficha (PDF)</b><br>Arrastra aquí la ficha 07-C, la estructura de costos o el informe de sustento (varios a la vez) o haz clic para elegirlos.
-      <div class="sub">Se clasifican por el nombre del archivo.</div>
+      <div class="sub">Se guardan y se leen al soltarlos (no hace falta otro botón). Se clasifican por el nombre del archivo o, si no lo dice, por su contenido.</div>
       <input type="file" id="doc-files" accept="application/pdf,.pdf" multiple hidden>
     </div>
     <div class="doc-res" id="doc-res">${resultadosDocs ? renderResultadosDocs(resultadosDocs.resultados) : ''}</div>
@@ -1000,6 +1000,9 @@ $('ficha').addEventListener('click', async e => {
     renderFicha();
     lista = lista.map(x => x.id === id ? actual.proyecto : x);
     renderListado(); renderKanban();
+    // La ficha se volvió a dibujar: sin este aviso no se nota que se guardó
+    if (accion === 'guardar') setMsg($('fi-msg'), '✅ Cambios guardados.', 'ok');
+    if (accion === 'evaluar') setMsg($('calc-msg'), '✅ Evaluación guardada (abajo, en «Evaluaciones guardadas»).', 'ok');
   } catch (err) {
     const msgEl = accion === 'evaluar' ? $('calc-msg') : $('fi-msg');
     if (msgEl) setMsg(msgEl, err.message, 'err'); else alert(err.message);

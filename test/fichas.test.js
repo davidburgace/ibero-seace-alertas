@@ -145,3 +145,38 @@ test('opcionMarcada: en una lista de opciones queda la marcada', () => {
   assert.equal(opcionMarcada('A ( ) B ( )'), null);
   assert.equal(opcionMarcada(null), null);
 });
+
+// Formato real del Anexo 03 (estructura de costos por institución educativa):
+// código de catálogo, cantidad antes de a/b/c/d, costo total al final, «-» = 0
+// y los datos del local/colegio delante en algunas filas.
+const L = (pagina, ...textos) => textos.map(texto => ({ pagina, texto }));
+const ANEXO_03 = [
+  ...L(1, 'ANEXO 05: PARÁMETROS O CRITERIOS PARA LA ESTIMACIÓN DE GASTOS O COSTOS DE INVERSIÓN'),
+  ...L(6, 'CÓDIGO CÓDIGO CODIGO DEL Suma de UNITARIO COSTO TOTAL POR BIEN',
+    'LOCAL MODULAR BIEN CANTIDAD AQUISICION (d)=0.15*(a+b+c)+(a+b+c)',
+    'SPM-03 SILLA DE METAL MADERA 3°-4° PRIMARIA 90 260.68 3.92 15.68 322.32 29,008.80',
+    'EST-B1 ESTANTE PARA BIBLIOTECA TIPO 1 5 880.33 17.61 70.43 1,113.62 5,568.10',
+    'IMP-M1 IMPRESORA MULTIFUNCIONAL DE ESCRITORIO 3 1,695.65 33.91 - 1,989.00 5,967.00',
+    '1037 RAMON ESPINOSA 0338327 Primaria MPM-04 MESA DE METAL MADERA 5°-6° PRIMARIA 40 357.77 5.38 21.52 442.37 17,694.80',
+    'ALEMANIA',
+    '743765 MI MUNDO INFANTIL 1661784 Inicial - Jardín UGEL 01 LAP-01 COMPUTADORA PORTÁTIL 1 5,362.50 - - 6,166.88 6,166.88',
+    'SPM-03 SILLA DE METAL MADERA 3°-4° PRIMARIA 40 260.68 3.92 15.68 322.32 12,892.80',
+    'Total 1661784 151 98,823.11')
+];
+
+test('estructura de costos con códigos de catálogo (Anexo 03)', () => {
+  const { filas, avisos } = leerTablaCostos(ANEXO_03);
+  assert.equal(avisos.length, 0);
+  assert.deepEqual(filas.map(f => [f.codigo_bien, f.cantidad, f.d]),
+    [['SPM-03', 90, 322.32], ['EST-B1', 5, 1113.62], ['IMP-M1', 3, 1989], ['MPM-04', 40, 442.37], ['LAP-01', 1, 6166.88], ['SPM-03', 40, 322.32]]);
+  assert.equal(filas[1].descripcion, 'ESTANTE PARA BIBLIOTECA TIPO 1');
+  assert.equal(filas[3].descripcion, 'MESA DE METAL MADERA 5°-6° PRIMARIA');
+  assert.deepEqual([filas[4].a, filas[4].b, filas[4].c], [5362.5, 0, 0]);
+  const { precios } = preciosUnicos(filas);
+  assert.equal(precios.find(p => p.codigo_bien === 'SPM-03').cantidad, 130);
+});
+
+test('«…_Exportacion.pdf» con una tabla de costos se clasifica como estructura de costos', () => {
+  assert.equal(clasificarDocumento('20261016_Exportacion.pdf', ANEXO_03), 'estructura_costos');
+  assert.equal(clasificarDocumento('20261016_Exportacion.pdf', L(1, 'FORMATO N° 07-C: REGISTRO DE IOARR')), 'ficha_07c');
+});

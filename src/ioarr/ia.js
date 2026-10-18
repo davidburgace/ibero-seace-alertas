@@ -16,7 +16,7 @@
 // ============================================================================
 
 import { normaliza, parseMonto, limpiaCui } from './ingesta.js';
-import { cuadra, dEsperado, FACTOR_D } from './fichas.js';
+import { cuadra, dEsperado, FACTOR_D, RE_CODIGO_ALFA } from './fichas.js';
 
 export const MODELO_LECTURA = process.env.IOARR_IA_MODELO_LECTURA || 'gpt-4o-mini';
 export const MODELO_CHAT = process.env.IOARR_IA_MODELO_CHAT || 'gpt-4o';
@@ -151,7 +151,7 @@ export async function respaldoFicha(campos, lineas, ia) {
 // ─── 1b. Estructura de costos ───────────────────────────────────────────────
 export function promptCostos(texto) {
   return `Eres un lector de documentos del sistema Invierte.pe (Perú). Del texto de una estructura de costos extrae la tabla de bienes.
-Cada bien tiene: código del bien (número largo), descripción, los costos unitarios a, b, c, el costo final d y la cantidad.
+Cada bien tiene: código del bien (número largo o código de catálogo como «SPM-03»), descripción, los costos unitarios a, b, c, el costo final d y la cantidad.
 Reglas:
 - Copia el código y la descripción TAL COMO aparecen; los números sin separador de miles.
 - Una fila por cada fila de la tabla (si un código se repite, repítela). No incluyas totales ni subtotales.
@@ -166,11 +166,16 @@ ${texto}`;
 export function validarCostosIA(propuesta, lineas) {
   const filas = [], descartadas = [];
   const textoCodigos = lineas.map(l => digitos(l.texto)).join(' ');
+  const tokens = new Set(lineas.flatMap(l => l.texto.split(' ')));
   for (const f of propuesta?.filas || []) {
-    const codigo = digitos(f.codigo_bien);
+    // Código de catálogo («SPM-03») tal cual; el numérico SIGA, solo sus dígitos
+    const crudo = String(f.codigo_bien ?? '').trim().toUpperCase();
+    const alfa = RE_CODIGO_ALFA.test(crudo);
+    const codigo = alfa ? crudo : digitos(f.codigo_bien);
+    const enPdf = alfa ? tokens.has(codigo) : codigo.length >= 6 && textoCodigos.includes(codigo);
     const [a, b, c, d] = ['a', 'b', 'c', 'd'].map(k => typeof f[k] === 'number' ? f[k] : parseMonto(f[k]));
     const desc = String(f.descripcion || '').replace(/\s+/g, ' ').trim();
-    if (codigo.length < 6 || !textoCodigos.includes(codigo) || ![a, b, c, d].every(Number.isFinite) || !desc || !apareceMonto(d, lineas)) {
+    if (!enPdf || ![a, b, c, d].every(Number.isFinite) || !desc || !apareceMonto(d, lineas)) {
       descartadas.push(codigo || '¿sin código?'); continue;
     }
     const cantidad = f.cantidad == null ? null : (typeof f.cantidad === 'number' ? f.cantidad : parseMonto(f.cantidad));

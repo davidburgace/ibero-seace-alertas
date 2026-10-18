@@ -116,6 +116,16 @@ test('validarCostosIA: fila aceptada si su código y su d están en el PDF; marc
   assert.match(v.avisos[0], /Código 112200010003 \(leído con IA\): d = 1300 pero \(a\+b\+c\) × 1.15 = 1207.5/);
 });
 
+test('validarCostosIA: acepta códigos de catálogo que están en el PDF', () => {
+  const lineas = L(1, 'SPM-03 SILLA DE METAL MADERA 90 260.68 3.92 15.68 322.32 29,008.80');
+  const v = validarCostosIA({ filas: [
+    { codigo_bien: 'SPM-03', descripcion: 'SILLA DE METAL MADERA', a: 260.68, b: 3.92, c: 15.68, d: 322.32, cantidad: 90 },
+    { codigo_bien: 'SPM-99', descripcion: 'INVENTADA', a: 260.68, b: 3.92, c: 15.68, d: 322.32, cantidad: 1 }
+  ] }, lineas);
+  assert.deepEqual(v.filas.map(f => [f.codigo_bien, f.cuadra]), [['SPM-03', true]]);
+  assert.deepEqual(v.descartadas, ['SPM-99']);
+});
+
 test('respaldoCostos: se usa la IA solo si mejora la lectura por reglas', async () => {
   const reglas = leerTablaCostos(COSTOS);
   assert.equal(reglas.filas.length, 0);
