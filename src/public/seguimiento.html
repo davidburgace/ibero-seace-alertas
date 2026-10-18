@@ -363,7 +363,7 @@
 
 <main>
   <div id="config-warning" class="config-warning">
-    Falta configurar la conexión a Supabase. Edita <code>SUPABASE_URL</code> y <code>SUPABASE_ANON_KEY</code> al inicio del <code>&lt;script&gt;</code>.
+    No se pudo conectar con Supabase. Revisa <code>SUPABASE_URL</code> y <code>SUPABASE_PUBLISHABLE_KEY</code> en el servidor.
   </div>
 
   <!-- ===================== CALENDARIO ===================== -->
@@ -657,13 +657,6 @@
 </div>
 
 <script>
-/* =========================================================
-   CONFIGURACIÓN — reemplaza con los datos de tu proyecto Supabase
-   ========================================================= */
-const SUPABASE_URL = "https://maitnligmaidhgzcqglq.supabase.co";
-const SUPABASE_ANON_KEY = "sb_publishable_8aRr2hZh0RB-DX2KqI9IFQ_wEmK1KvR";
-/* ========================================================= */
-
 const AREA_COLORS = {
   "Gerencia":"#16181d","Comercial":"#3a63e0","PCP":"#ff9f43","Ingeniería":"#6a4fd1",
   "Planta Puente Piedra":"#2ecc71","Planta Lurín":"#00b8a9","Otro":"#5c6270"
@@ -689,14 +682,8 @@ let calendar = null;
 let allProcesos = [];
 let allVisitas = [];
 let allReuniones = [];
-const isConfigured = !SUPABASE_URL.includes("TU-PROYECTO") && !SUPABASE_ANON_KEY.includes("TU-ANON-KEY");
-
-if (isConfigured) {
-  sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-} else {
-  document.getElementById('config-warning').style.display = 'block';
-  document.getElementById('status-text').textContent = 'Sin configurar';
-}
+// El cliente de Supabase viene de sesion.js: lee y escribe con la sesión del usuario
+// (las tablas solo dejan pasar a proveedores, ver migración 010)
 
 /* ---------- Tabs ---------- */
 document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -1716,6 +1703,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
   calendar.render();
 
+  try { sb = await radarSesion.cliente(); }
+  catch (e) { document.getElementById('config-warning').style.display = 'block'; document.getElementById('status-text').textContent = 'Sin conexión'; return; }
   await Promise.all([refreshReuniones(), refreshProcesos(), refreshVisitas(), loadContactosFrecuentes()]);
 
   document.getElementById('status-dot').classList.add('live');

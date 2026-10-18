@@ -70,7 +70,7 @@ Para que el correo de recuperación funcione, en Supabase:
 - Las páginas Admin, Infra, Oportunidad, Seleccionadas y Seguimiento cargan `src/public/sesion.js`. Si no hay sesión mandan a `login.html`; si el usuario es financista lo mandan a Radar IOARR. Además, agregan el token a cada llamada a `/api/*`.
 - El panel Admin ya no tiene contraseña propia: usa esta misma cuenta.
 
-**Pendiente:** endurecer el RLS de `procesos_seguimiento`, `reuniones`, `visitas_comerciales` y `contactos_frecuentes`. Hoy `seguimiento.html` las lee directo con la clave pública.
+- `seguimiento.html` lee `reuniones`, `procesos_seguimiento`, `visitas_comerciales` y `contactos_frecuentes` directo desde el navegador, con la sesión del usuario (el cliente sale de `sesion.js`). La migración `010_rls_seguimiento.sql` deja esas tablas solo para proveedores (`es_proveedor()`) y quita el acceso con la clave pública. El servidor usa la clave secreta, así que no le afecta.
 
 ## 3. Variables de entorno (Render → Environment)
 
