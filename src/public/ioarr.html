@@ -205,7 +205,8 @@
   @media (max-width:1100px) and (min-width:641px){ .kanban{ grid-template-columns:repeat(3, minmax(0,1fr)); } }
   @media (max-width:760px){ .grid2, .calc-res, .resumen, .frescura{ grid-template-columns:1fr; } .barra{ grid-template-columns:minmax(0,140px) minmax(0,1fr) 40px; } }
   @media (max-width:640px){
-    .topbar{ padding:12px 16px; } header{ padding:18px 16px 0; } main{ padding:16px 16px 40px; } footer{ padding:0 16px 24px; }
+    .topbar{ padding:12px 16px; } header{ padding:18px 16px 0; }
+    .top-right{ gap:6px; } .top-right .rol-badge, .top-right #user-email{ display:none; } .top-right .back{ padding:6px 9px; font-size:12px; } main{ padding:16px 16px 40px; } footer{ padding:0 16px 24px; }
     .kanban{ grid-template-columns:1fr; }
     .kcol{ min-height:0; }
     /* Filtros: buscador arriba, listas en dos columnas, montos mín./máx. juntos, casillas y botones al final */
@@ -252,6 +253,7 @@
   <div class="top-right" id="top-right" style="display:none">
     <span id="user-email"></span><span class="rol-badge" id="user-rol"></span>
     <a class="back" href="index.html" id="link-inicio" style="display:none">← Inicio</a>
+    <a class="back" href="login.html?modo=cambiar&amp;next=%2Fioarr.html">Contraseña</a>
     <button class="back" id="btn-salir">Salir</button>
   </div>
 </div>
@@ -265,6 +267,7 @@
     <div class="field"><label>Contraseña</label><input type="password" id="login-pass" autocomplete="current-password"></div>
     <button class="btn btn-primary" id="btn-login" style="width:100%">Ingresar</button>
     <div class="msg err" id="login-msg"></div>
+    <p style="margin-top:14px;font-size:13px"><a href="login.html?modo=olvide&amp;next=%2Fioarr.html" style="color:var(--accent);text-decoration:none">¿Olvidaste tu contraseña?</a></p>
   </div>
 </div>
 

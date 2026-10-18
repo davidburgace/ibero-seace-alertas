@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ingresar · Radar Ibero</title>
+<link rel="icon" href="favicon-32.png">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#ffffff; --surface:#f7f8fa; --surface2:#eef0f4;
+    --border:rgba(0,0,0,0.08); --border2:rgba(0,0,0,0.14);
+    --text:#16181d; --muted:#5c6270; --red:#e74c3c; --green:#1e8449;
+    --accent:#3a63e0; --accent2:#6a4fd1;
+    --font-display:'Syne',sans-serif; --font-body:'DM Sans',sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{
+    font-family:var(--font-body); background:var(--bg); color:var(--text);
+    min-height:100vh; display:flex; align-items:center; justify-content:center; padding:20px;
+    background-image:
+      radial-gradient(circle at 50% -5%, rgba(58,99,224,0.08), transparent 55%),
+      radial-gradient(circle at 85% 105%, rgba(106,79,209,0.07), transparent 50%);
+  }
+  .card{ background:var(--surface); border:1px solid var(--border2); border-radius:16px; padding:34px; width:100%; max-width:380px; }
+  .logo{ display:flex; align-items:center; gap:10px; font-family:var(--font-display); font-size:18px; font-weight:700; margin-bottom:24px; }
+  .logo-dot{ width:8px; height:8px; border-radius:50%; background:var(--accent); box-shadow:0 0 10px var(--accent); }
+  h1{ font-family:var(--font-display); font-size:20px; margin-bottom:6px; }
+  .sub{ color:var(--muted); font-size:13px; margin-bottom:22px; line-height:1.45; }
+  label{ display:block; font-size:12px; font-weight:600; color:var(--muted); margin-bottom:5px; }
+  input{ width:100%; padding:11px 12px; border:1px solid var(--border2); border-radius:10px; font-family:var(--font-body); font-size:16px; background:#fff; margin-bottom:14px; }
+  input:focus{ outline:none; border-color:var(--accent); }
+  button{ width:100%; font-family:var(--font-display); font-weight:700; font-size:14px; border:none; border-radius:10px; padding:12px; cursor:pointer; color:#fff; background:linear-gradient(90deg,var(--accent),var(--accent2)); }
+  button:disabled{ opacity:.6; cursor:wait; }
+  .msg{ font-size:13px; margin-top:12px; min-height:18px; line-height:1.45; color:var(--red); }
+  .msg.ok{ color:var(--green); }
+  .links{ display:flex; justify-content:space-between; gap:10px; margin-top:16px; font-size:13px; }
+  .links a{ color:var(--accent); text-decoration:none; }
+  .links a:hover{ text-decoration:underline; }
+  form[hidden]{ display:none; }
+  @media (max-width:640px){ .card{ padding:26px 20px; } }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo"><span class="logo-dot"></span> Radar Ibero</div>
+
+  <!-- Ingresar -->
+  <form id="f-ingresar" hidden>
+    <h1>Ingresar</h1>
+    <p class="sub">Usa la misma cuenta de Radar IOARR.</p>
+    <label for="email">Correo</label>
+    <input type="email" id="email" autocomplete="username" required>
+    <label for="pass">Contraseña</label>
+    <input type="password" id="pass" autocomplete="current-password" required>
+    <button type="submit">Ingresar</button>
+    <div class="links"><a href="#" data-modo="olvide">¿Olvidaste tu contraseña?</a></div>
+  </form>
+
+  <!-- Olvidé mi contraseña: pide el enlace por correo -->
+  <form id="f-olvide" hidden>
+    <h1>Recuperar contraseña</h1>
+    <p class="sub">Te enviaremos un enlace para crear una contraseña nueva.</p>
+    <label for="email-olvide">Correo</label>
+    <input type="email" id="email-olvide" autocomplete="username" required>
+    <button type="submit">Enviar enlace</button>
+    <div class="links"><a href="#" data-modo="ingresar">← Volver a ingresar</a></div>
+  </form>
+
+  <!-- Contraseña nueva: al volver desde el enlace del correo -->
+  <form id="f-nueva" hidden>
+    <h1>Contraseña nueva</h1>
+    <p class="sub" id="nueva-sub">Elige tu contraseña nueva.</p>
+    <label for="nueva1">Contraseña nueva</label>
+    <input type="password" id="nueva1" autocomplete="new-password" minlength="8" required>
+    <label for="nueva2">Repite la contraseña</label>
+    <input type="password" id="nueva2" autocomplete="new-password" minlength="8" required>
+    <button type="submit">Guardar contraseña</button>
+  </form>
+
+  <!-- Cambiar contraseña con la sesión abierta: pide la actual -->
+  <form id="f-cambiar" hidden>
+    <h1>Cambiar contraseña</h1>
+    <p class="sub" id="cambiar-sub"></p>
+    <label for="actual">Contraseña actual</label>
+    <input type="password" id="actual" autocomplete="current-password" required>
+    <label for="cambiar1">Contraseña nueva</label>
+    <input type="password" id="cambiar1" autocomplete="new-password" minlength="8" required>
+    <label for="cambiar2">Repite la contraseña nueva</label>
+    <input type="password" id="cambiar2" autocomplete="new-password" minlength="8" required>
+    <button type="submit">Cambiar contraseña</button>
+    <div class="links"><a href="#" id="volver">← Volver</a></div>
+  </form>
+
+  <div class="msg" id="msg"></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+// El enlace del correo vuelve con "#...type=recovery" (o "#error=..." si venció).
+// Se lee antes de crear el cliente, que limpia el hash al procesarlo.
+const hash = new URLSearchParams(location.hash.slice(1));
+const vieneDelCorreo = hash.get('type') === 'recovery';
+const errorEnlace = hash.get('error_description');
+const MIN = 8;
+
+// Vuelve a la página de origen; solo se aceptan rutas de este mismo sitio
+function destino() {
+  const next = params.get('next') || '/';
+  try {
+    const u = new URL(next, location.origin);
+    if (u.origin === location.origin && !u.pathname.startsWith('/login.html')) return u.pathname + u.search + u.hash;
+  } catch {}
+  return '/';
+}
+function mostrar(modo) {
+  ['ingresar', 'olvide', 'nueva', 'cambiar'].forEach(m => { $('f-' + m).hidden = m !== modo; });
+  msg('');
+  const primero = $('f-' + modo).querySelector('input');
+  if (primero) primero.focus();
+}
+function msg(texto, ok = false) { $('msg').textContent = texto; $('msg').className = 'msg' + (ok ? ' ok' : ''); }
+function revisarNuevas(a, b) {
+  if (a.length < MIN) return `La contraseña debe tener al menos ${MIN} caracteres.`;
+  if (a !== b) return 'Las contraseñas no coinciden.';
+  return '';
+}
+// Bloquea el botón mientras se espera a Supabase
+async function enviando(form, fn) {
+  const btn = form.querySelector('button');
+  btn.disabled = true;
+  try { await fn(); } finally { btn.disabled = false; }
+}
+
+document.querySelectorAll('[data-modo]').forEach(a => a.addEventListener('click', e => {
+  e.preventDefault();
+  if (a.dataset.modo === 'olvide') $('email-olvide').value = $('email').value;
+  mostrar(a.dataset.modo);
+}));
+$('volver').href = destino();
+
+(async () => {
+  let sb;
+  try {
+    const cfg = await fetch('/api/ioarr/config').then(r => r.json());
+    if (!cfg.supabaseUrl || !cfg.supabaseKey) throw new Error('Falta configurar Supabase en el servidor');
+    sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey);
+  } catch (e) { mostrar('ingresar'); msg(e.message); return; }
+
+  const { data } = await sb.auth.getSession();
+  const sesion = data.session;
+
+  if (vieneDelCorreo && sesion) mostrar('nueva');
+  else if (params.get('modo') === 'cambiar' && sesion) {
+    $('cambiar-sub').textContent = 'Cuenta: ' + sesion.user.email;
+    mostrar('cambiar');
+  }
+  else if (sesion) return location.replace(destino());
+  else if (params.get('modo') === 'olvide') mostrar('olvide');
+  else {
+    mostrar('ingresar');
+    if (errorEnlace || vieneDelCorreo) msg('El enlace ya no es válido (vence en una hora y sirve una sola vez). Pide uno nuevo con «¿Olvidaste tu contraseña?».');
+  }
+
+  $('f-ingresar').addEventListener('submit', e => { e.preventDefault(); enviando(e.target, async () => {
+    msg('');
+    const { error } = await sb.auth.signInWithPassword({ email: $('email').value.trim(), password: $('pass').value });
+    if (error) return msg('No se pudo ingresar: ' + error.message);
+    location.replace(destino());
+  }); });
+
+  $('f-olvide').addEventListener('submit', e => { e.preventDefault(); enviando(e.target, async () => {
+    msg('');
+    const redirectTo = location.origin + '/login.html?next=' + encodeURIComponent(destino());
+    const { error } = await sb.auth.resetPasswordForEmail($('email-olvide').value.trim(), { redirectTo });
+    // Mismo mensaje exista o no la cuenta, para no revelar qué correos están registrados
+    if (error && error.status !== 400 && error.status !== 404) return msg('No se pudo enviar el enlace: ' + error.message);
+    msg('Si ese correo tiene una cuenta, te llegará un enlace en unos minutos. Revisa también la carpeta de spam.', true);
+  }); });
+
+  $('f-nueva').addEventListener('submit', e => { e.preventDefault(); enviando(e.target, async () => {
+    const problema = revisarNuevas($('nueva1').value, $('nueva2').value);
+    if (problema) return msg(problema);
+    const { error } = await sb.auth.updateUser({ password: $('nueva1').value });
+    if (error) return msg('No se pudo guardar: ' + error.message);
+    msg('Contraseña guardada. Entrando…', true);
+    setTimeout(() => location.replace(destino()), 900);
+  }); });
+
+  $('f-cambiar').addEventListener('submit', e => { e.preventDefault(); enviando(e.target, async () => {
+    const problema = revisarNuevas($('cambiar1').value, $('cambiar2').value);
+    if (problema) return msg(problema);
+    // Confirma la contraseña actual antes de cambiarla
+    const { error: errActual } = await sb.auth.signInWithPassword({ email: sesion.user.email, password: $('actual').value });
+    if (errActual) return msg('La contraseña actual no es correcta.');
+    const { error } = await sb.auth.updateUser({ password: $('cambiar1').value });
+    if (error) return msg('No se pudo cambiar: ' + error.message);
+    e.target.reset();
+    msg('Contraseña cambiada.', true);
+    setTimeout(() => location.replace(destino()), 1200);
+  }); });
+})();
+</script>
+</body>
+</html>

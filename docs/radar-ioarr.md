@@ -38,13 +38,39 @@ Seguimiento de IOARR de mobiliario escolar en Obras por Impuestos (OxI), visto d
 
 - Crea los usuarios en **Authentication → Users → Add user**, con correo y contraseña.
 - Cada usuario nuevo recibe automáticamente el rol **`financista`**, que es el limitado: solo ve Radar IOARR.
-- Para darle acceso completo:
+- Para darle acceso completo, cámbiale el rol a **Proveedor** en **Admin → Usuarios**. También se puede editar la columna `rol` de la tabla `perfiles` en Supabase:
 
   ```sql
   update perfiles set rol = 'proveedor' where email = 'persona@grupoibero.pe';
   ```
 
-**Límite de la fase 1:** el rol se exige en `/api/ioarr/*` y en el inicio se ocultan los demás módulos. Pero las otras páginas y APIs (SEACE, Infra, Seguimiento) siguen sin login, igual que antes. Bloquearlas, y endurecer el RLS de `procesos_seguimiento`, `reuniones` y `visitas_comerciales` (que hoy se leen con la clave pública), queda para la fase 2. Se pueden reutilizar `requireAuth` y `requireRol` de `src/ioarr/auth.js`.
+  El primer proveedor hay que crearlo así, desde Supabase, porque la sección de Admin solo la pueden usar los proveedores.
+- Nadie se puede quitar su propio acceso de proveedor desde Admin, para que no se quede afuera por error.
+
+### Contraseñas
+
+- **Olvidé mi contraseña:** en `login.html` (y en el login de IOARR) se pide un enlace por correo. Supabase lo envía, y al abrirlo vuelve a `login.html` para elegir una contraseña nueva.
+- **Cambiar contraseña:** botón «Contraseña» en Admin y en Radar IOARR. Pide la contraseña actual.
+- Mínimo 8 caracteres.
+
+Para que el correo de recuperación funcione, en Supabase:
+
+1. **Authentication → URL Configuration:**
+   - **Site URL:** `https://ibero-seace-alertas.onrender.com`
+   - En **Redirect URLs**, agrega `https://ibero-seace-alertas.onrender.com/login.html**`
+
+   Si falta, el enlace del correo lleva al inicio en vez de a la pantalla de contraseña nueva.
+2. **Authentication → Emails → SMTP Settings:** activa un SMTP propio (puede ser el mismo SendGrid de `SMTP_*`). El correo que trae Supabase por defecto envía muy pocos mensajes por hora y, en proyectos nuevos, solo a los miembros del equipo de Supabase.
+3. *(Opcional)* **Authentication → Emails → Templates → Reset Password:** traduce el texto del correo al español.
+
+**Qué protege cada rol:**
+
+- `/api/ioarr/*` exige sesión con cualquier rol.
+- El resto de la API (SEACE, Infra, Seguimiento y Admin) exige sesión con rol **`proveedor`** (`crearProteccionApi` en `src/ioarr/auth.js`). Solo quedan abiertas `/api/health` y `/api/ioarr/config`.
+- Las páginas Admin, Infra, Oportunidad, Seleccionadas y Seguimiento cargan `src/public/sesion.js`. Si no hay sesión mandan a `login.html`; si el usuario es financista lo mandan a Radar IOARR. Además, agregan el token a cada llamada a `/api/*`.
+- El panel Admin ya no tiene contraseña propia: usa esta misma cuenta.
+
+**Pendiente:** endurecer el RLS de `procesos_seguimiento`, `reuniones`, `visitas_comerciales` y `contactos_frecuentes`. Hoy `seguimiento.html` las lee directo con la clave pública.
 
 ## 3. Variables de entorno (Render → Environment)
 

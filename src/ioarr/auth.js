@@ -5,9 +5,9 @@
 // `Authorization: Bearer <access_token>`. Aquí se valida el token con Supabase
 // y se carga el rol (proveedor | financista).
 //
-// Fase 1: protege solo /api/ioarr/*. Fase 2 (pendiente): reutilizar
-// requireAuth/requireRol en las APIs existentes y endurecer el RLS de las
-// tablas que hoy lee seguimiento.html con la clave pública.
+// Protege /api/ioarr/* (cualquier rol) y, con protegerApi, el resto de la API
+// (solo rol proveedor). Pendiente: endurecer el RLS de las tablas que
+// seguimiento.html lee directo con la clave pública.
 // ============================================================================
 
 import { supabase } from './db.js';
@@ -38,9 +38,25 @@ export async function requireAuth(req, res, next) {
   } catch (e) { next(e); }
 }
 
+// Tras cambiar el rol de alguien, que el cambio rija ya (sin esperar CACHE_MS)
+export function olvidarUsuario(id) {
+  for (const [token, v] of cache) if (v.usuario.id === id) cache.delete(token);
+}
+
 // Uso: router.post('/ruta', requireRol('proveedor'), handler)
 export function requireRol(...roles) {
   return (req, res, next) => roles.includes(req.usuario?.rol)
     ? next()
     : res.status(403).json({ error: 'Tu perfil no tiene acceso a esta acción' });
+}
+
+// Resto de la API (SEACE, Infra, Seguimiento, Admin): exige sesión y rol proveedor.
+// Quedan fuera /api/health y /api/ioarr/*, que tiene su propio control
+// (config es pública para poder iniciar sesión; lo demás exige sesión).
+// Uso: app.use('/api', crearProteccionApi())
+export function crearProteccionApi(autenticar = requireAuth, autorizar = requireRol('proveedor')) {
+  return (req, res, next) => {
+    if (req.path === '/health' || req.path.startsWith('/ioarr/')) return next();
+    autenticar(req, res, err => err ? next(err) : autorizar(req, res, next));
+  };
 }
