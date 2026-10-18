@@ -55,15 +55,18 @@ export async function extraerLineasPdf(buffer) {
 }
 
 // ─── Clasificación ──────────────────────────────────────────────────────────
-// Por nombre de archivo; si no dice nada, por el contenido.
+// Por nombre de archivo cuando es explícito; si es genérico (p. ej. el
+// «…_Exportacion.pdf» del Banco de Inversiones, que vale para cualquier
+// documento) o no dice nada, por el contenido.
 export function clasificarDocumento(nombreArchivo, lineas = []) {
   const n = normaliza(nombreArchivo).replace(/[^A-Z0-9]+/g, ' ');
   if (/SUSTENTO|INFORME/.test(n)) return 'informe_sustento';
   if (/COSTO|PRESUPUESTO|ESTRUCTURA/.test(n)) return 'estructura_costos';
-  if (/07 ?C|FORMATO|FICHA|EXPORTACION|REGISTRO/.test(n)) return 'ficha_07c';
+  if (/07 ?C|FORMATO|FICHA/.test(n)) return 'ficha_07c';
   const texto = normaliza(lineas.slice(0, 80).map(l => l.texto).join(' '));
   if (/07 ?-? ?C\b|REGISTRO DE IOARR/.test(texto)) return 'ficha_07c';
-  if (leerTablaCostos(lineas).filas.length >= 3) return 'estructura_costos';
+  if (leerTablaCostos(lineas).filas.filter(f => f.cuadra).length >= 3) return 'estructura_costos';
+  if (/EXPORTACION|REGISTRO/.test(n)) return 'ficha_07c';
   return 'otro';
 }
 
@@ -172,13 +175,17 @@ export function leerFicha07C(lineas) {
 }
 
 // ─── Estructura de costos: tabla de bienes ──────────────────────────────────
-// Fila = código del bien (≥ 6 dígitos, puede llevar un N° de ítem delante),
-// descripción y una serie final de números entre los que están a, b, c, d y la
-// cantidad. Las columnas se ubican buscando 4 números seguidos con
-// d = (a+b+c) × 1.15; si ninguna combinación cuadra, se asume el orden
-// a, b, c, d, cantidad y la fila se marca como «no cuadra».
+// Fila = código del bien, descripción y una serie final de números entre los
+// que están a, b, c, d y la cantidad. El código puede ser:
+//   - numérico SIGA (≥ 6 dígitos, puede llevar un N° de ítem delante), o
+//   - alfanumérico de catálogo («SPM-03», «MCOMP-T1»), con los datos del local
+//     o la institución educativa delante en la misma línea.
+// Las columnas se ubican buscando 4 números seguidos con d = (a+b+c) × 1.15;
+// si ninguna combinación cuadra, se asume el orden a, b, c, d, cantidad y la
+// fila se marca como «no cuadra». Un «-» en la serie de números vale 0.
 const RE_NUM = /^-?(\d{1,3}(,\d{3})+(\.\d+)?|\d{1,3}(\.\d{3})+,\d+|\d+([.,]\d+)?)$/;
 const RE_CODIGO = /^\d{6,20}$|^\d{2,}(?:[.\-]\d{2,}){2,}$/;
+export const RE_CODIGO_ALFA = /^[A-Z]{2,10}(?:-[A-Z0-9]{1,6})+$/;
 const RE_ITEM = /^\d{1,3}(\.\d{1,3})*\.?$/;
 const UNIDADES = new Set(['UND', 'UND.', 'UNID', 'UNIDAD', 'UNIDADES', 'U', 'JGO', 'JUEGO', 'MOD', 'MODULO', 'GLB', 'GLOBAL', 'KIT', 'PZA', 'PIEZA', 'SET', 'M2', 'ML', 'M']);
 const RE_FIN_TABLA = /^(TOTAL|SUB ?TOTAL|COSTO DIRECTO|NOTA|FUENTE|ELABORAD)/;
@@ -187,16 +194,27 @@ const redondea = (n) => Math.round(n * 100) / 100;
 export const dEsperado = (a, b, c) => redondea((a + b + c) * FACTOR_D);
 // Tolerancia de redondeo: 2 céntimos o 0.01 % del valor
 export const cuadra = (a, b, c, d) => Math.abs(d - (a + b + c) * FACTOR_D) <= Math.max(0.02, Math.abs(d) * 1e-4);
+// cantidad × d ≈ costo total de la fila (d viene redondeado a céntimos)
+const esTotal = (cantidad, d, total) => cantidad > 0 && Math.abs(cantidad * d - total) <= Math.max(0.1, total * 1e-3);
+const esNumero = (t) => t === '-' || RE_NUM.test(t);
+const numero = (t) => t === '-' ? 0 : parseMonto(t);
 
-function parseFila(tokens) {
+// modo 'alfa': el código es alfanumérico y puede ir después de otros datos
+function parseFila(tokens, modo = 'num') {
   let t = [...tokens];
-  if (t.length > 1 && RE_ITEM.test(t[0]) && !RE_CODIGO.test(t[0]) && RE_CODIGO.test(t[1])) t = t.slice(1);
-  if (!RE_CODIGO.test(t[0])) return null;
-  const codigo = t[0].replace(/[.\-]/g, '');
+  if (modo === 'alfa') {
+    const j = t.findIndex(x => RE_CODIGO_ALFA.test(x));
+    if (j < 0) return null;
+    t = t.slice(j);
+  } else {
+    if (t.length > 1 && RE_ITEM.test(t[0]) && !RE_CODIGO.test(t[0]) && RE_CODIGO.test(t[1])) t = t.slice(1);
+    if (!RE_CODIGO.test(t[0])) return null;
+  }
+  const codigo = modo === 'alfa' ? t[0] : t[0].replace(/[.\-]/g, '');
 
   let k = t.length;
-  while (k > 1 && RE_NUM.test(t[k - 1])) k--;
-  const nums = t.slice(k).map(parseMonto);
+  while (k > 1 && esNumero(t[k - 1])) k--;
+  const nums = t.slice(k).map(numero);
   if (nums.length < 4 || nums.some(n => n == null)) return null;
   const desc = t.slice(1, k);
   while (desc.length && UNIDADES.has(normaliza(desc[desc.length - 1]))) desc.pop();
@@ -206,24 +224,45 @@ function parseFila(tokens) {
   for (let i = 0; i + 3 < nums.length; i++) {
     const [a, b, c, d] = nums.slice(i, i + 4);
     if (d > 0 && cuadra(a, b, c, d)) {
-      const cantidad = nums[i + 4] ?? (i > 0 ? nums[i - 1] : null);
-      return { codigo_bien: codigo, descripcion, a, b, c, d, cantidad, cuadra: true };
+      // Cantidad antes de a y costo total después de d: «cant a b c d total»
+      const antes = i > 0 ? nums[i - 1] : null, despues = nums[i + 4] ?? null;
+      const cantAntes = antes != null && despues != null && esTotal(antes, d, despues);
+      const cantidad = cantAntes ? antes : (despues ?? antes);
+      // Los números anteriores a esas columnas son parte de la descripción («… TIPO 1»)
+      const resto = cantAntes ? t.slice(k, k + i - 1) : [];
+      const desc2 = [descripcion, ...resto].join(' ');
+      return { codigo_bien: codigo, descripcion: desc2, a, b, c, d, cantidad, cuadra: true };
     }
   }
   const [a, b, c, d, cantidad = null] = nums;
   return { codigo_bien: codigo, descripcion, a, b, c, d, cantidad, cuadra: false };
 }
 
+// La tabla usa códigos alfanuméricos si así se leen más filas que con los numéricos
+function modoTabla(lineas) {
+  let num = 0, alfa = 0;
+  for (const l of lineas) {
+    const tokens = l.texto.split(' ').filter(Boolean);
+    if (!tokens.length) continue;
+    if (parseFila(tokens, 'num')?.cuadra) num++;
+    if (parseFila(tokens, 'alfa')?.cuadra) alfa++;
+  }
+  return alfa > num ? 'alfa' : 'num';
+}
+
 export function leerTablaCostos(lineas) {
+  const modo = modoTabla(lineas);
   const filas = [];
   let ultima = null;
   for (const l of lineas) {
     const tokens = l.texto.split(' ').filter(Boolean);
-    const fila = tokens.length ? parseFila(tokens) : null;
+    const fila = tokens.length ? parseFila(tokens, modo) : null;
     if (fila) { fila.pagina = l.pagina; filas.push(fila); ultima = fila; continue; }
-    // Descripción partida en varias líneas: texto sin números justo debajo de una fila
+    // Descripción partida en varias líneas: texto sin números justo debajo de una fila.
+    // En las tablas con código de catálogo las descripciones son cortas y lo que
+    // queda suelto entre filas son nombres de colegios: no se pega.
     const n = normaliza(l.texto);
-    if (ultima && ultima.pagina === l.pagina && n && !/\d/.test(n) && !RE_FIN_TABLA.test(n) && n.length < 120
+    if (modo === 'num' && ultima && ultima.pagina === l.pagina && n && !/\d/.test(n) && !RE_FIN_TABLA.test(n) && n.length < 120
         && ultima.descripcion.length < 300) {
       ultima.descripcion += ' ' + l.texto.trim();
     } else {
