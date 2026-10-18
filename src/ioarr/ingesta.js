@@ -111,10 +111,18 @@ export function parseMonto(v) {
 // Un texto sin dígitos (p. ej. «Enlace») no es un CUI → null.
 export function limpiaCui(v) {
   if (v == null) return null;
-  const s = String(v).trim().replace(/\s+/g, '');
+  let s = String(v).trim();
   if (!s) return null;
-  if (esIdea(s)) return s.toUpperCase();
-  return s.replace(/[.,]0+$/, '').replace(/\D/g, '') || null;
+  if (esIdea(s)) return s.replace(/\s+/g, '').toUpperCase();
+  s = s.replace(/[.,]0+$/, '')                          // 2560356.0 / 2560356,00
+       .replace(/(\d)[.,\s](?=\d{3}(\D|$))/g, '$1');     // separadores de miles: 2,560,356 / 2 560 356
+  const grupos = s.match(/\d+/g);
+  if (!grupos) return null;
+  // Un paquete trae varios CUI en la misma celda («2703202, 2703203…»): se usa el primero
+  let cui = grupos.find(g => g.length >= 6) ?? grupos[0];
+  // …o ya pegados en un solo número (múltiplo de 7 dígitos)
+  if (cui.length > 7 && cui.length % 7 === 0) cui = cui.slice(0, 7);
+  return cui;
 }
 
 // Código de idea de inversión (aún no es un proyecto registrado con CUI)
