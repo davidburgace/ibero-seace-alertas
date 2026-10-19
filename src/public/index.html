@@ -111,6 +111,12 @@
 
   <footer>Grupo Ibero Perú S.A.C. · Radar SEACE</footer>
 
+<script>
+// Si un enlace de «crear/recuperar contraseña» cae aquí (Supabase manda al Site URL cuando
+// la dirección de vuelta no está permitida), se pasa a login.html antes de que supabase-js
+// abra la sesión sin pedir la contraseña.
+if (/(^#|&)(type=recovery|error_description=)/.test(location.hash)) location.replace('/login.html' + location.hash);
+</script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script>
 // Rol "financista": solo ve el tile de Radar IOARR. Sin sesión, la página se ve

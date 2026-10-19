@@ -63,13 +63,15 @@ export function correoInvitacion({ email, enlace, rol }) {
   };
 }
 
-// Genera el enlace (tipo recovery: lleva a login.html para elegir contraseña) y lo envía.
+// Genera el enlace (tipo recovery) y lo envía. El enlace va directo a login.html con el
+// token, y es la página la que lo valida y pide la contraseña. No se usa el action_link
+// de Supabase: si su redirectTo no está en la lista de URLs permitidas, Supabase manda
+// al Site URL (el launcher) con la sesión abierta y nunca se pide la contraseña.
 // Si el correo falla, devuelve el enlace para que Admin lo copie y lo envíe a mano.
 async function enviarInvitacion(supabase, enviarCorreo, { email, rol, baseUrl }) {
-  const redirectTo = `${baseUrl}/login.html?modo=bienvenida`;
-  const { data, error } = await supabase.auth.admin.generateLink({ type: 'recovery', email, options: { redirectTo } });
+  const { data, error } = await supabase.auth.admin.generateLink({ type: 'recovery', email });
   if (error) throw error;
-  const enlace = data.properties.action_link;
+  const enlace = `${baseUrl}/login.html?modo=bienvenida&type=recovery&token_hash=${encodeURIComponent(data.properties.hashed_token)}`;
   try {
     await enviarCorreo(correoInvitacion({ email, enlace, rol }));
     return { enviado: true };
