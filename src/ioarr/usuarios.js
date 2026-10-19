@@ -90,7 +90,7 @@ export async function invitarUsuario(supabase, enviarCorreo, { email, rol, baseU
   const { data, error } = await supabase.auth.admin.createUser({ email, email_confirm: true });
   if (error) {
     if (error.status === 422 || /already|registered|exists/i.test(error.message || '')) {
-      return { status: 409, error: 'Ya existe una cuenta con ese correo. Si no ha entrado nunca, usa «Reenviar invitación».' };
+      return { status: 409, error: 'Ya existe una cuenta con ese correo. Si no tiene contraseña, usa «Reenviar» en la lista de usuarios.' };
     }
     throw error;
   }
