@@ -136,7 +136,7 @@ test('invitar un correo ya registrado da 409 y sugiere reenviar', async () => {
   const sb = supabaseInvitar({ existentes: ['ya@ibero.pe'] });
   const r = await invitarUsuario(sb, async () => {}, { email: 'ya@ibero.pe', rol: 'financista', baseUrl: BASE });
   assert.equal(r.status, 409);
-  assert.match(r.error, /Reenviar invitación/);
+  assert.match(r.error, /«Reenviar»/);
   assert.equal(sb.upserts.length, 0);
 });
 

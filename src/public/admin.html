@@ -530,7 +530,7 @@ async function loadUsuarios() {
           <div class="item-meta">${u.ultimo_ingreso ? 'Último ingreso: ' + fechaHora(u.ultimo_ingreso) : '<span style="color:var(--amber)">Invitación pendiente</span> · aún no ha entrado'}</div>
         </div>
         <div class="item-actions" style="display:flex;align-items:center;gap:10px;">
-          ${!u.ultimo_ingreso && !yo ? `<button class="btn-delete btn-reenviar" data-id="${escAttr(u.id)}" data-email="${escAttr(u.email)}">Reenviar</button>` : ''}
+          ${!yo ? `<button class="btn-delete btn-reenviar" data-id="${escAttr(u.id)}" data-email="${escAttr(u.email)}" title="Envía un enlace nuevo para crear o cambiar la contraseña">Reenviar</button>` : ''}
           <select class="form-select rol-select" data-id="${escAttr(u.id)}" data-rol="${u.rol}" ${yo ? 'disabled title="No puedes quitarte tu propio acceso"' : ''}>
             <option value="proveedor" ${u.rol === 'proveedor' ? 'selected' : ''}>Proveedor</option>
             <option value="financista" ${u.rol === 'financista' ? 'selected' : ''}>Financista</option>
@@ -587,7 +587,7 @@ async function guardarUsuario() {
 }
 
 async function reenviarInvitacionUsuario(btn) {
-  if (!confirm('¿Reenviar la invitación a ' + btn.dataset.email + '? El enlace anterior deja de servir.')) return;
+  if (!confirm('¿Enviar a ' + btn.dataset.email + ' un enlace nuevo para crear su contraseña? El enlace anterior deja de servir. Su contraseña actual, si tiene, sigue valiendo hasta que elija otra.')) return;
   btn.disabled = true; btn.textContent = 'Enviando…';
   try {
     const res = await fetch(API + '/api/admin/usuarios/' + encodeURIComponent(btn.dataset.id) + '/invitacion', { method: 'POST' });
