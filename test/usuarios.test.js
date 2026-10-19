@@ -87,9 +87,9 @@ function supabaseInvitar({ existentes = [] } = {}) {
         return { data: { user }, error: null };
       },
       getUserById: async id => cuentas.has(id) ? { data: { user: cuentas.get(id) }, error: null } : { data: { user: null }, error: { message: 'not found' } },
-      generateLink: async ({ type, email, options }) => {
-        enlaces.push({ type, email, redirectTo: options.redirectTo });
-        return { data: { properties: { action_link: `https://sb.test/verify?token=t${enlaces.length}&redirect_to=${encodeURIComponent(options.redirectTo)}` } }, error: null };
+      generateLink: async ({ type, email }) => {
+        enlaces.push({ type, email });
+        return { data: { properties: { action_link: `https://sb.test/verify?token=t${enlaces.length}`, hashed_token: `h${enlaces.length}` } }, error: null };
       }
     } },
     from: () => ({
@@ -108,9 +108,11 @@ test('invitarUsuario crea la cuenta sin contraseña, fija el rol y envía el enl
   assert.equal(r.enlace, undefined); // si el correo salió, el enlace no se muestra en Admin
   assert.deepEqual(sb.creados, [{ email: 'maria.perez@ibero.pe', password: undefined, email_confirm: true }]);
   assert.deepEqual(sb.upserts[0].fila, { id: 'nuevo-1', email: 'maria.perez@ibero.pe', rol: 'proveedor' });
-  assert.deepEqual(sb.enlaces, [{ type: 'recovery', email: 'maria.perez@ibero.pe', redirectTo: 'https://radar.test/login.html?modo=bienvenida' }]);
+  assert.deepEqual(sb.enlaces, [{ type: 'recovery', email: 'maria.perez@ibero.pe' }]);
   assert.equal(correos[0].to, 'maria.perez@ibero.pe');
-  assert.match(correos[0].html, /https:\/\/sb\.test\/verify\?token=t1/);
+  // El botón lleva directo a la pantalla de crear contraseña, no al verify de Supabase
+  assert.match(correos[0].html, /href="https:\/\/radar\.test\/login\.html\?modo=bienvenida&amp;type=recovery&amp;token_hash=h1"/);
+  assert.doesNotMatch(correos[0].html, /sb\.test\/verify/);
 });
 
 test('si el correo falla, la cuenta queda creada y se devuelve el enlace para enviarlo a mano', async () => {
@@ -118,7 +120,7 @@ test('si el correo falla, la cuenta queda creada y se devuelve el enlace para en
   const r = await invitarUsuario(sb, async () => { throw new Error('SMTP no configurado'); }, { email: 'a@ibero.pe', rol: 'financista', baseUrl: BASE });
   assert.equal(r.status, 201);
   assert.equal(r.enviado, false);
-  assert.match(r.enlace, /^https:\/\/sb\.test\/verify/);
+  assert.match(r.enlace, /^https:\/\/radar\.test\/login\.html\?modo=bienvenida&type=recovery&token_hash=h1$/);
   assert.match(r.aviso, /SMTP no configurado/);
 });
 

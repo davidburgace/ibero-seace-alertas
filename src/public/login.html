@@ -102,8 +102,8 @@ const params = new URLSearchParams(location.search);
 // El enlace del correo vuelve con "#...type=recovery" (o "#error=..." si venció).
 // Se lee antes de crear el cliente, que limpia el hash al procesarlo.
 const hash = new URLSearchParams(location.hash.slice(1));
-const vieneDelCorreo = hash.get('type') === 'recovery';
-const errorEnlace = hash.get('error_description');
+const vieneDelHash = hash.get('type') === 'recovery';
+const errorHash = hash.get('error_description');
 const MIN = 8;
 
 // Vuelve a la página de origen; solo se aceptan rutas de este mismo sitio
@@ -148,6 +148,19 @@ $('volver').href = destino();
     if (!cfg.supabaseUrl || !cfg.supabaseKey) throw new Error('Falta configurar Supabase en el servidor');
     sb = window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseKey);
   } catch (e) { mostrar('ingresar'); msg(e.message); return; }
+
+  // Enlace de invitación: trae el token en la URL y se valida aquí.
+  // Se borra de la barra de direcciones para que no quede en el historial.
+  let vieneDelCorreo = vieneDelHash, errorEnlace = errorHash;
+  const tokenHash = params.get('token_hash');
+  if (tokenHash) {
+    const limpia = new URLSearchParams(params); limpia.delete('token_hash'); limpia.delete('type');
+    history.replaceState(null, '', location.pathname + (limpia.toString() ? '?' + limpia : ''));
+    await sb.auth.signOut({ scope: 'local' }); // la invitación es para otra cuenta que la abierta
+    const { error } = await sb.auth.verifyOtp({ token_hash: tokenHash, type: params.get('type') || 'recovery' });
+    vieneDelCorreo = true;
+    if (error) errorEnlace = error.message;
+  }
 
   const { data } = await sb.auth.getSession();
   const sesion = data.session;
