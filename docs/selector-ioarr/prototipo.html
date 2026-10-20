@@ -1,0 +1,567 @@
+<title>Selector de Colegios IOARR</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Public+Sans:wght@400;500;600;700&display=swap">
+<style>
+/* Concepto: planilla técnica de ingeniería. Superficies frías, tinta azul-negra, un solo acento petróleo.
+   Verde, ámbar y rojo se reservan para el estado del mobiliario (bueno, regular, malo). */
+:root{
+  --bg:#EDF0F3; --surface:#FFFFFF; --surface-2:#F5F7F9; --ink:#13222C; --muted:#586873; --line:#D3DBE1;
+  --accent:#0F5C7A; --accent-ink:#FFFFFF; --accent-soft:#DDECF3;
+  --good:#2E7D4F; --warn:#B07416; --bad:#B4372F; --good-soft:#DFF1E6; --warn-soft:#F8ECD3; --bad-soft:#F7DEDB;
+  --font-ui:"Public Sans",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0D151B; --surface:#16212A; --surface-2:#1B2833; --ink:#E5ECF1; --muted:#93A4B0; --line:#2B3A46;
+  --accent:#5DB8DA; --accent-ink:#06222E; --accent-soft:#183544;
+  --good:#5CC58A; --warn:#E0B04F; --bad:#EF8479; --good-soft:#1B3A2A; --warn-soft:#3B3017; --bad-soft:#412321; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0D151B; --surface:#16212A; --surface-2:#1B2833; --ink:#E5ECF1; --muted:#93A4B0; --line:#2B3A46;
+  --accent:#5DB8DA; --accent-ink:#06222E; --accent-soft:#183544;
+  --good:#5CC58A; --warn:#E0B04F; --bad:#EF8479; --good-soft:#1B3A2A; --warn-soft:#3B3017; --bad-soft:#412321; color-scheme:dark}
+
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--font-ui);font-size:14px;line-height:1.45;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.wrap{max-width:1440px;margin:0 auto;padding-block:20px 0;display:flex;flex-direction:column;gap:16px}
+h1,h2,h3{margin:0;text-wrap:balance}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mono{font-family:var(--font-mono);font-size:12.5px}
+.muted{color:var(--muted)}
+.num{font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+
+/* encabezado */
+.top{display:flex;flex-wrap:wrap;gap:16px 24px;align-items:flex-end;justify-content:space-between}
+.brand h1{font-size:22px;font-weight:700;letter-spacing:-.01em}
+.brand p{margin:2px 0 0;color:var(--muted);max-width:62ch}
+.ctrls{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end}
+.fld{display:flex;flex-direction:column;gap:4px;min-width:0}
+.fld>label,.lbl{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.in{height:36px;border:1px solid var(--line);background:var(--surface);border-radius:6px;padding:0 10px;min-width:0;width:100%}
+select.in{padding-right:6px}
+.in:hover{border-color:var(--muted)}
+
+/* pestañas */
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line)}
+.tab{background:none;border:0;border-bottom:3px solid transparent;padding:10px 16px;font-weight:600;color:var(--muted);cursor:pointer;margin-bottom:-1px}
+.tab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+.badge{display:inline-block;min-width:22px;padding:1px 7px;border-radius:99px;background:var(--accent);color:var(--accent-ink);font-size:12px;font-weight:600;text-align:center;margin-left:6px}
+
+/* paneles */
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:8px}
+.pad{padding:16px}
+.filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px 14px;align-items:end}
+.filters .wide{grid-column:span 2}
+@media (max-width:520px){.filters .wide{grid-column:span 1}}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{height:36px;padding:0 12px;border:1px solid var(--line);background:var(--surface);border-radius:6px;cursor:pointer;font-weight:500}
+.chip[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.chk{display:flex;align-items:center;gap:8px;height:36px}
+.chk input{width:16px;height:16px;accent-color:var(--accent)}
+.btn{height:36px;padding:0 14px;border-radius:6px;border:1px solid var(--line);background:var(--surface);cursor:pointer;font-weight:600;white-space:nowrap}
+.btn:hover{border-color:var(--muted)}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.btn.pri:hover{filter:brightness(1.08)}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.btn.sm{height:30px;padding:0 10px;font-size:13px}
+.bar{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;justify-content:space-between;padding:12px 16px;border-top:1px solid var(--line);background:var(--surface-2);border-radius:0 0 8px 8px}
+.bar .acts{display:flex;flex-wrap:wrap;gap:8px}
+
+details.crit summary{cursor:pointer;padding:12px 16px;font-weight:600;list-style:none;display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline}
+details.crit summary::-webkit-details-marker{display:none}
+details.crit summary::before{content:"▸";color:var(--accent);transition:transform .15s}
+details.crit[open] summary::before{transform:rotate(90deg)}
+.crit-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px 16px;padding:4px 16px 16px}
+.crit-sum{font-weight:400;color:var(--muted);font-size:13px}
+
+/* tabla */
+.tscroll{overflow-x:auto}
+table{border-collapse:collapse;width:100%}
+th,td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top;text-align:left}
+th{font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);background:var(--surface-2);white-space:nowrap;position:relative}
+th.s{cursor:pointer;user-select:none}
+th.s:hover{color:var(--ink)}
+th.s[aria-sort="ascending"]::after{content:" ▲";color:var(--accent)}
+th.s[aria-sort="descending"]::after{content:" ▼";color:var(--accent)}
+th.num{text-align:right}
+tr.sel>td{background:var(--accent-soft)}
+tr.det>td{background:var(--surface-2);padding:0}
+td .nm{display:block;max-width:44ch}
+.pill{display:inline-block;font-size:11px;font-weight:600;padding:1px 7px;border-radius:99px;border:1px solid var(--line);color:var(--muted);margin:2px 4px 0 0;white-space:nowrap}
+.pill.g{border-color:var(--warn);color:var(--warn)}
+.x{background:none;border:0;cursor:pointer;color:var(--accent);font-weight:600;padding:4px 6px}
+.meter{display:flex;align-items:center;gap:8px;justify-content:flex-end}
+.meter i{display:block;width:54px;height:6px;border-radius:3px;background:var(--line);overflow:hidden;font-style:normal}
+.meter b{display:block;height:100%;background:var(--bad)}
+.page{display:flex;gap:8px;align-items:center}
+.empty{padding:40px 16px;text-align:center;color:var(--muted)}
+
+/* detalle de local */
+.detail{display:grid;grid-template-columns:minmax(0,1fr);gap:14px;padding:12px 16px 16px}
+.detail h4{margin:0 0 6px;font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}
+.detail table th,.detail table td{padding:5px 8px;font-size:12.5px}
+.detail .tscroll{border:1px solid var(--line);border-radius:6px;background:var(--surface)}
+
+/* selección */
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px}
+.kpi{padding:14px 16px}
+.kpi .v{font-size:28px;font-weight:700;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.kpi .l{font-size:12px;color:var(--muted)}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,460px),1fr));gap:16px}
+.stack{display:flex;height:10px;border-radius:5px;overflow:hidden;background:var(--line);min-width:90px}
+.stack i{display:block;height:100%}
+.legend{display:flex;gap:14px;font-size:12px;color:var(--muted);flex-wrap:wrap}
+.legend span::before{content:"";display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:5px;background:var(--c)}
+.note{font-size:12.5px;color:var(--muted);max-width:90ch}
+.foot{padding:4px 0 8px;font-size:12px;color:var(--muted)}
+
+/* barra inferior */
+.dock{position:sticky;bottom:0;z-index:5;background:var(--ink);color:var(--bg);border-radius:8px 8px 0 0;
+  padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px));display:flex;flex-wrap:wrap;gap:8px 20px;align-items:center;justify-content:space-between}
+.dock b{font-variant-numeric:tabular-nums}
+.dock .btn{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(70px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:8px 14px;border-radius:6px;z-index:20;max-width:90vw}
+.err{color:var(--bad)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<div class="wrap" id="app">
+  <header class="top">
+    <div class="brand">
+      <h1>Selector de colegios IOARR</h1>
+      <p>Elige una región, filtra los locales educativos y marca los que intervendrás. La aplicación calcula la reposición de mobiliario y prepara los datos del estudio.</p>
+    </div>
+    <div class="ctrls">
+      <div class="fld" style="width:200px"><label for="region">Región</label><select class="in" id="region"></select></div>
+      <div class="fld" style="width:260px"><label for="proy">Nombre del proyecto</label><input class="in" id="proy" type="text" placeholder="Ej.: IOARR mobiliario Mariscal Nieto" autocomplete="off"></div>
+    </div>
+  </header>
+
+  <div class="panel">
+    <details class="crit" id="crit">
+      <summary><span>Criterios de cálculo</span><span class="crit-sum" id="critSum"></span></summary>
+      <div class="crit-grid" id="critGrid"></div>
+    </details>
+  </div>
+
+  <nav class="tabs" role="tablist">
+    <button class="tab" role="tab" id="tab-elegir" aria-selected="true" aria-controls="v-elegir">Elegir locales</button>
+    <button class="tab" role="tab" id="tab-sel" aria-selected="false" aria-controls="v-sel">Mi selección<span class="badge" id="selBadge">0</span></button>
+  </nav>
+
+  <section id="v-elegir" role="tabpanel" aria-labelledby="tab-elegir" style="display:flex;flex-direction:column;gap:16px">
+    <div class="panel">
+      <div class="pad filters">
+        <div class="fld wide"><label for="q">Buscar</label><input class="in" id="q" type="search" placeholder="Nombre, código modular, código de local o centro poblado" autocomplete="off"></div>
+        <div class="fld"><label for="fprov">Provincia</label><select class="in" id="fprov"></select></div>
+        <div class="fld"><label for="fdist">Distrito</label><select class="in" id="fdist"></select></div>
+        <div class="fld"><label for="fugel">UGEL</label><select class="in" id="fugel"></select></div>
+        <div class="fld"><span class="lbl">Nivel</span><div class="chips" id="fniv"></div></div>
+        <div class="fld"><label for="farea">Área</label><select class="in" id="farea"><option value="-1">Todas</option><option value="0">Urbana</option><option value="1">Rural</option></select></div>
+        <div class="fld"><label for="fges">Gestión</label><select class="in" id="fges"><option value="-1">Todas</option><option value="0">Pública directa</option><option value="1">Pública por convenio</option></select></div>
+        <div class="fld"><label for="frep">A reponer, mínimo (bienes)</label><input class="in" id="frep" type="number" min="0" step="1" placeholder="0"></div>
+        <div class="fld"><label for="fest">Estudiantes, mínimo</label><input class="in" id="fest" type="number" min="0" step="1" placeholder="0"></div>
+        <div class="fld"><span class="lbl">Datos de aulas</span><label class="chk"><input type="checkbox" id="fcenso"> Solo locales con aulas en el censo</label></div>
+        <div class="fld"><span class="lbl">&nbsp;</span><button class="btn" id="fclear" type="button">Limpiar filtros</button></div>
+      </div>
+      <div class="bar">
+        <div id="count" aria-live="polite"></div>
+        <div class="acts">
+          <button class="btn sm" id="selAll" type="button">Seleccionar los filtrados</button>
+          <button class="btn sm" id="unselAll" type="button">Quitar los filtrados</button>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="tscroll"><table id="tbl"><caption class="muted" style="text-align:left;padding:10px 12px;caption-side:top;font-size:12.5px">Cada fila es un local educativo (unidad productora). Un local puede tener varios servicios: inicial, primaria o secundaria.</caption>
+        <thead><tr id="thead"></tr></thead><tbody id="tbody"></tbody></table></div>
+      <div class="bar"><div id="pgInfo"></div><div class="page"><button class="btn sm" id="pgPrev" type="button">Anterior</button><span id="pgNum" class="num"></span><button class="btn sm" id="pgNext" type="button">Siguiente</button></div></div>
+    </div>
+  </section>
+
+  <section id="v-sel" role="tabpanel" aria-labelledby="tab-sel" hidden style="flex-direction:column;gap:16px"></section>
+
+  <p class="foot" id="foot"></p>
+
+  <div class="dock" id="dock">
+    <div id="dockTxt"></div>
+    <button class="btn" id="dockBtn" type="button">Ver mi selección</button>
+  </div>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script>
+(function(){
+'use strict';
+const NF=new Intl.NumberFormat('es-PE');
+const fmt=n=>NF.format(Math.round(n||0));
+const $=id=>document.getElementById(id);
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const norm=s=>String(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+const ITEMS=[
+  {k:'mesa',n:'Mesa del estudiante',u:'puestos'},{k:'silla',n:'Silla del estudiante',u:'unidades'},
+  {k:'esc',n:'Escritorio docente',u:'unidades'},{k:'sdoc',n:'Silla docente',u:'unidades'},{k:'arm',n:'Armario / estante',u:'unidades'}];
+const NIVN={I:'Inicial',P:'Primaria',S:'Secundaria',E:'Básica Especial'};
+const NIVS={I:'Inicial',P:'Primaria',S:'Secundaria',E:'Especial'};
+const NIVB={I:1,P:2,S:4,E:8};
+const DEF={kI:4,kPS:2,carpBip:2,carpEstado:'r',regPct:0,mesaEst:1,sillaEst:1,esc:1,sdoc:1,arm:1};
+const PAGE=40;
+const S={idx:null,D:null,C:null,params:Object.assign({},DEF),sel:new Set(),view:[],page:0,open:new Set(),
+  sort:{key:'rep',dir:-1},tab:'elegir',
+  f:{q:'',prov:-1,dist:-1,ugel:-1,area:-1,ges:-1,niv:0,rep:0,est:0,censo:false}};
+
+function store(k,v){try{if(v===undefined){const r=localStorage.getItem(k);return r==null?null:JSON.parse(r)}localStorage.setItem(k,JSON.stringify(v))}catch(e){return null}}
+function toast(t){const el=$('toast');el.textContent=t;el.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>{el.hidden=true},3600)}
+
+/* ---------- carga ---------- */
+async function boot(){
+  $('foot').textContent='Cargando regiones…';
+  try{
+    const r=await fetch('data/index.json');S.idx=await r.json();
+  }catch(e){$('foot').innerHTML='<span class="err">No se pudo cargar la lista de regiones.</span>';return}
+  const sel=$('region');
+  sel.innerHTML=S.idx.regiones.map((g,i)=>`<option value="${i}">${esc(g.nombre)} (${fmt(g.locales)} locales)</option>`).join('');
+  const p=store('ioarr:params');if(p)Object.assign(S.params,p);
+  $('proy').value=store('ioarr:proy')||'';
+  const last=store('ioarr:region');
+  let start=S.idx.regiones.findIndex(g=>g.nombre===last);
+  if(start<0)start=S.idx.regiones.findIndex(g=>g.nombre==='Moquegua');
+  if(start<0)start=0;
+  sel.value=String(start);
+  renderCrit();
+  await loadRegion(start);
+}
+async function loadRegion(i){
+  const g=S.idx.regiones[i];
+  $('count').textContent='Cargando '+g.nombre+'…';$('tbody').innerHTML='';
+  try{
+    const r=await fetch(g.archivo);S.D=await r.json();
+  }catch(e){$('count').innerHTML='<span class="err">No se pudo cargar '+esc(g.nombre)+'.</span>';return}
+  prep(S.D);
+  store('ioarr:region',g.nombre);
+  const saved=store('ioarr:sel:'+g.nombre)||[];
+  const codes=new Set(S.D.locs.map(l=>l[0]));
+  S.sel=new Set(saved.filter(c=>codes.has(c)));
+  S.open.clear();S.page=0;
+  S.f={q:'',prov:-1,dist:-1,ugel:-1,area:-1,ges:-1,niv:0,rep:0,est:0,censo:false};
+  fillFilters();calc();refresh();
+  $('foot').innerHTML='Fuentes: Padrón de ESCALE–Minedu (registros al 29/10/2025) y Censo Educativo 2025, Local escolar, pregunta 6.1. Son datos declarados por cada colegio y no están validados. Incluye servicios públicos escolarizados de Inicial, Primaria, Secundaria y Básica Especial. No hay datos de antigüedad ni de costos.';
+}
+function prep(D){
+  const nL=D.locs.length,nS=D.svcs.length;
+  D.locSvc=Array.from({length:nL},()=>[]);D.svcs.forEach((s,i)=>D.locSvc[s[3]].push(i));
+  D.locAul=Array.from({length:nL},()=>[]);D.svcAulN=new Int32Array(nS);
+  D.aulas.forEach((a,i)=>{D.locAul[a[0]].push(i);D.svcAulN[a[1]]++});
+  D.locEst=new Int32Array(nL);D.locSec=new Int32Array(nL);D.locNiv=new Uint8Array(nL);D.locGes=new Uint8Array(nL);
+  D.locText=new Array(nL);D.locName=new Array(nL);
+  for(let i=0;i<nL;i++){
+    const l=D.locs[i];let t=l[0]+' '+l[3]+' '+l[5]+' '+D.dists[l[1]][0];const names=[];
+    for(const si of D.locSvc[i]){const s=D.svcs[si];
+      D.locEst[i]+=s[6];D.locSec[i]+=s[5];D.locNiv[i]|=NIVB[s[2]];D.locGes[i]|=1<<s[4];
+      t+=' '+s[0]+' '+s[1];if(!names.includes(s[1]))names.push(s[1])}
+    D.locName[i]=names.join(' / ');D.locText[i]=norm(t);
+  }
+}
+
+/* ---------- cálculo ---------- */
+function calc(){
+  const D=S.D,P=S.params,nA=D.aulas.length,nL=D.locs.length;
+  const L={b:new Float64Array(5*nL),r:new Float64Array(5*nL),m:new Float64Array(5*nL),req:new Float64Array(5*nL),
+    fal:new Float64Array(5*nL),rep:new Float64Array(5*nL),repTot:new Float64Array(nL),reqTot:new Float64Array(nL)};
+  const A={b:[],r:[],m:[],req:[],fal:[],rep:[]};
+  for(const k in A)for(let t=0;t<5;t++)A[k].push(new Int32Array(nA));
+  for(let i=0;i<nA;i++){
+    const a=D.aulas[i],niv=D.svcs[a[1]][2],k=(niv==='I'||niv==='E')?P.kI:P.kPS,f=j=>a[11+j],loc=a[0];
+    const carp=f(6)+f(7)*P.carpBip;
+    let mb=f(0)+k*f(3),mr=f(1)+k*f(4),mm=f(2)+k*f(5),sb=f(8),sr=f(9),sm=f(10);
+    if(P.carpEstado==='b'){mb+=carp;sb+=carp}else if(P.carpEstado==='m'){mm+=carp;sm+=carp}else{mr+=carp;sr+=carp}
+    const trip=[[mb,mr,mm],[sb,sr,sm],[f(11),f(12),f(13)],[f(14),f(15),f(16)],[f(17),f(18),f(19)]];
+    const req=[Math.round(a[8]*P.mesaEst),Math.round(a[8]*P.sillaEst),P.esc,P.sdoc,P.arm];
+    for(let t=0;t<5;t++){
+      const [b,r,m]=trip[t],ex=b+r+m,fal=Math.max(0,req[t]-ex),rep=m+Math.round(r*P.regPct)+fal;
+      A.b[t][i]=b;A.r[t][i]=r;A.m[t][i]=m;A.req[t][i]=req[t];A.fal[t][i]=fal;A.rep[t][i]=rep;
+      const o=t*nL+loc;L.b[o]+=b;L.r[o]+=r;L.m[o]+=m;L.req[o]+=req[t];L.fal[o]+=fal;L.rep[o]+=rep;
+      L.repTot[loc]+=rep;L.reqTot[loc]+=req[t];
+    }
+  }
+  S.C={A,L,nL};
+}
+const lv=(m,t,i)=>S.C.L[m][t*S.C.nL+i];
+const pct=i=>S.C.L.reqTot[i]>0?S.C.L.repTot[i]/S.C.L.reqTot[i]:null;
+
+/* ---------- filtros y orden ---------- */
+function fillFilters(){
+  const D=S.D;
+  $('fprov').innerHTML='<option value="-1">Todas</option>'+D.provs.map((p,i)=>`<option value="${i}">${esc(p)}</option>`).join('');
+  $('fugel').innerHTML='<option value="-1">Todas</option>'+D.ugels.map((p,i)=>`<option value="${i}">${esc(p)}</option>`).join('');
+  fillDist();
+  $('fniv').innerHTML=Object.keys(NIVN).map(k=>`<button type="button" class="chip" data-n="${k}" aria-pressed="false">${NIVS[k]}</button>`).join('');
+  $('q').value='';$('farea').value='-1';$('fges').value='-1';$('frep').value='';$('fest').value='';$('fcenso').checked=false;
+}
+function fillDist(){
+  const D=S.D;
+  $('fdist').innerHTML='<option value="-1">Todos</option>'+D.dists.map((d,i)=>[d,i]).filter(([d])=>S.f.prov<0||d[2]===S.f.prov)
+    .map(([d,i])=>`<option value="${i}">${esc(d[0])}</option>`).join('');
+  $('fdist').value=String(S.f.dist);
+}
+function applyFilter(){
+  const D=S.D,F=S.f,C=S.C,out=[];
+  const q=norm(F.q).split(/\s+/).filter(Boolean);
+  for(let i=0;i<D.locs.length;i++){
+    const l=D.locs[i],dist=l[1];
+    if(F.prov>=0&&D.dists[dist][2]!==F.prov)continue;
+    if(F.dist>=0&&dist!==F.dist)continue;
+    if(F.ugel>=0&&l[2]!==F.ugel)continue;
+    if(F.area>=0&&l[4]!==F.area)continue;
+    if(F.niv&&!(D.locNiv[i]&F.niv))continue;
+    if(F.ges>=0&&!(D.locGes[i]&(1<<F.ges)))continue;
+    if(F.est&&D.locEst[i]<F.est)continue;
+    if(F.rep&&C.L.repTot[i]<F.rep)continue;
+    if(F.censo&&!D.locAul[i].length)continue;
+    if(q.length){const t=D.locText[i];let ok=true;for(const w of q)if(!t.includes(w)){ok=false;break}if(!ok)continue}
+    out.push(i);
+  }
+  const k=S.sort.key,d=S.sort.dir;
+  const val={cod:i=>D.locs[i][0],nom:i=>norm(D.locName[i]),dist:i=>norm(D.dists[D.locs[i][1]][0]),est:i=>D.locEst[i],
+    aul:i=>D.locAul[i].length,rep:i=>C.L.repTot[i],pct:i=>pct(i)==null?-1:pct(i)}[k];
+  out.sort((a,b)=>{const x=val(a),y=val(b);return (x<y?-1:x>y?1:0)*d||D.locs[a][0].localeCompare(D.locs[b][0])});
+  S.view=out;
+}
+
+/* ---------- tabla ---------- */
+const COLS=[['','',0],['Código de local','cod',0],['Instituciones','nom',0],['Distrito · centro poblado','dist',0],['Área','',0],
+  ['Estudiantes','est',1],['Aulas','aul',1],['A reponer','rep',1],['% del requerido','pct',1],['','',0]];
+function renderHead(){
+  $('thead').innerHTML=COLS.map(([t,k,n])=>{
+    if(!k)return `<th class="${n?'num':''}">${t}</th>`;
+    const sorted=S.sort.key===k?(S.sort.dir>0?'ascending':'descending'):'none';
+    return `<th class="s ${n?'num':''}" data-k="${k}" aria-sort="${sorted}" tabindex="0" role="columnheader">${t}</th>`}).join('');
+}
+function detailHTML(i){
+  const D=S.D,A=S.C.A;
+  const sv=D.locSvc[i].map(si=>{const s=D.svcs[si];
+    return `<tr><td class="mono">${esc(s[0])}</td><td>${NIVN[s[2]]}</td><td>${esc(s[1])}</td><td>${s[4]?'Convenio':'Directa'}</td><td class="num">${fmt(s[6])}</td><td class="num">${fmt(s[5])}</td><td class="num">${fmt(D.svcAulN[si])}</td><td>${esc(s[7])}</td></tr>`}).join('');
+  const au=D.locAul[i].map(ai=>{const a=D.aulas[ai],cell=t=>`${A.b[t][ai]+A.r[t][ai]+A.m[t][ai]} / <b>${A.rep[t][ai]}</b>`;
+    return `<tr><td>${esc(a[4])}</td><td>${esc(a[2])} · piso ${a[3]}</td><td>${esc(a[5])}${a[6]?' '+esc(a[6]):''}</td><td>${esc(a[7])}${a[9]?' (compartida)':''}</td><td class="num">${a[8]}</td>`+
+      [0,1,2,3,4].map(t=>`<td class="num">${cell(t)}</td>`).join('')+'</tr>'}).join('');
+  return `<div class="detail">
+    <div><h4>Servicios educativos del local</h4><div class="tscroll"><table><thead><tr><th>Cód. modular</th><th>Nivel</th><th>Institución</th><th>Gestión</th><th class="num">Estudiantes</th><th class="num">Secciones</th><th class="num">Aulas (censo)</th><th>Turno</th></tr></thead><tbody>${sv}</tbody></table></div></div>
+    <div><h4>Aulas en uso (existente / <b>a reponer</b>)</h4>${au?`<div class="tscroll"><table><thead><tr><th>Aula</th><th>Ubicación</th><th>Grado y sección</th><th>Turno</th><th class="num">Estud.</th>${ITEMS.map(x=>`<th class="num">${x.n}</th>`).join('')}</tr></thead><tbody>${au}</tbody></table></div>`:'<p class="muted">El censo no registra aulas en uso para este local.</p>'}</div>
+  </div>`;
+}
+function renderTable(){
+  const D=S.D,v=S.view,pages=Math.max(1,Math.ceil(v.length/PAGE));
+  if(S.page>=pages)S.page=pages-1;
+  const rows=v.slice(S.page*PAGE,S.page*PAGE+PAGE);
+  if(!rows.length){$('tbody').innerHTML=`<tr><td colspan="10" class="empty">Ningún local cumple los filtros. Prueba con menos condiciones.</td></tr>`}
+  else $('tbody').innerHTML=rows.map(i=>{
+    const l=D.locs[i],code=l[0],sel=S.sel.has(code),open=S.open.has(i),p=pct(i);
+    const pills=Object.keys(NIVN).filter(k=>D.locNiv[i]&NIVB[k]).map(k=>`<span class="pill">${NIVS[k]}</span>`).join('')+(D.locGes[i]&2?'<span class="pill g">Convenio</span>':'');
+    return `<tr class="${sel?'sel':''}"><td><input type="checkbox" data-i="${i}" ${sel?'checked':''} aria-label="Seleccionar el local ${code}"></td>
+      <td class="mono">${code}</td><td><span class="nm">${esc(D.locName[i])}</span>${pills}</td>
+      <td>${esc(D.dists[l[1]][0])}<br><span class="muted">${esc(l[3])}</span></td><td>${l[4]?'Rural':'Urbana'}</td>
+      <td class="num">${fmt(D.locEst[i])}</td><td class="num">${fmt(D.locAul[i].length)}</td><td class="num">${fmt(S.C.L.repTot[i])}</td>
+      <td class="num">${p==null?'<span class="muted">—</span>':`<span class="meter"><i><b style="width:${Math.min(100,p*100)}%"></b></i>${Math.round(p*100)}%</span>`}</td>
+      <td><button class="x" data-x="${i}" aria-expanded="${open}" aria-label="Ver detalle del local ${code}">${open?'Ocultar':'Detalle'}</button></td></tr>`
+      +(open?`<tr class="det"><td colspan="10">${detailHTML(i)}</td></tr>`:'');
+  }).join('');
+  $('pgInfo').textContent=v.length?`Mostrando ${S.page*PAGE+1}–${Math.min(v.length,S.page*PAGE+PAGE)} de ${fmt(v.length)}`:'';
+  $('pgNum').textContent=`Página ${S.page+1} de ${pages}`;
+  $('pgPrev').disabled=S.page===0;$('pgNext').disabled=S.page>=pages-1;
+}
+function renderCount(){
+  const v=S.view,D=S.D;let au=0,est=0;for(const i of v){au+=D.locAul[i].length;est+=D.locEst[i]}
+  const ns=v.filter(i=>S.sel.has(D.locs[i][0])).length;
+  $('count').innerHTML=`<b>${fmt(v.length)}</b> locales · ${fmt(est)} estudiantes · ${fmt(au)} aulas en el censo · <span class="muted">${fmt(ns)} ya seleccionados</span>`;
+  $('selAll').textContent=`Seleccionar los ${fmt(v.length)} filtrados`;
+  $('selAll').disabled=!v.length;$('unselAll').disabled=!ns;
+}
+
+/* ---------- selección ---------- */
+function selIdx(){const m=new Map(S.D.locs.map((l,i)=>[l[0],i]));return [...S.sel].map(c=>m.get(c)).filter(i=>i!=null)}
+function totals(list){
+  const D=S.D,T={n:list.length,est:0,aul:0,sec:0,rep:0,req:0,t:ITEMS.map(()=>({b:0,r:0,m:0,req:0,fal:0,rep:0}))};
+  for(const i of list){T.est+=D.locEst[i];T.aul+=D.locAul[i].length;T.sec+=D.locSec[i];T.rep+=S.C.L.repTot[i];T.req+=S.C.L.reqTot[i];
+    for(let t=0;t<5;t++){const o=T.t[t];o.b+=lv('b',t,i);o.r+=lv('r',t,i);o.m+=lv('m',t,i);o.req+=lv('req',t,i);o.fal+=lv('fal',t,i);o.rep+=lv('rep',t,i)}}
+  return T;
+}
+function stackBar(o){const ex=o.b+o.r+o.m;if(!ex)return '<div class="stack"></div>';
+  return `<div class="stack" title="Bueno ${fmt(o.b)} · Regular ${fmt(o.r)} · Malo ${fmt(o.m)}"><i style="width:${o.b/ex*100}%;background:var(--good)"></i><i style="width:${o.r/ex*100}%;background:var(--warn)"></i><i style="width:${o.m/ex*100}%;background:var(--bad)"></i></div>`}
+function renderSel(){
+  const D=S.D,list=selIdx(),T=totals(list),el=$('v-sel');
+  if(!list.length){
+    el.innerHTML=`<div class="panel empty"><h3 style="color:var(--ink);margin-bottom:6px">Aún no hay locales seleccionados</h3><p style="margin:0 0 14px">Vuelve a «Elegir locales» y marca los locales que intervendrás.</p><button class="btn pri" id="goPick" type="button">Elegir locales</button></div>`;
+    $('goPick').onclick=()=>setTab('elegir');return}
+  const byD=new Map();for(const i of list){const d=D.locs[i][1];if(!byD.has(d))byD.set(d,[]);byD.get(d).push(i)}
+  const drows=[...byD.entries()].map(([d,ls])=>({d,n:ls.length,t:totals(ls)})).sort((a,b)=>b.t.rep-a.t.rep).map(r=>
+    `<tr><td>${esc(D.dists[r.d][0])}</td><td class="num">${r.n}</td><td class="num">${fmt(r.t.est)}</td><td class="num">${fmt(r.t.aul)}</td><td class="num"><b>${fmt(r.t.rep)}</b></td></tr>`).join('');
+  const trows=ITEMS.map((x,t)=>{const o=T.t[t];return `<tr><td>${x.n}<br><span class="muted">${x.u}</span></td><td class="num">${fmt(o.req)}</td><td class="num">${fmt(o.b+o.r+o.m)}</td><td>${stackBar(o)}</td><td class="num">${fmt(o.fal)}</td><td class="num"><b>${fmt(o.rep)}</b></td></tr>`}).join('');
+  const lrows=list.slice().sort((a,b)=>S.C.L.repTot[b]-S.C.L.repTot[a]).map(i=>{const l=D.locs[i];
+    return `<tr><td class="mono">${l[0]}</td><td><span class="nm">${esc(D.locName[i])}</span></td><td>${esc(D.dists[l[1]][0])}</td><td class="num">${fmt(D.locEst[i])}</td><td class="num">${fmt(S.C.L.repTot[i])}</td><td><button class="x" data-rm="${l[0]}" aria-label="Quitar el local ${l[0]}">Quitar</button></td></tr>`}).join('');
+  el.innerHTML=`
+   <div class="kpis">
+     <div class="panel kpi"><div class="v">${fmt(T.n)}</div><div class="l">locales seleccionados</div></div>
+     <div class="panel kpi"><div class="v">${fmt(T.est)}</div><div class="l">estudiantes (padrón)</div></div>
+     <div class="panel kpi"><div class="v">${fmt(T.aul)}</div><div class="l">aulas en uso (censo)</div></div>
+     <div class="panel kpi"><div class="v">${fmt(T.rep)}</div><div class="l">bienes a reponer (suma de los 5 tipos)</div></div>
+   </div>
+   <div class="panel pad" style="display:flex;flex-wrap:wrap;gap:12px 20px;align-items:center;justify-content:space-between">
+     <div><h3 style="font-size:16px">Exportar para el estudio</h3><p class="note" style="margin:4px 0 0">Un libro de Excel con el resumen, los locales (unidades productoras) con ubigeo y coordenadas, los servicios, las aulas con mobiliario por estado y el listado de bienes a reponer.</p></div>
+     <button class="btn pri" id="exp" type="button">Exportar a Excel</button>
+   </div>
+   <div class="cols">
+     <div class="panel"><div class="pad"><h3 style="font-size:16px;margin-bottom:8px">Mobiliario por tipo</h3>
+       <div class="legend" style="margin-bottom:8px"><span style="--c:var(--good)">Bueno</span><span style="--c:var(--warn)">Regular</span><span style="--c:var(--bad)">Malo</span></div></div>
+       <div class="tscroll"><table><thead><tr><th>Tipo</th><th class="num">Requerido</th><th class="num">Existente</th><th>Estado</th><th class="num">Faltante</th><th class="num">A reponer</th></tr></thead><tbody>${trows}</tbody></table></div></div>
+     <div class="panel"><div class="pad"><h3 style="font-size:16px">Por distrito</h3></div>
+       <div class="tscroll"><table><thead><tr><th>Distrito</th><th class="num">Locales</th><th class="num">Estudiantes</th><th class="num">Aulas</th><th class="num">A reponer</th></tr></thead><tbody>${drows}</tbody></table></div></div>
+   </div>
+   <div class="panel"><div class="pad" style="display:flex;flex-wrap:wrap;gap:8px;justify-content:space-between;align-items:center"><h3 style="font-size:16px">Locales seleccionados</h3><button class="btn sm" id="clrSel" type="button">Quitar todos</button></div>
+     <div class="tscroll"><table><thead><tr><th>Código de local</th><th>Instituciones</th><th>Distrito</th><th class="num">Estudiantes</th><th class="num">A reponer</th><th></th></tr></thead><tbody>${lrows}</tbody></table></div></div>`;
+  $('exp').onclick=exportXlsx;$('clrSel').onclick=()=>{S.sel.clear();persist();refresh()};
+}
+function persist(){store('ioarr:sel:'+S.D.region,[...S.sel])}
+function renderDock(){
+  const list=selIdx(),T=totals(list);
+  $('dockTxt').innerHTML=list.length?`<b>${fmt(T.n)}</b> locales · <b>${fmt(T.est)}</b> estudiantes · <b>${fmt(T.rep)}</b> bienes a reponer`:'Sin locales seleccionados';
+  $('dockBtn').disabled=!list.length;$('selBadge').textContent=fmt(list.length);
+}
+function setTab(t){
+  S.tab=t;$('v-elegir').hidden=t!=='elegir';$('v-sel').hidden=t!=='sel';
+  $('v-elegir').style.display=t==='elegir'?'flex':'none';$('v-sel').style.display=t==='sel'?'flex':'none';
+  $('tab-elegir').setAttribute('aria-selected',t==='elegir');$('tab-sel').setAttribute('aria-selected',t==='sel');
+  $('dockBtn').hidden=t==='sel';
+  if(t==='sel')renderSel();
+}
+function refresh(){applyFilter();renderHead();renderTable();renderCount();renderDock();if(S.tab==='sel')renderSel()}
+
+/* ---------- criterios ---------- */
+const CRIT=[['kI','Puestos por mesa múltiple (Inicial y Especial)',1,12,1],['kPS','Puestos por mesa múltiple (Primaria y Secundaria)',1,12,1],
+  ['carpBip','Puestos por carpeta bipersonal',1,4,1],['regPct','% del estado Regular que se repone',0,100,5],
+  ['mesaEst','Mesas por estudiante',0,2,.5],['sillaEst','Sillas por estudiante',0,2,.5],
+  ['esc','Escritorios docentes por aula',0,3,1],['sdoc','Sillas docentes por aula',0,3,1],['arm','Armarios o estantes por aula',0,5,1]];
+function renderCrit(){
+  const P=S.params;
+  $('critGrid').innerHTML=CRIT.map(([k,l,mn,mx,st])=>`<div class="fld"><label for="c_${k}">${l}</label><input class="in" id="c_${k}" type="number" min="${mn}" max="${mx}" step="${st}" value="${k==='regPct'?P[k]*100:P[k]}"></div>`).join('')+
+   `<div class="fld"><label for="c_carpEstado">Estado asignado a las carpetas (vienen sin estado)</label><select class="in" id="c_carpEstado"><option value="b">Bueno</option><option value="r">Regular</option><option value="m">Malo</option></select></div>
+    <div class="fld"><span class="lbl">&nbsp;</span><button class="btn" id="critReset" type="button">Restablecer criterios</button></div>`;
+  $('c_carpEstado').value=P.carpEstado;
+  critSum();
+}
+function critSum(){const P=S.params;$('critSum').textContent=`Mesa múltiple = ${P.kI} puestos (Inicial) o ${P.kPS} (Primaria y Secundaria) · carpeta bipersonal = ${P.carpBip} · a reponer = Malo + Faltante${P.regPct?` + ${Math.round(P.regPct*100)}% de Regular`:''}`}
+function onCrit(e){
+  const id=e.target.id||'';if(!id.startsWith('c_'))return;const k=id.slice(2),P=S.params;
+  if(k==='carpEstado')P.carpEstado=e.target.value;
+  else{let v=parseFloat(e.target.value);if(!isFinite(v)||v<0)return;if(k==='regPct')v=Math.min(100,v)/100;P[k]=v}
+  store('ioarr:params',P);critSum();calc();refresh();
+}
+
+/* ---------- exportar ---------- */
+function slug(s){return norm(s).replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'')||'proyecto'}
+async function exportXlsx(){
+  if(typeof XLSX==='undefined'){toast('No se pudo cargar el generador de Excel. Revisa tu conexión y recarga la página.');return}
+  const dl=(window.claude&&window.claude.use)?await window.claude.use('downloads'):null;
+  if(!dl){toast('La descarga de archivos no está disponible en esta vista. Abre la página desde Claude.');return}
+  const D=S.D,A=S.C.A,P=S.params,list=selIdx();if(!list.length)return;
+  const T=totals(list),proy=$('proy').value.trim(),hoy=new Date().toISOString().slice(0,10);
+  const stateName=['Bueno','Regular','Malo'];
+  const wb=XLSX.utils.book_new();
+  const add=(name,aoa,widths)=>{const ws=XLSX.utils.aoa_to_sheet(aoa);ws['!cols']=widths.map(w=>({wch:w}));XLSX.utils.book_append_sheet(wb,ws,name)};
+  // Resumen
+  const rs=[['Proyecto IOARR de reposición de mobiliario escolar'],[],['Proyecto',proy||'(sin nombre)'],['Región',D.region],['Fecha de exportación',hoy],
+    ['Locales seleccionados',T.n],['Estudiantes (padrón)',T.est],['Aulas en uso (censo)',T.aul],['Bienes a reponer (suma de los 5 tipos)',T.rep],[],
+    ['Mobiliario por tipo','Unidad','Requerido','Bueno','Regular','Malo','Existente','Faltante','A reponer']];
+  ITEMS.forEach((x,t)=>{const o=T.t[t];rs.push([x.n,x.u,o.req,o.b,o.r,o.m,o.b+o.r+o.m,o.fal,o.rep])});
+  rs.push([],['Criterios de cálculo'],
+    ['Puestos por mesa múltiple (Inicial y Básica Especial)',P.kI],['Puestos por mesa múltiple (Primaria y Secundaria)',P.kPS],['Puestos por carpeta bipersonal',P.carpBip],
+    ['Estado asignado a las carpetas (vienen sin estado)',{b:'Bueno',r:'Regular',m:'Malo'}[P.carpEstado]],['% del estado Regular que se repone',P.regPct],
+    ['Mesas por estudiante',P.mesaEst],['Sillas por estudiante',P.sillaEst],['Escritorios docentes por aula',P.esc],['Sillas docentes por aula',P.sdoc],['Armarios o estantes por aula',P.arm],
+    ['Faltante','Requerido menos Existente, mínimo 0 por aula'],['A reponer','Malo + Faltante + el porcentaje indicado del estado Regular'],[],
+    ['Fuentes'],['Padrón de ESCALE – Minedu, registros al 29/10/2025'],['Censo Educativo 2025, Local escolar, pregunta 6.1 (aulas y mobiliario)'],[],
+    ['Limitaciones'],['Los datos del censo son declarados por cada colegio y no están validados.'],
+    ['Un aula usada por dos niveles o turnos se registra una sola vez, bajo el servicio con más estudiantes; sus estudiantes son el mayor de los turnos.'],
+    ['El censo no informa antigüedad ni costos del mobiliario, que el Formato 07-C pide para reposición.'],
+    ['Alcance: servicios públicos escolarizados de Inicial, Primaria, Secundaria y Básica Especial.']);
+  add('Resumen',rs,[48,22,14,12,12,12,12,12,12]);
+  // Locales
+  const lh=['Ubigeo','Departamento','Provincia','Distrito','UGEL','Centro poblado','Área','Código de local','Dirección','Latitud','Longitud','Códigos modulares','Instituciones','Niveles','Gestión','Estudiantes (padrón)','Secciones (padrón)','Aulas en uso (censo)'];
+  ITEMS.forEach(x=>['Bueno','Regular','Malo','Requerido','Faltante','A reponer'].forEach(s=>lh.push(x.n+' – '+s)));lh.push('TOTAL a reponer');
+  const lrows=[lh];
+  for(const i of list){const l=D.locs[i],d=D.dists[l[1]],sv=D.locSvc[i].map(si=>D.svcs[si]);
+    const niv=Object.keys(NIVN).filter(k=>D.locNiv[i]&NIVB[k]).map(k=>NIVN[k]).join(', ');
+    const ges=D.locGes[i]===3?'Directa y convenio':D.locGes[i]===2?'Por convenio':'Directa';
+    const r=[d[1],D.region,D.provs[d[2]],d[0],D.ugels[l[2]],l[3],l[4]?'Rural':'Urbana',l[0],l[5],l[6],l[7],sv.map(s=>s[0]).join(', '),D.locName[i],niv,ges,D.locEst[i],D.locSec[i],D.locAul[i].length];
+    for(let t=0;t<5;t++)r.push(lv('b',t,i),lv('r',t,i),lv('m',t,i),lv('req',t,i),lv('fal',t,i),lv('rep',t,i));
+    r.push(S.C.L.repTot[i]);lrows.push(r)}
+  add('Locales (UP)',lrows,[9,13,14,20,22,22,9,11,34,10,10,22,36,24,18,12,12,12,...Array(31).fill(11)]);
+  // Servicios
+  const srows=[['Código modular','Institución','Nivel','Código de local','Gestión','Secciones (padrón)','Estudiantes (padrón)','Turno (padrón)','Aulas (censo)']];
+  for(const i of list)for(const si of D.locSvc[i]){const s=D.svcs[si];srows.push([s[0],s[1],NIVN[s[2]],D.locs[i][0],s[4]?'Por convenio':'Directa',s[5],s[6],s[7],D.svcAulN[si]])}
+  add('Servicios',srows,[12,36,16,12,14,12,12,14,12]);
+  // Aulas
+  const ah=['Código de local','Código modular','Institución','Nivel','Edificación','Piso','Aula N°','Grado','Sección','Turno','Estudiantes','Aula compartida'];
+  ITEMS.forEach(x=>['Bueno','Regular','Malo','Existente','Requerido','Faltante','A reponer'].forEach(s=>ah.push(x.n+' – '+s)));ah.push('Observaciones');
+  const arows=[ah];
+  for(const i of list)for(const ai of D.locAul[i]){const a=D.aulas[ai],s=D.svcs[a[1]];
+    const r=[D.locs[i][0],s[0],s[1],NIVN[s[2]],a[2],a[3],a[4],a[5],a[6],a[7],a[8],a[9]?'Sí':'No'];
+    for(let t=0;t<5;t++){const b=A.b[t][ai],rg=A.r[t][ai],m=A.m[t][ai];r.push(b,rg,m,b+rg+m,A.req[t][ai],A.fal[t][ai],A.rep[t][ai])}
+    const ob=[];if(a[22]>0)ob.push(`Mesas múltiples: ${a[14]+a[15]+a[16]} (×${(s[2]==='I'||s[2]==='E')?P.kI:P.kPS} puestos)`);
+    if(a[17]+a[18]>0)ob.push(`Carpetas: ${a[17]} unip., ${a[18]} bip.`);if(a[10])ob.push('Local con más de un servicio de este nivel');
+    r.push(ob.join(' | '));arows.push(r)}
+  add('Aulas',arows,[11,11,30,14,10,6,8,16,8,14,11,10,...Array(36).fill(10)]);
+  // Reposición masiva
+  const mrows=[['Código de local','Instituciones','Distrito','Tipo de activo','Unidad','Existente','Bueno','Regular','Malo','Requerido','Faltante','A reponer']];
+  for(const i of list)for(let t=0;t<5;t++){const rep=lv('rep',t,i);if(rep<=0)continue;
+    mrows.push([D.locs[i][0],D.locName[i],D.dists[D.locs[i][1]][0],ITEMS[t].n,ITEMS[t].u,lv('b',t,i)+lv('r',t,i)+lv('m',t,i),lv('b',t,i),lv('r',t,i),lv('m',t,i),lv('req',t,i),lv('fal',t,i),rep])}
+  add('Reposición masiva',mrows,[12,40,22,24,10,10,10,10,10,10,10,10]);
+  const data=XLSX.write(wb,{bookType:'xlsx',type:'array'});
+  try{
+    const res=await dl.save({filename:`IOARR_${slug(proy||D.region)}_${hoy}.xlsx`,data});
+    if(res&&res.status==='saved')toast('Archivo guardado.');
+  }catch(e){
+    if(e&&e.code==='declined')toast('Descarga cancelada.');
+    else toast('No se pudo guardar el archivo ('+((e&&e.code)||'error')+').');
+  }
+}
+
+/* ---------- eventos ---------- */
+function bind(){
+  $('region').onchange=e=>loadRegion(+e.target.value);
+  $('proy').oninput=e=>store('ioarr:proy',e.target.value);
+  $('crit').addEventListener('input',onCrit);$('crit').addEventListener('change',onCrit);
+  $('critGrid').addEventListener('click',e=>{if(e.target.id==='critReset'){S.params=Object.assign({},DEF);store('ioarr:params',S.params);renderCrit();calc();refresh()}});
+  let tq;$('q').oninput=e=>{clearTimeout(tq);tq=setTimeout(()=>{S.f.q=e.target.value;S.page=0;refresh()},180)};
+  $('fprov').onchange=e=>{S.f.prov=+e.target.value;S.f.dist=-1;fillDist();S.page=0;refresh()};
+  $('fdist').onchange=e=>{S.f.dist=+e.target.value;S.page=0;refresh()};
+  $('fugel').onchange=e=>{S.f.ugel=+e.target.value;S.page=0;refresh()};
+  $('farea').onchange=e=>{S.f.area=+e.target.value;S.page=0;refresh()};
+  $('fges').onchange=e=>{S.f.ges=+e.target.value;S.page=0;refresh()};
+  $('frep').oninput=e=>{S.f.rep=Math.max(0,+e.target.value||0);S.page=0;refresh()};
+  $('fest').oninput=e=>{S.f.est=Math.max(0,+e.target.value||0);S.page=0;refresh()};
+  $('fcenso').onchange=e=>{S.f.censo=e.target.checked;S.page=0;refresh()};
+  $('fniv').addEventListener('click',e=>{const b=e.target.closest('.chip');if(!b)return;
+    const on=b.getAttribute('aria-pressed')!=='true';b.setAttribute('aria-pressed',on);S.f.niv=on?S.f.niv|NIVB[b.dataset.n]:S.f.niv&~NIVB[b.dataset.n];S.page=0;refresh()});
+  $('fclear').onclick=()=>{S.f={q:'',prov:-1,dist:-1,ugel:-1,area:-1,ges:-1,niv:0,rep:0,est:0,censo:false};fillFilters();S.page=0;refresh()};
+  $('selAll').onclick=()=>{for(const i of S.view)S.sel.add(S.D.locs[i][0]);persist();refresh()};
+  $('unselAll').onclick=()=>{for(const i of S.view)S.sel.delete(S.D.locs[i][0]);persist();refresh()};
+  $('pgPrev').onclick=()=>{S.page=Math.max(0,S.page-1);renderTable()};
+  $('pgNext').onclick=()=>{S.page++;renderTable()};
+  $('thead').addEventListener('click',e=>{const th=e.target.closest('th.s');if(!th)return;const k=th.dataset.k;
+    S.sort=S.sort.key===k?{key:k,dir:-S.sort.dir}:{key:k,dir:(k==='cod'||k==='nom'||k==='dist')?1:-1};S.page=0;refresh()});
+  $('thead').addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){const th=e.target.closest('th.s');if(th){e.preventDefault();th.click()}}});
+  $('tbody').addEventListener('click',e=>{
+    const cb=e.target.closest('input[data-i]');
+    if(cb){const c=S.D.locs[+cb.dataset.i][0];cb.checked?S.sel.add(c):S.sel.delete(c);persist();
+      cb.closest('tr').classList.toggle('sel',cb.checked);renderCount();renderDock();return}
+    const x=e.target.closest('[data-x]');
+    if(x){const i=+x.dataset.x;S.open.has(i)?S.open.delete(i):S.open.add(i);renderTable()}});
+  $('v-sel').addEventListener('click',e=>{const r=e.target.closest('[data-rm]');if(r){S.sel.delete(r.dataset.rm);persist();refresh()}});
+  $('tab-elegir').onclick=()=>setTab('elegir');$('tab-sel').onclick=()=>setTab('sel');
+  $('dockBtn').onclick=()=>{setTab('sel');window.scrollTo({top:0,behavior:'smooth'})};
+}
+bind();setTab('elegir');boot();
+})();
+</script>

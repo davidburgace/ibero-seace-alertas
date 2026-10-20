@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<!-- Sesión de Supabase (la misma de Radar IOARR): exige ingresar y agrega el token a cada /api/* -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="/sesion.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Selector IOARR — Radar Ibero</title>
+<link rel="icon" href="favicon-32.png">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="selector-ioarr.css">
+</head>
+<body>
+
+<div class="topbar">
+  <a class="logo" href="index.html"><span class="logo-dot"></span> Radar Ibero</a>
+  <a class="back" href="index.html">← Inicio</a>
+</div>
+
+<header>
+  <div class="title-row">
+    <div>
+      <h1>Selector <span class="accent">IOARR</span></h1>
+      <div class="subtitle">Elige los locales escolares a intervenir y calcula la reposición de mobiliario para el estudio (Formato 07-C).</div>
+    </div>
+  </div>
+
+  <!-- Proyecto y región -->
+  <section class="proyecto">
+    <div class="campo campo-proy">
+      <label for="proy">Proyecto</label>
+      <select id="proy"></select>
+    </div>
+    <div class="campo">
+      <label for="region">Región</label>
+      <select id="region"></select>
+    </div>
+    <div class="proy-acciones">
+      <button class="btn btn-primary" id="btn-nuevo" type="button">Nuevo proyecto</button>
+      <button class="btn btn-ghost" id="btn-renombrar" type="button">Renombrar</button>
+      <button class="btn btn-ghost" id="btn-duplicar" type="button">Duplicar</button>
+      <button class="btn btn-ghost btn-peligro" id="btn-borrar" type="button">Borrar</button>
+    </div>
+    <div class="proy-meta">
+      <span id="estado-guardado" class="guardado" aria-live="polite"></span>
+      <button class="vinculo" id="btn-vinculo" type="button" hidden></button>
+    </div>
+  </section>
+
+  <details class="criterios" id="crit">
+    <summary><span class="crit-tit">Criterios de cálculo</span><span class="crit-sum" id="critSum"></span></summary>
+    <div class="crit-grid" id="critGrid"></div>
+  </details>
+
+  <div class="tabs" role="tablist">
+    <button class="tab-btn active" role="tab" id="tab-elegir" aria-selected="true" data-tab="elegir">Elegir locales</button>
+    <button class="tab-btn" role="tab" id="tab-sel" aria-selected="false" data-tab="sel">Mi selección <span class="count" id="selBadge">0</span></button>
+  </div>
+</header>
+
+<main>
+  <section class="view active" id="v-elegir">
+    <div class="filtros-panel">
+      <div class="filtros-grid">
+        <div class="campo ancho"><label for="q">Buscar</label><input id="q" type="search" placeholder="Nombre, código modular, código de local o centro poblado" autocomplete="off"></div>
+        <div class="campo"><label for="fprov">Provincia</label><select id="fprov"></select></div>
+        <div class="campo"><label for="fdist">Distrito</label><select id="fdist"></select></div>
+        <div class="campo"><label for="fugel">UGEL</label><select id="fugel"></select></div>
+        <div class="campo"><label for="farea">Área</label><select id="farea"><option value="-1">Todas</option><option value="0">Urbana</option><option value="1">Rural</option></select></div>
+        <div class="campo"><label for="fges">Gestión</label><select id="fges"><option value="-1">Todas</option><option value="0">Pública directa</option><option value="1">Pública por convenio</option></select></div>
+        <div class="campo"><label for="fest">Estudiantes, mínimo</label><input id="fest" type="number" min="0" step="1" inputmode="numeric" placeholder="0"></div>
+        <div class="campo"><label for="frep">A reponer, mínimo</label><input id="frep" type="number" min="0" step="1" inputmode="numeric" placeholder="0"></div>
+        <div class="campo ancho"><span class="lbl">Nivel</span><div class="chips" id="fniv"></div></div>
+        <div class="campo"><span class="lbl">Datos de aulas</span><label class="chk"><input type="checkbox" id="fcenso"> Solo con aulas en el censo</label></div>
+        <div class="campo"><span class="lbl">&nbsp;</span><button class="btn btn-ghost" id="fclear" type="button">Limpiar filtros</button></div>
+      </div>
+      <div class="filtros-bar">
+        <div id="count" aria-live="polite">Cargando…</div>
+        <div class="acts">
+          <button class="btn btn-ghost btn-sm" id="selAll" type="button">Seleccionar los filtrados</button>
+          <button class="btn btn-ghost btn-sm" id="unselAll" type="button">Quitar los filtrados</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="tabla-wrap">
+      <table class="tabla tabla-locales">
+        <caption>Cada fila es un local educativo (unidad productora). Un local puede tener varios servicios: inicial, primaria o secundaria.</caption>
+        <thead><tr id="thead"></tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+    <div class="paginacion">
+      <span id="pgInfo" class="sub"></span>
+      <div class="pg-btns">
+        <button class="btn btn-ghost btn-sm" id="pgPrev" type="button">Anterior</button>
+        <span id="pgNum" class="mono"></span>
+        <button class="btn btn-ghost btn-sm" id="pgNext" type="button">Siguiente</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="view" id="v-sel"></section>
+
+  <p class="fuente" id="foot"></p>
+</main>
+
+<div class="dock" id="dock">
+  <div id="dockTxt">Sin locales seleccionados</div>
+  <button class="btn btn-primary btn-sm" id="dockBtn" type="button">Ver mi selección</button>
+</div>
+
+<!-- Modal: nuevo proyecto / renombrar / duplicar -->
+<div class="modal-overlay" id="m-proy" role="dialog" aria-modal="true" aria-labelledby="m-proy-tit">
+  <form class="modal modal-sm" id="f-proy">
+    <button class="cerrar" type="button" data-cerrar aria-label="Cerrar">×</button>
+    <h2 id="m-proy-tit">Nuevo proyecto</h2>
+    <div class="field"><label for="m-nombre">Nombre</label><input id="m-nombre" type="text" maxlength="200" required placeholder="Ej.: IOARR Mariscal Nieto 2026" autocomplete="off"></div>
+    <div class="field" id="m-region-f"><label for="m-region">Región</label><select id="m-region"></select></div>
+    <label class="chk" id="m-copiar-f"><input type="checkbox" id="m-copiar" checked> <span id="m-copiar-txt">Partir de la selección actual</span></label>
+    <p class="err" id="m-err" hidden></p>
+    <div class="modal-acts">
+      <button class="btn btn-ghost" type="button" data-cerrar>Cancelar</button>
+      <button class="btn btn-primary" type="submit" id="m-ok">Crear</button>
+    </div>
+  </form>
+</div>
+
+<!-- Modal: vincular con Radar IOARR -->
+<div class="modal-overlay" id="m-vinc" role="dialog" aria-modal="true" aria-labelledby="m-vinc-tit">
+  <div class="modal modal-sm">
+    <button class="cerrar" type="button" data-cerrar aria-label="Cerrar">×</button>
+    <h2 id="m-vinc-tit">Vincular con Radar IOARR</h2>
+    <p class="sub">Asocia este proyecto a un registro existente de Radar IOARR (por CUI o nombre).</p>
+    <div class="field"><input id="v-q" type="search" placeholder="Buscar CUI o nombre" autocomplete="off"></div>
+    <ul class="v-lista" id="v-lista"></ul>
+    <div class="modal-acts">
+      <button class="btn btn-ghost btn-peligro" type="button" id="v-quitar">Quitar vínculo</button>
+      <button class="btn btn-ghost" type="button" data-cerrar>Cerrar</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script type="module" src="selector-ioarr.js"></script>
+</body>
+</html>
