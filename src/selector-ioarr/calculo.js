@@ -36,7 +36,18 @@ export const CRIT = [['kI', 'Puestos por mesa múltiple (Inicial y Especial)', 1
   ['mesaEst', 'Mesas por estudiante', 0, 2, 0.5], ['sillaEst', 'Sillas por estudiante', 0, 2, 0.5],
   ['esc', 'Escritorios docentes por aula', 0, 3, 1], ['sdoc', 'Sillas docentes por aula', 0, 3, 1], ['arm', 'Armarios o estantes por aula', 0, 5, 1]];
 
-export const norm = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+// ─── Ubicación (coordenadas declaradas en el padrón) ────────────────────────
+// Válidas si caen en el rango de Perú; el padrón puede traer ceros o valores errados.
+export const coordValidas = (lat, lon) => typeof lat === 'number' && typeof lon === 'number'
+  && lat >= -19 && lat <= 0 && lon >= -82 && lon <= -68;
+// Google Maps en vista satelital (t=k), zoom 18
+export const urlGoogleMaps = (lat, lon) => `https://www.google.com/maps?q=${lat},${lon}&t=k&z=18`;
+// Iframe: con llave usa la Maps Embed API; sin llave, el embed clásico sin llave
+export const urlMapaEmbed = (lat, lon, llave) => llave
+  ? `https://www.google.com/maps/embed/v1/place?key=${encodeURIComponent(llave)}&q=${lat},${lon}&zoom=18&maptype=satellite`
+  : `https://maps.google.com/maps?q=${lat},${lon}&t=k&z=18&output=embed`;
+
+export const norm = s =>String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
 // Criterios válidos a partir de lo que venga guardado (ignora claves o valores raros)
 export function limpiarParams(p) {
