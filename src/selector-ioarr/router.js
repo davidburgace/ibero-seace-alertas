@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { supabase } from '../ioarr/db.js';
 import { prep, calc, limpiarParams } from './calculo.js';
 import { generarExcel } from './excel.js';
+import { crearApiExpediente } from './expediente.js';
 
 export const ANIO_DATOS = 2025;
 const DIR_DATOS = fileURLToPath(new URL('../public/data/selector-ioarr/', import.meta.url));
@@ -63,6 +64,10 @@ const router = express.Router();
 router.get('/selector-ioarr/calculo.js', (_, res) =>
   res.type('application/javascript').set('Cache-Control', 'no-cache')
     .sendFile(fileURLToPath(new URL('./calculo.js', import.meta.url))));
+// Rubros y textos de la estructura de costos (la pantalla del expediente usa las mismas listas)
+router.get('/selector-ioarr/costos.js', (_, res) =>
+  res.type('application/javascript').set('Cache-Control', 'no-cache')
+    .sendFile(fileURLToPath(new URL('./costos.js', import.meta.url))));
 
 const api = express.Router();
 router.use('/api/selector-ioarr', api);
@@ -256,6 +261,9 @@ api.get('/proyectos/:id/excel', async (req, res, next) => {
     }).send(buffer);
   } catch (e) { enviarError(res, next)(e); }
 });
+
+// Expediente IOARR (costos): supabase/migrations/012_ioarr_expediente_costos.sql
+api.use(crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegion, leerIndice }));
 
 const slug = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
   .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'proyecto';

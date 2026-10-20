@@ -246,3 +246,50 @@ table.tabla{ width:100%; border-collapse:collapse; font-size:13px; }
   .detalle .tabla-wrap{ max-width:calc(100vw - 54px); }
 }
 @media (prefers-reduced-motion:reduce){ *{ transition:none !important; } }
+
+/* ─── Expediente IOARR (costos) y catálogo de precios ───────────────────── */
+.vacio-tit{ color:var(--text); margin-bottom:6px; font-family:var(--font-display); }
+.vacio p{ margin:0 0 14px; }
+.pad{ padding:0 16px 12px; }
+.borde-0{ border:0; border-top:1px solid var(--border); border-radius:0; }
+.chip-est{ display:inline-block; font-size:11px; font-weight:600; padding:2px 8px; border-radius:20px; background:var(--surface2); color:var(--muted); white-space:nowrap; margin-top:3px; }
+.chip-est.ok{ background:rgba(46,158,91,.12); color:#1f7a44; }
+.chip-est.pend{ background:rgba(224,150,43,.16); color:#9a5f0c; }
+.chip-est.alerta{ background:rgba(214,69,58,.12); color:#b5322a; }
+.avisos{ display:flex; flex-direction:column; gap:8px; }
+.aviso{ border:1px solid rgba(224,150,43,.4); background:rgba(224,150,43,.08); border-radius:12px; padding:10px 14px; font-size:13px; line-height:1.45; }
+.aviso.alerta{ border-color:rgba(214,69,58,.45); background:rgba(214,69,58,.08); color:#8f241d; font-weight:600; }
+.aviso-linea{ color:#9a5f0c; margin-top:4px; }
+.precio-acc{ margin-top:6px; }
+.precio-acc select, .tabla-rubros select, .tabla-rubros input, .uit-fila input, .form-grid input, .form-grid select, .form-grid textarea{
+  font-size:13px; padding:7px 9px; border-radius:8px; border:1px solid var(--border2); background:var(--surface); max-width:100%; min-width:0;
+}
+.precio-acc select{ width:100%; max-width:420px; }
+.kpis-montos .kpi{ min-width:0; }
+.kpis-montos .kpi .v{ font-size:clamp(18px,2.2vw,24px); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.rubro-val{ display:flex; gap:6px; align-items:center; }
+.rubro-val select{ width:58px; flex:none; }
+.rubro-val input{ width:110px; text-align:right; }
+.tabla-rubros td{ vertical-align:middle; }
+.tabla-rubros td select{ max-width:220px; }
+.uit-fila{ display:flex; flex-wrap:wrap; gap:10px 16px; align-items:flex-end; padding:14px 16px; border-top:1px solid var(--border); }
+.uit-fila .campo{ width:130px; }
+.tabla-estructura td{ padding-top:7px; padding-bottom:7px; }
+.tabla-estructura tr.fuerte td{ background:var(--surface); }
+.tabla-estructura tr.total td{ background:var(--accent-soft); font-weight:800; font-size:15px; }
+.sangria{ padding-left:14px; display:inline-block; }
+.form-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px 14px; }
+.form-grid .ancho{ grid-column:1 / -1; }
+.form-grid textarea{ width:100%; min-height:64px; font:inherit; }
+.form-grid input, .form-grid select{ width:100%; }
+.seccion{ display:flex; flex-direction:column; gap:12px; scroll-margin-top:80px; }
+.seccion h2{ font-family:var(--font-display); font-size:20px; }
+.acciones-fila{ display:flex; flex-wrap:wrap; gap:6px; }
+@media (max-width:640px){
+  .kpis-montos{ grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
+  .kpis-montos .kpi .v{ font-size:16px; }
+  .kpis-montos .chip-est{ white-space:normal; }
+  .rubro-val input{ width:84px; }
+  .tabla-rubros td select{ max-width:150px; }
+}
+.seccion + .seccion{ margin-top:16px; }

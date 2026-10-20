@@ -1,6 +1,7 @@
 // Selector IOARR — interfaz. Los datos y el cálculo viven en selector-ioarr-worker.js;
 // los proyectos se guardan en Supabase vía /api/selector-ioarr/* (sesión de sesion.js).
 import { CRIT, DEF, ITEMS, NIVN, NIVS, NIVB, FILTRO_VACIO, limpiarParams, coordValidas, urlGoogleMaps, urlMapaEmbed } from '/selector-ioarr/calculo.js';
+import { renderExpediente, enlazarExpediente } from '/selector-ioarr-expediente.js';
 
 const ANIO = 2025;
 const BASE_DATOS = `/data/selector-ioarr/${ANIO}/`;
@@ -296,7 +297,7 @@ async function renderDock() {
 async function refresh() {
   if (S.cargando || !S.meta) return;
   renderHead();
-  await Promise.all([renderTable(), renderDock(), S.tab === 'sel' ? renderSel() : null]);
+  await Promise.all([renderTable(), renderDock(), S.tab === 'sel' ? renderSel() : null, S.tab === 'exp' ? abrirExpediente() : null]);
 }
 
 async function cambioSel() {
@@ -365,12 +366,18 @@ async function exportar(btn) {
 
 function setTab(t) {
   S.tab = t;
-  for (const v of ['elegir', 'sel']) {
+  for (const v of ['elegir', 'sel', 'exp']) {
     $('v-' + v).classList.toggle('active', v === t);
     const b = $('tab-' + v); b.classList.toggle('active', v === t); b.setAttribute('aria-selected', v === t);
   }
-  $('dockBtn').hidden = t === 'sel';
+  $('dockBtn').hidden = t !== 'elegir';
   if (t === 'sel') renderSel();
+  if (t === 'exp') abrirExpediente();
+}
+
+// Expediente (costos): lo calcula el servidor con el proyecto guardado
+function abrirExpediente() {
+  return renderExpediente({ el: $('v-exp'), proyecto: S.proyecto, api, toast, guardarYa });
 }
 
 // ─── Criterios ───────────────────────────────────────────────────────────────
@@ -549,7 +556,8 @@ function bind() {
     if (pg) { S.selPage = (S.selPage || 0) + +pg.dataset.selpag; await renderSel(); document.querySelector('#v-sel .panel:last-of-type')?.scrollIntoView({ block: 'start' }); return; }
     if (e.target.closest('[data-ir]')) setTab('elegir');
   });
-  $('tab-elegir').onclick = () => setTab('elegir'); $('tab-sel').onclick = () => setTab('sel');
+  $('tab-elegir').onclick = () => setTab('elegir'); $('tab-sel').onclick = () => setTab('sel'); $('tab-exp').onclick = () => setTab('exp');
+  enlazarExpediente($('v-exp'), () => abrirModalProyecto('nuevo'));
   $('dockBtn').onclick = () => { setTab('sel'); window.scrollTo({ top: 0, behavior: 'smooth' }); };
 }
 
