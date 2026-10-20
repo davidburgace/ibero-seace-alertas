@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<!-- Sesión de Supabase (la misma de Radar IOARR): exige ingresar y agrega el token a cada /api/* -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="/sesion.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Precios y parámetros — Selector IOARR</title>
+<link rel="icon" href="favicon-32.png">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="selector-ioarr.css">
+</head>
+<body>
+
+<div class="topbar">
+  <a class="logo" href="index.html"><span class="logo-dot"></span> Radar Ibero</a>
+  <a class="back" href="selector-ioarr.html">← Selector IOARR</a>
+</div>
+
+<header>
+  <div class="title-row">
+    <div>
+      <h1>Precios y <span class="accent">parámetros</span></h1>
+      <div class="subtitle">Catálogo compartido por todo el equipo: precios unitarios por tipo de bien, valor de la UIT por año y factores de flete e instalación para zonas alejadas. El sistema no propone valores: solo calcula con lo que cargues aquí.</div>
+    </div>
+  </div>
+  <div class="tabs" role="tablist">
+    <a class="tab-btn" href="#precios">Precios unitarios</a>
+    <a class="tab-btn" href="#uit">UIT</a>
+    <a class="tab-btn" href="#zonas">Factores por zona</a>
+  </div>
+</header>
+
+<main>
+  <section class="seccion" id="precios">
+    <div class="panel">
+      <div class="panel-cab">
+        <h3>Precios unitarios (sin IGV)</h3>
+        <div class="acciones-fila">
+          <select id="p-filtro" aria-label="Filtrar por tipo de bien" class="btn btn-ghost btn-sm"></select>
+          <button class="btn btn-ghost btn-sm" id="p-ref" type="button">Copiar de Radar IOARR</button>
+          <button class="btn btn-primary btn-sm" id="p-nuevo" type="button">Nuevo precio</button>
+        </div>
+      </div>
+      <p class="sub pad">Puede haber varios precios por tipo; uno es el vigente y es el que usan los proyectos que no fijaron otro. En soles, sin IGV (el IGV es un rubro de la estructura de costos).</p>
+      <div class="tabla-wrap borde-0"><table class="tabla"><thead><tr><th>Tipo de bien</th><th>Descripción</th><th class="num">Precio</th><th>Unidad</th><th>Fecha</th><th>Fuente</th><th>Observación</th><th></th></tr></thead><tbody id="p-tbody"></tbody></table></div>
+    </div>
+  </section>
+
+  <section class="seccion" id="uit">
+    <div class="panel">
+      <div class="panel-cab"><h3>UIT por año</h3></div>
+      <p class="sub pad">Se usa para el aviso de 75 UIT: hasta ese monto el Formato 07-C va en registro abreviado; por encima, en registro completo.</p>
+      <form class="form-grid pad" id="u-form">
+        <div class="campo"><label for="u-anio">Año</label><input id="u-anio" type="number" min="2000" max="2100" step="1" required></div>
+        <div class="campo"><label for="u-valor">Valor (S/)</label><input id="u-valor" type="number" min="0.01" step="0.01" inputmode="decimal" required></div>
+        <div class="campo"><label for="u-fuente">Fuente (norma que la fija)</label><input id="u-fuente" type="text" maxlength="300" placeholder="Ej.: D.S. N° …-EF"></div>
+        <div class="campo"><span class="lbl">&nbsp;</span><button class="btn btn-primary" type="submit">Guardar UIT</button></div>
+      </form>
+      <div class="tabla-wrap borde-0"><table class="tabla"><thead><tr><th>Año</th><th class="num">Valor</th><th class="num">75 UIT</th><th>Fuente</th><th></th></tr></thead><tbody id="u-tbody"></tbody></table></div>
+    </div>
+  </section>
+
+  <section class="seccion" id="zonas">
+    <div class="panel">
+      <div class="panel-cab"><h3>Factores por zona</h3></div>
+      <p class="sub pad">Porcentaje adicional sobre el flete y la instalación de cada local. A cada local se le aplica el factor de su distrito o, si no tiene, el de su provincia; si el local es rural, se suma además el factor rural de su región.</p>
+      <form class="form-grid pad" id="z-form">
+        <div class="campo"><label for="z-region">Región</label><select id="z-region"></select></div>
+        <div class="campo"><label for="z-ambito">Ámbito</label><select id="z-ambito"><option value="provincia">Provincia</option><option value="distrito">Distrito</option><option value="rural">Área rural de la región</option></select></div>
+        <div class="campo"><label for="z-codigo">Zona</label><select id="z-codigo"></select></div>
+        <div class="campo"><label for="z-flete">% adicional de flete</label><input id="z-flete" type="number" min="0" max="500" step="0.01" inputmode="decimal" value="0"></div>
+        <div class="campo"><label for="z-inst">% adicional de instalación</label><input id="z-inst" type="number" min="0" max="500" step="0.01" inputmode="decimal" value="0"></div>
+        <div class="campo ancho"><label for="z-obs">Observación</label><input id="z-obs" type="text" maxlength="500" placeholder="Ej.: acceso por trocha, 6 h desde la capital de provincia"></div>
+        <div class="campo"><button class="btn btn-primary" type="submit">Guardar factor</button></div>
+      </form>
+      <div class="tabla-wrap borde-0"><table class="tabla"><thead><tr><th>Ámbito</th><th>Zona</th><th>Ubigeo</th><th class="num">Flete</th><th class="num">Instalación</th><th>Observación</th><th></th></tr></thead><tbody id="z-tbody"></tbody></table></div>
+    </div>
+  </section>
+  <p class="fuente">Los precios, la UIT y los factores los carga el equipo; no se toman de ninguna norma ni fuente automática.</p>
+</main>
+
+<!-- Modal: precio -->
+<div class="modal-overlay" id="m-precio" role="dialog" aria-modal="true" aria-labelledby="m-precio-tit">
+  <form class="modal" id="f-precio">
+    <button class="cerrar" type="button" data-cerrar aria-label="Cerrar">×</button>
+    <h2 id="m-precio-tit">Nuevo precio</h2>
+    <div class="form-grid">
+      <div class="campo"><label for="f-tipo">Tipo de bien</label><select id="f-tipo" required></select></div>
+      <div class="campo"><label for="f-precio-v">Precio unitario sin IGV (S/)</label><input id="f-precio-v" type="number" min="0" step="0.01" inputmode="decimal" required></div>
+      <div class="campo"><label for="f-unidad">Unidad</label><input id="f-unidad" type="text" maxlength="40" required></div>
+      <div class="campo"><label for="f-fecha">Fecha del precio</label><input id="f-fecha" type="date" required></div>
+      <div class="campo"><label for="f-fuente">Fuente</label><select id="f-fuente" required></select></div>
+      <div class="campo"><span class="lbl">&nbsp;</span><label class="chk"><input type="checkbox" id="f-vigente"> Marcar como vigente</label></div>
+      <div class="campo ancho"><label for="f-desc">Descripción</label><input id="f-desc" type="text" maxlength="300" required placeholder="Ej.: Mesa unipersonal de melamina y estructura metálica, primaria"></div>
+      <div class="campo ancho"><label for="f-obs">Observación</label><textarea id="f-obs" maxlength="1000" placeholder="Ej.: cotización N° … del proveedor …; incluye o no flete"></textarea></div>
+    </div>
+    <p class="err" id="f-err" hidden></p>
+    <div class="modal-acts">
+      <button class="btn btn-ghost" type="button" data-cerrar>Cancelar</button>
+      <button class="btn btn-primary" type="submit" id="f-ok">Guardar</button>
+    </div>
+  </form>
+</div>
+
+<!-- Modal: copiar de Radar IOARR -->
+<div class="modal-overlay" id="m-ref" role="dialog" aria-modal="true" aria-labelledby="m-ref-tit">
+  <div class="modal">
+    <button class="cerrar" type="button" data-cerrar aria-label="Cerrar">×</button>
+    <h2 id="m-ref-tit">Copiar un precio de Radar IOARR</h2>
+    <p class="sub">Precios leídos de las estructuras de costos del Banco de Inversiones. Se copia «a» (costo de adquisición), porque «d» ya incluye embalaje y entrega, que aquí son rubros aparte. Revisa el tipo y la fecha antes de guardar.</p>
+    <div class="field"><input id="r-q" type="search" placeholder="Buscar por descripción, código del bien o CUI" autocomplete="off"></div>
+    <div class="tabla-wrap"><table class="tabla"><thead><tr><th>Bien</th><th>CUI y año</th><th class="num">a</th><th class="num">d</th><th></th></tr></thead><tbody id="r-tbody"></tbody></table></div>
+    <div class="modal-acts"><button class="btn btn-ghost" type="button" data-cerrar>Cerrar</button></div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" hidden></div>
+<script type="module" src="selector-ioarr-precios.js"></script>
+</body>
+</html>
