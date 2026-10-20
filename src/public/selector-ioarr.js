@@ -1,6 +1,6 @@
 // Selector IOARR — interfaz. Los datos y el cálculo viven en selector-ioarr-worker.js;
 // los proyectos se guardan en Supabase vía /api/selector-ioarr/* (sesión de sesion.js).
-import { CRIT, DEF, ITEMS, NIVN, NIVS, NIVB, FILTRO_VACIO, limpiarParams } from '/selector-ioarr/calculo.js';
+import { CRIT, DEF, ITEMS, NIVN, NIVS, NIVB, FILTRO_VACIO, limpiarParams, coordValidas, urlGoogleMaps, urlMapaEmbed } from '/selector-ioarr/calculo.js';
 
 const ANIO = 2025;
 const BASE_DATOS = `/data/selector-ioarr/${ANIO}/`;
@@ -42,6 +42,7 @@ const S = {
   proyectos: [], proyecto: null, sinBase: false,       // proyecto null = borrador (solo en este navegador)
   params: { ...DEF }, sel: new Set(),
   f: FILTRO_VACIO(), sort: { key: 'rep', dir: -1 }, page: 0, open: new Set(), detalles: new Map(),
+  mapas: new Set(), mapsKey: null,                     // mapas satelitales abiertos (índice de local) y llave de Maps Embed
   tab: 'elegir', seq: 0, selPage: 0
 };
 
@@ -92,6 +93,8 @@ function persistirCrit() { if (S.proyecto) programar('crit'); else store('params
 // ─── Arranque ────────────────────────────────────────────────────────────────
 async function boot() {
   bind();
+  // Llave de Maps Embed (opcional); sin ella el mapa usa el embed sin llave
+  api('/config').then(c => { S.mapsKey = c.mapsKey || null; }).catch(() => {});
   try { S.idx = await fetch(BASE_DATOS + 'index.json').then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }); }
   catch { $('count').innerHTML = '<span class="err">No se pudo cargar la lista de regiones.</span>'; return; }
   const opts = S.idx.regiones.map(g => `<option value="${esc(g.nombre)}">${esc(g.nombre)} (${fmt(g.locales)} locales)</option>`).join('');
@@ -151,7 +154,7 @@ async function cargarRegion(nombre, params, codigos) {
   if (!g) { toast('No hay datos para la región ' + nombre); return; }
   S.cargando = true; $('region').value = nombre;
   S.params = params; S.sel = new Set(codigos);
-  S.f = FILTRO_VACIO(); S.page = 0; S.open.clear(); S.detalles.clear();
+  S.f = FILTRO_VACIO(); S.page = 0; S.open.clear(); S.detalles.clear(); S.mapas.clear();
   renderCrit();
   if (S.region !== nombre || !S.meta) {
     $('count').textContent = `Cargando ${g.nombre}…`; $('tbody').innerHTML = ''; document.body.classList.add('cargando');
@@ -200,9 +203,46 @@ async function detalleHTML(i) {
   const au = d.aulas.map(a => `<tr><td>${esc(a.aula)}</td><td>${esc(a.edif)} · piso ${a.piso}</td><td>${esc(a.grado)}${a.secc ? ' ' + esc(a.secc) : ''}</td><td>${esc(a.tur)}${a.comp ? ' (compartida)' : ''}</td><td class="num">${a.est}</td>` +
     a.t.map(([ex, rep]) => `<td class="num">${fmt(ex)} / <b>${fmt(rep)}</b></td>`).join('') + '</tr>').join('');
   return `<div class="detalle">
+    ${ubicacionHTML(i, d)}
     <div><h4>Servicios educativos del local</h4><div class="tabla-wrap"><table class="tabla"><thead><tr><th>Cód. modular</th><th>Nivel</th><th>Institución</th><th>Gestión</th><th class="num">Estudiantes</th><th class="num">Secciones</th><th class="num">Aulas (censo)</th><th>Turno</th></tr></thead><tbody>${sv}</tbody></table></div></div>
     <div><h4>Aulas en uso (existente / <b>a reponer</b>)</h4>${au ? `<div class="tabla-wrap"><table class="tabla"><thead><tr><th>Aula</th><th>Ubicación</th><th>Grado y sección</th><th>Turno</th><th class="num">Estud.</th>${ITEMS.map(x => `<th class="num">${x.n}</th>`).join('')}</tr></thead><tbody>${au}</tbody></table></div>` : '<p class="sub">El censo no registra aulas en uso para este local.</p>'}</div>
   </div>`;
+}
+
+// ─── Ubicación y mapa satelital ─────────────────────────────────────────────
+function ubicacionHTML(i, d) {
+  if (!coordValidas(d.lat, d.lon)) return `<div class="ubic"><h4>Ubicación</h4><p class="sub">Este local no tiene coordenadas válidas en el padrón</p></div>`;
+  const abierto = S.mapas.has(i);
+  return `<div class="ubic"><h4>Ubicación</h4>
+    <p class="coords">Latitud <span class="mono">${d.lat}</span> · Longitud <span class="mono">${d.lon}</span></p>
+    <div class="ubic-acc">
+      <button class="btn btn-ghost btn-sm" type="button" data-mapa-btn="${i}" aria-expanded="${abierto}" aria-controls="mapa-${i}">${abierto ? 'Ocultar vista satelital' : 'Ver vista satelital'}</button>
+      <a class="btn btn-ghost btn-sm" href="${urlGoogleMaps(d.lat, d.lon)}" target="_blank" rel="noopener">Abrir en Google Maps</a>
+    </div>
+    <p class="sub">Coordenadas declaradas en el padrón de ESCALE; pueden tener error.</p>
+    <div class="mapa" id="mapa-${i}" data-mapa="${i}" ${abierto ? '' : 'hidden'}></div></div>`;
+}
+// El iframe se crea solo al pedir la vista satelital (nunca al abrir el detalle)
+function crearMapa(cont) {
+  const d = S.detalles.get(+cont.dataset.mapa), f = document.createElement('iframe');
+  f.dataset.mapa = cont.dataset.mapa;
+  f.src = urlMapaEmbed(d.lat, d.lon, S.mapsKey);
+  f.loading = 'lazy'; f.title = `Vista satelital del local ${d.cod}`;
+  f.referrerPolicy = 'no-referrer-when-downgrade';   // la llave está restringida por referrer
+  f.allowFullscreen = true;
+  cont.append(f);
+}
+// moveBefore conserva el iframe sin recargarlo; sin él, el navegador lo recarga al moverlo
+const reservaMapas = Object.assign(document.createElement('div'), { hidden: true });
+document.body.append(reservaMapas);
+const mover = (padre, nodo) => { try { if (padre.moveBefore) return padre.moveBefore(nodo, null); } catch { /* sigue con append */ } padre.append(nodo); };
+function toggleMapa(btn) {
+  const i = +btn.dataset.mapaBtn, cont = $('mapa-' + i), abrir = !S.mapas.has(i);
+  abrir ? S.mapas.add(i) : S.mapas.delete(i);
+  btn.setAttribute('aria-expanded', abrir); btn.textContent = abrir ? 'Ocultar vista satelital' : 'Ver vista satelital';
+  cont.hidden = !abrir;
+  if (abrir && !cont.querySelector('iframe')) crearMapa(cont);
+  if (!abrir) cont.replaceChildren();               // libera el mapa al ocultarlo
 }
 
 async function renderTable() {
@@ -215,6 +255,8 @@ async function renderTable() {
   for (const r of R.filas) if (S.open.has(r.i)) det.set(r.i, await detalleHTML(r.i));
   if (seq !== S.seq) return;
   $('tbody').classList.remove('cargando-tabla');
+  // Guarda los mapas abiertos antes de redibujar, para devolverlos a su fila
+  for (const f of $('tbody').querySelectorAll('iframe[data-mapa]')) if (S.mapas.has(+f.dataset.mapa)) mover(reservaMapas, f);
   if (!R.filas.length) $('tbody').innerHTML = `<tr><td colspan="10" class="vacio">Ningún local cumple los filtros. Prueba con menos condiciones.</td></tr>`;
   else $('tbody').innerHTML = R.filas.map(r => {
     const sel = S.sel.has(r.cod), open = S.open.has(r.i);
@@ -232,6 +274,11 @@ async function renderTable() {
       <td class="c-x"><button class="x" data-x="${r.i}" type="button" aria-expanded="${open}" aria-label="Ver detalle del local ${r.cod}">${open ? 'Ocultar' : 'Detalle'}</button></td></tr>`
       + (open ? `<tr class="det"><td colspan="10">${det.get(r.i)}</td></tr>` : '');
   }).join('');
+  for (const cont of $('tbody').querySelectorAll('.mapa[data-mapa]:not([hidden])')) {
+    const f = reservaMapas.querySelector(`iframe[data-mapa="${cont.dataset.mapa}"]`);
+    f ? mover(cont, f) : crearMapa(cont);
+  }
+  reservaMapas.replaceChildren();                    // mapas de filas que ya no están en esta página
   $('pgInfo').textContent = R.total ? `Mostrando ${fmt(R.page * PAGE + 1)}–${fmt(Math.min(R.total, R.page * PAGE + PAGE))} de ${fmt(R.total)}` : '';
   $('pgNum').textContent = `${R.page + 1} / ${R.pages}`;
   $('pgPrev').disabled = R.page === 0; $('pgNext').disabled = R.page >= R.pages - 1;
@@ -273,7 +320,7 @@ async function renderSel() {
   const pags = Math.max(1, Math.ceil(T.locales.length / PAGE));
   S.selPage = Math.min(S.selPage || 0, pags - 1);
   const desde = S.selPage * PAGE;
-  const lrows = T.locales.slice(desde, desde + PAGE).map(r => `<tr><td class="mono">${r.cod}</td><td><span class="nm">${esc(r.nom)}</span></td><td>${esc(r.dist)}</td><td class="num">${fmt(r.est)}</td><td class="num">${fmt(r.aul)}</td>${r.t.map(v => `<td class="num">${fmt(v)}</td>`).join('')}<td class="num"><b>${fmt(r.rep)}</b></td><td><button class="x" data-rm="${r.cod}" type="button" aria-label="Quitar el local ${r.cod}">Quitar</button></td></tr>`).join('');
+  const lrows = T.locales.slice(desde, desde + PAGE).map(r => `<tr><td class="mono">${r.cod}</td><td><span class="nm">${esc(r.nom)}</span></td><td>${esc(r.dist)}</td><td class="num">${fmt(r.est)}</td><td class="num">${fmt(r.aul)}</td>${r.t.map(v => `<td class="num">${fmt(v)}</td>`).join('')}<td class="num"><b>${fmt(r.rep)}</b></td><td>${coordValidas(r.lat, r.lon) ? `<a class="x" href="${urlGoogleMaps(r.lat, r.lon)}" target="_blank" rel="noopener" aria-label="Ver el local ${r.cod} en Google Maps">Mapa</a>` : '<span class="sub">—</span>'}</td><td><button class="x" data-rm="${r.cod}" type="button" aria-label="Quitar el local ${r.cod}">Quitar</button></td></tr>`).join('');
   const sum = k => fmt(T.tipos.reduce((a, o) => a + o[k], 0));
   el.innerHTML = `
     <div class="kpis">
@@ -294,7 +341,7 @@ async function renderSel() {
         <div class="tabla-wrap"><table class="tabla"><thead><tr><th>Distrito</th><th class="num">Locales</th><th class="num">Estudiantes</th><th class="num">Aulas</th><th class="num">A reponer</th></tr></thead><tbody>${drows}</tbody></table></div></div>
     </div>
     <div class="panel"><div class="panel-cab"><h3>Locales seleccionados</h3><button class="btn btn-ghost btn-sm btn-peligro" id="clrSel" type="button">Quitar todos</button></div>
-      <div class="tabla-wrap"><table class="tabla"><thead><tr><th>Código de local</th><th>Instituciones</th><th>Distrito</th><th class="num">Estudiantes</th><th class="num">Aulas</th>${ITEMS.map(x => `<th class="num">${x.n}</th>`).join('')}<th class="num">A reponer</th><th></th></tr></thead><tbody>${lrows}</tbody></table></div>
+      <div class="tabla-wrap"><table class="tabla"><thead><tr><th>Código de local</th><th>Instituciones</th><th>Distrito</th><th class="num">Estudiantes</th><th class="num">Aulas</th>${ITEMS.map(x => `<th class="num">${x.n}</th>`).join('')}<th class="num">A reponer</th><th>Ubicación</th><th></th></tr></thead><tbody>${lrows}</tbody></table></div>
       ${pags > 1 ? `<div class="paginacion pad-pag"><span class="sub">Mostrando ${fmt(desde + 1)}–${fmt(Math.min(T.locales.length, desde + PAGE))} de ${fmt(T.locales.length)} · ordenados por bienes a reponer</span><div class="pg-btns"><button class="btn btn-ghost btn-sm" data-selpag="-1" type="button" ${S.selPage === 0 ? 'disabled' : ''}>Anterior</button><span class="mono">${S.selPage + 1} / ${pags}</span><button class="btn btn-ghost btn-sm" data-selpag="1" type="button" ${S.selPage >= pags - 1 ? 'disabled' : ''}>Siguiente</button></div></div>` : ''}</div>`;
 }
 
@@ -487,8 +534,11 @@ function bind() {
     $('unselAll').disabled = !R.nsel;
   });
   $('tbody').addEventListener('click', e => {
+    const mb = e.target.closest('[data-mapa-btn]'); if (mb) { toggleMapa(mb); return; }
     const x = e.target.closest('[data-x]'); if (!x) return;
-    const i = +x.dataset.x; S.open.has(i) ? S.open.delete(i) : S.open.add(i); renderTable();
+    const i = +x.dataset.x;
+    if (S.open.has(i)) { S.open.delete(i); S.mapas.delete(i); } else S.open.add(i);
+    renderTable();
   });
   $('v-sel').addEventListener('click', async e => {
     const rm = e.target.closest('[data-rm]');

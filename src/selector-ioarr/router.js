@@ -73,7 +73,11 @@ api.use((req, res, next) => {
   next();
 });
 
-const enviarError = (res, next) => e => faltaMigracion(e) ? res.status(503).json({ error: AVISO_MIGRACION }) : next(e);
+// Configuración del navegador. La llave de Maps Embed queda visible en la página:
+// debe estar restringida por referrer HTTP al dominio de la app en Google Cloud.
+api.get('/config', (_, res) => res.json({ mapsKey: process.env.GOOGLE_MAPS_EMBED_KEY || null }));
+
+const enviarError =(res, next) => e => faltaMigracion(e) ? res.status(503).json({ error: AVISO_MIGRACION }) : next(e);
 const limpiarNombre = n => String(n ?? '').replace(/\s+/g, ' ').trim().slice(0, 200);
 const codigosValidos = arr => [...new Set((Array.isArray(arr) ? arr : []).map(String).filter(c => /^\d{4,10}$/.test(c)))];
 const esUuid = s => /^[0-9a-f-]{36}$/i.test(String(s || ''));

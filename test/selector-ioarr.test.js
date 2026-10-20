@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import ExcelJS from 'exceljs';
-import { prep, calc, totals, filtrar, FILTRO_VACIO, DEF, NIVB, norm, limpiarParams } from '../src/selector-ioarr/calculo.js';
+import { prep, calc, totals, filtrar, FILTRO_VACIO, DEF, NIVB, norm, limpiarParams, coordValidas, urlGoogleMaps, urlMapaEmbed } from '../src/selector-ioarr/calculo.js';
 import { generarExcel } from '../src/selector-ioarr/excel.js';
 
 const DIR = new URL('../src/public/data/selector-ioarr/2025/', import.meta.url);
@@ -88,6 +88,30 @@ test('Excel: hojas, fórmulas y totales iguales a la pantalla', async () => {
   let masiva = 0; wb.getWorksheet('Reposición masiva').eachRow((row, n) => { if (n > 1) masiva += row.getCell(12).value; });
   assert.equal(masiva, T.rep);
   assert.equal(wb.getWorksheet('Locales (UP)').rowCount - 1, 11);
+
+  // Locales (UP): latitud y longitud numéricas, enlace satelital a Google Maps
+  const lo = wb.getWorksheet('Locales (UP)'), cab = lo.getRow(1).values;
+  const [cLat, cLon, cMapa] = ['Latitud', 'Longitud', 'Enlace Google Maps'].map(h => cab.indexOf(h));
+  assert.equal(cMapa, cLon + 1);
+  lo.eachRow((row, n) => {
+    if (n === 1) return;
+    const lat = row.getCell(cLat).value, lon = row.getCell(cLon).value, url = row.getCell(cMapa).value;
+    assert.equal(typeof lat, 'number'); assert.equal(typeof lon, 'number');
+    assert.equal(url.hyperlink, urlGoogleMaps(lat, lon));
+  });
+  // Las fórmulas del Resumen siguen apuntando a las columnas correctas tras la columna nueva
+  const letraDe = h => lo.getColumn(cab.indexOf(h)).letter;
+  assert.match(fila('Estudiantes (padrón)').getCell(2).value.formula, new RegExp(`!${letraDe('Estudiantes (padrón)')}2:`));
+  assert.match(fila('Aulas en uso (censo)').getCell(2).value.formula, new RegExp(`!${letraDe('Aulas en uso (censo)')}2:`));
+  assert.match(fila('Locales seleccionados').getCell(2).value.formula, new RegExp(`!${letraDe('Código de local')}2:`));
+});
+
+test('coordenadas: rango de Perú y URLs de Google Maps', () => {
+  assert.ok(coordValidas(-6.8882, -79.4997));
+  for (const [lat, lon] of [[0.5, -75], [-19.1, -70], [-10, -82.1], [-10, -67.9], [null, -75], ['-6', '-79'], [NaN, NaN]]) assert.ok(!coordValidas(lat, lon), `${lat},${lon}`);
+  assert.equal(urlGoogleMaps(-6.88, -79.5), 'https://www.google.com/maps?q=-6.88,-79.5&t=k&z=18');
+  assert.equal(urlMapaEmbed(-6.88, -79.5, 'AB C'), 'https://www.google.com/maps/embed/v1/place?key=AB%20C&q=-6.88,-79.5&zoom=18&maptype=satellite');
+  assert.equal(urlMapaEmbed(-6.88, -79.5, null), 'https://maps.google.com/maps?q=-6.88,-79.5&t=k&z=18&output=embed');
 });
 
 test('Lima: carga y cálculo en tiempo razonable', () => {

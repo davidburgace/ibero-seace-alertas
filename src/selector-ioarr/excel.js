@@ -16,7 +16,7 @@
 
 import ExcelJS from 'exceljs';
 import { PassThrough } from 'node:stream';
-import { ITEMS, NIVN, NIVB, lv, totals } from './calculo.js';
+import { ITEMS, NIVN, NIVB, lv, totals, coordValidas, urlGoogleMaps } from './calculo.js';
 
 const ESTADO = { b: 'Bueno', r: 'Regular', m: 'Malo' };
 const AZUL = 'FF3A63E0';
@@ -67,10 +67,12 @@ export async function generarExcel(D, C, P, list, meta) {
   const nLoc = list.length;
   let nAul = 0; for (const i of list) nAul += D.locAul[i].length;
 
-  // ── Columnas de Locales (UP): 18 fijas + 5 tipos × 6 + total ────────────────
+  // ── Columnas de Locales (UP): 19 fijas + 5 tipos × 6 + total ────────────────
   const lBase = ['Ubigeo', 'Departamento', 'Provincia', 'Distrito', 'UGEL', 'Centro poblado', 'Área', 'Código de local', 'Dirección', 'Latitud', 'Longitud',
-    'Códigos modulares', 'Instituciones', 'Niveles', 'Gestión', 'Estudiantes (padrón)', 'Secciones (padrón)', 'Aulas en uso (censo)'];
-  const L_EST = 16, L_AUL = 18, L_COD = 8;
+    'Enlace Google Maps', 'Códigos modulares', 'Instituciones', 'Niveles', 'Gestión', 'Estudiantes (padrón)', 'Secciones (padrón)', 'Aulas en uso (censo)'];
+  const colL = h => lBase.indexOf(h) + 1;
+  const L_EST = colL('Estudiantes (padrón)'), L_AUL = colL('Aulas en uso (censo)'), L_COD = colL('Código de local');
+  const L_LAT = colL('Latitud'), L_LON = colL('Longitud'), L_MAPA = colL('Enlace Google Maps');
   const lEst = ['Bueno', 'Regular', 'Malo', 'Requerido', 'Faltante', 'A reponer'];
   const lCol = (t, k) => lBase.length + 1 + t * 6 + lEst.indexOf(k);          // número de columna
   const L_TOT = lBase.length + 5 * 6 + 1;
@@ -140,7 +142,7 @@ export async function generarExcel(D, C, P, list, meta) {
   // ── Locales (UP) ────────────────────────────────────────────────────────────
   {
     const cab = [...lBase]; ITEMS.forEach(x => lEst.forEach(s => cab.push(x.n + ' – ' + s))); cab.push('TOTAL a reponer');
-    const ws = hoja(wb, 'Locales (UP)', cab, [9, 13, 14, 20, 22, 22, 9, 11, 34, 10, 10, 22, 36, 24, 18, 12, 12, 12]);
+    const ws = hoja(wb, 'Locales (UP)', cab, [9, 13, 14, 20, 22, 22, 9, 11, 34, 10, 10, 18, 22, 36, 24, 18, 12, 12, 12]);
     const repCols = ITEMS.map((_, t) => letra(lCol(t, 'A reponer')));
     let n = 1;
     for (const i of list) {
@@ -148,12 +150,16 @@ export async function generarExcel(D, C, P, list, meta) {
       const l = D.locs[i], d = D.dists[l[1]], sv = D.locSvc[i].map(si => D.svcs[si]);
       const niv = Object.keys(NIVN).filter(k => D.locNiv[i] & NIVB[k]).map(k => NIVN[k]).join(', ');
       const ges = D.locGes[i] === 3 ? 'Directa y convenio' : D.locGes[i] === 2 ? 'Por convenio' : 'Directa';
-      const r = [d[1], D.region, D.provs[d[2]], d[0], D.ugels[l[2]], l[3], l[4] ? 'Rural' : 'Urbana', l[0], l[5], l[6], l[7],
+      const ok = coordValidas(l[6], l[7]), url = ok ? urlGoogleMaps(l[6], l[7]) : null;
+      const r = [d[1], D.region, D.provs[d[2]], d[0], D.ugels[l[2]], l[3], l[4] ? 'Rural' : 'Urbana', l[0], l[5],
+        ok ? l[6] : null, ok ? l[7] : null, url ? { text: url, hyperlink: url } : 'Sin coordenadas válidas',
         sv.map(s => s[0]).join(', '), D.locName[i], niv, ges, D.locEst[i], D.locSec[i], D.locAul[i].length];
       for (let t = 0; t < 5; t++) r.push(lv(C, 'b', t, i), lv(C, 'r', t, i), lv(C, 'm', t, i), lv(C, 'req', t, i), lv(C, 'fal', t, i), lv(C, 'rep', t, i));
       r.push(f(repCols.map(c => c + n).join('+'), C.L.repTot[i]));
       const row = ws.addRow(r);
       row.getCell(L_TOT).font = { bold: true };
+      row.getCell(L_LAT).numFmt = row.getCell(L_LON).numFmt = '0.0000';
+      if (url) row.getCell(L_MAPA).font = { color: { argb: AZUL }, underline: true };
       row.commit();
     }
     ws.commit();

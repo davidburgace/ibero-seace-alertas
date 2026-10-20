@@ -139,6 +139,11 @@ table.tabla{ width:100%; border-collapse:collapse; font-size:13px; }
 .detalle h4{ font-size:11px; letter-spacing:.4px; text-transform:uppercase; color:var(--muted); margin-bottom:6px; }
 .detalle .tabla-wrap{ border-radius:8px; }
 .detalle .tabla th, .detalle .tabla td{ padding:6px 8px; font-size:12.5px; }
+.ubic .coords{ margin:0 0 8px; font-size:13px; }
+.ubic-acc{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:6px; }
+.ubic .sub{ margin:0; }
+.mapa{ margin-top:10px; }
+.mapa iframe{ display:block; width:100%; height:340px; border:0; border-radius:8px; background:var(--border); }
 
 /* Mi selección */
 .kpis{ display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:12px; }

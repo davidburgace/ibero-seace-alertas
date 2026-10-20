@@ -42,8 +42,9 @@ const acciones = {
   codigosVista() { return view.map(i => D.locs[i][0]); },
 
   detalle({ i }) {
-    const A = C.A;
+    const A = C.A, l = D.locs[i];
     return {
+      cod: l[0], lat: l[6], lon: l[7],
       servicios: D.locSvc[i].map(si => { const s = D.svcs[si]; return { mod: s[0], niv: NIVN[s[2]], nom: s[1], conv: !!s[4], est: s[6], sec: s[5], aulas: D.svcAulN[si], tur: s[7] }; }),
       aulas: D.locAul[i].map(ai => {
         const a = D.aulas[ai];
@@ -64,7 +65,7 @@ const acciones = {
       .sort((a, b) => b.rep - a.rep);
     const locales = list.slice().sort((a, b) => C.L.repTot[b] - C.L.repTot[a] || D.locs[a][0].localeCompare(D.locs[b][0])).map(i => {
       const l = D.locs[i];
-      return { i, cod: l[0], nom: D.locName[i], dist: D.dists[l[1]][0], est: D.locEst[i], aul: D.locAul[i].length, rep: C.L.repTot[i],
+      return { i, cod: l[0], nom: D.locName[i], dist: D.dists[l[1]][0], lat: l[6], lon: l[7], est: D.locEst[i], aul: D.locAul[i].length, rep: C.L.repTot[i],
         t: [0, 1, 2, 3, 4].map(t => lv(C, 'rep', t, i)) };
     });
     return { ...base, tipos: ITEMS.map((x, t) => ({ ...x, ...T.t[t] })), distritos, locales };
