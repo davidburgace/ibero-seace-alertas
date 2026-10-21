@@ -137,46 +137,27 @@ export function limpiarAdquisicion(obj, anioMax) {
  *   factores     filas de ioarr_factores_zona
  *   uit          { anio, valor } | null
  *   inventario   { [codLocal]: { bienes: { mesa: { b, r, m } }, fecha_visita, observacion } } verificado en campo
+ *   grupos       opcional: [{ clave, D, C, list, inventario }] varias IOARR que se costean juntas
+ *                (una por nivel, ver niveles.js). Reemplaza a D, C, list e inventario.
  *
  * Con inventario verificado, en ese local y tipo se reemplaza el censo:
  *   Faltante = MAX(0, Requerido − (B + R + M)), Reposición = M, por local.
+ *
+ * Con grupos, los rubros en % se aplican igual en cada IOARR y los montos fijos
+ * se reparten entre todos los locales de todas, según su base: así la suma de
+ * las IOARR es el total del proyecto. Devuelve el resultado del conjunto y, en
+ * grupos[clave], el de cada IOARR (sus rubros en monto fijo traen la parte que
+ * le toca en valor, y el monto del proyecto en valor_proyecto).
  */
-export function costear({ D, C, list, precios, rubros, factores, uit, inventario }) {
+export function costear({ D, C, list, precios, rubros, factores, uit, inventario, grupos }) {
   const R = limpiarRubros(rubros);
   const pu = TIPOS.map(k => Number(precios?.[k]) >= 0 && precios?.[k] != null ? Number(precios[k]) : null);
   const idx = indiceFactores(factores);
-  const nL = C.nL, n = list.length;
+  const fuentes = grupos || [{ clave: null, D, C, list, inventario }];
 
   // ── Por local: metrado, CD y factores ─────────────────────────────────────
-  const locales = list.map(i => {
-    const l = D.locs[i], d = D.dists[l[1]];
-    const rep = TIPOS.map((_, t) => C.L.rep[t * nL + i]);
-    const fal = TIPOS.map((_, t) => C.L.fal[t * nL + i]);
-    // Diagnóstico (bueno, regular, malo) y requerido: se muestran siempre, aunque solo Malo se reponga
-    const diag = TIPOS.map((_, t) => ({ b: C.L.b[t * nL + i], r: C.L.r[t * nL + i], m: C.L.m[t * nL + i], req: C.L.req[t * nL + i] }));
-    const inv = inventario?.[l[0]];
-    let verificado = null;
-    if (inv) {
-      const tipos = [];
-      TIPOS.forEach((k, t) => {
-        const x = inv.bienes?.[k];
-        if (!x) return;
-        fal[t] = Math.max(0, C.L.req[t * nL + i] - (x.b + x.r + x.m));
-        rep[t] = x.m;
-        diag[t] = { ...diag[t], b: x.b, r: x.r, m: x.m };
-        tipos.push(k);
-      });
-      // Visita registrada: puede corregir cantidades (tipos) o solo traer el año de adquisición
-      verificado = { tipos, adquisicion: inv.adquisicion || {}, fecha_visita: inv.fecha_visita, responsable: inv.responsable || null, observacion: inv.observacion };
-    }
-    const cdTipo = rep.map((q, t) => q * (pu[t] ?? 0));
-    const z = factorZona(d[1], l[4], idx);
-    return {
-      i, cod: l[0], nom: D.locName[i], dist: d[0], prov: D.provs[d[2]], ubigeo: d[1], rural: !!l[4],
-      est: D.locEst[i], aul: D.locAul[i].length, zona: z, rep, fal, diag, cdTipo, verificado,
-      cd: cdTipo.reduce((a, b) => a + b, 0), falValor: fal.reduce((a, q, t) => a + q * (pu[t] ?? 0), 0), r: {}
-    };
-  });
+  const locales = fuentes.flatMap(g => g.list.map(i => localDe(g, i, pu, idx)));
+  const n = locales.length;
 
   // Aplica un grupo de rubros: base(local) → monto del rubro en cada local
   const aplicar = (grupo, baseDe) => {
@@ -185,10 +166,10 @@ export function costear({ D, C, list, precios, rubros, factores, uit, inventario
       const base = loc => baseDe(loc, x.base);
       const suma = locales.reduce((a, loc) => a + base(loc), 0);
       for (const loc of locales) {
-        let m = x.modo === 'pct' ? base(loc) * x.valor / 100
+        const m = x.modo === 'pct' ? base(loc) * x.valor / 100
           : (suma ? x.valor * base(loc) / suma : x.valor / (n || 1));
-        if (def.zona) m *= 1 + loc.zona[def.zona];
-        loc.r[def.clave] = m;
+        loc.rf[def.clave] = m;   // antes del factor por zona: la parte del monto fijo
+        loc.r[def.clave] = def.zona ? m * (1 + loc.zona[def.zona]) : m;
       }
     }
   };
@@ -204,7 +185,45 @@ export function costear({ D, C, list, precios, rubros, factores, uit, inventario
   aplicar('otros', elegir);
   for (const loc of locales) loc.total = loc.bienes + sumaR(loc, 'otros');
 
-  // ── Totales ───────────────────────────────────────────────────────────────
+  const res = resumir(locales, R, pu, uit, false);
+  if (grupos) res.grupos = Object.fromEntries(grupos.map(g => [g.clave, resumir(locales.filter(l => l.grupo === g.clave), R, pu, uit, true)]));
+  return res;
+}
+
+function localDe(g, i, pu, idx) {
+  const { D, C, inventario } = g, nL = C.nL;
+  const l = D.locs[i], d = D.dists[l[1]];
+  const rep = TIPOS.map((_, t) => C.L.rep[t * nL + i]);
+  const fal = TIPOS.map((_, t) => C.L.fal[t * nL + i]);
+  // Diagnóstico (bueno, regular, malo) y requerido: se muestran siempre, aunque solo Malo se reponga
+  const diag = TIPOS.map((_, t) => ({ b: C.L.b[t * nL + i], r: C.L.r[t * nL + i], m: C.L.m[t * nL + i], req: C.L.req[t * nL + i] }));
+  const inv = inventario?.[l[0]];
+  let verificado = null;
+  if (inv) {
+    const tipos = [];
+    TIPOS.forEach((k, t) => {
+      const x = inv.bienes?.[k];
+      if (!x) return;
+      fal[t] = Math.max(0, C.L.req[t * nL + i] - (x.b + x.r + x.m));
+      rep[t] = x.m;
+      diag[t] = { ...diag[t], b: x.b, r: x.r, m: x.m };
+      tipos.push(k);
+    });
+    // Visita registrada: puede corregir cantidades (tipos) o solo traer el año de adquisición
+    verificado = { tipos, adquisicion: inv.adquisicion || {}, fecha_visita: inv.fecha_visita, responsable: inv.responsable || null, observacion: inv.observacion };
+  }
+  const cdTipo = rep.map((q, t) => q * (pu[t] ?? 0));
+  const z = factorZona(d[1], l[4], idx);
+  return {
+    i, grupo: g.clave, cod: l[0], nom: D.locName[i], dist: d[0], prov: D.provs[d[2]], ubigeo: d[1], rural: !!l[4],
+    est: D.locEst[i], aul: D.locAul[i].length, zona: z, rep, fal, diag, cdTipo, verificado,
+    cd: cdTipo.reduce((a, b) => a + b, 0), falValor: fal.reduce((a, q, t) => a + q * (pu[t] ?? 0), 0), r: {}, rf: {}
+  };
+}
+
+// Totales, partidas, rubros, distritos, UIT y avisos de un conjunto de locales ya costeados
+function resumir(locales, R, pu, uit, esGrupo) {
+  const n = locales.length;
   const sum = f => locales.reduce((a, loc) => a + f(loc), 0);
   const T = {
     locales: n, est: sum(l => l.est), aul: sum(l => l.aul),
@@ -218,7 +237,10 @@ export function costear({ D, C, list, precios, rubros, factores, uit, inventario
     const [b, r, m, req] = ['b', 'r', 'm', 'req'].map(k => sum(l => l.diag[t][k]));
     return { k: x.k, n: x.n, u: x.u, b, r, m, ex: b + r + m, req, rep, fal, pu: pu[t], parcial: rep * (pu[t] ?? 0), falValor: fal * (pu[t] ?? 0) };
   });
-  const rubrosOut = R.map(x => ({ ...x, nombre: RUBRO[x.clave].nombre, grupo: RUBRO[x.clave].grupo, monto: sum(l => l.r[x.clave]) }));
+  const rubrosOut = R.map(x => ({
+    ...x, nombre: RUBRO[x.clave].nombre, grupo: RUBRO[x.clave].grupo, monto: sum(l => l.r[x.clave]),
+    ...(esGrupo && x.modo === 'monto' ? { valor: sum(l => l.rf[x.clave]), valor_proyecto: x.valor } : {})
+  }));
 
   // ── Por distrito ──────────────────────────────────────────────────────────
   const porDist = new Map();

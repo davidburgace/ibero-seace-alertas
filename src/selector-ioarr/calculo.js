@@ -87,14 +87,16 @@ export function prep(D) {
   return D;
 }
 
-// Mobiliario por aula (A) y acumulado por local (L), según los criterios P
-export function calc(D, P) {
+// Mobiliario por aula (A) y acumulado por local (L), según los criterios P.
+// Con nivel (I, P, S o E), solo cuentan las aulas de los servicios de ese nivel.
+export function calc(D, P, nivel = null) {
   const nA = D.aulas.length, nL = D.locs.length;
   const L = { b: new Float64Array(5 * nL), r: new Float64Array(5 * nL), m: new Float64Array(5 * nL), req: new Float64Array(5 * nL),
     fal: new Float64Array(5 * nL), rep: new Float64Array(5 * nL), repTot: new Float64Array(nL), falTot: new Float64Array(nL), reqTot: new Float64Array(nL) };
   const A = { b: [], r: [], m: [], req: [], fal: [], rep: [] };
   for (const k in A) for (let t = 0; t < 5; t++) A[k].push(new Int32Array(nA));
   for (let i = 0; i < nA; i++) {
+    if (nivel && D.svcs[D.aulas[i][1]][2] !== nivel) continue;
     const a = D.aulas[i], niv = D.svcs[a[1]][2], k = (niv === 'I' || niv === 'E') ? P.kI : P.kPS, f = j => a[11 + j], loc = a[0];
     const carp = f(6) + f(7) * P.carpBip;
     let mb = f(0) + k * f(3), mr = f(1) + k * f(4), mm = f(2) + k * f(5), sb = f(8), sr = f(9), sm = f(10);
@@ -123,6 +125,23 @@ export function totals(D, C, list) {
     }
   }
   return T;
+}
+
+// Totales por nivel educativo de una lista de locales: un local con varios niveles
+// cuenta en cada uno con sus estudiantes (padrón) y sus aulas (censo) de ese nivel.
+// [{ nivel, nombre, n, est, aul, b, r, m, rep, fal, req }] en orden I, P, S, E
+export function totalesPorNivel(D, C, list) {
+  const out = {};
+  const de = n => out[n] ??= { nivel: n, nombre: NIVN[n], n: 0, est: 0, aul: 0, b: 0, r: 0, m: 0, rep: 0, fal: 0, req: 0 };
+  for (const i of list) {
+    const vistos = new Set();
+    for (const si of D.locSvc[i]) { const s = D.svcs[si], o = de(s[2]); o.est += s[6]; if (!vistos.has(s[2])) { vistos.add(s[2]); o.n++; } }
+    for (const ai of D.locAul[i]) {
+      const o = de(D.svcs[D.aulas[ai][1]][2]); o.aul++;
+      for (let t = 0; t < 5; t++) { o.b += C.A.b[t][ai]; o.r += C.A.r[t][ai]; o.m += C.A.m[t][ai]; o.rep += C.A.rep[t][ai]; o.fal += C.A.fal[t][ai]; o.req += C.A.req[t][ai]; }
+    }
+  }
+  return ['I', 'P', 'S', 'E'].filter(n => out[n]).map(n => out[n]);
 }
 
 // Filtro del prototipo (applyFilter, sin el orden). F: {q, prov, dist, ugel, area, ges, niv, rep, est, censo}

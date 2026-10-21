@@ -20,6 +20,9 @@ let datos = null;      // respuesta de /costos
 let catalogo = null;   // precios del catálogo por tipo
 let pagLoc = 0, tGuardar = null, version = 0, filtroLoc = '';
 let vistaExp = 'costos';   // sub-pestaña: 'costos' | 'docs' | 'verif'
+let nivelExp = null;       // IOARR a la vista con «Una IOARR por nivel»: 'I' | 'P' | 'S' | 'E'
+let proyectoExp = null;    // al cambiar de proyecto se vuelve a la primera IOARR
+const qn = () => nivelExp ? `?nivel=${nivelExp}` : '';
 const norm = t => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 
 export async function renderExpediente(c) {
@@ -33,9 +36,10 @@ export async function renderExpediente(c) {
   const mio = ++version;
   try {
     await c.guardarYa();
-    const [d, cat] = await Promise.all([c.api(`/proyectos/${c.proyecto.id}/costos`), c.api('/catalogo')]);
+    if (proyectoExp !== c.proyecto.id) { proyectoExp = c.proyecto.id; nivelExp = null; }
+    const [d, cat] = await Promise.all([c.api(`/proyectos/${c.proyecto.id}/costos${qn()}`), c.api('/catalogo')]);
     if (mio !== version) return;
-    datos = d; catalogo = agrupar(cat.precios); pagLoc = 0;
+    datos = d; catalogo = agrupar(cat.precios); pagLoc = 0; nivelExp = d.nivel; ctx.nivel = d.nivel;
     pintar();
   } catch (e) {
     if (mio !== version) return;
@@ -52,6 +56,7 @@ function agrupar(precios) {
 // ─── Pintado ─────────────────────────────────────────────────────────────────
 function pintar() {
   ctx.el.innerHTML = `
+    <div id="exp-ioarr"></div>
     <div class="subtabs" role="tablist" aria-label="Expediente">
       <button type="button" role="tab" data-exp-vista="costos" aria-selected="${vistaExp === 'costos'}">Costos</button>
       <button type="button" role="tab" data-exp-vista="docs" aria-selected="${vistaExp === 'docs'}">Documentos: Formato 07-C y memoria</button>
@@ -72,9 +77,43 @@ function pintar() {
     </div>
     <div id="exp-resultados"></div>
     </div>`;
-  pintarPrecios(); pintarRubros(); pintarResultados();
+  pintarIoarr(); pintarPrecios(); pintarRubros(); pintarResultados();
   if (vistaExp === 'docs') abrirDocumentos();
   if (vistaExp === 'verif') abrirVerificacion();
+}
+
+// ─── Una IOARR o una por nivel ──────────────────────────────────────────────
+const REG = r => r == null ? '<span class="chip-est pend">UIT sin cargar</span>' : r === 'completo' ? '<span class="chip-est alerta">Registro completo · supera 75 UIT</span>' : '<span class="chip-est ok">Registro abreviado · hasta 75 UIT</span>';
+function pintarIoarr() {
+  const K = datos.comparativo, porNiv = datos.modo === 'por_nivel', U = K.uit;
+  const fila = (txt, x, activa) => `<tr class="${activa ? 'activa' : ''}"><td>${txt}</td><td class="num">${ent(x.locales)}</td><td class="num">${ent(x.rep)}</td><td class="num"><b>${soles(x.total)}</b></td><td class="num">${x.en_uit == null ? '—' : dec(x.en_uit) + ' UIT'}</td><td>${REG(x.registro)}</td></tr>`;
+  const pestanas = porNiv && datos.ioarrs.length ? `<div class="subtabs ioarr-tabs" role="tablist" aria-label="IOARR por nivel">${datos.ioarrs.map(x =>
+    `<button type="button" role="tab" data-exp-nivel="${x.nivel}" aria-selected="${x.nivel === datos.nivel}">IOARR ${esc(x.nombre)} <span class="sub">${soles(x.total)}</span></button>`).join('')}</div>` : '';
+  document.getElementById('exp-ioarr').innerHTML = `
+    <div class="panel"><div class="panel-cab"><h3>Una IOARR o una por nivel</h3>
+      <div class="seg" role="radiogroup" aria-label="Organización del proyecto">
+        <label class="chk"><input type="radio" name="exp-modo" value="por_nivel" ${porNiv ? 'checked' : ''}> Una IOARR por nivel</label>
+        <label class="chk"><input type="radio" name="exp-modo" value="una" ${porNiv ? '' : 'checked'}> Una IOARR</label></div></div>
+      <p class="sub pad">La norma permite una reposición masiva en varias UP si los activos son homogéneos y el servicio y la entidad son los mismos, pero no aclara si Inicial, Primaria y Secundaria cuentan como un mismo servicio: confírmalo con la OPMI. Un expediente de Huánuco (2023) presentó una IOARR por nivel. Compara los totales con el límite de 75 UIT${U ? ` (S/ ${NF.format(U.limite)}, UIT ${U.anio})` : ''}:</p>
+      <div class="tabla-wrap borde-0"><table class="tabla tabla-ioarr"><thead><tr><th>Opción</th><th class="num">Locales</th><th class="num">A reponer</th><th class="num">Total</th><th class="num">En UIT</th><th>Registro del 07-C</th></tr></thead><tbody>
+        ${fila('<b>Una IOARR</b> (todos los niveles)', K.una, !porNiv)}
+        ${K.niveles.map(x => fila(`IOARR ${esc(x.nombre)}`, x, porNiv)).join('')}
+      </tbody>${K.niveles.length > 1 ? `<tfoot><tr><td>Suma de las IOARR por nivel</td><td></td><td class="num">${ent(K.niveles.reduce((a, x) => a + x.rep, 0))}</td><td class="num">${soles(K.suma)}</td><td colspan="2"></td></tr></tfoot>` : ''}</table></div>
+      ${K.niveles.length > 1 ? '<p class="sub pad">Un local con varios niveles entra en cada IOARR con sus estudiantes, aulas y mobiliario de ese nivel. Los rubros en monto fijo se reparten entre las IOARR según su base, así la suma da el total del proyecto.</p>' : ''}
+    </div>${pestanas}`;
+}
+async function cambiarModo(modo) {
+  try {
+    await ctx.api(`/proyectos/${ctx.proyecto.id}`, { method: 'PATCH', body: { modo_ioarr: modo } });
+    ctx.proyecto.modo_ioarr = modo; nivelExp = null;
+    ctx.toast(modo === 'una' ? 'El proyecto es ahora una sola IOARR.' : 'El proyecto es ahora una IOARR por nivel.');
+  } catch (e) { ctx.toast('No se pudo cambiar: ' + e.message); }
+  await renderExpediente(ctx);
+}
+async function cambiarNivel(n) {
+  if (n === nivelExp) return;
+  nivelExp = n;
+  await renderExpediente(ctx);
 }
 
 function pintarKpis() {
@@ -83,7 +122,7 @@ function pintarKpis() {
     : U.supera ? '<span class="chip-est alerta">Registro completo · supera 75 UIT</span>' : '<span class="chip-est ok">Registro abreviado · hasta 75 UIT</span>';
   document.getElementById('exp-kpis').innerHTML = `
     <div class="kpis kpis-montos">
-      <div class="kpi destacado"><div class="v">${soles(T.total)}</div><div class="l">total de inversión</div></div>
+      <div class="kpi destacado"><div class="v">${soles(T.total)}</div><div class="l">total de inversión${datos.nivel ? ` · IOARR ${esc(datos.nombre_ioarr)}` : ''}</div></div>
       <div class="kpi"><div class="v">${soles(T.cd)}</div><div class="l">costo directo · ${ent(T.rep)} bienes a reponer</div></div>
       <div class="kpi"><div class="v">${T.porEstudiante == null ? '—' : soles(T.porEstudiante)}</div><div class="l">por estudiante · ${ent(T.est)} estudiantes</div></div>
       <div class="kpi"><div class="v">${U.enUit == null ? '—' : dec(U.enUit) + ' UIT'}</div><div class="l">${reg}</div></div>
@@ -219,11 +258,11 @@ async function guardar(body) {
   const mio = ++version;
   estado('Guardando…', 'pend');
   try {
-    const d = await ctx.api(`/proyectos/${ctx.proyecto.id}/costos`, { method: 'PATCH', body });
+    const d = await ctx.api(`/proyectos/${ctx.proyecto.id}/costos${qn()}`, { method: 'PATCH', body });
     if (mio !== version) return;
     const cambioAnio = d.anio_uit !== datos.anio_uit || (d.uit?.valor ?? null) !== (datos.uit?.valor ?? null);
     datos = d;
-    pintarResultados();
+    pintarIoarr(); pintarResultados();
     if (cambioAnio) pintarRubros();
     estado('Guardado', 'ok');
   } catch (e) { if (mio === version) estado('No se pudo guardar: ' + e.message, 'error'); }
@@ -232,10 +271,10 @@ async function guardar(body) {
 async function cambiarPrecio(tipo, precioId) {
   const mio = ++version;
   try {
-    const ruta = `/proyectos/${ctx.proyecto.id}/costos/precios/${tipo}`;
+    const ruta = `/proyectos/${ctx.proyecto.id}/costos/precios/${tipo}${qn()}`;
     const d = precioId ? await ctx.api(ruta, { method: 'PUT', body: { precio_id: precioId } }) : await ctx.api(ruta, { method: 'DELETE' });
     if (mio !== version) return;
-    datos = d; pintarPrecios(); pintarResultados();
+    datos = d; pintarIoarr(); pintarPrecios(); pintarResultados();
     ctx.toast(precioId ? 'Precio fijado en el proyecto.' : 'Se usa el precio vigente del catálogo.');
   } catch (e) { ctx.toast('No se pudo cambiar el precio: ' + e.message); }
 }
@@ -244,7 +283,7 @@ async function exportar(btn) {
   btn.disabled = true; const txt = btn.textContent; btn.textContent = 'Generando…';
   try {
     clearTimeout(tGuardar);
-    const r = await fetch(`/api/selector-ioarr/proyectos/${ctx.proyecto.id}/costos/excel`);
+    const r = await fetch(`/api/selector-ioarr/proyectos/${ctx.proyecto.id}/costos/excel${qn()}`);
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Error ' + r.status);
     const blob = await r.blob(), cd = r.headers.get('Content-Disposition') || '';
     const nombre = decodeURIComponent((cd.match(/filename\*=UTF-8''([^;]+)/) || [])[1] || 'Costos_IOARR.xlsx');
@@ -272,6 +311,7 @@ export function enlazarExpediente(el, abrirNuevo) {
     }
   });
   el.addEventListener('change', e => {
+    if (e.target.name === 'exp-modo') { cambiarModo(e.target.value); return; }
     const c = e.target.dataset.campo;
     if (c === 'modo' || c === 'base') { clearTimeout(tGuardar); guardar({ rubros: leerRubros() }); }
     if (e.target.dataset.precio) cambiarPrecio(e.target.dataset.precio, e.target.value || null);
@@ -281,6 +321,8 @@ export function enlazarExpediente(el, abrirNuevo) {
   el.addEventListener('click', e => {
     const sv = e.target.closest('[data-exp-vista]');
     if (sv) cambiarVista(sv.dataset.expVista);
+    const nv = e.target.closest('[data-exp-nivel]');
+    if (nv) cambiarNivel(nv.dataset.expNivel);
     if (e.target.id === 'exp-excel') exportar(e.target);
     if (e.target.closest('[data-exp-nuevo]')) abrirNuevo();
     const pg = e.target.closest('[data-exp-pag]');
@@ -337,8 +379,8 @@ function modalInventario() {
   m.addEventListener('click', e => { if (e.target === m || e.target.closest('[data-cerrar]')) m.classList.remove('open'); });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') m.classList.remove('open'); });
   m.querySelector('#inv-tbody').addEventListener('change', e => {
-    const k = e.target.dataset.invChk;
-    if (k) m.querySelectorAll(`[data-inv-k="${k}"]`).forEach(i => { i.disabled = !e.target.checked; });
+    const k = e.target.dataset.invChk, n = e.target.dataset.niv ?? '';
+    if (k) m.querySelectorAll(`[data-inv-k="${k}"][data-niv="${n}"]`).forEach(i => { i.disabled = !e.target.checked; });
   });
   m.querySelector('#f-inv').addEventListener('submit', guardarInventario);
   m.querySelector('#inv-quitar').addEventListener('click', quitarInventario);
@@ -359,14 +401,20 @@ async function abrirInventario(cod) {
     const d = await ctx.api(`/proyectos/${ctx.proyecto.id}/costos/inventario/${encodeURIComponent(cod)}`);
     if (d.sin_migracion) { ctx.toast('Falta ejecutar supabase/migrations/013_ioarr_expediente_inventario.sql en Supabase'); return; }
     const v = d.verificado;
-    m.querySelector('#inv-local').innerHTML = `<b>${esc(d.cod)}</b> · ${esc(d.nom)}`;
-    m.querySelector('#inv-tbody').innerHTML = ITEMS.map(x => {
-      const c = d.censo[x.k], f = v?.bienes?.[x.k], on = !!f, val = (k) => f ? f[k] : c[k];
-      const inp = k => `<input type="number" min="0" step="1" inputmode="numeric" data-inv-k="${x.k}" data-c="${k}" value="${val(k)}" ${on ? '' : 'disabled'} required aria-label="${x.n}: ${{ b: 'bueno', r: 'regular', m: 'malo' }[k]}">`;
+    m.querySelector('#inv-local').innerHTML = `<b>${esc(d.cod)}</b> · ${esc(d.nom)}${d.por_nivel ? `<br>Local con ${d.niveles.length} niveles: carga lo de cada nivel por separado; cada IOARR por nivel usa lo suyo.` : ''}`
+      + (d.sin_nivel ? '<br><b class="aviso-linea">Lo cargado antes no tiene nivel: vuelve a cargarlo por nivel (al guardar se reemplaza).</b>' : '')
+      + (d.por_nivel && d.sin_migracion_niveles ? '<br><b class="aviso-linea">Falta ejecutar supabase/migrations/018_ioarr_por_nivel.sql para guardar por nivel.</b>' : '');
+    // Un solo nivel: bienes / adquisicion (niv = ''). Varios niveles: un bloque por nivel (por_nivel)
+    const bloques = d.por_nivel ? d.niveles.map(x => ({ niv: x.nivel, titulo: x.nombre, censo: x.censo, f: v?.por_nivel?.[x.nivel] || {} }))
+      : [{ niv: '', titulo: null, censo: d.censo, f: { bienes: v?.bienes, adquisicion: v?.adquisicion } }];
+    m.querySelector('#inv-tbody').innerHTML = bloques.map(B => (B.titulo ? `<tr class="fila-nivel"><td colspan="8"><b>${esc(B.titulo)}</b></td></tr>` : '') + ITEMS.map(x => {
+      const c = B.censo[x.k], f = B.f.bienes?.[x.k], on = !!f, val = (k) => f ? f[k] : c[k];
+      const lbl = `${x.n}${B.titulo ? ' (' + B.titulo + ')' : ''}`;
+      const inp = k => `<input type="number" min="0" step="1" inputmode="numeric" data-inv-k="${x.k}" data-niv="${B.niv}" data-c="${k}" value="${val(k)}" ${on ? '' : 'disabled'} required aria-label="${lbl}: ${{ b: 'bueno', r: 'regular', m: 'malo' }[k]}">`;
       return `<tr><td><b>${x.n}</b></td><td class="num">${ent(c.req)}</td><td class="num">${ent(c.b)} / ${ent(c.r)} / ${ent(c.m)}${c.b + c.r + c.m < c.req ? '<br><span class="sub aviso-linea">faltan ' + ent(c.req - c.b - c.r - c.m) + '</span>' : ''}</td>
-        <td><label class="chk"><input type="checkbox" data-inv-chk="${x.k}" ${on ? 'checked' : ''}> Corregir</label></td><td>${inp('b')}</td><td>${inp('r')}</td><td>${inp('m')}</td>
-        <td><input type="number" min="1950" max="${new Date().getFullYear()}" step="1" inputmode="numeric" data-inv-anio="${x.k}" value="${v?.adquisicion?.[x.k] ?? ''}" placeholder="AAAA" aria-label="${x.n}: año de adquisición"></td></tr>`;
-    }).join('');
+        <td><label class="chk"><input type="checkbox" data-inv-chk="${x.k}" data-niv="${B.niv}" ${on ? 'checked' : ''}> Corregir</label></td><td>${inp('b')}</td><td>${inp('r')}</td><td>${inp('m')}</td>
+        <td><input type="number" min="1950" max="${new Date().getFullYear()}" step="1" inputmode="numeric" data-inv-anio="${x.k}" data-niv="${B.niv}" value="${B.f.adquisicion?.[x.k] ?? ''}" placeholder="AAAA" aria-label="${lbl}: año de adquisición"></td></tr>`;
+    }).join('')).join('');
     m.querySelector('#inv-fecha').value = v?.fecha_visita || '';
     m.querySelector('#inv-fecha').max = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Lima' });
     m.querySelector('#inv-resp').value = v?.responsable || '';
@@ -381,19 +429,24 @@ async function abrirInventario(cod) {
 
 async function guardarInventario(e) {
   e.preventDefault();
-  const m = modalInventario(), err = m.querySelector('#inv-err'), bienes = {};
+  const m = modalInventario(), err = m.querySelector('#inv-err');
+  // Por bloque: '' = el local (un solo nivel), 'P' = Primaria, etc.
+  const bloque = {};
+  const de = n => bloque[n] ??= { bienes: {}, adquisicion: {} };
   m.querySelectorAll('[data-inv-chk]:checked').forEach(chk => {
-    const k = chk.dataset.invChk, n = c => Number(m.querySelector(`[data-inv-k="${k}"][data-c="${c}"]`).value);
-    bienes[k] = { b: n('b'), r: n('r'), m: n('m') };
+    const k = chk.dataset.invChk, n = chk.dataset.niv, val = c => Number(m.querySelector(`[data-inv-k="${k}"][data-niv="${n}"][data-c="${c}"]`).value);
+    de(n).bienes[k] = { b: val('b'), r: val('r'), m: val('m') };
   });
-  const adquisicion = {};
-  m.querySelectorAll('[data-inv-anio]').forEach(i => { if (i.value) adquisicion[i.dataset.invAnio] = Number(i.value); });
-  if (!Object.keys(bienes).length && !Object.keys(adquisicion).length) { err.textContent = 'Corrige al menos un tipo de bien o indica un año de adquisición.'; err.hidden = false; return; }
+  m.querySelectorAll('[data-inv-anio]').forEach(i => { if (i.value) de(i.dataset.niv).adquisicion[i.dataset.invAnio] = Number(i.value); });
+  const { '': local = { bienes: {}, adquisicion: {} }, ...por_nivel } = bloque;
+  const vacio = x => !Object.keys(x.bienes).length && !Object.keys(x.adquisicion).length;
+  if (vacio(local) && Object.values(por_nivel).every(vacio)) { err.textContent = 'Corrige al menos un tipo de bien o indica un año de adquisición.'; err.hidden = false; return; }
+  const { bienes, adquisicion } = local;
   const btn = m.querySelector('#inv-ok'); btn.disabled = true;
   try {
-    datos = await ctx.api(`/proyectos/${ctx.proyecto.id}/costos/inventario/${encodeURIComponent(invCod)}`, { method: 'PUT', body: {
-      bienes, adquisicion, fecha_visita: m.querySelector('#inv-fecha').value, responsable: m.querySelector('#inv-resp').value, observacion: m.querySelector('#inv-obs').value } });
-    pintarPrecios(); pintarResultados();
+    datos = await ctx.api(`/proyectos/${ctx.proyecto.id}/costos/inventario/${encodeURIComponent(invCod)}${qn()}`, { method: 'PUT', body: {
+      bienes, adquisicion, por_nivel, fecha_visita: m.querySelector('#inv-fecha').value, responsable: m.querySelector('#inv-resp').value, observacion: m.querySelector('#inv-obs').value } });
+    pintarIoarr(); pintarPrecios(); pintarResultados();
     m.querySelector('#inv-quitar').hidden = false;
     const primera = !invGuardado; invGuardado = true; pintarSustento();
     ctx.toast(primera ? 'Inventario guardado. Ahora adjunta el acta y las fotos.' : 'Inventario verificado guardado.');
@@ -405,9 +458,9 @@ async function quitarInventario() {
   if (!confirm(`¿Quitar la corrección? El local vuelve a calcularse con el Censo Educativo${invArchivos.length ? ` y se borran sus ${invArchivos.length} archivos de sustento` : ''}.`)) return;
   const m = modalInventario();
   try {
-    datos = await ctx.api(`/proyectos/${ctx.proyecto.id}/costos/inventario/${encodeURIComponent(invCod)}`, { method: 'DELETE' });
+    datos = await ctx.api(`/proyectos/${ctx.proyecto.id}/costos/inventario/${encodeURIComponent(invCod)}${qn()}`, { method: 'DELETE' });
     m.classList.remove('open');
-    pintarPrecios(); pintarResultados();
+    pintarIoarr(); pintarPrecios(); pintarResultados();
     ctx.toast('Se usa otra vez el censo.');
   } catch (x) { ctx.toast('No se pudo quitar: ' + x.message); }
 }
@@ -494,5 +547,5 @@ async function borrarArchivo(id) {
 
 // Vuelve a pedir los costos (los avisos y el conteo de archivos por local)
 async function refrescarCostos() {
-  try { datos = await ctx.api(`/proyectos/${ctx.proyecto.id}/costos`); pintarResultados(); } catch { /* se verá al recargar */ }
+  try { datos = await ctx.api(`/proyectos/${ctx.proyecto.id}/costos${qn()}`); pintarIoarr(); pintarResultados(); } catch { /* se verá al recargar */ }
 }

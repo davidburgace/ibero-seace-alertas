@@ -50,12 +50,14 @@ import { generarExcelCostos } from './excel-costos.js';
 import { armarModelo, limpiarDatosDoc, ESTADOS_ACTIVO } from './documentos.js';
 import { generar07C, generarMemoria, generarVerificacion } from './word.js';
 import { leerDuplicidad, separarLocales, estadoDe, avisosDuplicidad } from './duplicidad.js';
+import { porNivel, inventarioNivel, inventarioUna, modoDe, sinNivel, nivelesDeLocal, vistaNivel, limpiarPorNivel, NOMBRE_NIVEL } from './niveles.js';
 
 const AVISO = 'Falta ejecutar supabase/migrations/012_ioarr_expediente_costos.sql en Supabase';
 const faltaMigracion = e => e?.code === 'PGRST204' || e?.code === 'PGRST205' || e?.code === '42P01' || /schema cache|does not exist/i.test(e?.message || '');
 const AVISO_INV = 'Falta ejecutar supabase/migrations/013_ioarr_expediente_inventario.sql en Supabase';
 const AVISO_ADQ = 'Falta ejecutar supabase/migrations/016_ioarr_inventario_antiguedad.sql en Supabase para guardar el año de adquisición';
 const AVISO_DOC = 'Falta ejecutar supabase/migrations/015_ioarr_expediente_documentos.sql en Supabase';
+const AVISO_NIV = 'Falta ejecutar supabase/migrations/018_ioarr_por_nivel.sql en Supabase para cargar el inventario por nivel';
 const AVISO_ARCH = 'Falta ejecutar supabase/migrations/014_ioarr_expediente_archivos.sql en Supabase';
 const URL_FIRMADA_SEG = 600;
 const subida = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_ARCHIVO, files: 1 } });
@@ -274,17 +276,45 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     const P = limpiarParams(p.criterios);
     const C = calc(D, P);
     const inv = Object.fromEntries(inventario.map(x => [x.cod_local, { ...x, archivos: archivos.filter(a => a.cod_local === x.cod_local).map(sinRuta) }]));
-    const R = costear({ D, C, list, precios, rubros: fila?.rubros, factores, uit: { anio: anioUit, valor: uit?.valor ?? null }, inventario: inv });
-    for (const l of R.locales) l.duplicidad = estadoDe(dup.mapa, l.cod);
-    R.excluidos = excluidos.map(i => ({ cod: D.locs[i][0], nom: D.locName[i], dist: D.dists[D.locs[i][1]][0], rep: C.L.repTot[i], ...estadoDe(dup.mapa, D.locs[i][0]) }));
-    R.avisos.push(...avisosDuplicidad(dup.mapa, codigos));
-    // Sustento: cada local corregido debería tener al menos el acta de la visita
-    const sinActa = R.locales.filter(l => l.verificado && !inv[l.cod].archivos.some(a => a.tipo === 'acta')).map(l => l.cod);
-    if (sinActa.length) R.avisos.push({ tipo: 'sustento', texto: `Falta adjuntar el acta de verificación de: ${sinActa.join(', ')}. Súbela en «Corregir inventario» del local, con las fotos y el inventario patrimonial.` });
-    return { R, P, detalle, anioUit, uit, D, C, list, inv, dup: dup.mapa, excluidos };
-  }
+    const comun = { precios, rubros: fila?.rubros, factores, uit: { anio: anioUit, valor: uit?.valor ?? null } };
 
-  const vista = ({ R, detalle, anioUit, uit, inv }) => ({
+    // Una IOARR (todos los niveles) y una por nivel: se calculan las dos para compararlas
+    const G = porNivel(D, P, list), Cn = Object.fromEntries(G.map(g => [g.nivel, g.C]));
+    const Runa = costear({ D, C, list, ...comun, inventario: inventarioUna(inv, D, Cn) });
+    const Rniv = costear({ ...comun, grupos: G.map(g => ({ clave: g.nivel, D: g.D, C: g.C, list: g.list, inventario: inventarioNivel(inv, D, g.nivel) })) });
+    const modo = modoDe(p);
+    // Sin locales no hay niveles: se muestra la IOARR única (vacía)
+    const ioarrs = modo === 'una' || !G.length
+      ? [{ nivel: null, nombre: 'Todos los niveles', R: Runa, D, C, list, inv: inventarioUna(inv, D, Cn) }]
+      : G.map(g => ({ nivel: g.nivel, nombre: g.nombre, R: Rniv.grupos[g.nivel], D: g.D, C: g.C, list: g.list, inv: inventarioNivel(inv, D, g.nivel) }));
+
+    // Locales de varios niveles con inventario cargado sin nivel (antes de la 018): no valen por nivel
+    const sinNiv = modo === 'por_nivel' ? Object.entries(inv).filter(([cod, f]) => { const i = D.locs.findIndex(l => l[0] === cod); return i >= 0 && list.includes(i) && sinNivel(f, nivelesDeLocal(D, i)); }).map(([c]) => c) : [];
+    for (const x of ioarrs) {
+      const R = x.R;
+      for (const l of R.locales) l.duplicidad = estadoDe(dup.mapa, l.cod);
+      const fuera = x.nivel ? excluidos.filter(i => x.D.locSvc[i].length) : excluidos;
+      R.excluidos = fuera.map(i => ({ cod: D.locs[i][0], nom: x.D.locName[i], dist: D.dists[D.locs[i][1]][0], rep: x.C.L.repTot[i], ...estadoDe(dup.mapa, D.locs[i][0]) }));
+      R.avisos.push(...avisosDuplicidad(dup.mapa, codigos));
+      // Sustento: cada local corregido debería tener al menos el acta de la visita
+      const sinActa = R.locales.filter(l => l.verificado && !inv[l.cod].archivos.some(a => a.tipo === 'acta')).map(l => l.cod);
+      if (sinActa.length) R.avisos.push({ tipo: 'sustento', texto: `Falta adjuntar el acta de verificación de: ${sinActa.join(', ')}. Súbela en «Corregir inventario» del local, con las fotos y el inventario patrimonial.` });
+      const sn = sinNiv.filter(c => R.locales.some(l => l.cod === c));
+      if (sn.length) R.avisos.push({ tipo: 'inventario', alerta: true, texto: `El inventario verificado de ${sn.length === 1 ? 'el local' : 'los locales'} ${sn.join(', ')} se cargó sin nivel y el local tiene varios niveles: en esta IOARR se usa el censo. Vuelve a cargarlo por nivel en «Corregir inventario».` });
+    }
+    const fila_ = R => ({ total: R.totales.total, rep: R.totales.rep, locales: R.totales.locales, est: R.totales.est, en_uit: R.uit.enUit, supera: R.uit.supera, registro: R.uit.valor == null ? null : R.uit.supera ? 'completo' : 'abreviado' });
+    const comparativo = {
+      modo, uit: Runa.uit.valor ? { anio: Runa.uit.anio, valor: Runa.uit.valor, limite: Runa.uit.limite } : null,
+      una: fila_(Runa), niveles: G.map(g => ({ nivel: g.nivel, nombre: g.nombre, ...fila_(Rniv.grupos[g.nivel]) })), suma: Rniv.totales.total
+    };
+    return { modo, ioarrs, comparativo, Runa, P, detalle, anioUit, uit, D, C, list, inv, dup: dup.mapa, excluidos };
+  }
+  // La IOARR pedida (?nivel=P); sin nivel o con una sola IOARR, la primera
+  const elegir = (A, nivel) => A.ioarrs.find(x => x.nivel === nivel) || A.ioarrs[0];
+
+  const vista = (A, nivel) => { const x = elegir(A, nivel); return vistaDe({ ...A, R: x.R }, x, A); };
+  const vistaDe = ({ R, detalle, anioUit, uit, inv }, x, A) => ({
+    modo: A.modo, nivel: x.nivel, nombre_ioarr: x.nombre, ioarrs: A.ioarrs.map(y => ({ nivel: y.nivel, nombre: y.nombre, total: y.R.totales.total })), comparativo: A.comparativo,
     anio_uit: anioUit, uit: uit || null, precios: detalle,
     rubros: R.rubros, partidas: R.partidas, totales: R.totales, distritos: R.distritos, uitCalc: R.uit, avisos: R.avisos, excluidos: R.excluidos,
     locales: R.locales.map(l => ({ cod: l.cod, nom: l.nom, dist: l.dist, prov: l.prov, rural: l.rural, est: l.est, zona: l.zona,
@@ -294,7 +324,7 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
   });
 
   api.get('/proyectos/:id/costos', responder(async (req, res) => {
-    res.json(vista(await armar(await proyecto(req))));
+    res.json(vista(await armar(await proyecto(req)), req.query.nivel));
   }));
 
   api.patch('/proyectos/:id/costos', responder(async (req, res) => {
@@ -306,7 +336,7 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
       fila.anio_uit = a;
     }
     ok(await supabase.from('ioarr_expediente_costos').upsert(fila, { onConflict: 'proyecto_id' }));
-    res.json(vista(await armar(p)));
+    res.json(vista(await armar(p), req.query.nivel));
   }));
 
   api.put('/proyectos/:id/costos/precios/:tipo', responder(async (req, res) => {
@@ -319,13 +349,13 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
       proyecto_id: p.id, tipo_bien: tipo, precio_id: c.id, precio_unitario: c.precio, descripcion: c.descripcion, fuente: c.fuente, fecha: c.fecha,
       actualizado_en: new Date().toISOString()
     }, { onConflict: 'proyecto_id,tipo_bien' }));
-    res.json(vista(await armar(p)));
+    res.json(vista(await armar(p), req.query.nivel));
   }));
 
   api.delete('/proyectos/:id/costos/precios/:tipo', responder(async (req, res) => {
     const p = await proyecto(req);
     ok(await supabase.from('ioarr_expediente_precios').delete().eq('proyecto_id', p.id).eq('tipo_bien', req.params.tipo));
-    res.json(vista(await armar(p)));
+    res.json(vista(await armar(p), req.query.nivel));
   }));
 
   // ─── Inventario verificado en campo ───────────────────────────────────────
@@ -339,40 +369,62 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     return { D, i };
   }
 
+  // Censo del local y, si tiene varios niveles, el de cada nivel (para cargar el inventario por nivel)
+  function censoConNiveles(D, P, i) {
+    const niveles = nivelesDeLocal(D, i), C = calc(D, P);
+    const porNiv = niveles.length > 1 ? Object.fromEntries(niveles.map(n => [n, censoLocal(calc(vistaNivel(D, n), P, n), i)])) : null;
+    return { niveles, censo: censoLocal(C, i), porNiv };
+  }
+
   api.get('/proyectos/:id/costos/inventario/:cod', responder(async (req, res) => {
     const p = await proyecto(req), cod = String(req.params.cod);
     const { D, i } = await localDelProyecto(p, cod);
-    const C = calc(D, limpiarParams(p.criterios));
+    const { niveles, censo, porNiv } = censoConNiveles(D, limpiarParams(p.criterios), i);
     const { data, error } = await supabase.from('ioarr_expediente_inventario').select('*').eq('proyecto_id', p.id).eq('cod_local', cod).maybeSingle();
     if (error && !faltaMigracion(error)) throw error;
     const archivos = data ? (await leerArchivos(p.id, cod)).map(sinRuta) : [];
-    res.json({ cod, nom: D.locName[i], censo: censoLocal(C, i), verificado: data || null, archivos, sin_migracion: !!error });
+    res.json({
+      cod, nom: D.locName[i], censo, verificado: data || null, archivos, sin_migracion: !!error,
+      // Con varios niveles, las cantidades y el año se cargan por nivel (migración 018)
+      niveles: niveles.map(n => ({ nivel: n, nombre: NOMBRE_NIVEL[n], censo: porNiv?.[n] || censo })),
+      por_nivel: niveles.length > 1, sin_nivel: !!data && sinNivel(data, niveles), sin_migracion_niveles: !!data && !('por_nivel' in data)
+    });
   }));
 
   api.put('/proyectos/:id/costos/inventario/:cod', responder(async (req, res) => {
     const p = await proyecto(req), cod = String(req.params.cod), b = req.body || {};
     const { D, i } = await localDelProyecto(p, cod);
-    const bienes = limpiarInventario(b.bienes), adquisicion = limpiarAdquisicion(b.adquisicion, anioLima());
-    if (!Object.keys(bienes).length && !Object.keys(adquisicion).length) return res.status(400).json({ error: 'Corrige al menos un tipo de bien o indica un año de adquisición' });
+    const P = limpiarParams(p.criterios), { niveles, censo, porNiv } = censoConNiveles(D, P, i);
+    // Un solo nivel: bienes y adquisicion. Varios niveles: por nivel (lo cargado sin nivel se reemplaza)
+    const varios = niveles.length > 1;
+    const porNivelLimpio = varios ? limpiarPorNivel(b.por_nivel, niveles, limpiarInventario, limpiarAdquisicion, anioLima()) : {};
+    const bienes = varios ? {} : limpiarInventario(b.bienes), adquisicion = varios ? {} : limpiarAdquisicion(b.adquisicion, anioLima());
+    if (!Object.keys(bienes).length && !Object.keys(adquisicion).length && !Object.keys(porNivelLimpio).length) return res.status(400).json({ error: 'Corrige al menos un tipo de bien o indica un año de adquisición' });
     if (!fechaValida(b.fecha_visita)) return res.status(400).json({ error: 'Indica la fecha de la visita' });
     if (b.fecha_visita > hoyLima()) return res.status(400).json({ error: 'La fecha de la visita no puede ser futura' });
     const observacion = texto(b.observacion, 1000);
     if (!observacion) return res.status(400).json({ error: 'Describe el sustento de la visita (acta, fotos, quién la hizo)' });
-    const C = calc(D, limpiarParams(p.criterios));
     const fila = {
-      proyecto_id: p.id, cod_local: cod, bienes, adquisicion, censo: censoLocal(C, i), fecha_visita: b.fecha_visita,
+      proyecto_id: p.id, cod_local: cod, bienes, adquisicion, por_nivel: porNivelLimpio,
+      censo: porNiv ? { ...censo, _niveles: porNiv } : censo, fecha_visita: b.fecha_visita,
       responsable: texto(b.responsable, 200) || null, observacion, creado_por: req.usuario.id, actualizado_en: new Date().toISOString()
     };
     const guardar = f => supabase.from('ioarr_expediente_inventario').upsert(f, { onConflict: 'proyecto_id,cod_local' });
     let { error } = await guardar(fila);
-    // Sin la 016 no existe la columna adquisicion: si no se cargó ningún año, se guarda sin ella
+    // Sin la 018 no existe por_nivel; sin la 016, adquisicion. Si no se usan, se guarda sin ellas
+    if (error && /por_nivel/.test(error.message || '')) {
+      if (varios) return res.status(503).json({ error: AVISO_NIV });
+      const { por_nivel: _, ...sinNiv } = fila;
+      ({ error } = await guardar(sinNiv));
+      if (!error) delete fila.por_nivel;
+    }
     if (error && /adquisicion/.test(error.message || '')) {
       if (Object.keys(adquisicion).length) return res.status(503).json({ error: AVISO_ADQ });
-      const { adquisicion: _, ...sinAdq } = fila;
-      ({ error } = await guardar(sinAdq));
+      const { adquisicion: _, por_nivel: __, ...sinAdq } = fila;
+      ({ error } = await guardar('por_nivel' in fila ? { ...sinAdq, por_nivel: fila.por_nivel } : sinAdq));
     }
     if (error) { if (faltaMigracion(error)) return res.status(503).json({ error: AVISO_INV }); throw error; }
-    res.json(vista(await armar(p)));
+    res.json(vista(await armar(p), req.query.nivel));
   }));
 
   api.delete('/proyectos/:id/costos/inventario/:cod', responder(async (req, res) => {
@@ -381,7 +433,7 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     if (archivos.length) await borrarDelBucket(archivos.map(a => a.ruta));
     const { error } = await supabase.from('ioarr_expediente_inventario').delete().eq('proyecto_id', p.id).eq('cod_local', cod);
     if (error && !faltaMigracion(error)) throw error;
-    res.json(vista(await armar(p)));
+    res.json(vista(await armar(p), req.query.nivel));
   }));
 
   // ─── Archivos de sustento ─────────────────────────────────────────────────
@@ -450,13 +502,29 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     if (error) { if (faltaMigracion(error)) return { datos: limpiarDatosDoc({}), sinMigracion: true }; throw error; }
     return { datos: limpiarDatosDoc(data?.datos || {}), sinMigracion: false };
   }
-  async function modelo(p) {
+  // Modelo de los documentos de una IOARR. Con una por nivel, cada una tiene su nombre y su CUI
+  // (datos.por_nivel), y el vínculo con Radar IOARR vale para la IOARR que tiene ese CUI.
+  function modeloDe(A, x, datos, p) {
+    const porNiv = A.modo === 'por_nivel';
+    const dn = porNiv ? datos.por_nivel?.[x.nivel] || {} : null;
+    const datosX = porNiv ? { ...datos, nombre_inversion: dn.nombre_inversion || '', cui: dn.cui || '' } : datos;
+    const proyectoX = porNiv ? { ...p, nombre: `${p.nombre} — IOARR ${x.nombre}`, ioarr: p.ioarr && dn.cui && dn.cui === p.ioarr.cui ? p.ioarr : null } : p;
+    const M = armarModelo({ R: x.R, D: x.D, list: x.list, proyecto: proyectoX, datos: datosX, precios: A.detalle, inv: A.inv, fecha: hoyLima() });
+    return Object.assign(M, { nivel: x.nivel, nombreIoarr: x.nombre });
+  }
+  async function modelo(p, nivel) {
     const [A, { datos, sinMigracion }] = await Promise.all([armar(p), leerDatosDoc(p)]);
-    const M = armarModelo({ R: A.R, D: A.D, list: A.list, proyecto: p, datos, precios: A.detalle, inv: A.inv, fecha: hoyLima() });
-    return { M, datos, sinMigracion, A };
+    const x = elegir(A, nivel);
+    return { M: modeloDe(A, x, datos, p), datos, sinMigracion, A, x };
+  }
+  // Todas las IOARR del proyecto (ZIP y Radar)
+  async function modelos(p) {
+    const [A, { datos }] = await Promise.all([armar(p), leerDatosDoc(p)]);
+    return { A, lista: A.ioarrs.map(x => ({ x, M: modeloDe(A, x, datos, p) })) };
   }
   // Lo que necesita el formulario: datos guardados, lo que se propone y lo que falta
-  const vistaDoc = ({ M, datos, sinMigracion }, p) => ({
+  const vistaDoc = ({ M, datos, sinMigracion, A, x }, p) => ({
+    modo: A.modo, nivel: x.nivel, nombre_ioarr: x.nombre, ioarrs: A.ioarrs.map(y => ({ nivel: y.nivel, nombre: y.nombre })), comparativo: A.comparativo,
     datos, sin_migracion: sinMigracion, estados: ESTADOS_ACTIVO, verificacion: M.verificacion, ioarr: p?.ioarr || null,
     resumen: {
       nombre: M.nombre, nombre_sugerido: M.nombreSugerido, cui: M.cui, masiva: M.masiva, registro: M.registro,
@@ -471,7 +539,7 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
 
   api.get('/proyectos/:id/documentos', responder(async (req, res) => {
     const p = await proyecto(req);
-    res.json(vistaDoc(await modelo(p), p));
+    res.json(vistaDoc(await modelo(p, req.query.nivel), p));
   }));
 
   api.patch('/proyectos/:id/documentos', responder(async (req, res) => {
@@ -481,9 +549,10 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     const datos = limpiarDatosDoc({ ...actual, ...(req.body?.datos || {}) });
     const { error } = await supabase.from('ioarr_expediente_documentos').upsert({ proyecto_id: p.id, datos, actualizado_en: new Date().toISOString() }, { onConflict: 'proyecto_id' });
     if (error) { if (faltaMigracion(error)) return res.status(503).json({ error: AVISO_DOC }); throw error; }
-    res.json(vistaDoc(await modelo(p), p));
+    res.json(vistaDoc(await modelo(p, req.query.nivel), p));
   }));
 
+  const sufijo = M => M.nivel ? '_' + slug(M.nombreIoarr) : '';
   const WORD = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
   const enviarWord = (res, buffer, archivo) => res.set({
     'Content-Type': WORD, 'Cache-Control': 'no-store',
@@ -491,32 +560,32 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
   }).send(buffer);
 
   api.get('/proyectos/:id/documentos/formato-07c', responder(async (req, res) => {
-    const p = await proyecto(req), { M } = await modelo(p);
+    const p = await proyecto(req), { M } = await modelo(p, req.query.nivel);
     if (!M.ups.length) return res.status(400).json({ error: 'Ningún local del proyecto tiene bienes a reponer' });
-    enviarWord(res, await generar07C(M), `Formato_07C_borrador_${slug(p.nombre)}_${M.fecha}.docx`);
+    enviarWord(res, await generar07C(M), `Formato_07C_borrador_${slug(p.nombre)}${sufijo(M)}_${M.fecha}.docx`);
   }));
 
   api.get('/proyectos/:id/documentos/memoria', responder(async (req, res) => {
-    const p = await proyecto(req), { M } = await modelo(p);
+    const p = await proyecto(req), { M } = await modelo(p, req.query.nivel);
     if (!M.ups.length) return res.status(400).json({ error: 'Ningún local del proyecto tiene bienes a reponer' });
-    enviarWord(res, await generarMemoria(M), `Memoria_descriptiva_${slug(p.nombre)}_${M.fecha}.docx`);
+    enviarWord(res, await generarMemoria(M), `Memoria_descriptiva_${slug(p.nombre)}${sufijo(M)}_${M.fecha}.docx`);
   }));
 
   api.get('/proyectos/:id/documentos/verificacion', responder(async (req, res) => {
-    const p = await proyecto(req), { M } = await modelo(p);
+    const p = await proyecto(req), { M } = await modelo(p, req.query.nivel);
     if (!M.ups.length) return res.status(400).json({ error: 'Ningún local del proyecto tiene bienes a reponer' });
-    enviarWord(res, await generarVerificacion(M), `Lista_verificacion_${slug(p.nombre)}_${M.fecha}.docx`);
+    enviarWord(res, await generarVerificacion(M), `Lista_verificacion_${slug(p.nombre)}${sufijo(M)}_${M.fecha}.docx`);
   }));
 
   api.get('/proyectos/:id/costos/excel', responder(async (req, res) => {
-    const p = await proyecto(req), A = await armar(p);
-    if (!A.R.locales.length) return res.status(400).json({ error: 'El proyecto no tiene locales seleccionados' });
+    const p = await proyecto(req), A = await armar(p), x = elegir(A, req.query.nivel);
+    if (!x?.R.locales.length) return res.status(400).json({ error: 'El proyecto no tiene locales seleccionados' });
     const fecha = hoyLima();
-    const buffer = await generarExcelCostos(A.R, {
-      proyecto: p.nombre, region: p.region, fecha, ioarr: p.ioarr, fuente: (await leerIndice()).fuente,
-      criterios: textoCriterios(A.P), precios: A.detalle, inventario: A.inv
+    const buffer = await generarExcelCostos(x.R, {
+      proyecto: x.nivel ? `${p.nombre} — IOARR ${x.nombre}` : p.nombre, region: p.region, fecha, ioarr: p.ioarr, fuente: (await leerIndice()).fuente,
+      criterios: textoCriterios(A.P), precios: A.detalle, inventario: x.inv
     });
-    const archivo = `Costos_IOARR_${slug(p.nombre)}_${fecha}.xlsx`;
+    const archivo = `Costos_IOARR_${slug(p.nombre)}${x.nivel ? '_' + slug(x.nombre) : ''}_${fecha}.xlsx`;
     res.set({
       'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="${archivo}"; filename*=UTF-8''${encodeURIComponent(archivo)}`,
@@ -528,18 +597,35 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
   // Se arma en flujo (archiver): los archivos del bucket se agregan de a uno, así
   // la memoria no crece con el número de fotos.
   api.get('/proyectos/:id/expediente-zip', responder(async (req, res) => {
-    const p = await proyecto(req), { M, A } = await modelo(p);
-    if (!M.ups.length) return res.status(400).json({ error: 'Ningún local del proyecto tiene bienes a reponer' });
-    const fecha = M.fecha, base = `Expediente_IOARR_${slug(p.nombre)}_${fecha}`;
-    const meta = { proyecto: p.nombre, region: p.region, fecha, ioarr: p.ioarr, fuente: (await leerIndice()).fuente };
+    const p = await proyecto(req), { A, lista: todas } = await modelos(p);
+    // Solo las IOARR con algo que reponer
+    const lista = todas.filter(y => y.M.ups.length);
+    if (!lista.length) return res.status(400).json({ error: 'Ningún local del proyecto tiene bienes a reponer' });
+    const fecha = lista[0].M.fecha, base = `Expediente_IOARR_${slug(p.nombre)}_${fecha}`;
+    const meta = { region: p.region, fecha, ioarr: p.ioarr, fuente: (await leerIndice()).fuente };
+    const porNiv = A.modo === 'por_nivel';
     // Todo lo que puede fallar se genera antes de empezar a enviar
-    const [f07c, memoria, verificacion, costos, { buffer: seleccion }, archivos] = await Promise.all([
-      generar07C(M), generarMemoria(M), generarVerificacion(M),
-      generarExcelCostos(A.R, { ...meta, criterios: textoCriterios(A.P), precios: A.detalle, inventario: A.inv }),
-      generarExcel(A.D, A.C, A.P, A.list, { ...meta, duplicidad: A.dup, excluidos: A.excluidos }),
+    const [piezas, archivos] = await Promise.all([
+      Promise.all(lista.map(async ({ x, M }, j) => {
+        const carpeta = porNiv ? `${String(j + 1).padStart(2, '0')}_IOARR_${nombreSeguro(x.nombre)}/` : '';
+        const m = { ...meta, proyecto: porNiv ? `${p.nombre} — IOARR ${x.nombre}` : p.nombre };
+        const fuera = x.nivel ? A.excluidos.filter(i => x.D.locSvc[i].length) : A.excluidos;
+        const [f07c, memoria, verificacion, costos, { buffer: seleccion }] = await Promise.all([
+          generar07C(M), generarMemoria(M), generarVerificacion(M),
+          generarExcelCostos(x.R, { ...m, criterios: textoCriterios(A.P), precios: A.detalle, inventario: x.inv }),
+          generarExcel(x.D, x.C, A.P, x.list, { ...m, duplicidad: A.dup, excluidos: fuera })
+        ]);
+        return [
+          { nombre: carpeta + '01_Formato_07C_borrador.docx', contenido: f07c, descripcion: 'borrador del Formato 07-C' },
+          { nombre: carpeta + '02_Memoria_descriptiva.docx', contenido: memoria },
+          { nombre: carpeta + '03_Lista_de_verificacion.docx', contenido: verificacion },
+          { nombre: carpeta + '04_Estructura_de_costos.xlsx', contenido: costos, descripcion: 'con fórmulas' },
+          { nombre: carpeta + '05_Seleccion_de_locales_y_metrado.xlsx', contenido: seleccion, descripcion: 'metrado por aula del Selector' }
+        ];
+      })).then(xs => xs.flat()),
       leerArchivos(p.id)
     ]);
-    const nombreLocal = Object.fromEntries(A.R.locales.map(l => [l.cod, l.nom]));
+    const nombreLocal = Object.fromEntries(A.Runa.locales.map(l => [l.cod, l.nom]));
     res.set({
       'Content-Type': 'application/zip', 'Cache-Control': 'no-store',
       'Content-Disposition': `attachment; filename="${base}.zip"; filename*=UTF-8''${encodeURIComponent(base + '.zip')}`
@@ -550,32 +636,34 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
       return Buffer.from(await data.arrayBuffer());
     };
     try {
-      await escribirZip(res, {
-        base, archivos, nombreLocal, descargar, M, autor: req.usuario.email, proyecto: p.nombre,
-        piezas: [
-          { nombre: '01_Formato_07C_borrador.docx', contenido: f07c, descripcion: 'borrador del Formato 07-C' },
-          { nombre: '02_Memoria_descriptiva.docx', contenido: memoria },
-          { nombre: '03_Lista_de_verificacion.docx', contenido: verificacion },
-          { nombre: '04_Estructura_de_costos.xlsx', contenido: costos, descripcion: 'con fórmulas' },
-          { nombre: '05_Seleccion_de_locales_y_metrado.xlsx', contenido: seleccion, descripcion: 'metrado por aula del Selector' }
-        ]
-      });
+      await escribirZip(res, { base, archivos, nombreLocal, descargar, modelos: lista.map(y => y.M), autor: req.usuario.email, proyecto: p.nombre, piezas });
     } catch (e) { console.error('[EXPEDIENTE][ZIP]', e.message); res.destroy(e); return; }
-    const V = M.verificacion;
 
     // Hito en la línea de tiempo del CUI vinculado en Radar IOARR (no bloquea la descarga)
     if (p.ioarr?.id) {
-      const detalle = `Expediente exportado (ZIP) desde Selector IOARR «${p.nombre}»: S/ ${M.F.total.toLocaleString('es-PE', { minimumFractionDigits: 2 })}, registro ${M.registro}, verificación ${V.hechos}/${V.total} — ${req.usuario.email}`;
+      const S2 = n => n.toLocaleString('es-PE', { minimumFractionDigits: 2 });
+      const r = resumenDe(lista.map(y => y.M), A.modo);
+      const detalle = `Expediente exportado (ZIP) desde Selector IOARR «${p.nombre}»: S/ ${S2(r.total)}, ${porNiv ? `${lista.length} IOARR por nivel (${lista.map(y => `${y.x.nombre} ${y.M.registro}`).join(', ')})` : 'registro ' + r.registro}, verificación ${r.hechos}/${r.puntos} — ${req.usuario.email}`;
       supabase.from('ioarr_eventos').insert({ proyecto_id: p.ioarr.id, tipo: 'hito', detalle })
         .then(({ error }) => { if (error) console.warn('[EXPEDIENTE] No se pudo registrar el hito:', error.message); });
     }
   }));
 
-  // Avance del expediente de un proyecto, para Radar IOARR (ficha y kanban)
+  // Avance del expediente de un proyecto, para Radar IOARR (ficha y kanban).
+  // Con una IOARR por nivel, suma las IOARR y lista cada una en ioarrs.
+  function resumenDe(Ms, modo) {
+    const sum = f => Ms.reduce((a, M) => a + f(M), 0);
+    const una = Ms.length === 1 && modo !== 'por_nivel';
+    return {
+      total: sum(M => M.F.total), registro: una ? Ms[0].registro : 'por nivel', masiva: Ms.some(M => M.masiva), ups: sum(M => M.ups.length),
+      hechos: sum(M => M.verificacion.hechos), puntos: sum(M => M.verificacion.total), bloqueos: sum(M => M.verificacion.bloqueos), pendientes: sum(M => M.faltan.length),
+      modo: modo || 'una', ioarrs: Ms.map(M => ({ nivel: M.nivel, nombre: M.nombreIoarr, total: M.F.total, registro: M.registro, ups: M.ups.length }))
+    };
+  }
   api.resumen = async (p) => {
-    const { M } = await modelo(p);
-    const V = M.verificacion;
-    return { total: M.F.total, registro: M.registro, masiva: M.masiva, ups: M.ups.length, hechos: V.hechos, puntos: V.total, bloqueos: V.bloqueos, pendientes: M.faltan.length };
+    const { A, lista } = await modelos(p);
+    const conUps = lista.filter(y => y.M.ups.length).map(y => y.M);
+    return resumenDe(conUps.length ? conUps : [lista[0].M], A.modo);
   };
 
   return api;

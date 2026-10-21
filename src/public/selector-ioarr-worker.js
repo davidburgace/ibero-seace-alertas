@@ -1,7 +1,7 @@
 // Selector IOARR — Web Worker: guarda los datos de la región, calcula y filtra.
 // La página solo recibe lo que pinta (una página de la tabla, un detalle, un resumen),
 // así Lima (32 mil aulas) no congela la pantalla.
-import { ITEMS, NIVN, NIVS, NIVB, DEF, prep, calc, totals, filtrar, lv, norm, limpiarParams } from '/selector-ioarr/calculo.js';
+import { ITEMS, NIVN, NIVS, NIVB, DEF, prep, calc, totals, filtrar, lv, norm, limpiarParams, totalesPorNivel } from '/selector-ioarr/calculo.js';
 
 let D = null, C = null, P = { ...DEF }, sel = new Set(), view = [], codIdx = new Map();
 let excl = new Set();   // locales excluidos por otra inversión vigente o reciente: siguen seleccionados, fuera de los totales
@@ -70,7 +70,7 @@ const acciones = {
       return { i, cod: l[0], excl: excl.has(l[0]), nom: D.locName[i], dist: D.dists[l[1]][0], lat: l[6], lon: l[7], est: D.locEst[i], aul: D.locAul[i].length, rep: C.L.repTot[i], fal: C.L.falTot[i],
         t: [0, 1, 2, 3, 4].map(t => lv(C, 'rep', t, i)) };
     });
-    return { ...base, tipos: ITEMS.map((x, t) => ({ ...x, ...T.t[t] })), distritos, locales };
+    return { ...base, tipos: ITEMS.map((x, t) => ({ ...x, ...T.t[t] })), distritos, locales, niveles: totalesPorNivel(D, C, list) };
   }
 };
 
