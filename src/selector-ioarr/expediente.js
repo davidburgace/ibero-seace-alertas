@@ -27,6 +27,11 @@
 //     GET    /proyectos/:id/costos/archivos/:archId/url      URL firmada de 10 minutos
 //     DELETE /proyectos/:id/costos/archivos/:archId
 //     GET    /proyectos/:id/costos/excel
+//   Documentos (etapa 2, migración 015)
+//     GET    /proyectos/:id/documentos              datos cargados + resumen + pendientes
+//     PATCH  /proyectos/:id/documentos              { datos }
+//     GET    /proyectos/:id/documentos/formato-07c  Word del borrador del Formato 07-C
+//     GET    /proyectos/:id/documentos/memoria      Word de la memoria descriptiva
 // ============================================================================
 
 import express from 'express';
@@ -36,10 +41,13 @@ import { supabase } from '../ioarr/db.js';
 import { calc, limpiarParams, CRIT } from './calculo.js';
 import { costear, limpiarRubros, limpiarInventario, censoLocal, TIPOS, FUENTES_PRECIO } from './costos.js';
 import { generarExcelCostos } from './excel-costos.js';
+import { armarModelo, limpiarDatosDoc, ESTADOS_ACTIVO } from './documentos.js';
+import { generar07C, generarMemoria } from './word.js';
 
 const AVISO = 'Falta ejecutar supabase/migrations/012_ioarr_expediente_costos.sql en Supabase';
 const faltaMigracion = e => e?.code === 'PGRST204' || e?.code === 'PGRST205' || e?.code === '42P01' || /schema cache|does not exist/i.test(e?.message || '');
 const AVISO_INV = 'Falta ejecutar supabase/migrations/013_ioarr_expediente_inventario.sql en Supabase';
+const AVISO_DOC = 'Falta ejecutar supabase/migrations/015_ioarr_expediente_documentos.sql en Supabase';
 const AVISO_ARCH = 'Falta ejecutar supabase/migrations/014_ioarr_expediente_archivos.sql en Supabase';
 const URL_FIRMADA_SEG = 600;
 const subida = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_ARCHIVO, files: 1 } });
@@ -414,6 +422,61 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     ok(await supabase.from('ioarr_expediente_archivos').delete().eq('id', a.id));
     await borrarDelBucket([a.ruta]);
     res.json({ ok: true });
+  }));
+
+  // ─── Documentos: Formato 07-C y memoria descriptiva ───────────────────────
+  async function leerDatosDoc(p) {
+    const { data, error } = await supabase.from('ioarr_expediente_documentos').select('datos').eq('proyecto_id', p.id).maybeSingle();
+    if (error) { if (faltaMigracion(error)) return { datos: limpiarDatosDoc({}), sinMigracion: true }; throw error; }
+    return { datos: limpiarDatosDoc(data?.datos || {}), sinMigracion: false };
+  }
+  async function modelo(p) {
+    const [A, { datos, sinMigracion }] = await Promise.all([armar(p), leerDatosDoc(p)]);
+    const M = armarModelo({ R: A.R, D: A.D, list: A.list, proyecto: p, datos, precios: A.detalle, inv: A.inv, fecha: hoyLima(), regPct: A.P.regPct });
+    return { M, datos, sinMigracion };
+  }
+  // Lo que necesita el formulario: datos guardados, lo que se propone y lo que falta
+  const vistaDoc = ({ M, datos, sinMigracion }) => ({
+    datos, sin_migracion: sinMigracion, estados: ESTADOS_ACTIVO,
+    resumen: {
+      nombre: M.nombre, nombre_sugerido: M.nombreSugerido, cui: M.cui, masiva: M.masiva, registro: M.registro,
+      total: M.F.total, en_uit: M.uit.enUit, uit: M.uit.valor ? { anio: M.uit.anio, valor: M.uit.valor } : null,
+      ups: M.ups.length, sin_rep: M.sinRep.map(x => x.cod), ugels: M.ugels, mantenimiento_sugerido: M.D.mantenimiento,
+      tipos: M.E.activos.map(a => ({ k: a.k, nombre: a.nombre, cantidad: a.cantidad, descripcion: a.descripcion })),
+      alineamiento: { servicio: M.A.servicio, tipologia: M.A.tipologia, indicadores: M.A.indicadores },
+      inicio: M.F.inicio, fin: M.F.fin, condiciones: M.E.condiciones
+    },
+    faltan: M.faltan
+  });
+
+  api.get('/proyectos/:id/documentos', responder(async (req, res) => {
+    res.json(vistaDoc(await modelo(await proyecto(req))));
+  }));
+
+  api.patch('/proyectos/:id/documentos', responder(async (req, res) => {
+    const p = await proyecto(req);
+    const datos = limpiarDatosDoc(req.body?.datos || {});
+    const { error } = await supabase.from('ioarr_expediente_documentos').upsert({ proyecto_id: p.id, datos, actualizado_en: new Date().toISOString() }, { onConflict: 'proyecto_id' });
+    if (error) { if (faltaMigracion(error)) return res.status(503).json({ error: AVISO_DOC }); throw error; }
+    res.json(vistaDoc(await modelo(p)));
+  }));
+
+  const WORD = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  const enviarWord = (res, buffer, archivo) => res.set({
+    'Content-Type': WORD, 'Cache-Control': 'no-store',
+    'Content-Disposition': `attachment; filename="${archivo}"; filename*=UTF-8''${encodeURIComponent(archivo)}`
+  }).send(buffer);
+
+  api.get('/proyectos/:id/documentos/formato-07c', responder(async (req, res) => {
+    const p = await proyecto(req), { M } = await modelo(p);
+    if (!M.ups.length) return res.status(400).json({ error: 'Ningún local del proyecto tiene bienes a reponer' });
+    enviarWord(res, await generar07C(M), `Formato_07C_borrador_${slug(p.nombre)}_${M.fecha}.docx`);
+  }));
+
+  api.get('/proyectos/:id/documentos/memoria', responder(async (req, res) => {
+    const p = await proyecto(req), { M } = await modelo(p);
+    if (!M.ups.length) return res.status(400).json({ error: 'Ningún local del proyecto tiene bienes a reponer' });
+    enviarWord(res, await generarMemoria(M), `Memoria_descriptiva_${slug(p.nombre)}_${M.fecha}.docx`);
   }));
 
   api.get('/proyectos/:id/costos/excel', responder(async (req, res) => {

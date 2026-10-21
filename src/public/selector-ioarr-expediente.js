@@ -3,6 +3,7 @@
 // arma el Excel: así la pantalla y el Excel dan lo mismo.
 import { RUBROS, BASES, FUENTES_PRECIO, LIMITE_UIT, TIPOS_ARCHIVO } from '/selector-ioarr/costos.js';
 import { ITEMS } from '/selector-ioarr/calculo.js';
+import { renderDocumentos, enlazarDocumentos } from '/selector-ioarr-documentos.js';
 
 const NF = new Intl.NumberFormat('es-PE');
 const NS = new Intl.NumberFormat('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -17,6 +18,7 @@ let ctx = null;        // { el, proyecto, api, toast, guardarYa }
 let datos = null;      // respuesta de /costos
 let catalogo = null;   // precios del catálogo por tipo
 let pagLoc = 0, tGuardar = null, version = 0, filtroLoc = '';
+let vistaExp = 'costos';   // sub-pestaña: 'costos' | 'docs'
 const norm = t => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 
 export async function renderExpediente(c) {
@@ -49,6 +51,12 @@ function agrupar(precios) {
 // ─── Pintado ─────────────────────────────────────────────────────────────────
 function pintar() {
   ctx.el.innerHTML = `
+    <div class="subtabs" role="tablist" aria-label="Expediente">
+      <button type="button" role="tab" data-exp-vista="costos" aria-selected="${vistaExp === 'costos'}">Costos</button>
+      <button type="button" role="tab" data-exp-vista="docs" aria-selected="${vistaExp === 'docs'}">Documentos: Formato 07-C y memoria</button>
+    </div>
+    <div id="exp-v-docs" ${vistaExp === 'docs' ? '' : 'hidden'}></div>
+    <div id="exp-v-costos" ${vistaExp === 'costos' ? '' : 'hidden'}>
     <div id="exp-kpis"></div>
     <div id="exp-avisos"></div>
     <div class="exportar">
@@ -59,8 +67,10 @@ function pintar() {
       <div class="panel" id="exp-precios"></div>
       <div class="panel" id="exp-rubros"></div>
     </div>
-    <div id="exp-resultados"></div>`;
+    <div id="exp-resultados"></div>
+    </div>`;
   pintarPrecios(); pintarRubros(); pintarResultados();
+  if (vistaExp === 'docs') abrirDocumentos();
 }
 
 function pintarKpis() {
@@ -172,6 +182,18 @@ function pintarResultados() {
       ${pags > 1 ? `<div class="paginacion pad-pag"><span class="sub">${ent(desde + 1)}–${ent(Math.min(locs.length, desde + PAGE))} de ${ent(locs.length)}</span><div class="pg-btns"><button class="btn btn-ghost btn-sm" data-exp-pag="-1" type="button" ${pagLoc === 0 ? 'disabled' : ''}>Anterior</button><span class="mono">${pagLoc + 1} / ${pags}</span><button class="btn btn-ghost btn-sm" data-exp-pag="1" type="button" ${pagLoc >= pags - 1 ? 'disabled' : ''}>Siguiente</button></div></div>` : ''}</div>`;
 }
 
+// Documentos (etapa 2): se recalculan al abrir, así toman los últimos costos e inventario
+function abrirDocumentos() {
+  return renderDocumentos({ ...ctx, el: document.getElementById('exp-v-docs') });
+}
+function cambiarVista(v) {
+  vistaExp = v;
+  ctx.el.querySelectorAll('[data-exp-vista]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.expVista === v)));
+  document.getElementById('exp-v-costos').hidden = v !== 'costos';
+  document.getElementById('exp-v-docs').hidden = v !== 'docs';
+  if (v === 'docs') abrirDocumentos();
+}
+
 // ─── Cambios ────────────────────────────────────────────────────────────────
 function estado(t, cls = '') { const s = document.getElementById('exp-guardado'); if (s) { s.className = 'guardado ' + cls; s.textContent = t; } }
 
@@ -244,7 +266,10 @@ export function enlazarExpediente(el, abrirNuevo) {
     if (c === 'modo' || c === 'base') { clearTimeout(tGuardar); guardar({ rubros: leerRubros() }); }
     if (e.target.dataset.precio) cambiarPrecio(e.target.dataset.precio, e.target.value || null);
   });
+  enlazarDocumentos(el);
   el.addEventListener('click', e => {
+    const sv = e.target.closest('[data-exp-vista]');
+    if (sv) cambiarVista(sv.dataset.expVista);
     if (e.target.id === 'exp-excel') exportar(e.target);
     if (e.target.closest('[data-exp-nuevo]')) abrirNuevo();
     const pg = e.target.closest('[data-exp-pag]');
