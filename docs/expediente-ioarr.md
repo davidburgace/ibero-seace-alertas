@@ -2,8 +2,8 @@
 
 Arma, sobre un proyecto del Selector IOARR, la documentación de una IOARR de reposición de mobiliario escolar. Se entrega por etapas:
 
-1. **Costos** (esta etapa): catálogo de precios, rubros, factores por zona, estructura de costos, Excel con fórmulas y aviso de 75 UIT.
-2. Documentos: Formato 07-C y memoria descriptiva en Word.
+1. **Costos** (lista): catálogo de precios, rubros, factores por zona, estructura de costos, Excel con fórmulas y aviso de 75 UIT.
+2. **Documentos** (lista): borrador del Formato 07-C y memoria descriptiva en Word.
 3. Lista de verificación, archivos de sustento y antigüedad del mobiliario.
 4. Vínculos con el kanban OxI y Radar IOARR, y ZIP del expediente.
 
@@ -107,3 +107,47 @@ Hojas: **Resumen**, **Parámetros**, **Partidas**, **Metrado y costos por local*
 Pruebas automáticas: `npm test` (`test/expediente-costos.test.js`). Si LibreOffice está instalado, una prueba recalcula el Excel, comprueba que el total coincide con el cálculo y que cambia al editar un precio y la UIT.
 
 Con los criterios por defecto, el caso de control de Moquegua («mariscal», 11 locales) da 1,729 bienes en el metrado: **198 de reposición** (Malo) y **1,531 de faltante**.
+
+## Etapa 2: documentos (Formato 07-C y memoria descriptiva)
+
+### Migración
+
+Ejecuta `supabase/migrations/015_ioarr_expediente_documentos.sql`, después de la 014. Crea `ioarr_expediente_documentos`: los datos que carga el usuario, uno por proyecto, con RLS del dueño.
+
+### Pantalla
+
+**Selector IOARR → Expediente → Documentos.** Muestra:
+
+- Un resumen: total, si la IOARR es individual o masiva, y si el registro es abreviado o completo.
+- Los datos pendientes y las condiciones de la reposición.
+- El formulario, que se guarda solo.
+- Dos botones: **Formato 07-C (Word)** y **Memoria descriptiva (Word)**.
+
+### Reglas (`src/selector-ioarr/documentos.js`)
+
+Fuente: Lineamientos IOARR del MEF, 9.ª versión, junio de 2025, y el Anexo C con los ejemplos del Formato 07-C.
+
+- **Un local con bienes a reponer** → IOARR de reposición (07-C con la sección E.3). **Varios** → inversión masiva de reposición (2.5; 07-C con la sección E.5 y la lista de UP). El lineamiento pone el mobiliario de aula como ejemplo de activo homogéneo.
+- Los locales del proyecto sin bienes a reponer no entran como UP. Se listan en una nota.
+- **Hasta 75 UIT** → sección G (registro abreviado). **Más de 75 UIT** → secciones D, E y F. Sin la UIT cargada, el Word trae las dos versiones.
+- **Costo por tipo de bien** (F.1 y G.2): en cada local, el costo de los bienes con IGV, más gestión e imprevistos, se reparte según el costo directo de cada tipo. El expediente, la supervisión y la liquidación van en filas aparte. El total es igual al de la estructura de costos.
+- **Cronogramas:** el costo y las metas se reparten por igual entre los meses del plazo. Los redondeos van al último mes, para que las sumas sean exactas.
+- **Mantenimiento** (F.4 y G.3): el costo anual del mobiliario nuevo durante su vida útil, por tipo.
+- **Datos propuestos:**
+  - Del proyecto salen la función, la división y el grupo funcional, el servicio, la tipología y el indicador de brecha (según el nivel educativo), el nombre de la inversión, la UGEL responsable del mantenimiento y la descripción técnica (tomada del precio del catálogo).
+  - Lo demás lo carga el usuario: UF, UEI, OPMI, plazo, mantenimiento, antigüedad, inventario y antecedentes.
+  - Si un dato falta, sale como «PENDIENTE» en amarillo y en la lista de pendientes. No se inventan valores.
+- **Condiciones de la reposición** (2.4.C y 2.5): cada una sale como cumple, pendiente o no cumple, según los datos y los archivos adjuntos (acta y baja).
+
+El Word dice **«Borrador de trabajo»**: el registro oficial se hace en el aplicativo del Banco de Inversiones.
+
+### Pruebas
+
+`npm test` (`test/expediente-documentos.test.js`) cubre:
+
+- El caso individual de Chiclayo 276008 (registro abreviado).
+- El caso masivo de Moquegua «mariscal» (registro completo, sin pendientes).
+- Que las sumas de los cronogramas sean exactas.
+- Las secciones de cada Word.
+
+Si LibreOffice Writer está instalado (`libreoffice-writer-nogui`), una prueba comprueba además que los Word abren.

@@ -299,3 +299,12 @@ table.tabla{ width:100%; border-collapse:collapse; font-size:13px; }
 .tabla-inv input:disabled{ background:var(--surface2); color:var(--muted); }
 .inv-sustento{ border-top:1px solid var(--border); padding-top:12px; display:flex; flex-direction:column; gap:8px; }
 .inv-sustento h3{ font-size:15px; }
+/* Expediente: sub-pestañas y Documentos (etapa 2) */
+.subtabs{ display:flex; gap:6px; flex-wrap:wrap; margin-bottom:12px; }
+.subtabs button{ font:inherit; font-size:13px; font-weight:600; padding:8px 14px; border-radius:20px; border:1px solid var(--border2); background:var(--surface); color:var(--muted); cursor:pointer; }
+.subtabs button[aria-selected="true"]{ background:var(--accent); border-color:var(--accent); color:#fff; }
+.doc-form{ display:flex; flex-direction:column; gap:10px; }
+.doc-form h3{ font-size:15px; margin-top:8px; }
+.doc-form textarea, .doc-form input[type=month]{ font:inherit; font-size:13px; padding:9px 11px; border-radius:10px; border:1px solid var(--border2); background:var(--surface); width:100%; }
+.tabla-doc input, .tabla-doc select{ width:100%; min-width:80px; padding:6px 8px; border:1px solid var(--border2); border-radius:6px; font:inherit; }
+.pendientes{ margin:0; padding:0 16px 12px 34px; display:flex; flex-direction:column; gap:4px; font-size:13px; }
