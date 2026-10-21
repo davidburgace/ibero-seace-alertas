@@ -125,6 +125,50 @@ No necesita migración: las explicaciones se guardan en `ioarr_expediente_docume
 - La explicación va al Excel, debajo de la advertencia. Si falta, sale «PENDIENTE» en amarillo.
 - Ruta: `PUT /api/selector-ioarr/proyectos/:id/situacional/revisiones` con `{ clave, nota }`; una nota vacía quita la explicación.
 
+## Ficha de verificación por local (migración 019)
+
+Ejecuta `supabase/migrations/019_ioarr_ficha_verificacion.sql` después de la 018. Agrega la columna `ficha` al inventario verificado. Sin ella, las fichas se pueden descargar, pero no importar.
+
+**Dónde está:** Expediente → **Fichas de verificación**.
+
+**Descargas:**
+- La ficha de cada local, en Excel (para llenar) y en PDF (para imprimir y firmar).
+- Un ZIP con las de todos los locales de la propuesta. Los excluidos por otra inversión no llevan ficha.
+
+**Qué trae la ficha** (estructura del documento «Ficha de verificación de mobiliario escolar — IOARR de reposición»):
+- A. Datos del local, del padrón, y de la visita: fecha, verificador y acompañante.
+- B. Servicios: estudiantes del padrón y estudiantes verificados.
+- C. Cinco filas por aula, con el censo ya cargado (la mesa, en puestos). Lleva columnas para Verificado Bueno, Regular y Malo, puestos por unidad, antigüedad, código patrimonial, estado de baja y observación.
+- D. Mobiliario fuera de aulas y panel fotográfico.
+- E. Observaciones y firmas.
+- Los encabezados van completos (Censo Bueno, Verificado Bueno…), con la nota de las siglas B, R y M y la tabla de criterios.
+- Lo gris lo llena la app y lo amarillo se llena en campo. Una columna y una hoja ocultas llevan las claves para importarla.
+
+**Importación (uno o varios Excel a la vez):**
+- Cada archivo se valida y se guarda por separado. El informe indica hoja, fila y motivo.
+- **Se rechaza el archivo** si:
+  - el local no está en el proyecto o está excluido;
+  - falta la fecha de la verificación;
+  - no es una ficha de la app, o se generó con otro censo;
+  - no tiene ninguna fila con cantidades.
+- **Se rechaza la fila** si:
+  - tiene un estado a medias (si llenas uno, se llenan Bueno, Regular y Malo; B + R + M es lo existente verificado);
+  - tiene cantidades negativas o con decimales;
+  - los puestos por unidad están fuera de 1 a 12;
+  - la antigüedad o el estado de baja no son válidos.
+- **Aviso sin rechazo:** lo contado difiere del censo en más de 15 % y la fila no tiene observación.
+- **Mesas:** se cuentan por unidad, con sus puestos por unidad (vacío = 1); la app las pasa a puestos. Si un aula tiene mesas de distinto tipo, se copia la fila de la mesa y se anota cada tipo en su fila.
+- Volver a importar la ficha de un local reemplaza la anterior.
+
+**Cálculo (`src/selector-ioarr/ficha.js`):**
+- En cada local, nivel y tipo de bien con algo verificado, las aulas contadas usan lo verificado y las demás siguen con el censo. Se guarda en `bienes` (local de un nivel) o en `por_nivel` (varios niveles), igual que una corrección a mano.
+- Cada local queda **Verificado** o **Solo censo**.
+- **Formato 07-C, memoria y lista de verificación:** indican qué porcentaje de las cantidades a reponer está verificado en campo. Lo verificado reemplaza al censo donde existe; el resto sigue con el censo.
+- **Antigüedad:** en años, o por rango (menos de 5, de 5 a 10, más de 10, que se calculan como 3, 8 y 12 años). El rango queda marcado como estimado, y el 07-C dice en cuántos locales.
+- **Estudiantes verificados por aula:** cambian el requerido de mesas y sillas, y con él el faltante, que es informativo. No cambian lo que se repone.
+- **Fuera de aulas:** se guarda como información y no entra al costo, porque está por confirmar si el proyecto lo incluye.
+- Si después se corrige a mano un tipo cargado desde la ficha, ese tipo cuenta como verificado en su totalidad.
+
 ## Etapa 1: costos
 
 ### Migración

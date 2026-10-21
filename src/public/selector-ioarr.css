@@ -346,3 +346,11 @@ table.tabla{ width:100%; border-collapse:collapse; font-size:13px; }
 .lista-ugel{ border:1px solid var(--border); border-radius:10px; margin-top:8px; }
 .lista-ugel summary{ cursor:pointer; padding:10px 12px; }
 .lista-ugel .tabla-wrap{ border-top:1px solid var(--border); }
+
+/* Fichas de verificación */
+.fichas-subir { display: inline-flex; margin-top: 10px; cursor: pointer; }
+.informe-fichas h4 { margin: 0 0 8px; }
+.inf-archivo { border-top: 1px solid var(--border); padding: 10px 0; }
+.inf-cab { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; overflow-wrap: anywhere; }
+.inf-lista { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
+.inf-linea { overflow-wrap: anywhere; line-height: 1.4; }

@@ -68,7 +68,9 @@ const kv = (filas, anchos = [38, 62]) => tabla(null, filas.map(([k, v, o = {}]) 
 const espacio = () => new Paragraph({ children: [], spacing: { after: 80 } });
 // De dónde sale la antigüedad: la cargó el usuario o es el promedio del año de adquisición por local
 const origenAnt = a => a.antiguedad_origen === 'inventario' && a.antiguedad_inventario
-  ? ` (promedio según el año de adquisición en ${a.antiguedad_inventario.con} de ${a.antiguedad_inventario.de} locales${a.antiguedad_inventario.min !== a.antiguedad_inventario.max ? `; de ${a.antiguedad_inventario.min} a ${a.antiguedad_inventario.max} años` : ''})` : '';
+  ? ` (promedio según el año de adquisición en ${a.antiguedad_inventario.con} de ${a.antiguedad_inventario.de} locales${a.antiguedad_inventario.min !== a.antiguedad_inventario.max ? `; de ${a.antiguedad_inventario.min} a ${a.antiguedad_inventario.max} años` : ''}${a.antiguedad_inventario.estimada ? `; estimada por rango en ${a.antiguedad_inventario.estimada} ${a.antiguedad_inventario.estimada === 1 ? 'local' : 'locales'}` : ''})` : '';
+// Qué parte de las cantidades está verificada en campo (fichas de verificación)
+const notaCantidades = M => M.cantidades?.texto ? [p(M.cantidades.texto, { italics: true, size: 17, color: M.cantidades.verif >= M.cantidades.rep ? TENUE : TEXTO })] : [];
 const siNo = v => v === 'si' ? 'Sí' : v === 'no' ? 'No' : PEND;
 const trozos = (xs, k) => { const out = []; for (let i = 0; i < xs.length; i += k) out.push([i, xs.slice(i, i + k)]); return out; };
 
@@ -223,7 +225,7 @@ export async function generar07C(M) {
     }
     c.push(titulo('F. Costos y cronogramas (IOARR mayores a 75 UIT)'));
     c.push(titulo('F.1 Metas físicas, costo y plazo', 2));
-    c.push(tablaMetas(M));
+    c.push(tablaMetas(M), ...notaCantidades(M));
     c.push(nota('El costo de cada tipo de bien incluye su parte de transporte, instalación, embalaje, gastos generales, utilidad, IGV, gestión e imprevistos, repartidos en cada local según su costo directo. Ver la estructura de costos en Excel.'));
     c.push(titulo('F.2 Cronograma de inversión (S/)', 2));
     c.push(...cronogramas(M));
@@ -239,7 +241,7 @@ export async function generar07C(M) {
     c.push(titulo('G.1 Nombre de la inversión', 2));
     c.push(p(M.nombre));
     c.push(titulo('G.2 Registro abreviado', 2));
-    c.push(tablaMetas(M));
+    c.push(tablaMetas(M), ...notaCantidades(M));
     c.push(p('Cronograma de ejecución (S/):', { bold: true, before: 120 }));
     c.push(...cronogramas(M));
     if (M.masiva) { c.push(p('Las UP y los activos a reponer:', { bold: true, before: 120 })); c.push(tablaUPs(M), ...notaSinRep(M), ...notaExcluidos(M)); }
@@ -282,6 +284,7 @@ export async function generarMemoria(M) {
   c.push(p(verif.length
     ? `En ${verif.length} ${verif.length === 1 ? 'local' : 'locales'} el inventario del Censo Educativo 2025 se reemplazó por el verificado en campo: ${verif.map(u => `${u.cod} (visita del ${u.verificado.fecha_visita.split('-').reverse().join('/')})`).join('; ')}. En los demás se usa el Censo Educativo 2025, declarado por cada institución.`
     : 'Las cantidades salen del Censo Educativo 2025 (Minedu, local escolar, pregunta 6.1), declarado por cada institución educativa. Deben confirmarse con el inventario patrimonial y una verificación en campo.', { before: 120 }));
+  c.push(...notaCantidades(M));
 
   c.push(titulo('6. Sustento de la reposición'));
   for (const x of M.E.sustento) c.push(p(x));

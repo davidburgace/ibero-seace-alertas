@@ -35,6 +35,12 @@
 //     GET    /proyectos/:id/documentos/verificacion Word de la lista de verificación (etapa 3)
 //   Entrega (etapa 4)
 //     GET    /proyectos/:id/expediente-zip          ZIP con los Word, los Excel y el sustento por local
+//   Fichas de verificación por local (ficha.js, migración 019)
+//     GET    /proyectos/:id/fichas                     locales con su estado (Verificado / Solo censo) y % verificado
+//     GET    /proyectos/:id/fichas/:cod/excel          ficha para llenar en campo
+//     GET    /proyectos/:id/fichas/:cod/pdf            ficha imprimible
+//     GET    /proyectos/:id/fichas-zip                 Excel y PDF de todos los locales
+//     POST   /proyectos/:id/fichas/importar            multipart: archivos (uno o varios Excel llenos) → informe
 //   También devuelve api.resumen(p): avance del expediente para Radar IOARR (ficha y kanban)
 // ============================================================================
 
@@ -51,6 +57,8 @@ import { armarModelo, limpiarDatosDoc, ESTADOS_ACTIVO } from './documentos.js';
 import { generar07C, generarMemoria, generarVerificacion } from './word.js';
 import { leerDuplicidad, separarLocales, estadoDe, avisosDuplicidad } from './duplicidad.js';
 import { porNivel, inventarioNivel, inventarioUna, modoDe, sinNivel, nivelesDeLocal, vistaNivel, limpiarPorNivel, NOMBRE_NIVEL } from './niveles.js';
+import { modeloFicha, generarFichaExcel, generarFichaPdf, leerFicha, procesarFicha, requeridoFicha, ESTADO_VERIF } from './ficha.js';
+import archiver from 'archiver';
 
 const AVISO = 'Falta ejecutar supabase/migrations/012_ioarr_expediente_costos.sql en Supabase';
 const faltaMigracion = e => e?.code === 'PGRST204' || e?.code === 'PGRST205' || e?.code === '42P01' || /schema cache|does not exist/i.test(e?.message || '');
@@ -59,6 +67,9 @@ const AVISO_ADQ = 'Falta ejecutar supabase/migrations/016_ioarr_inventario_antig
 const AVISO_DOC = 'Falta ejecutar supabase/migrations/015_ioarr_expediente_documentos.sql en Supabase';
 const AVISO_NIV = 'Falta ejecutar supabase/migrations/018_ioarr_por_nivel.sql en Supabase para cargar el inventario por nivel';
 const AVISO_ARCH = 'Falta ejecutar supabase/migrations/014_ioarr_expediente_archivos.sql en Supabase';
+const AVISO_FICHA = 'Falta ejecutar supabase/migrations/019_ioarr_ficha_verificacion.sql en Supabase para importar las fichas de verificación';
+const MAX_FICHAS = 50, MAX_FICHA_MB = 10;
+const subidaFichas = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_FICHA_MB * 1024 * 1024, files: MAX_FICHAS } });
 const URL_FIRMADA_SEG = 600;
 const subida = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_ARCHIVO, files: 1 } });
 const COLS_ARCH = 'id, cod_local, tipo, nombre_archivo, mime, tamano, descripcion, creado_en';
@@ -275,7 +286,11 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     const { list, excluidos } = separarLocales(D, codigos, dup.mapa);
     const P = limpiarParams(p.criterios);
     const C = calc(D, P);
-    const inv = Object.fromEntries(inventario.map(x => [x.cod_local, { ...x, archivos: archivos.filter(a => a.cod_local === x.cod_local).map(sinRuta) }]));
+    const idxCod = new Map(D.locs.map((l, i) => [l[0], i]));
+    // Con ficha de verificación: requerido con los estudiantes verificados (solo cambia el faltante)
+    const inv = Object.fromEntries(inventario.map(x => [x.cod_local, { ...x,
+      req_ficha: x.ficha && idxCod.has(x.cod_local) ? requeridoFicha(x, D, P, idxCod.get(x.cod_local)) : null,
+      archivos: archivos.filter(a => a.cod_local === x.cod_local).map(sinRuta) }]));
     const comun = { precios, rubros: fila?.rubros, factores, uit: { anio: anioUit, valor: uit?.valor ?? null } };
 
     // Una IOARR (todos los niveles) y una por nivel: se calculan las dos para compararlas
@@ -319,7 +334,7 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     rubros: R.rubros, partidas: R.partidas, totales: R.totales, distritos: R.distritos, uitCalc: R.uit, avisos: R.avisos, excluidos: R.excluidos,
     locales: R.locales.map(l => ({ cod: l.cod, nom: l.nom, dist: l.dist, prov: l.prov, rural: l.rural, est: l.est, zona: l.zona,
       rep: l.rep.reduce((a, b) => a + b, 0), fal: l.fal.reduce((a, b) => a + b, 0), cd: l.cd, total: l.total,
-      verificado: l.verificado ? { tipos: l.verificado.tipos, fecha_visita: l.verificado.fecha_visita } : null,
+      verificado: l.verificado ? { tipos: l.verificado.tipos, fecha_visita: l.verificado.fecha_visita, ficha: !!l.verificado.ficha } : null,
       archivos: inv?.[l.cod]?.archivos.length || 0, duplicidad: l.duplicidad }))
   });
 
@@ -496,6 +511,127 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     res.json({ ok: true });
   }));
 
+  // ─── Fichas de verificación por local ─────────────────────────────────────
+  // Locales de la propuesta (sin los excluidos por duplicidad), con su estado
+  const fichaDe = f => f?.ficha ? { archivo: f.ficha.archivo, importado_en: f.ficha.importado_en, fecha: f.ficha.fecha, verificador: f.ficha.verificador, filas: f.ficha.filas } : null;
+  async function sinMigracionFicha() {
+    const { error } = await supabase.from('ioarr_expediente_inventario').select('ficha').limit(1);
+    return !!error && (faltaMigracion(error) || /ficha/.test(error.message || ''));
+  }
+  async function vistaFichas(p) {
+    const [A, sinMig] = await Promise.all([armar(p), sinMigracionFicha()]);
+    const est = new Map(A.Runa.locales.map(l => [l.cod, l]));
+    const pct = R => R.totales.rep ? Math.round((R.totales.repVerif || 0) / R.totales.rep * 1000) / 10 : 0;
+    const locales = A.list.map(i => {
+      const cod = A.D.locs[i][0], l = est.get(cod), f = A.inv[cod];
+      const estado = l?.verificado?.tipos.length ? 'verificado' : 'solo_censo';
+      return { cod, nom: A.D.locName[i], dist: A.D.dists[A.D.locs[i][1]][0], niveles: nivelesDeLocal(A.D, i).map(n => NOMBRE_NIVEL[n]), aulas: A.D.locAul[i].length,
+        rep: l ? l.rep.reduce((a, b) => a + b, 0) : 0, rep_verif: l ? l.repVerif.reduce((a, b) => a + b, 0) : 0,
+        estado, estado_texto: ESTADO_VERIF[estado], visita: f?.fecha_visita || null, ficha: fichaDe(f) };
+    });
+    return {
+      sin_migracion: sinMig, locales, excluidos: A.excluidos.length,
+      resumen: { locales: locales.length, verificados: locales.filter(l => l.estado === 'verificado').length, con_ficha: locales.filter(l => l.ficha).length,
+        rep: A.Runa.totales.rep, rep_verif: A.Runa.totales.repVerif || 0, pct: pct(A.Runa),
+        ioarrs: A.modo === 'por_nivel' ? A.ioarrs.filter(x => x.nivel).map(x => ({ nivel: x.nivel, nombre: x.nombre, rep: x.R.totales.rep, rep_verif: x.R.totales.repVerif || 0, pct: pct(x.R) })) : [] }
+    };
+  }
+  api.get('/proyectos/:id/fichas', responder(async (req, res) => {
+    res.json(await vistaFichas(await proyecto(req)));
+  }));
+
+  // Ficha de un local (padrón y censo con los criterios del proyecto)
+  async function fichaLocal(p, cod) {
+    const { D, i } = await localDelProyecto(p, cod);
+    const C = calc(D, limpiarParams(p.criterios));
+    return modeloFicha(D, C, i, { proyecto: { id: p.id, nombre: p.nombre }, anio: p.anio_datos, fecha: hoyLima() });
+  }
+  const nombreFicha = (F, ext) => `Ficha_verificacion_${F.local.cod}_${slug(F.local.nombre).slice(0, 40)}.${ext}`;
+  const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  const enviar = (res, buffer, archivo, tipo) => res.set({
+    'Content-Type': tipo, 'Cache-Control': 'no-store',
+    'Content-Disposition': `attachment; filename="${archivo}"; filename*=UTF-8''${encodeURIComponent(archivo)}`
+  }).send(buffer);
+  api.get('/proyectos/:id/fichas/:cod/excel', responder(async (req, res) => {
+    const F = await fichaLocal(await proyecto(req), String(req.params.cod));
+    enviar(res, await generarFichaExcel(F), nombreFicha(F, 'xlsx'), XLSX);
+  }));
+  api.get('/proyectos/:id/fichas/:cod/pdf', responder(async (req, res) => {
+    const F = await fichaLocal(await proyecto(req), String(req.params.cod));
+    enviar(res, await generarFichaPdf(F), nombreFicha(F, 'pdf'), 'application/pdf');
+  }));
+
+  // Todas las fichas (Excel y PDF) en un ZIP, en flujo: se genera una ficha a la vez
+  api.get('/proyectos/:id/fichas-zip', responder(async (req, res) => {
+    const p = await proyecto(req);
+    const [D, codigos, dup] = await Promise.all([cargarRegion(p.region), leerCodigos(p.id), leerDuplicidad(supabase, p.id)]);
+    if (!D) return res.status(400).json({ error: 'No hay datos para la región ' + p.region });
+    const { list } = separarLocales(D, codigos, dup.mapa);
+    if (!list.length) return res.status(400).json({ error: 'El proyecto no tiene locales en la propuesta' });
+    const C = calc(D, limpiarParams(p.criterios)), fecha = hoyLima(), base = `Fichas_verificacion_${slug(p.nombre)}_${fecha}`;
+    res.set({ 'Content-Type': 'application/zip', 'Cache-Control': 'no-store',
+      'Content-Disposition': `attachment; filename="${base}.zip"; filename*=UTF-8''${encodeURIComponent(base + '.zip')}` });
+    const zip = archiver('zip', { zlib: { level: 6 } });
+    const fallo = new Promise((_, mal) => zip.on('error', mal));
+    zip.pipe(res);
+    const agregar = (contenido, name) => Promise.race([fallo, new Promise(ok => { zip.once('entry', ok); zip.append(contenido, { name: `${base}/${name}` }); })]);
+    try {
+      await agregar(Buffer.from(LEEME_FICHAS(p.nombre, list.length, fecha), 'utf8'), '00_LEEME.txt');
+      for (const i of list) {
+        const F = modeloFicha(D, C, i, { proyecto: { id: p.id, nombre: p.nombre }, anio: p.anio_datos, fecha });
+        await agregar(await generarFichaExcel(F), 'Excel/' + nombreFicha(F, 'xlsx'));
+        await agregar(await generarFichaPdf(F), 'PDF/' + nombreFicha(F, 'pdf'));
+      }
+      await zip.finalize();
+    } catch (e) { console.error('[EXPEDIENTE][FICHAS]', e.message); res.destroy(e); }
+  }));
+
+  // Importar una o varias fichas llenas. Cada archivo se valida y se guarda por separado:
+  // un archivo rechazado no impide importar los demás; dentro de un archivo, las filas
+  // con errores no se importan y el resto sí.
+  const recibirFichas = (req, res, next) => subidaFichas.array('archivos', MAX_FICHAS)(req, res, err => {
+    if (!err) return next();
+    const msg = err.code === 'LIMIT_FILE_SIZE' ? `Algún archivo pasa de ${MAX_FICHA_MB} MB` : err.code === 'LIMIT_FILE_COUNT' || err.code === 'LIMIT_UNEXPECTED_FILE' ? `Máximo ${MAX_FICHAS} archivos por vez` : 'No se pudieron recibir los archivos: ' + err.message;
+    res.status(400).json({ error: msg });
+  });
+  api.post('/proyectos/:id/fichas/importar', recibirFichas, responder(async (req, res) => {
+    const p = await proyecto(req), archivos = req.files || [];
+    if (!archivos.length) return res.status(400).json({ error: 'Elige uno o varios Excel de fichas llenas' });
+    if (await sinMigracionFicha()) return res.status(503).json({ error: AVISO_FICHA });
+    const [D, codigos, dup, inventario] = await Promise.all([cargarRegion(p.region), leerCodigos(p.id), leerDuplicidad(supabase, p.id), leerInventario(p)]);
+    if (!D) return res.status(400).json({ error: 'No hay datos para la región ' + p.region });
+    const P = limpiarParams(p.criterios), C = calc(D, P), hoy = hoyLima();
+    // Solo los locales de la propuesta: un excluido por otra inversión no se verifica
+    const { list } = separarLocales(D, codigos, dup.mapa), enPropuesta = new Set(list.map(i => D.locs[i][0]));
+    const previas = Object.fromEntries(inventario.map(x => [x.cod_local, x])), vistos = new Map();
+    const resultados = [];
+    for (const a of archivos) {
+      const nombre = nombreUtf8(a.originalname || 'ficha.xlsx').slice(-200);
+      const x = await leerFicha(a.buffer);
+      const cod = x.meta?.cod_local;
+      let r;
+      if (cod && codigos.includes(cod) && !enPropuesta.has(cod)) r = { cod, errores: [{ hoja: '—', fila: null, motivo: `El local ${cod} está excluido de la propuesta por otra inversión vigente o reciente. Vuelve a incluirlo en Mi selección si corresponde.` }], avisos: [], rechazada: true, filas: { ok: 0, rechazadas: 0 } };
+      else r = procesarFicha(x, { D, C, P, codigos: new Set(codigos), proyectoId: p.id, anioDatos: p.anio_datos, hoy, archivo: nombre, filaPrevia: previas[cod] });
+      if (!r.rechazada) {
+        if (vistos.has(r.cod)) r.avisos.unshift({ hoja: '—', fila: null, motivo: `Otra ficha del mismo local (${vistos.get(r.cod)}) se importó antes en esta carga: queda esta, que es la última.` });
+        const { censo, porNiv } = censoConNiveles(D, P, r.i);
+        const fila = { proyecto_id: p.id, cod_local: r.cod, ...r.fila, censo: porNiv ? { ...censo, _niveles: porNiv } : censo, creado_por: req.usuario.id, actualizado_en: new Date().toISOString() };
+        const { error } = await supabase.from('ioarr_expediente_inventario').upsert(fila, { onConflict: 'proyecto_id,cod_local' });
+        if (error) {
+          if (faltaMigracion(error) && !/ficha|por_nivel|adquisicion/.test(error.message || '')) return res.status(503).json({ error: AVISO_INV });
+          if (/ficha/.test(error.message || '')) return res.status(503).json({ error: AVISO_FICHA });
+          if (/por_nivel/.test(error.message || '')) return res.status(503).json({ error: AVISO_NIV });
+          if (/adquisicion/.test(error.message || '')) return res.status(503).json({ error: AVISO_ADQ });
+          throw error;
+        }
+        vistos.set(r.cod, nombre); previas[r.cod] = fila;
+      }
+      const i = r.cod ? D.locs.findIndex(l => l[0] === r.cod) : -1;
+      resultados.push({ archivo: nombre, cod: r.cod || null, nom: i >= 0 ? D.locName[i] : null, estado: r.rechazada ? 'rechazada' : 'importada', filas: r.filas, errores: r.errores, avisos: r.avisos });
+    }
+    res.json({ resultados, fichas: await vistaFichas(p) });
+  }));
+
   // ─── Documentos: Formato 07-C y memoria descriptiva ───────────────────────
   async function leerDatosDoc(p) {
     const { data, error } = await supabase.from('ioarr_expediente_documentos').select('datos').eq('proyecto_id', p.id).maybeSingle();
@@ -668,6 +804,22 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
 
   return api;
 }
+
+const LEEME_FICHAS = (proyecto, n, fecha) => [
+  `Fichas de verificación de mobiliario escolar — proyecto «${proyecto}» (${n} ${n === 1 ? 'local' : 'locales'}), generadas el ${fecha}.`,
+  '',
+  'Excel/  una ficha por local, para llenar en campo y devolver. Es la que se importa en la app.',
+  'PDF/    la misma ficha para imprimir y firmar.',
+  '',
+  'Cómo se llena:',
+  '- Lo gris lo llenó la app con el Padrón ESCALE y el Censo Educativo; lo amarillo se llena en campo.',
+  '- Si llenas un estado verificado, llena los tres (Bueno, Regular y Malo; 0 si no hay).',
+  '- Las mesas múltiples y las carpetas se cuentan por unidad, con sus puestos por unidad.',
+  '- La fecha de la verificación es obligatoria para importar.',
+  '- No cambies las celdas grises ni borres filas.',
+  '',
+  'Para cargarlas: Selector IOARR → Expediente → Fichas → Importar fichas llenas (uno o varios Excel a la vez).'
+].join('\r\n');
 
 export function textoCriterios(P) {
   const est = { b: 'Bueno', r: 'Regular', m: 'Malo' }[P.carpEstado];

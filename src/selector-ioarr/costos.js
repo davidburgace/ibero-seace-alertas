@@ -142,6 +142,10 @@ export function limpiarAdquisicion(obj, anioMax) {
  *
  * Con inventario verificado, en ese local y tipo se reemplaza el censo:
  *   Faltante = MAX(0, Requerido − (B + R + M)), Reposición = M, por local.
+ * Con la ficha de verificación (ficha.js), el inventario trae además verif
+ * ({ k: { mv, mc } }: Malo contado en campo y Malo del censo en las aulas sin
+ * verificar) y req (requerido con los estudiantes verificados). repVerif es la
+ * parte de la reposición verificada en campo, para el porcentaje del 07-C.
  *
  * Con grupos, los rubros en % se aplican igual en cada IOARR y los montos fijos
  * se reparten entre todos los locales de todas, según su base: así la suma de
@@ -198,25 +202,36 @@ function localDe(g, i, pu, idx) {
   // Diagnóstico (bueno, regular, malo) y requerido: se muestran siempre, aunque solo Malo se reponga
   const diag = TIPOS.map((_, t) => ({ b: C.L.b[t * nL + i], r: C.L.r[t * nL + i], m: C.L.m[t * nL + i], req: C.L.req[t * nL + i] }));
   const inv = inventario?.[l[0]];
+  // Parte de lo que se repone que está verificada en campo (el resto sale del censo)
+  const repVerif = TIPOS.map(() => 0);
   let verificado = null;
   if (inv) {
     const tipos = [];
     TIPOS.forEach((k, t) => {
       const x = inv.bienes?.[k];
-      if (!x) return;
-      fal[t] = Math.max(0, C.L.req[t * nL + i] - (x.b + x.r + x.m));
+      // Requerido con los estudiantes verificados en la ficha (solo mesas y sillas; cambia el faltante)
+      const req = inv.req?.[k] ?? null;
+      if (req != null) diag[t] = { ...diag[t], req };
+      if (!x) {
+        if (req != null) fal[t] = Math.max(0, req - (diag[t].b + diag[t].r + diag[t].m));
+        return;
+      }
+      fal[t] = Math.max(0, (req ?? C.L.req[t * nL + i]) - (x.b + x.r + x.m));
       rep[t] = x.m;
+      // Con ficha, solo las aulas contadas; corregido a mano, todo el tipo
+      repVerif[t] = inv.verif?.[k] ? inv.verif[k].mv : x.m;
       diag[t] = { ...diag[t], b: x.b, r: x.r, m: x.m };
       tipos.push(k);
     });
     // Visita registrada: puede corregir cantidades (tipos) o solo traer el año de adquisición
-    verificado = { tipos, adquisicion: inv.adquisicion || {}, fecha_visita: inv.fecha_visita, responsable: inv.responsable || null, observacion: inv.observacion };
+    verificado = { tipos, adquisicion: inv.adquisicion || {}, adq_estimada: inv.adq_estimada || [], fecha_visita: inv.fecha_visita, responsable: inv.responsable || null, observacion: inv.observacion,
+      ficha: inv.ficha ? { archivo: inv.ficha.archivo, importado_en: inv.ficha.importado_en, verificador: inv.ficha.verificador } : null };
   }
   const cdTipo = rep.map((q, t) => q * (pu[t] ?? 0));
   const z = factorZona(d[1], l[4], idx);
   return {
     i, grupo: g.clave, cod: l[0], nom: D.locName[i], dist: d[0], prov: D.provs[d[2]], ubigeo: d[1], rural: !!l[4],
-    est: D.locEst[i], aul: D.locAul[i].length, zona: z, rep, fal, diag, cdTipo, verificado,
+    est: D.locEst[i], aul: D.locAul[i].length, zona: z, rep, repVerif, fal, diag, cdTipo, verificado,
     cd: cdTipo.reduce((a, b) => a + b, 0), falValor: fal.reduce((a, q, t) => a + q * (pu[t] ?? 0), 0), r: {}, rf: {}
   };
 }
@@ -228,14 +243,14 @@ function resumir(locales, R, pu, uit, esGrupo) {
   const T = {
     locales: n, est: sum(l => l.est), aul: sum(l => l.aul),
     cd: sum(l => l.cd), subtotal: sum(l => l.subtotal), neto: sum(l => l.neto), bienes: sum(l => l.bienes), total: sum(l => l.total),
-    rep: sum(l => l.rep.reduce((a, b) => a + b, 0)), fal: sum(l => l.fal.reduce((a, b) => a + b, 0)), falValor: sum(l => l.falValor)
+    rep: sum(l => l.rep.reduce((a, b) => a + b, 0)), repVerif: sum(l => l.repVerif.reduce((a, b) => a + b, 0)), fal: sum(l => l.fal.reduce((a, b) => a + b, 0)), falValor: sum(l => l.falValor)
   };
   T.porEstudiante = T.est ? T.total / T.est : null;
 
   const partidas = ITEMS.map((x, t) => {
-    const rep = sum(l => l.rep[t]), fal = sum(l => l.fal[t]);
+    const rep = sum(l => l.rep[t]), fal = sum(l => l.fal[t]), repVerif = sum(l => l.repVerif[t]);
     const [b, r, m, req] = ['b', 'r', 'm', 'req'].map(k => sum(l => l.diag[t][k]));
-    return { k: x.k, n: x.n, u: x.u, b, r, m, ex: b + r + m, req, rep, fal, pu: pu[t], parcial: rep * (pu[t] ?? 0), falValor: fal * (pu[t] ?? 0) };
+    return { k: x.k, n: x.n, u: x.u, b, r, m, ex: b + r + m, req, rep, repVerif, fal, pu: pu[t], parcial: rep * (pu[t] ?? 0), falValor: fal * (pu[t] ?? 0) };
   });
   const rubrosOut = R.map(x => ({
     ...x, nombre: RUBRO[x.clave].nombre, grupo: RUBRO[x.clave].grupo, monto: sum(l => l.r[x.clave]),
