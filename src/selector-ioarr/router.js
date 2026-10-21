@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 import { supabase } from '../ioarr/db.js';
 import { prep, calc, limpiarParams } from './calculo.js';
 import { generarExcel } from './excel.js';
-import { crearApiExpediente } from './expediente.js';
+import { crearApiExpediente, borrarArchivosProyecto } from './expediente.js';
 
 export const ANIO_DATOS = 2025;
 const DIR_DATOS = fileURLToPath(new URL('../public/data/selector-ioarr/', import.meta.url));
@@ -220,6 +220,7 @@ api.delete('/proyectos/:id', async (req, res, next) => {
   try {
     const p = await proyectoDelUsuario(req);
     if (!p) return res.status(404).json({ error: 'Proyecto no encontrado' });
+    await borrarArchivosProyecto(p.id);   // sustento del expediente en el bucket (las filas caen en cascada)
     const { error } = await supabase.from('ioarr_selector_proyectos').delete().eq('id', p.id).eq('usuario_id', req.usuario.id);
     if (error) throw error;
     res.json({ ok: true });

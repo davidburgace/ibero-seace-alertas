@@ -32,6 +32,11 @@ import { ITEMS } from './calculo.js';
 export const TIPOS = ITEMS.map(x => x.k);                       // ['mesa', 'silla', 'esc', 'sdoc', 'arm']
 export const FUENTES_PRECIO = { cotizacion: 'Cotización', seace: 'SEACE', historico: 'Histórico propio' };
 export const BASES = { cd: 'Costo directo', subtotal: 'Subtotal (CD + transporte, instalación y embalaje)', neto: 'Subtotal + GG + utilidad', bienes: 'Costo de los bienes (con IGV)' };
+// Archivos de sustento del inventario verificado (src/selector-ioarr/archivos.js)
+export const TIPOS_ARCHIVO = {
+  acta: 'Acta de verificación', foto: 'Foto', inventario_patrimonial: 'Inventario patrimonial',
+  baja: 'Resolución o trámite de baja', otro: 'Otro'
+};
 export const LIMITE_UIT = 75;   // registro completo del Formato 07-C si la inversión supera 75 UIT
 
 // Propone el tipo de bien a partir de la descripción (al copiar un precio de Radar IOARR).

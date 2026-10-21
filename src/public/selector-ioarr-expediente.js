@@ -1,7 +1,7 @@
 // Selector IOARR — pestaña «Expediente» (Etapa 1: estructura de costos).
 // El cálculo lo hace el servidor (src/selector-ioarr/costos.js), el mismo que
 // arma el Excel: así la pantalla y el Excel dan lo mismo.
-import { RUBROS, BASES, FUENTES_PRECIO, LIMITE_UIT } from '/selector-ioarr/costos.js';
+import { RUBROS, BASES, FUENTES_PRECIO, LIMITE_UIT, TIPOS_ARCHIVO } from '/selector-ioarr/costos.js';
 import { ITEMS } from '/selector-ioarr/calculo.js';
 
 const NF = new Intl.NumberFormat('es-PE');
@@ -77,7 +77,7 @@ function pintarKpis() {
 }
 
 function pintarAvisos() {
-  const clase = { uit75: 'aviso alerta', precio: 'aviso', faltante: 'aviso', uit: 'aviso', rubros: 'aviso', inventario: 'aviso' };
+  const clase = { uit75: 'aviso alerta', precio: 'aviso', faltante: 'aviso', uit: 'aviso', rubros: 'aviso', inventario: 'aviso', sustento: 'aviso' };
   document.getElementById('exp-avisos').innerHTML = datos.avisos.length
     ? `<div class="avisos">${datos.avisos.map(a => `<div class="${clase[a.tipo] || 'aviso'}" role="${a.tipo === 'uit75' ? 'alert' : 'note'}">${esc(a.texto)}</div>`).join('')}</div>` : '';
 }
@@ -143,7 +143,7 @@ function pintarResultados() {
   const pags = Math.max(1, Math.ceil(locs.length / PAGE)); pagLoc = Math.min(pagLoc, pags - 1);
   const desde = pagLoc * PAGE;
   const lrows = locs.slice(desde, desde + PAGE).map(l => `<tr><td class="mono">${l.cod}</td><td><span class="nm">${esc(l.nom)}</span><span class="sub">${esc(l.dist)}${l.rural ? ' · rural' : ''}</span></td><td class="num">${ent(l.est)}</td><td class="num">${ent(l.rep)}</td><td class="num">${ent(l.fal)}</td><td class="num">${l.zona.flete || l.zona.instalacion ? `+${dec(l.zona.flete * 100)} % / +${dec(l.zona.instalacion * 100)} %` : '<span class="sub">—</span>'}</td><td class="num">${soles(l.cd)}</td><td class="num"><b>${soles(l.total)}</b></td>
-    <td>${l.verificado ? `<span class="chip-est ok">Verificado ${fechaPe(l.verificado.fecha_visita)}</span><br>` : ''}<button class="x" data-inv="${esc(l.cod)}" type="button">${l.verificado ? 'Editar' : 'Corregir inventario'}</button></td></tr>`).join('');
+    <td>${l.verificado ? `<span class="chip-est ok">Verificado ${fechaPe(l.verificado.fecha_visita)}</span><br>${l.archivos ? `<span class="sub">${l.archivos} archivo${l.archivos === 1 ? '' : 's'}</span><br>` : '<span class="chip-est pend">Sin sustento</span><br>'}` : ''}<button class="x" data-inv="${esc(l.cod)}" type="button">${l.verificado ? 'Editar' : 'Corregir inventario'}</button></td></tr>`).join('');
 
   document.getElementById('exp-resultados').innerHTML = `
     <div class="cols">
@@ -275,9 +275,25 @@ function modalInventario() {
     </div>
     <p class="err" id="inv-err" hidden></p>
     <div class="modal-acts">
-      <button class="btn btn-ghost btn-peligro" type="button" id="inv-quitar" hidden>Quitar corrección (usar el censo)</button>
-      <button class="btn btn-ghost" type="button" data-cerrar>Cancelar</button>
       <button class="btn btn-primary" type="submit" id="inv-ok">Guardar</button>
+    </div>
+    <section class="inv-sustento" id="inv-sustento">
+      <h3>Sustento de la visita</h3>
+      <p class="sub" id="inv-sus-ayuda"></p>
+      <div id="inv-sus-subir" hidden>
+        <div class="form-grid">
+          <div class="campo"><label for="inv-a-tipo">Tipo</label><select id="inv-a-tipo">
+            <option value="">Automático (PDF = acta, imagen = foto)</option>${Object.entries(TIPOS_ARCHIVO).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>
+          <div class="campo ancho"><label for="inv-a-desc">Descripción (opcional)</label><input id="inv-a-desc" type="text" maxlength="300" placeholder="Ej.: aula 3° A, mesas con tablero roto"></div>
+          <div class="campo ancho"><label for="inv-a-file">Archivos (PDF o fotos, hasta 15 MB cada uno)</label><input id="inv-a-file" type="file" multiple accept="application/pdf,image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif"></div>
+        </div>
+        <p class="sub" id="inv-a-estado" role="status"></p>
+      </div>
+      <div class="tabla-wrap borde-0"><table class="tabla"><tbody id="inv-a-lista"></tbody></table></div>
+    </section>
+    <div class="modal-acts">
+      <button class="btn btn-ghost btn-peligro" type="button" id="inv-quitar" hidden>Quitar corrección (usar el censo)</button>
+      <button class="btn btn-ghost" type="button" data-cerrar>Cerrar</button>
     </div>
   </form>`;
   document.body.appendChild(m);
@@ -289,10 +305,16 @@ function modalInventario() {
   });
   m.querySelector('#f-inv').addEventListener('submit', guardarInventario);
   m.querySelector('#inv-quitar').addEventListener('click', quitarInventario);
+  m.querySelector('#inv-a-file').addEventListener('change', e => subirArchivos([...e.target.files]));
+  m.querySelector('#inv-a-lista').addEventListener('click', e => {
+    const ab = e.target.closest('[data-a-abrir]'), del = e.target.closest('[data-a-del]');
+    if (ab) abrirArchivo(ab.dataset.aAbrir);
+    if (del) borrarArchivo(del.dataset.aDel);
+  });
   return m;
 }
 
-let invCod = null;
+let invCod = null, invArchivos = [], invGuardado = false;
 async function abrirInventario(cod) {
   const m = modalInventario();
   invCod = cod;
@@ -313,6 +335,8 @@ async function abrirInventario(cod) {
     m.querySelector('#inv-obs').value = v?.observacion || '';
     m.querySelector('#inv-quitar').hidden = !v;
     m.querySelector('#inv-err').hidden = true;
+    invArchivos = d.archivos || []; invGuardado = !!v;
+    pintarSustento();
     m.classList.add('open');
   } catch (e) { ctx.toast('No se pudo abrir el inventario: ' + e.message); }
 }
@@ -329,15 +353,16 @@ async function guardarInventario(e) {
   try {
     datos = await ctx.api(`/proyectos/${ctx.proyecto.id}/costos/inventario/${encodeURIComponent(invCod)}`, { method: 'PUT', body: {
       bienes, fecha_visita: m.querySelector('#inv-fecha').value, responsable: m.querySelector('#inv-resp').value, observacion: m.querySelector('#inv-obs').value } });
-    m.classList.remove('open');
     pintarPrecios(); pintarResultados();
-    ctx.toast('Inventario verificado guardado.');
+    m.querySelector('#inv-quitar').hidden = false;
+    const primera = !invGuardado; invGuardado = true; pintarSustento();
+    ctx.toast(primera ? 'Inventario guardado. Ahora adjunta el acta y las fotos.' : 'Inventario verificado guardado.');
   } catch (x) { err.textContent = x.message; err.hidden = false; }
   finally { btn.disabled = false; }
 }
 
 async function quitarInventario() {
-  if (!confirm('¿Quitar la corrección? El local vuelve a calcularse con el Censo Educativo.')) return;
+  if (!confirm(`¿Quitar la corrección? El local vuelve a calcularse con el Censo Educativo${invArchivos.length ? ` y se borran sus ${invArchivos.length} archivos de sustento` : ''}.`)) return;
   const m = modalInventario();
   try {
     datos = await ctx.api(`/proyectos/${ctx.proyecto.id}/costos/inventario/${encodeURIComponent(invCod)}`, { method: 'DELETE' });
@@ -345,4 +370,89 @@ async function quitarInventario() {
     pintarPrecios(); pintarResultados();
     ctx.toast('Se usa otra vez el censo.');
   } catch (x) { ctx.toast('No se pudo quitar: ' + x.message); }
+}
+
+// ─── Archivos de sustento (acta, fotos, inventario patrimonial, baja) ────────
+const kb = n => n >= 1048576 ? NS.format(n / 1048576) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+const fechaHora = s => new Date(s).toLocaleString('es-PE', { timeZone: 'America/Lima', dateStyle: 'short', timeStyle: 'short' });
+
+function pintarSustento() {
+  const m = modalInventario();
+  m.querySelector('#inv-sus-subir').hidden = !invGuardado;
+  const actas = invArchivos.filter(a => a.tipo === 'acta').length, fotos = invArchivos.filter(a => a.tipo === 'foto').length;
+  m.querySelector('#inv-sus-ayuda').innerHTML = !invGuardado
+    ? 'Guarda primero el inventario; después podrás adjuntar el acta de verificación, las fotos, el inventario patrimonial y la baja.'
+    : `Adjunta el acta firmada por el director, las fotos por aula, el inventario patrimonial y, si existe, la resolución o el trámite de baja. ${actas ? '' : '<b class="aviso-linea">Falta el acta.</b> '}${actas} acta${actas === 1 ? '' : 's'} · ${fotos} foto${fotos === 1 ? '' : 's'} · ${invArchivos.length} en total.`;
+  m.querySelector('#inv-a-lista').innerHTML = invArchivos.map(a => `<tr>
+      <td><span class="chip-est">${esc(TIPOS_ARCHIVO[a.tipo])}</span></td>
+      <td><b>${esc(a.nombre_archivo)}</b>${a.descripcion ? `<br><span class="sub">${esc(a.descripcion)}</span>` : ''}</td>
+      <td class="num sub">${kb(a.tamano || 0)}<br>${fechaHora(a.creado_en)}</td>
+      <td><div class="acciones-fila"><button class="x" type="button" data-a-abrir="${a.id}">Abrir</button><button class="x btn-peligro" type="button" data-a-del="${a.id}">Borrar</button></div></td></tr>`).join('');
+}
+
+// Las fotos del celular pesan varios MB: se reducen a 2400 px de lado y JPEG 85 %.
+// Si el navegador no puede leer la imagen (p. ej. HEIC fuera de Safari) se sube tal cual.
+async function reducirFoto(file) {
+  if (!/^image\/(jpeg|png|webp)$/.test(file.type) || file.size < 800 * 1024) return file;
+  try {
+    const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    const k = Math.min(1, 2400 / Math.max(bmp.width, bmp.height));
+    const cv = document.createElement('canvas');
+    cv.width = Math.round(bmp.width * k); cv.height = Math.round(bmp.height * k);
+    cv.getContext('2d').drawImage(bmp, 0, 0, cv.width, cv.height);
+    bmp.close?.();
+    const blob = await new Promise(r => cv.toBlob(r, 'image/jpeg', 0.85));
+    if (!blob || blob.size >= file.size) return file;
+    return new File([blob], file.name.replace(/\.(png|webp|jpe?g)$/i, '') + '.jpg', { type: 'image/jpeg' });
+  } catch { return file; }
+}
+
+async function subirArchivos(files) {
+  const m = modalInventario(), est = m.querySelector('#inv-a-estado'), input = m.querySelector('#inv-a-file');
+  if (!files.length) return;
+  input.disabled = true;
+  const errores = [];
+  for (let j = 0; j < files.length; j++) {
+    const f = files[j];
+    est.textContent = `Subiendo ${j + 1} de ${files.length}: ${f.name}…`;
+    try {
+      const file = await reducirFoto(f);
+      if (file.size > 15 * 1048576) throw new Error('pasa de 15 MB');
+      const tipo = m.querySelector('#inv-a-tipo').value || (/pdf$/i.test(file.type) || /\.pdf$/i.test(file.name) ? 'acta' : 'foto');
+      const fd = new FormData();
+      fd.append('tipo', tipo); fd.append('descripcion', m.querySelector('#inv-a-desc').value); fd.append('archivo', file, file.name);
+      const r = await fetch(`/api/selector-ioarr/proyectos/${ctx.proyecto.id}/costos/inventario/${encodeURIComponent(invCod)}/archivos`, { method: 'POST', body: fd });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.error || 'Error ' + r.status);
+      invArchivos.push(data); pintarSustento();
+    } catch (e) { errores.push(`${f.name}: ${e.message}`); }
+  }
+  input.value = ''; input.disabled = false;
+  est.textContent = errores.length ? 'No se subieron: ' + errores.join(' · ') : `Listo: ${files.length} archivo${files.length === 1 ? '' : 's'} subido${files.length === 1 ? '' : 's'}.`;
+  est.className = errores.length ? 'err' : 'sub';
+  await refrescarCostos();
+}
+
+async function abrirArchivo(id) {
+  // La pestaña se abre antes del await para que el navegador no la bloquee
+  const w = window.open('', '_blank');
+  try {
+    const { url } = await ctx.api(`/proyectos/${ctx.proyecto.id}/costos/archivos/${id}/url`);
+    if (w) w.location = url; else location.href = url;
+  } catch (e) { w?.close(); ctx.toast('No se pudo abrir: ' + e.message); }
+}
+
+async function borrarArchivo(id) {
+  const a = invArchivos.find(x => x.id === id);
+  if (!a || !confirm(`¿Borrar «${a.nombre_archivo}»?`)) return;
+  try {
+    await ctx.api(`/proyectos/${ctx.proyecto.id}/costos/archivos/${id}`, { method: 'DELETE' });
+    invArchivos = invArchivos.filter(x => x.id !== id); pintarSustento();
+    await refrescarCostos();
+  } catch (e) { ctx.toast('No se pudo borrar: ' + e.message); }
+}
+
+// Vuelve a pedir los costos (los avisos y el conteo de archivos por local)
+async function refrescarCostos() {
+  try { datos = await ctx.api(`/proyectos/${ctx.proyecto.id}/costos`); pintarResultados(); } catch { /* se verá al recargar */ }
 }

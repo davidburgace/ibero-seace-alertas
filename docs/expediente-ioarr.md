@@ -79,6 +79,19 @@ Reposición = Malo + ROUND(Regular × % de Regular)
 - El Excel trae la columna **Inventario** en «Metrado y costos por local» y la hoja **Inventario verificado**, que compara censo y campo e incluye el sustento.
 - Sin la migración 013, el expediente se calcula con el censo, y al guardar una corrección se avisa que falta ejecutarla.
 
+#### Sustento: acta y fotos (migración 014)
+
+Ejecuta `supabase/migrations/014_ioarr_expediente_archivos.sql`, después de la 013. Crea el bucket **privado** `ioarr-expediente` (PDF, JPG, PNG, WEBP y HEIC, hasta 15 MB por archivo) y la tabla `ioarr_expediente_archivos`, con RLS del dueño del proyecto.
+
+- Los archivos se adjuntan en la misma ventana de **Corregir inventario**, una vez guardado el inventario.
+- Tipos: acta de verificación, foto, inventario patrimonial, resolución o trámite de baja, y otro. Si se deja en «Automático», un PDF se guarda como acta y una imagen como foto.
+- Las fotos de más de 800 KB se reducen en el navegador a 2400 px de lado (JPEG al 85 %) antes de subirse. HEIC se sube tal cual.
+- El servidor comprueba el tipo real por el contenido del archivo, no por el nombre.
+- Se admiten hasta 60 archivos por local. Se abren con una URL firmada de 10 minutos.
+- Si a un local corregido le falta el acta, el expediente muestra un aviso.
+- En el Excel, la hoja «Inventario verificado» trae la columna «Archivos adjuntos», en amarillo si falta el acta.
+- Al quitar la corrección de un local o al borrar el proyecto, se borran también sus archivos del bucket.
+
 ### Excel (`src/selector-ioarr/excel-costos.js`)
 
 Hojas: **Resumen**, **Parámetros**, **Partidas**, **Metrado y costos por local** y **Por distrito**. Cada cifra calculada es una fórmula de Excel. Si se cambia un precio, un % o la UIT en **Parámetros**, el libro se recalcula, incluido el texto «Registro que corresponde». Las celdas sin cargar van en amarillo. Las cantidades del metrado van como valor: salen del cálculo por aula del Selector, cuyo Excel trae esas fórmulas en la hoja Aulas.
