@@ -13,6 +13,8 @@
 // Otra inversión vigente o reciente por local: 017_ioarr_selector_duplicidad.sql
 //   PUT  /api/selector-ioarr/proyectos/:id/duplicidad/:cod   { estado, codigo?, nota?, excluir? }
 //   POST /api/selector-ioarr/proyectos/:id/duplicidad/excluir { excluir } a todos los marcados Sí
+// Cuadro de estado situacional: advertencias revisadas, en ioarr_expediente_documentos (015)
+//   PUT  /api/selector-ioarr/proyectos/:id/situacional/revisiones  { clave, nota } (nota vacía la quita)
 // ============================================================================
 
 import express from 'express';
@@ -24,6 +26,7 @@ import { prep, calc, limpiarParams } from './calculo.js';
 import { generarExcel } from './excel.js';
 import { crearApiExpediente, borrarArchivosProyecto } from './expediente.js';
 import { MODOS } from './niveles.js';
+import { limpiarDatosDoc } from './documentos.js';
 import { leerDuplicidad, limpiarDuplicidad, aFila, deFila, esVacia, separarLocales, AVISO_DUP } from './duplicidad.js';
 
 export const ANIO_DATOS = 2025;
@@ -163,8 +166,8 @@ api.get('/proyectos/:id', async (req, res, next) => {
   try {
     const p = await proyectoDelUsuario(req);
     if (!p) return res.status(404).json({ error: 'Proyecto no encontrado' });
-    const [locales, dup] = await Promise.all([leerCodigos(p.id), leerDuplicidad(supabase, p.id)]);
-    res.json({ ...p, locales, duplicidad: dup.mapa, sin_migracion_dup: dup.sinMigracion });
+    const [locales, dup, rev] = await Promise.all([leerCodigos(p.id), leerDuplicidad(supabase, p.id), leerRevisiones(p.id)]);
+    res.json({ ...p, locales, duplicidad: dup.mapa, sin_migracion_dup: dup.sinMigracion, revisiones_situacional: rev });
   } catch (e) { enviarError(res, next)(e); }
 });
 
@@ -243,6 +246,33 @@ api.post('/proyectos/:id/duplicidad/excluir', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ─── Estado situacional: explicación de las advertencias ────────────────────
+async function leerDatosDoc(proyectoId) {
+  const { data, error } = await supabase.from('ioarr_expediente_documentos').select('datos').eq('proyecto_id', proyectoId).maybeSingle();
+  if (error) { if (faltaMigracion(error)) return null; throw error; }
+  return data?.datos || {};
+}
+async function leerRevisiones(proyectoId) {
+  const d = await leerDatosDoc(proyectoId);
+  return d ? limpiarDatosDoc(d).situacional.revisiones : {};
+}
+api.put('/proyectos/:id/situacional/revisiones', async (req, res, next) => {
+  try {
+    const p = await proyectoDelUsuario(req);
+    if (!p) return res.status(404).json({ error: 'Proyecto no encontrado' });
+    const clave = String(req.body?.clave || '').slice(0, 300), nota = String(req.body?.nota || '').trim();
+    if (!clave) return res.status(400).json({ error: 'Falta la advertencia' });
+    const actual = await leerDatosDoc(p.id);
+    if (actual == null) return res.status(503).json({ error: 'Falta ejecutar supabase/migrations/015_ioarr_expediente_documentos.sql en Supabase para guardar la explicación' });
+    const revisiones = { ...(actual.situacional?.revisiones || {}) };
+    if (nota) revisiones[clave] = { nota, fecha: new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Lima' }).format(new Date()) }; else delete revisiones[clave];
+    const datos = limpiarDatosDoc({ ...actual, situacional: { revisiones } });
+    const { error } = await supabase.from('ioarr_expediente_documentos').upsert({ proyecto_id: p.id, datos, actualizado_en: new Date().toISOString() }, { onConflict: 'proyecto_id' });
+    if (error) throw error;
+    res.json({ revisiones: datos.situacional.revisiones });
+  } catch (e) { next(e); }
+});
+
 // Duplicar: { nombre? }
 api.post('/proyectos/:id/duplicar', async (req, res, next) => {
   try {
@@ -296,13 +326,13 @@ api.get('/proyectos/:id/excel', async (req, res, next) => {
     if (!p) return res.status(404).json({ error: 'Proyecto no encontrado' });
     const D = await cargarRegion(p.region);
     if (!D) return res.status(400).json({ error: 'No hay datos para la región ' + p.region });
-    const [cods, { mapa }] = await Promise.all([leerCodigos(p.id), leerDuplicidad(supabase, p.id)]);
+    const [cods, { mapa }, revisiones] = await Promise.all([leerCodigos(p.id), leerDuplicidad(supabase, p.id), leerRevisiones(p.id)]);
     const { list, excluidos } = separarLocales(D, cods, mapa);
     if (!list.length) return res.status(400).json({ error: excluidos.length ? 'Todos los locales del proyecto están excluidos por otra inversión vigente o reciente' : 'El proyecto no tiene locales seleccionados' });
     const P = limpiarParams(p.criterios);
     const fecha = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Lima' }).format(new Date());
     const { buffer } = await generarExcel(D, calc(D, P), P, list, {
-      proyecto: p.nombre, fecha, fuente: (await leerIndice()).fuente, ioarr: p.ioarr, duplicidad: mapa, excluidos
+      proyecto: p.nombre, fecha, fuente: (await leerIndice()).fuente, ioarr: p.ioarr, duplicidad: mapa, excluidos, revisiones
     });
     const archivo = `IOARR_${slug(p.nombre)}_${fecha}.xlsx`;
     res.set({

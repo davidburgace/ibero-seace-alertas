@@ -71,6 +71,9 @@ export function limpiarDatosDoc(b = {}) {
     antiguedad: porTipo(b.antiguedad, v => numero(v, 0, 100)),
     vida_util_estimada: porTipo(b.vida_util_estimada, v => entero(v, 1, 50)),
     informe_vida_util: texto(b.informe_vida_util, 300),
+    // Cuadro de estado situacional: advertencias revisadas, con su explicación ({ clave: { nota, fecha } })
+    situacional: { revisiones: Object.fromEntries(Object.entries(b.situacional?.revisiones || {}).slice(0, 200)
+      .map(([k, v]) => [String(k).slice(0, 300), { nota: texto(v?.nota, 500), fecha: /^\d{4}-\d{2}-\d{2}$/.test(v?.fecha || '') ? v.fecha : null }]).filter(([, v]) => v.nota)) },
     verificacion: Object.fromEntries(VERIF_MANUAL.map(x => [x.id, b.verificacion?.[x.id]]).filter(([, v]) => v && typeof v === 'object')
       .map(([id, v]) => [id, { ok: v.ok === true, nota: texto(v.nota, 300) }]).filter(([, v]) => v.ok || v.nota)),
     estado_actual: porTipo(b.estado_actual, v => ESTADOS_ACTIVO.includes(v) ? v : null),

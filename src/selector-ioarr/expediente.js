@@ -520,7 +520,7 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
   // Todas las IOARR del proyecto (ZIP y Radar)
   async function modelos(p) {
     const [A, { datos }] = await Promise.all([armar(p), leerDatosDoc(p)]);
-    return { A, lista: A.ioarrs.map(x => ({ x, M: modeloDe(A, x, datos, p) })) };
+    return { A, datos, lista: A.ioarrs.map(x => ({ x, M: modeloDe(A, x, datos, p) })) };
   }
   // Lo que necesita el formulario: datos guardados, lo que se propone y lo que falta
   const vistaDoc = ({ M, datos, sinMigracion, A, x }, p) => ({
@@ -597,7 +597,7 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
   // Se arma en flujo (archiver): los archivos del bucket se agregan de a uno, así
   // la memoria no crece con el número de fotos.
   api.get('/proyectos/:id/expediente-zip', responder(async (req, res) => {
-    const p = await proyecto(req), { A, lista: todas } = await modelos(p);
+    const p = await proyecto(req), { A, datos, lista: todas } = await modelos(p);
     // Solo las IOARR con algo que reponer
     const lista = todas.filter(y => y.M.ups.length);
     if (!lista.length) return res.status(400).json({ error: 'Ningún local del proyecto tiene bienes a reponer' });
@@ -613,7 +613,7 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
         const [f07c, memoria, verificacion, costos, { buffer: seleccion }] = await Promise.all([
           generar07C(M), generarMemoria(M), generarVerificacion(M),
           generarExcelCostos(x.R, { ...m, criterios: textoCriterios(A.P), precios: A.detalle, inventario: x.inv }),
-          generarExcel(x.D, x.C, A.P, x.list, { ...m, duplicidad: A.dup, excluidos: fuera })
+          generarExcel(x.D, x.C, A.P, x.list, { ...m, duplicidad: A.dup, excluidos: fuera, revisiones: datos.situacional?.revisiones })
         ]);
         return [
           { nombre: carpeta + '01_Formato_07C_borrador.docx', contenido: f07c, descripcion: 'borrador del Formato 07-C' },

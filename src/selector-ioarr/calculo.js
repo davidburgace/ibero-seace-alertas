@@ -144,6 +144,100 @@ export function totalesPorNivel(D, C, list) {
   return ['I', 'P', 'S', 'E'].filter(n => out[n]).map(n => out[n]);
 }
 
+// ─── Cuadro de estado situacional (formato del expediente de Huánuco, 2023) ────
+// Por UGEL y nivel: locales, población (matrícula del padrón), aulas (censo),
+// mobiliario Bueno, Regular y Malo (los cinco tipos; mesa en puestos) y si los
+// locales cuentan con otra inversión. Subtotal por nivel y total.
+// Listas por UGEL: una fila por servicio educativo (código modular).
+// Comprobaciones, para no repetir un error visto en un expediente real:
+//   suma     · lo de cada UGEL sumado por nivel = lo de la UGEL contado directo;
+//              los subtotales por nivel suman el total
+//   iguales  · dos UGEL con cifras idénticas (en total o en un mismo nivel)
+// dupDe(cod) → 'si' | 'no' | 'sin_verificar' (otra inversión vigente o reciente)
+export const CLAVES_SIT = ['n', 'est', 'aul', 'b', 'r', 'm'];
+const vacioSit = () => ({ n: 0, est: 0, aul: 0, b: 0, r: 0, m: 0, pi: { si: 0, no: 0, sin_verificar: 0 } });
+const sumarSit = (o, x) => { for (const k of CLAVES_SIT) o[k] += x[k]; for (const k in o.pi) o.pi[k] += x.pi[k]; return o; };
+export const piTexto = pi => pi.si ? 'Sí' : pi.sin_verificar ? 'Sin verificar' : 'No';
+
+export function estadoSituacional(D, C, list, dupDe = () => 'sin_verificar') {
+  const celdas = new Map();   // nivel|ugel → totales
+  const listas = new Map();   // ugel → filas
+  const directo = new Map();  // ugel → contado por local, sin pasar por el nivel
+  for (const i of list) {
+    const l = D.locs[i], ugel = D.ugels[l[2]] || '(sin UGEL)', cod = l[0], dup = dupDe(cod) || 'sin_verificar';
+    const porNiv = {};
+    const de = n => porNiv[n] ??= vacioSit();
+    for (const si of D.locSvc[i]) {
+      const s = D.svcs[si];
+      de(s[2]).est += s[6];
+      if (!listas.has(ugel)) listas.set(ugel, []);
+      listas.get(ugel).push({ cod, modular: s[0], inst: s[1], est: s[6], nivel: s[2], nombreNivel: NIVN[s[2]], cp: l[3], dist: D.dists[l[1]][0], ugel });
+    }
+    for (const ai of D.locAul[i]) {
+      const o = de(D.svcs[D.aulas[ai][1]][2]); o.aul++;
+      for (let t = 0; t < 5; t++) { o.b += C.A.b[t][ai]; o.r += C.A.r[t][ai]; o.m += C.A.m[t][ai]; }
+    }
+    for (const [n, o] of Object.entries(porNiv)) {
+      o.n = 1; o.pi[dup] = 1;
+      const k = n + '|' + ugel;
+      celdas.set(k, sumarSit(celdas.get(k) || Object.assign(vacioSit(), { nivel: n, nombre: NIVN[n], ugel }), o));
+    }
+    // Directo por local (para la comprobación)
+    const d = directo.get(ugel) || Object.assign(vacioSit(), { ugel });
+    d.n++; d.est += D.locEst[i]; d.aul += D.locAul[i].length; d.pi[dup]++;
+    for (let t = 0; t < 5; t++) { d.b += C.L.b[t * C.nL + i]; d.r += C.L.r[t * C.nL + i]; d.m += C.L.m[t * C.nL + i]; }
+    directo.set(ugel, d);
+  }
+  const ORD = ['I', 'P', 'S', 'E'], cmpU = (a, b) => a.localeCompare(b, 'es');
+  const filas = [...celdas.values()].sort((a, b) => ORD.indexOf(a.nivel) - ORD.indexOf(b.nivel) || cmpU(a.ugel, b.ugel));
+  const niveles = ORD.filter(n => filas.some(f => f.nivel === n)).map(n => ({
+    nivel: n, nombre: NIVN[n], filas: filas.filter(f => f.nivel === n),
+    subtotal: filas.filter(f => f.nivel === n).reduce(sumarSit, vacioSit())
+  }));
+  const total = niveles.reduce((a, x) => sumarSit(a, x.subtotal), vacioSit());
+  const ugels = [...directo.keys()].sort(cmpU);
+
+  // ── Comprobaciones ──
+  const advertencias = [], fmt = n => n.toLocaleString('es-PE'), cif = o => `${fmt(o.est)} estudiantes, ${fmt(o.aul)} aulas, ${fmt(o.b)} B, ${fmt(o.r)} R, ${fmt(o.m)} M`;
+  // Locales: en el cuadro cuenta una vez por nivel; directo, una vez. Se comparan las cifras, no el conteo.
+  const CIF = ['est', 'aul', 'b', 'r', 'm'];
+  const porUgel = ugels.map(u => {
+    const suma = filas.filter(f => f.ugel === u).reduce(sumarSit, vacioSit()), d = directo.get(u);
+    const ok = CIF.every(k => suma[k] === d[k]);
+    if (!ok) advertencias.push({ tipo: 'suma', clave: 'suma|' + u, texto: `${u}: la suma por nivel (${cif(suma)}) no coincide con lo contado por local (${cif(d)}).` });
+    return { ugel: u, ...suma, pi: suma.pi, locales: d.n, directo: d, ok };
+  });
+  const T = list.length ? totals(D, C, list) : null;
+  if (T) {
+    const tb = T.t.reduce((a, o) => ({ b: a.b + o.b, r: a.r + o.r, m: a.m + o.m }), { b: 0, r: 0, m: 0 });
+    const esperado = { est: T.est, aul: T.aul, ...tb };
+    if (!CIF.every(k => total[k] === esperado[k]))
+      advertencias.push({ tipo: 'suma', clave: 'suma|total', texto: `Los subtotales por nivel (${cif(total)}) no suman el total de la selección (${cif(esperado)}).` });
+  }
+  // Dos UGEL con cifras idénticas: en el total de la UGEL o en un mismo nivel
+  const firma = o => CIF.map(k => o[k]).join('|');
+  const parejas = (grupo, etiqueta, claveDe) => {
+    const vistos = new Map();
+    for (const o of grupo) {
+      if (!o.est && !o.aul) continue;
+      const f = firma(o);
+      if (vistos.has(f)) {
+        const a = vistos.get(f);
+        advertencias.push({ tipo: 'iguales', clave: claveDe(a.ugel, o.ugel), texto: `${a.ugel} y ${o.ugel} tienen cifras idénticas${etiqueta} (${cif(o)}). Revisa si es un error de copia o explícalo.` });
+      } else vistos.set(f, o);
+    }
+  };
+  const par = (a, b) => [a, b].sort(cmpU).join(' = ');
+  if (ugels.length > 1) {
+    parejas(porUgel, ' en su total', (a, b) => 'iguales|total|' + par(a, b));
+    for (const x of niveles) parejas(x.filas, ` en ${x.nombre}`, (a, b) => `iguales|${x.nivel}|` + par(a, b));
+  }
+  return {
+    niveles, total, porUgel, advertencias,
+    listas: ugels.map(u => ({ ugel: u, filas: (listas.get(u) || []).sort((a, b) => a.cod.localeCompare(b.cod) || ORD.indexOf(a.nivel) - ORD.indexOf(b.nivel)) }))
+  };
+}
+
 // Filtro del prototipo (applyFilter, sin el orden). F: {q, prov, dist, ugel, area, ges, niv, rep, est, censo}
 export function filtrar(D, C, F) {
   const out = [], q = norm(F.q).split(/\s+/).filter(Boolean);

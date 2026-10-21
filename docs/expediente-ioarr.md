@@ -97,6 +97,34 @@ Sin la migración, el proyecto se calcula por nivel y no se puede cambiar a «Un
 
 **Radar IOARR:** la ficha del CUI muestra cada IOARR por nivel con su total y su registro.
 
+## Cuadro de estado situacional (formato del expediente de Huánuco)
+
+No necesita migración: las explicaciones se guardan en `ioarr_expediente_documentos` (migración 015).
+
+**Qué muestra:** en **Mi selección**, el panel «Estado situacional por UGEL y nivel», y en el Excel del Selector, las hojas «Estado situacional» y «Locales por UGEL».
+
+- **Cuadro:** una fila por nivel y UGEL, con:
+  - locales;
+  - población de estudiantes (matrícula del padrón);
+  - número de aulas (censo);
+  - mobiliario Bueno, Regular y Malo (los cinco tipos, la mesa en puestos);
+  - «Cuenta con proyecto de inversión»: Sí si algún local tiene otra inversión vigente o reciente, Sin verificar si falta verificar alguno, y No en otro caso.
+  - Lleva subtotales por nivel y una fila de total. En el Excel, los subtotales y el total son fórmulas.
+- **Listas por UGEL:** una fila por servicio educativo, con código de local, código modular, institución, población, nivel, centro poblado, distrito y UGEL. En el Excel se agregan subtotales por UGEL.
+- **Un local con varios niveles** cuenta en cada nivel.
+- **Se cuentan** los locales de la propuesta; los excluidos por duplicidad quedan fuera.
+
+**Comprobaciones** (`estadoSituacional` en `src/selector-ioarr/calculo.js`):
+- Para cada UGEL, la suma de sus filas por nivel debe coincidir con lo contado por local. En el Excel, la tabla «Comprobación por UGEL» lo calcula con SUMIF.
+- Los subtotales por nivel deben sumar el total de la selección.
+- No debe haber dos UGEL con cifras idénticas (población, aulas, B, R y M), ni en su total ni en un mismo nivel. Un expediente real tuvo ese error.
+
+**Si hay una advertencia:**
+- Se muestra en pantalla y, al exportar, una ventana pide explicarla.
+- Se puede exportar sin explicar, porque la advertencia no bloquea.
+- La explicación va al Excel, debajo de la advertencia. Si falta, sale «PENDIENTE» en amarillo.
+- Ruta: `PUT /api/selector-ioarr/proyectos/:id/situacional/revisiones` con `{ clave, nota }`; una nota vacía quita la explicación.
+
 ## Etapa 1: costos
 
 ### Migración

@@ -1,10 +1,11 @@
 // Selector IOARR — Web Worker: guarda los datos de la región, calcula y filtra.
 // La página solo recibe lo que pinta (una página de la tabla, un detalle, un resumen),
 // así Lima (32 mil aulas) no congela la pantalla.
-import { ITEMS, NIVN, NIVS, NIVB, DEF, prep, calc, totals, filtrar, lv, norm, limpiarParams, totalesPorNivel } from '/selector-ioarr/calculo.js';
+import { ITEMS, NIVN, NIVS, NIVB, DEF, prep, calc, totals, filtrar, lv, norm, limpiarParams, totalesPorNivel, estadoSituacional } from '/selector-ioarr/calculo.js';
 
 let D = null, C = null, P = { ...DEF }, sel = new Set(), view = [], codIdx = new Map();
 let excl = new Set();   // locales excluidos por otra inversión vigente o reciente: siguen seleccionados, fuera de los totales
+let dup = {};           // { codLocal: { estado, excluir } } para el cuadro de estado situacional
 
 const pct = i => C.L.reqTot[i] > 0 ? C.L.repTot[i] / C.L.reqTot[i] : null;
 const selIdx = () => [...sel].map(c => codIdx.get(c)).filter(i => i != null);
@@ -21,7 +22,12 @@ const acciones = {
   params({ params }) { P = limpiarParams(params); if (D) C = calc(D, P); return P; },
   // Fija la selección; devuelve los códigos que existen en la región
   sel({ codigos }) { sel = new Set(codigos.filter(c => codIdx.has(c))); return [...sel]; },
-  excluidos({ codigos }) { excl = new Set(codigos); return excl.size; },
+  // Otra inversión vigente o reciente por local: { codLocal: { estado, codigo, excluir } }
+  duplicidad({ mapa }) {
+    dup = mapa || {};
+    excl = new Set(Object.entries(dup).filter(([, d]) => d.estado === 'si' && d.excluir).map(([c]) => c));
+    return excl.size;
+  },
 
   consulta({ f, sort, page, size }) {
     view = filtrar(D, C, f);
@@ -70,7 +76,8 @@ const acciones = {
       return { i, cod: l[0], excl: excl.has(l[0]), nom: D.locName[i], dist: D.dists[l[1]][0], lat: l[6], lon: l[7], est: D.locEst[i], aul: D.locAul[i].length, rep: C.L.repTot[i], fal: C.L.falTot[i],
         t: [0, 1, 2, 3, 4].map(t => lv(C, 'rep', t, i)) };
     });
-    return { ...base, tipos: ITEMS.map((x, t) => ({ ...x, ...T.t[t] })), distritos, locales, niveles: totalesPorNivel(D, C, list) };
+    return { ...base, tipos: ITEMS.map((x, t) => ({ ...x, ...T.t[t] })), distritos, locales, niveles: totalesPorNivel(D, C, list),
+      situacional: estadoSituacional(D, C, list, cod => dup[cod]?.estado) };
   }
 };
 

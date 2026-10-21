@@ -3,6 +3,7 @@
 //
 // Mismas hojas y columnas que exportXlsx del prototipo:
 //   Resumen · Locales (UP) · Por distrito · Por nivel · Servicios · Aulas · Reposición masiva
+//   · Estado situacional · Locales por UGEL (formato del expediente de Huánuco)
 //   · Excluidos por duplicidad (solo si algún local con otra inversión se excluyó)
 // Las columnas de resultado llevan fórmulas (con su resultado ya calculado)
 // para que el estudio sea auditable:
@@ -18,7 +19,7 @@
 
 import ExcelJS from 'exceljs';
 import { PassThrough } from 'node:stream';
-import { ITEMS, NIVN, NIVB, lv, totals, coordValidas, urlGoogleMaps, totalesPorNivel } from './calculo.js';
+import { ITEMS, NIVN, NIVB, lv, totals, coordValidas, urlGoogleMaps, totalesPorNivel, estadoSituacional, piTexto } from './calculo.js';
 import { ROTULO_DUP, ESTADOS_DUP, estadoDe } from './duplicidad.js';
 
 const ESTADO = { b: 'Bueno', r: 'Regular', m: 'Malo' };
@@ -54,7 +55,8 @@ function hoja(wb, nombre, cabecera, anchos) {
  * @param {object} P  criterios
  * @param {number[]} list índices de los locales seleccionados
  * @param {object} meta { proyecto, fecha (YYYY-MM-DD), fuente, ioarr: {cui, nombre} | null,
- *                     duplicidad: { [codLocal]: { estado, codigo, nota, excluir } }, excluidos: índices fuera de la propuesta }
+ *                     duplicidad: { [codLocal]: { estado, codigo, nota, excluir } }, excluidos: índices fuera de la propuesta,
+ *                     revisiones: { [clave de advertencia]: { nota, fecha } } del cuadro de estado situacional }
  * @returns {Promise<Buffer>}
  */
 export async function generarExcel(D, C, P, list, meta) {
@@ -215,6 +217,70 @@ export async function generarExcel(D, C, P, list, meta) {
     ws.addRow([]).commit();
     ws.addRow(['Un local con varios niveles se cuenta en cada nivel con sus estudiantes y aulas de ese nivel: la columna Locales no suma el total de locales. Con «Una IOARR por nivel», cada fila es una IOARR.']).commit();
     ws.commit();
+  }
+
+  // ── Estado situacional (por UGEL y nivel) y locales por UGEL ──────────────
+  {
+    const E = estadoSituacional(D, C, list, cod => estadoDe(meta.duplicidad, cod).estado);
+    const ws = wb.addWorksheet('Estado situacional', { views: [{ state: 'frozen', ySplit: 3 }] });
+    ws.columns = [16, 34, 10, 14, 12, 12, 12, 12, 18, 14].map(width => ({ width }));
+    ws.getCell('A1').value = 'Cuadro de estado situacional del mobiliario escolar por UGEL y nivel'; ws.getCell('A1').font = { bold: true, size: 14 };
+    ws.getCell('A2').value = 'Población: matrícula del padrón de ESCALE. Mobiliario: Censo Educativo 2025, los cinco tipos (mesa en puestos). Un local con varios niveles cuenta en cada nivel.';
+    ws.getCell('A2').font = { italic: true, color: { argb: 'FF5C6270' } };
+    const cab = ['Nivel', 'UGEL', 'Locales', 'Población de estudiantes', 'N.° de aulas', 'Mobiliario Bueno', 'Mobiliario Regular', 'Mobiliario Malo', 'Cuenta con proyecto de inversión', 'Locales con otra inversión'];
+    ws.getRow(3).values = cab; encabezado(ws, 3, cab.length);
+    const COLS = ['C', 'D', 'E', 'F', 'G', 'H', 'J'], VAL = o => [o.n, o.est, o.aul, o.b, o.r, o.m];
+    let r = 4; const subt = [];
+    for (const x of E.niveles) {
+      const desde = r;
+      for (const f of x.filas) { ws.getRow(r).values = [x.nombre, f.ugel, ...VAL(f), piTexto(f.pi), f.pi.si]; r++; }
+      const fr = ws.getRow(r);
+      fr.values = [`Subtotal ${x.nombre}`, '', ...COLS.slice(0, 6).map((c, k) => f(`SUM(${c}${desde}:${c}${r - 1})`, VAL(x.subtotal)[k])), piTexto(x.subtotal.pi), f(`SUM(J${desde}:J${r - 1})`, x.subtotal.pi.si)];
+      fr.font = { bold: true }; for (let c = 1; c <= 10; c++) fr.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F3F7' } };
+      subt.push(r); r++;
+    }
+    const tr = ws.getRow(r);
+    tr.values = ['TOTAL', '', ...COLS.slice(0, 6).map((c, k) => f(subt.map(n => c + n).join('+') || '0', VAL(E.total)[k])), piTexto(E.total.pi), f(subt.map(n => 'J' + n).join('+') || '0', E.total.pi.si)];
+    tr.font = { bold: true };
+    const filaTotal = r;
+    for (let k = 4; k <= r; k++) for (let c = 3; c <= 10; c++) if (c !== 9) ws.getCell(k, c).numFmt = ENTERO;
+    r += 2;
+    // Comprobación: por UGEL, la suma de sus filas (SUMIF) contra lo contado por local
+    ws.getCell(r, 1).value = 'Comprobación por UGEL'; ws.getCell(r, 1).font = { bold: true, color: { argb: AZUL } }; r++;
+    ws.getRow(r).values = ['', 'UGEL', 'Locales', 'Población (suma por nivel)', 'Aulas (suma por nivel)', 'Bueno', 'Regular', 'Malo', '¿Coincide con lo contado por local?']; encabezado(ws, r, 9); r++;
+    const rango = c => `$${c}$4:$${c}$${filaTotal - 1}`;
+    for (const u of E.porUgel) {
+      ws.getRow(r).values = ['', u.ugel, u.locales, ...['D', 'E', 'F', 'G', 'H'].map((c, k) => f(`SUMIF(${rango('B')},B${r},${rango(c)})`, [u.est, u.aul, u.b, u.r, u.m][k])), u.ok ? 'Sí' : 'NO'];
+      if (!u.ok) ws.getCell(r, 9).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3B0' } };
+      for (let c = 3; c <= 8; c++) ws.getCell(r, c).numFmt = ENTERO;
+      r++;
+    }
+    r++;
+    ws.getCell(r, 1).value = 'Advertencias'; ws.getCell(r, 1).font = { bold: true, color: { argb: AZUL } }; r++;
+    if (!E.advertencias.length) { ws.getCell(r, 1).value = 'Sin advertencias: los totales por UGEL suman los totales por nivel y no hay dos UGEL con cifras idénticas.'; r++; }
+    for (const a of E.advertencias) {
+      const rev = meta.revisiones?.[a.clave];
+      ws.getCell(r, 1).value = a.texto;
+      ws.getCell(r + 1, 1).value = rev ? `Revisado el ${rev.fecha ? rev.fecha.split('-').reverse().join('/') : '—'}: ${rev.nota}` : 'PENDIENTE: sin explicación.';
+      ws.getCell(r + 1, 1).font = { italic: true };
+      if (!rev) ws.getCell(r + 1, 1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3B0' } };
+      r += 2;
+    }
+    await ws.commit();
+
+    const wl = wb.addWorksheet('Locales por UGEL', { views: [{ state: 'frozen', ySplit: 1 }] });
+    const cabL = ['Código de local', 'Código modular', 'Institución educativa', 'Población', 'Nivel', 'Centro poblado', 'Distrito', 'UGEL'];
+    wl.columns = cabL.map((header, k) => ({ header, width: [12, 12, 40, 11, 16, 24, 22, 32][k] }));
+    encabezado(wl, 1, cabL.length);
+    let n = 1;
+    for (const L of E.listas) {
+      n++; const h = wl.addRow([L.ugel]); h.font = { bold: true, color: { argb: AZUL } }; h.commit();
+      const desde = n + 1;
+      for (const x of L.filas) { n++; wl.addRow([x.cod, x.modular, x.inst, x.est, x.nombreNivel, x.cp, x.dist, x.ugel]).commit(); }
+      n++; const st = wl.addRow(['', '', `Subtotal ${L.ugel} · ${((n) => n === 1 ? '1 local' : n + ' locales')(new Set(L.filas.map(x => x.cod)).size)}`, f(`SUM(D${desde}:D${n - 1})`, L.filas.reduce((a, x) => a + x.est, 0))]);
+      st.font = { bold: true }; st.commit();
+    }
+    wl.commit();
   }
 
   // ── Servicios ───────────────────────────────────────────────────────────────
