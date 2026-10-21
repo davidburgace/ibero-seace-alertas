@@ -34,6 +34,18 @@ export const FUENTES_PRECIO = { cotizacion: 'Cotización', seace: 'SEACE', histo
 export const BASES = { cd: 'Costo directo', subtotal: 'Subtotal (CD + transporte, instalación y embalaje)', neto: 'Subtotal + GG + utilidad', bienes: 'Costo de los bienes (con IGV)' };
 export const LIMITE_UIT = 75;   // registro completo del Formato 07-C si la inversión supera 75 UIT
 
+// Propone el tipo de bien a partir de la descripción (al copiar un precio de Radar IOARR).
+// Devuelve null si no se reconoce: el usuario lo elige a mano.
+export function tipoDesdeDescripcion(desc) {
+  const t = String(desc || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+  const docente = /docente|profesor|maestr/.test(t);
+  if (/armario|estante|anaquel|repisa|locker|casillero/.test(t)) return 'arm';
+  if (/escritorio/.test(t) || (/mesa/.test(t) && docente)) return 'esc';
+  if (/silla|asiento/.test(t)) return docente ? 'sdoc' : 'silla';
+  if (/mesa|carpeta|pupitre/.test(t)) return 'mesa';
+  return null;
+}
+
 // grupo: orden de cálculo. zona: qué factor por zona se le aplica.
 export const RUBROS = [
   { clave: 'transporte', nombre: 'Transporte (flete)', grupo: 'bienes', bases: ['cd'], zona: 'flete' },

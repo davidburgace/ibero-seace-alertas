@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import ExcelJS from 'exceljs';
 import { prep, calc, totals, filtrar, FILTRO_VACIO, DEF } from '../src/selector-ioarr/calculo.js';
-import { costear, limpiarRubros, factorZona, indiceFactores, RUBROS } from '../src/selector-ioarr/costos.js';
+import { costear, limpiarRubros, factorZona, indiceFactores, RUBROS, tipoDesdeDescripcion } from '../src/selector-ioarr/costos.js';
 import { generarExcelCostos } from '../src/selector-ioarr/excel-costos.js';
 
 const DIR = new URL('../src/public/data/selector-ioarr/2025/', import.meta.url);
@@ -167,4 +167,14 @@ test('Excel recalculado con LibreOffice: mismo total, y cambia al editar un par�
   cerca(Math.round(valorResumen(h2.Resumen, 'TOTAL DE INVERSIÓN') * 100), Math.round(R2.totales.total * 100), 'total tras cambiar el precio');
   assert.equal(R2.uit.supera, true);
   assert.match(h2.Resumen, /Registro que corresponde,"COMPLETO/);
+});
+
+test('copiar de Radar IOARR: el tipo de bien se propone por la descripción', () => {
+  const casos = {
+    'MESA UNIPERSONAL PARA ESTUDIANTE DE PRIMARIA': 'mesa', 'Carpeta bipersonal': 'mesa', 'PUPITRE': 'mesa',
+    'SILLA PARA ESTUDIANTE': 'silla', 'Silla de profesor': 'sdoc', 'SILLA PARA DOCENTE': 'sdoc',
+    'ESCRITORIO': 'esc', 'MESA PARA DOCENTE': 'esc', 'Armario de melamina': 'arm', 'ESTANTE METÁLICO': 'arm',
+    'PIZARRA ACRÍLICA': null, '': null
+  };
+  for (const [d, t] of Object.entries(casos)) assert.equal(tipoDesdeDescripcion(d), t, d);
 });

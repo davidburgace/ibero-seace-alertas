@@ -1,7 +1,7 @@
 // Selector IOARR — catálogo compartido de precios, UIT y factores por zona.
 // API: /api/selector-ioarr/catalogo/* (src/selector-ioarr/expediente.js)
 import { ITEMS } from '/selector-ioarr/calculo.js';
-import { FUENTES_PRECIO, LIMITE_UIT } from '/selector-ioarr/costos.js';
+import { FUENTES_PRECIO, LIMITE_UIT, tipoDesdeDescripcion } from '/selector-ioarr/costos.js';
 
 const NS = new Intl.NumberFormat('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const soles = n => 'S/ ' + NS.format(Number(n) || 0);
@@ -42,6 +42,8 @@ function pintarPrecios() {
     </tr>`).join('') : '<tr><td colspan="8" class="vacio">Aún no hay precios cargados.</td></tr>';
 }
 
+const hayVigente = tipo => S.precios.some(x => x.tipo_bien === tipo && x.vigente);
+
 function abrirPrecio(p, prellenado = {}) {
   S.editando = p?.id || null;
   const v = p || prellenado;
@@ -53,8 +55,10 @@ function abrirPrecio(p, prellenado = {}) {
   $('f-fuente').value = v.fuente || 'cotizacion';
   $('f-desc').value = v.descripcion || '';
   $('f-obs').value = v.observacion || '';
-  $('f-vigente').checked = p ? !!p.vigente : !S.precios.some(x => x.tipo_bien === $('f-tipo').value && x.vigente);
+  $('f-vigente').checked = p ? !!p.vigente : !hayVigente($('f-tipo').value);
   $('f-err').hidden = true;
+  $('f-tipo-aviso').hidden = !prellenado.aviso_tipo;
+  $('f-tipo-aviso').textContent = prellenado.aviso_tipo || '';
   $('m-precio').classList.add('open');
   setTimeout(() => $('f-precio-v').focus(), 30);
 }
@@ -92,7 +96,10 @@ async function buscarRef() {
 function usarRef(r) {
   $('m-ref').classList.remove('open');
   const partes = ['a', 'b', 'c', 'd'].filter(k => r[k] != null).map(k => `${k} = ${soles(r[k])}`).join(', ');
+  const tipo = tipoDesdeDescripcion(r.descripcion);
   abrirPrecio(null, {
+    tipo_bien: tipo || undefined,
+    aviso_tipo: tipo ? `Tipo propuesto según la descripción: ${NOMBRE[tipo]}. Revísalo.` : 'No se reconoció el tipo de bien por la descripción: elígelo.',
     precio: r.a, fuente: 'historico', descripcion: r.descripcion || r.codigo_bien,
     observacion: `Estructura de costos del CUI ${r.cui_origen}${r.anio_ficha ? ' (' + r.anio_ficha + ')' : ''}, bien ${r.codigo_bien}: ${partes}. Se copió a (costo de adquisición).${r.cuadra ? '' : ' La fila no cumple d = (a + b + c) × 1.15.'}`
   });
@@ -161,7 +168,8 @@ async function boot() {
   $('p-ref').onclick = () => { $('r-q').value = ''; $('m-ref').classList.add('open'); buscarRef(); setTimeout(() => $('r-q').focus(), 30); };
   $('r-q').oninput = () => { clearTimeout(tRef); tRef = setTimeout(buscarRef, 250); };
   $('r-tbody').onclick = e => { const b = e.target.closest('[data-usar]'); if (b) usarRef(S.refs[+b.dataset.usar]); };
-  $('f-tipo').onchange = () => { if (!S.editando) $('f-unidad').value = UNIDAD[$('f-tipo').value]; };
+  // En un precio nuevo, al cambiar el tipo se ajustan la unidad y «vigente» (si el tipo aún no tiene uno)
+  $('f-tipo').onchange = () => { if (!S.editando) { $('f-unidad').value = UNIDAD[$('f-tipo').value]; $('f-vigente').checked = !hayVigente($('f-tipo').value); } };
   $('f-precio').onsubmit = guardarPrecio;
   $('p-tbody').onclick = async e => {
     const id = t => e.target.closest(`[data-${t}]`)?.dataset[t];
