@@ -2,6 +2,7 @@
 // src/selector-ioarr/excel-costos.js — Excel de la estructura de costos (exceljs)
 //
 // Hojas: Resumen · Parámetros · Partidas · Metrado y costos por local · Por distrito
+//        · Inventario verificado (solo si algún local se corrigió con una visita de campo)
 // Todo lo que se calcula es una fórmula de Excel (con su resultado ya puesto),
 // para que el evaluador pueda auditar cada cifra:
 //   - Parámetros: precios unitarios, rubros (modo, valor, base) y UIT. Si se
@@ -30,11 +31,13 @@ function cabecera(ws, fila, ancho) {
   for (let c = 1; c <= ancho; c++) r.getCell(c).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: AZUL } };
   r.height = 34;
 }
+const fechaPe = s => s ? String(s).split('-').reverse().join('/') : '';
 const resaltar = (cell, argb) => { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb } }; };
 
 /**
  * @param {object} R    resultado de costear()
- * @param {object} meta { proyecto, region, fecha, fuente, criterios: texto, precios: {mesa: {descripcion, fuente, fecha, observacion}} }
+ * @param {object} meta { proyecto, region, fecha, fuente, criterios: texto, precios: {mesa: {descripcion, fuente, fecha, observacion}},
+ *                      inventario: { [codLocal]: fila de ioarr_expediente_inventario } }
  * @returns {Promise<Buffer>}
  */
 export async function generarExcelCostos(R, meta) {
@@ -48,6 +51,8 @@ export async function generarExcelCostos(R, meta) {
   const wsPa = wb.addWorksheet(HPa);
   const wsM = wb.addWorksheet('Metrado y costos por local', { views: [{ state: 'frozen', xSplit: 2, ySplit: 1 }] });
   const wsD = wb.addWorksheet('Por distrito', { views: [{ state: 'frozen', ySplit: 1 }] });
+  const verificados = R.locales.filter(l => l.verificado);
+  const wsI = verificados.length ? wb.addWorksheet('Inventario verificado', { views: [{ state: 'frozen', ySplit: 3 }] }) : null;
 
   const T = R.totales, L = R.locales, n = L.length;
 
@@ -101,6 +106,7 @@ export async function generarExcelCostos(R, meta) {
   const col = (clave, titulo, ancho = 14) => { cab.push({ titulo, ancho }); C[clave] = cab.length; };
   col('cod', 'Código de local', 12); col('nom', 'Instituciones', 40); col('ubigeo', 'Ubigeo', 9); col('prov', 'Provincia', 18); col('dist', 'Distrito', 20);
   col('area', 'Área', 9); col('est', 'Estudiantes (padrón)', 12); col('aul', 'Aulas en uso (censo)', 11);
+  col('inv', 'Inventario', 16);
   col('zf', 'Factor de zona: flete', 11); col('zi', 'Factor de zona: instalación', 12);
   ITEMS.forEach((x, t) => col('q' + t, `${x.n} – reposición (${x.u})`, 13));
   ITEMS.forEach((x, t) => col('cd' + t, `${x.n} – costo directo (S/)`, 15));
@@ -136,6 +142,7 @@ export async function generarExcelCostos(R, meta) {
   L.forEach((l, j) => {
     const r = ini + j, v = [];
     v[C.cod] = l.cod; v[C.nom] = l.nom; v[C.ubigeo] = l.ubigeo; v[C.prov] = l.prov; v[C.dist] = l.dist;
+    v[C.inv] = l.verificado ? `Verificado en campo ${fechaPe(l.verificado.fecha_visita)}` : 'Censo Educativo';
     v[C.area] = l.rural ? 'Rural' : 'Urbana'; v[C.est] = l.est; v[C.aul] = l.aul; v[C.zf] = l.zona.flete; v[C.zi] = l.zona.instalacion;
     ITEMS.forEach((_, t) => { v[C['q' + t]] = l.rep[t]; v[C['cd' + t]] = f(`${A('q' + t, r)}*${celPU[t]}`, l.cdTipo[t]); });
     v[C.cd] = f(`SUM(${A('cd0', r)}:${A('cd4', r)})`, l.cd);
@@ -158,7 +165,7 @@ export async function generarExcelCostos(R, meta) {
   // Fila de totales
   {
     const v = []; v[C.cod] = 'TOTAL';
-    const sumables = Object.keys(C).filter(k => !['cod', 'nom', 'ubigeo', 'prov', 'dist', 'area', 'zf', 'zi'].includes(k));
+    const sumables = Object.keys(C).filter(k => !['cod', 'nom', 'ubigeo', 'prov', 'dist', 'area', 'inv', 'zf', 'zi'].includes(k));
     const resultado = {
       est: T.est, aul: T.aul, cd: T.cd, subtotal: T.subtotal, neto: T.neto, bienes: T.bienes, total: T.total, fv: T.falValor,
       ...Object.fromEntries(R.rubros.map(x => [x.clave, x.monto])),
@@ -259,6 +266,7 @@ export async function generarExcelCostos(R, meta) {
     add([meta.fuente || 'Padrón de ESCALE – Minedu, registros al 29/10/2025']);
     add(['Censo Educativo 2025, Local escolar, pregunta 6.1 (aulas y mobiliario)']);
     add(['Son datos declarados por cada colegio y no están validados.']);
+    if (verificados.length) add([`En ${verificados.length === 1 ? '1 local' : verificados.length + ' locales'} el mobiliario se reemplazó por el inventario verificado en campo (hoja «Inventario verificado»).`]);
     add(['Los precios unitarios, los porcentajes de los rubros y la UIT los cargó el usuario (hoja Parámetros).']);
   }
 
@@ -285,6 +293,31 @@ export async function generarExcelCostos(R, meta) {
     for (let k = 2; k <= r; k++) {
       for (const c of [4, 5, 6]) ws.getCell(k, c).numFmt = ENTERO;
       for (const c of [7, 8, 9]) ws.getCell(k, c).numFmt = SOLES;
+    }
+  }
+
+  // ── Inventario verificado en campo ──────────────────────────────────────────
+  if (wsI) {
+    const ws = wsI;
+    ws.columns = [12, 36, 22, 9, 9, 9, 9, 9, 9, 11, 12, 11, 12, 22, 50].map(width => ({ width }));
+    ws.getCell('A1').value = 'Inventario verificado en campo'; ws.getCell('A1').font = { bold: true, size: 14 };
+    ws.getCell('A2').value = 'Reemplaza lo que reporta el Censo Educativo en estos locales y tipos de bien. Reposición = Malo + % de Regular; faltante = Requerido − Existente, por local.';
+    ws.getCell('A2').font = { italic: true, color: { argb: 'FF5C6270' } };
+    ws.getRow(3).values = ['Código de local', 'Instituciones', 'Tipo de bien', 'Censo: bueno', 'Censo: regular', 'Censo: malo',
+      'Campo: bueno', 'Campo: regular', 'Campo: malo', 'Requerido', 'Reposición', 'Faltante', 'Fecha de visita', 'Responsable', 'Sustento'];
+    cabecera(ws, 3, 15);
+    let r = 4;
+    for (const l of verificados) {
+      const inv = meta.inventario?.[l.cod] || {};
+      for (const k of l.verificado.tipos) {
+        const t = ITEMS.findIndex(x => x.k === k), c = inv.censo?.[k] || {}, v = inv.bienes?.[k] || {};
+        ws.getRow(r).values = [l.cod, l.nom, ITEMS[t].n, c.b ?? '', c.r ?? '', c.m ?? '', v.b, v.r, v.m, c.req ?? '',
+          l.rep[t], l.fal[t], fechaPe(l.verificado.fecha_visita), l.verificado.responsable || '', l.verificado.observacion];
+        for (let k2 = 4; k2 <= 12; k2++) ws.getCell(r, k2).numFmt = ENTERO;
+        for (const k2 of [7, 8, 9]) resaltar(ws.getCell(r, k2), GRIS);
+        ws.getCell(r, 15).alignment = { wrapText: true, vertical: 'top' };
+        r++;
+      }
     }
   }
 

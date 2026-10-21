@@ -16,7 +16,8 @@ const PAGE = 40;
 let ctx = null;        // { el, proyecto, api, toast, guardarYa }
 let datos = null;      // respuesta de /costos
 let catalogo = null;   // precios del catálogo por tipo
-let pagLoc = 0, tGuardar = null, version = 0;
+let pagLoc = 0, tGuardar = null, version = 0, filtroLoc = '';
+const norm = t => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 
 export async function renderExpediente(c) {
   ctx = c;
@@ -76,7 +77,7 @@ function pintarKpis() {
 }
 
 function pintarAvisos() {
-  const clase = { uit75: 'aviso alerta', precio: 'aviso', faltante: 'aviso', uit: 'aviso', rubros: 'aviso' };
+  const clase = { uit75: 'aviso alerta', precio: 'aviso', faltante: 'aviso', uit: 'aviso', rubros: 'aviso', inventario: 'aviso' };
   document.getElementById('exp-avisos').innerHTML = datos.avisos.length
     ? `<div class="avisos">${datos.avisos.map(a => `<div class="${clase[a.tipo] || 'aviso'}" role="${a.tipo === 'uit75' ? 'alert' : 'note'}">${esc(a.texto)}</div>`).join('')}</div>` : '';
 }
@@ -136,10 +137,13 @@ function pintarResultados() {
   const partidas = datos.partidas.map(p => `<tr><td>${p.n}</td><td>${p.u}</td><td class="num">${ent(p.rep)}</td><td class="num">${soles(p.pu)}</td><td class="num">${soles(p.parcial)}</td></tr>`).join('');
   const falt = datos.partidas.map(p => `<tr><td>${p.n}</td><td class="num">${ent(p.fal)}</td><td class="num">${soles(p.falValor)}</td></tr>`).join('');
   const dist = datos.distritos.map(d => `<tr><td>${esc(d.nom)}<br><span class="sub">${esc(d.prov)} · ${d.ubigeo}</span></td><td class="num">${ent(d.n)}</td><td class="num">${ent(d.est)}</td><td class="num">${ent(d.rep)}</td><td class="num">${soles(d.total)}</td><td class="num">${d.porEstudiante == null ? '—' : soles(d.porEstudiante)}</td></tr>`).join('');
-  const locs = [...datos.locales].sort((a, b) => b.total - a.total || a.cod.localeCompare(b.cod));
+  const q = norm(filtroLoc).trim();
+  const locs = [...datos.locales].filter(l => !q || l.cod.includes(q) || norm(l.nom).includes(q) || norm(l.dist).includes(q))
+    .sort((a, b) => b.total - a.total || a.cod.localeCompare(b.cod));
   const pags = Math.max(1, Math.ceil(locs.length / PAGE)); pagLoc = Math.min(pagLoc, pags - 1);
   const desde = pagLoc * PAGE;
-  const lrows = locs.slice(desde, desde + PAGE).map(l => `<tr><td class="mono">${l.cod}</td><td><span class="nm">${esc(l.nom)}</span><span class="sub">${esc(l.dist)}${l.rural ? ' · rural' : ''}</span></td><td class="num">${ent(l.est)}</td><td class="num">${ent(l.rep)}</td><td class="num">${ent(l.fal)}</td><td class="num">${l.zona.flete || l.zona.instalacion ? `+${dec(l.zona.flete * 100)} % / +${dec(l.zona.instalacion * 100)} %` : '<span class="sub">—</span>'}</td><td class="num">${soles(l.cd)}</td><td class="num"><b>${soles(l.total)}</b></td></tr>`).join('');
+  const lrows = locs.slice(desde, desde + PAGE).map(l => `<tr><td class="mono">${l.cod}</td><td><span class="nm">${esc(l.nom)}</span><span class="sub">${esc(l.dist)}${l.rural ? ' · rural' : ''}</span></td><td class="num">${ent(l.est)}</td><td class="num">${ent(l.rep)}</td><td class="num">${ent(l.fal)}</td><td class="num">${l.zona.flete || l.zona.instalacion ? `+${dec(l.zona.flete * 100)} % / +${dec(l.zona.instalacion * 100)} %` : '<span class="sub">—</span>'}</td><td class="num">${soles(l.cd)}</td><td class="num"><b>${soles(l.total)}</b></td>
+    <td>${l.verificado ? `<span class="chip-est ok">Verificado ${fechaPe(l.verificado.fecha_visita)}</span><br>` : ''}<button class="x" data-inv="${esc(l.cod)}" type="button">${l.verificado ? 'Editar' : 'Corregir inventario'}</button></td></tr>`).join('');
 
   document.getElementById('exp-resultados').innerHTML = `
     <div class="cols">
@@ -163,7 +167,8 @@ function pintarResultados() {
       <div class="tabla-wrap borde-0"><table class="tabla"><thead><tr><th>Distrito</th><th class="num">Locales</th><th class="num">Estudiantes</th><th class="num">Bienes a reponer</th><th class="num">Total</th><th class="num">Por estudiante</th></tr></thead><tbody>${dist}</tbody>
       <tfoot><tr><td>Total</td><td class="num">${ent(T.locales)}</td><td class="num">${ent(T.est)}</td><td class="num">${ent(T.rep)}</td><td class="num">${soles(T.total)}</td><td class="num">${T.porEstudiante == null ? '—' : soles(T.porEstudiante)}</td></tr></tfoot></table></div></div>
     <div class="panel"><div class="panel-cab"><h3>Por local</h3><span class="sub">Ordenados por total</span></div>
-      <div class="tabla-wrap borde-0"><table class="tabla"><thead><tr><th>Código de local</th><th>Instituciones</th><th class="num">Estudiantes</th><th class="num">Reposición</th><th class="num">Faltante</th><th class="num">Zona (flete / instal.)</th><th class="num">Costo directo</th><th class="num">Total</th></tr></thead><tbody>${lrows}</tbody></table></div>
+      <div class="pad"><input id="exp-buscar" type="search" placeholder="Buscar por código de local, nombre o distrito" value="${esc(filtroLoc)}" autocomplete="off" aria-label="Buscar local"></div>
+      <div class="tabla-wrap borde-0"><table class="tabla"><thead><tr><th>Código de local</th><th>Instituciones</th><th class="num">Estudiantes</th><th class="num">Reposición</th><th class="num">Faltante</th><th class="num">Zona (flete / instal.)</th><th class="num">Costo directo</th><th class="num">Total</th><th>Inventario</th></tr></thead><tbody>${lrows || '<tr><td colspan="9" class="vacio">Ningún local coincide con la búsqueda.</td></tr>'}</tbody></table></div>
       ${pags > 1 ? `<div class="paginacion pad-pag"><span class="sub">${ent(desde + 1)}–${ent(Math.min(locs.length, desde + PAGE))} de ${ent(locs.length)}</span><div class="pg-btns"><button class="btn btn-ghost btn-sm" data-exp-pag="-1" type="button" ${pagLoc === 0 ? 'disabled' : ''}>Anterior</button><span class="mono">${pagLoc + 1} / ${pags}</span><button class="btn btn-ghost btn-sm" data-exp-pag="1" type="button" ${pagLoc >= pags - 1 ? 'disabled' : ''}>Siguiente</button></div></div>` : ''}</div>`;
 }
 
@@ -221,6 +226,12 @@ async function exportar(btn) {
 // Eventos delegados: se enganchan una vez sobre el contenedor
 export function enlazarExpediente(el, abrirNuevo) {
   el.addEventListener('input', e => {
+    if (e.target.id === 'exp-buscar') {
+      filtroLoc = e.target.value; pagLoc = 0;
+      const pos = e.target.selectionStart; pintarResultados();
+      const b = document.getElementById('exp-buscar'); b.focus(); b.setSelectionRange(pos, pos);
+      return;
+    }
     if (e.target.dataset.campo === 'valor') { clearTimeout(tGuardar); estado('Cambios sin guardar', 'pend'); tGuardar = setTimeout(() => guardar({ rubros: leerRubros() }), 700); }
     if (e.target.id === 'exp-anio') {
       clearTimeout(tGuardar);
@@ -238,5 +249,100 @@ export function enlazarExpediente(el, abrirNuevo) {
     if (e.target.closest('[data-exp-nuevo]')) abrirNuevo();
     const pg = e.target.closest('[data-exp-pag]');
     if (pg) { pagLoc += +pg.dataset.expPag; pintarResultados(); }
+    const inv = e.target.closest('[data-inv]');
+    if (inv) abrirInventario(inv.dataset.inv);
   });
+}
+
+// ─── Inventario verificado en campo ──────────────────────────────────────────
+// Reemplaza el censo de un local en el expediente (costos y Excel). El Selector sigue con el censo.
+function modalInventario() {
+  let m = document.getElementById('m-inv');
+  if (m) return m;
+  m = document.createElement('div');
+  m.className = 'modal-overlay'; m.id = 'm-inv';
+  m.setAttribute('role', 'dialog'); m.setAttribute('aria-modal', 'true'); m.setAttribute('aria-labelledby', 'm-inv-tit');
+  m.innerHTML = `<form class="modal" id="f-inv">
+    <button class="cerrar" type="button" data-cerrar aria-label="Cerrar">×</button>
+    <h2 id="m-inv-tit">Inventario verificado en campo</h2>
+    <p class="sub" id="inv-local"></p>
+    <p class="sub">Marca los tipos de bien que verificaste y escribe lo que encontraste. En esos tipos, el expediente usa tus cantidades en lugar del Censo Educativo: reposición = malo + % de regular; faltante = requerido − existente. El Selector sigue mostrando el censo.</p>
+    <div class="tabla-wrap"><table class="tabla tabla-inv"><thead><tr><th>Tipo de bien</th><th class="num">Requerido</th><th class="num">Censo (B / R / M)</th><th>Corregir</th><th>Bueno</th><th>Regular</th><th>Malo</th></tr></thead><tbody id="inv-tbody"></tbody></table></div>
+    <div class="form-grid">
+      <div class="campo"><label for="inv-fecha">Fecha de la visita</label><input id="inv-fecha" type="date" required></div>
+      <div class="campo"><label for="inv-resp">Responsable</label><input id="inv-resp" type="text" maxlength="200" placeholder="Quién hizo la visita"></div>
+      <div class="campo ancho"><label for="inv-obs">Sustento</label><textarea id="inv-obs" maxlength="1000" required placeholder="Ej.: acta de verificación firmada por el director, 32 fotos; las mesas existen pero están rotas"></textarea></div>
+    </div>
+    <p class="err" id="inv-err" hidden></p>
+    <div class="modal-acts">
+      <button class="btn btn-ghost btn-peligro" type="button" id="inv-quitar" hidden>Quitar corrección (usar el censo)</button>
+      <button class="btn btn-ghost" type="button" data-cerrar>Cancelar</button>
+      <button class="btn btn-primary" type="submit" id="inv-ok">Guardar</button>
+    </div>
+  </form>`;
+  document.body.appendChild(m);
+  m.addEventListener('click', e => { if (e.target === m || e.target.closest('[data-cerrar]')) m.classList.remove('open'); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') m.classList.remove('open'); });
+  m.querySelector('#inv-tbody').addEventListener('change', e => {
+    const k = e.target.dataset.invChk;
+    if (k) m.querySelectorAll(`[data-inv-k="${k}"]`).forEach(i => { i.disabled = !e.target.checked; });
+  });
+  m.querySelector('#f-inv').addEventListener('submit', guardarInventario);
+  m.querySelector('#inv-quitar').addEventListener('click', quitarInventario);
+  return m;
+}
+
+let invCod = null;
+async function abrirInventario(cod) {
+  const m = modalInventario();
+  invCod = cod;
+  try {
+    const d = await ctx.api(`/proyectos/${ctx.proyecto.id}/costos/inventario/${encodeURIComponent(cod)}`);
+    if (d.sin_migracion) { ctx.toast('Falta ejecutar supabase/migrations/013_ioarr_expediente_inventario.sql en Supabase'); return; }
+    const v = d.verificado;
+    m.querySelector('#inv-local').innerHTML = `<b>${esc(d.cod)}</b> · ${esc(d.nom)}`;
+    m.querySelector('#inv-tbody').innerHTML = ITEMS.map(x => {
+      const c = d.censo[x.k], f = v?.bienes?.[x.k], on = !!f, val = (k) => f ? f[k] : c[k];
+      const inp = k => `<input type="number" min="0" step="1" inputmode="numeric" data-inv-k="${x.k}" data-c="${k}" value="${val(k)}" ${on ? '' : 'disabled'} required aria-label="${x.n}: ${{ b: 'bueno', r: 'regular', m: 'malo' }[k]}">`;
+      return `<tr><td><b>${x.n}</b></td><td class="num">${ent(c.req)}</td><td class="num">${ent(c.b)} / ${ent(c.r)} / ${ent(c.m)}${c.b + c.r + c.m < c.req ? '<br><span class="sub aviso-linea">faltan ' + ent(c.req - c.b - c.r - c.m) + '</span>' : ''}</td>
+        <td><label class="chk"><input type="checkbox" data-inv-chk="${x.k}" ${on ? 'checked' : ''}> Corregir</label></td><td>${inp('b')}</td><td>${inp('r')}</td><td>${inp('m')}</td></tr>`;
+    }).join('');
+    m.querySelector('#inv-fecha').value = v?.fecha_visita || '';
+    m.querySelector('#inv-fecha').max = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Lima' });
+    m.querySelector('#inv-resp').value = v?.responsable || '';
+    m.querySelector('#inv-obs').value = v?.observacion || '';
+    m.querySelector('#inv-quitar').hidden = !v;
+    m.querySelector('#inv-err').hidden = true;
+    m.classList.add('open');
+  } catch (e) { ctx.toast('No se pudo abrir el inventario: ' + e.message); }
+}
+
+async function guardarInventario(e) {
+  e.preventDefault();
+  const m = modalInventario(), err = m.querySelector('#inv-err'), bienes = {};
+  m.querySelectorAll('[data-inv-chk]:checked').forEach(chk => {
+    const k = chk.dataset.invChk, n = c => Number(m.querySelector(`[data-inv-k="${k}"][data-c="${c}"]`).value);
+    bienes[k] = { b: n('b'), r: n('r'), m: n('m') };
+  });
+  if (!Object.keys(bienes).length) { err.textContent = 'Marca al menos un tipo de bien para corregir.'; err.hidden = false; return; }
+  const btn = m.querySelector('#inv-ok'); btn.disabled = true;
+  try {
+    datos = await ctx.api(`/proyectos/${ctx.proyecto.id}/costos/inventario/${encodeURIComponent(invCod)}`, { method: 'PUT', body: {
+      bienes, fecha_visita: m.querySelector('#inv-fecha').value, responsable: m.querySelector('#inv-resp').value, observacion: m.querySelector('#inv-obs').value } });
+    m.classList.remove('open');
+    pintarPrecios(); pintarResultados();
+    ctx.toast('Inventario verificado guardado.');
+  } catch (x) { err.textContent = x.message; err.hidden = false; }
+  finally { btn.disabled = false; }
+}
+
+async function quitarInventario() {
+  if (!confirm('¿Quitar la corrección? El local vuelve a calcularse con el Censo Educativo.')) return;
+  const m = modalInventario();
+  try {
+    datos = await ctx.api(`/proyectos/${ctx.proyecto.id}/costos/inventario/${encodeURIComponent(invCod)}`, { method: 'DELETE' });
+    m.classList.remove('open');
+    pintarPrecios(); pintarResultados();
+    ctx.toast('Se usa otra vez el censo.');
+  } catch (x) { ctx.toast('No se pudo quitar: ' + x.message); }
 }
