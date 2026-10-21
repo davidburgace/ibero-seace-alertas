@@ -90,7 +90,7 @@ const esUuid = s => /^[0-9a-f-]{36}$/i.test(String(s || ''));
 async function proyectoDelUsuario(req) {
   if (!esUuid(req.params.id)) return null;
   const { data, error } = await supabase.from('ioarr_selector_proyectos')
-    .select('*, ioarr:ioarr_proyectos(id, cui, nombre)')
+    .select('*, ioarr:ioarr_proyectos(id, cui, nombre, monto_inversion, estado, etapa_financista)')
     .eq('id', req.params.id).eq('usuario_id', req.usuario.id).maybeSingle();
   if (error) throw error;
   return data;
@@ -127,7 +127,7 @@ async function borrarCodigos(proyectoId, codigos) {
 api.get('/proyectos', async (req, res, next) => {
   try {
     const { data, error } = await supabase.from('ioarr_selector_proyectos')
-      .select('id, nombre, region, anio_datos, actualizado_en, ioarr:ioarr_proyectos(id, cui, nombre), locales:ioarr_selector_locales(count)')
+      .select('id, nombre, region, anio_datos, actualizado_en, ioarr:ioarr_proyectos(id, cui, nombre, monto_inversion, estado, etapa_financista), locales:ioarr_selector_locales(count)')
       .eq('usuario_id', req.usuario.id).order('actualizado_en', { ascending: false });
     if (error) throw error;
     res.json(data.map(({ locales, ...p }) => ({ ...p, n_locales: locales?.[0]?.count ?? 0 })));
@@ -178,7 +178,7 @@ api.patch('/proyectos/:id', async (req, res, next) => {
       cambios.ioarr_proyecto_id = v;
     }
     const { data, error } = await supabase.from('ioarr_selector_proyectos').update(cambios)
-      .eq('id', p.id).eq('usuario_id', req.usuario.id).select('*, ioarr:ioarr_proyectos(id, cui, nombre)').single();
+      .eq('id', p.id).eq('usuario_id', req.usuario.id).select('*, ioarr:ioarr_proyectos(id, cui, nombre, monto_inversion, estado, etapa_financista)').single();
     if (error) throw error;
     res.json(data);
   } catch (e) { enviarError(res, next)(e); }
@@ -208,7 +208,7 @@ api.post('/proyectos/:id/duplicar', async (req, res, next) => {
     const { data, error } = await supabase.from('ioarr_selector_proyectos').insert({
       usuario_id: req.usuario.id, nombre, region: p.region, anio_datos: p.anio_datos, criterios: p.criterios,
       ioarr_proyecto_id: p.ioarr_proyecto_id
-    }).select('*, ioarr:ioarr_proyectos(id, cui, nombre)').single();
+    }).select('*, ioarr:ioarr_proyectos(id, cui, nombre, monto_inversion, estado, etapa_financista)').single();
     if (error) throw error;
     const codigos = await leerCodigos(p.id);
     await insertarCodigos(data.id, codigos);
@@ -264,7 +264,34 @@ api.get('/proyectos/:id/excel', async (req, res, next) => {
 });
 
 // Expediente IOARR (costos): supabase/migrations/012_ioarr_expediente_costos.sql
-api.use(crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegion, leerIndice }));
+const expediente = crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegion, leerIndice });
+api.use(expediente);
+
+// ─── Para Radar IOARR (src/ioarr/router.js): expedientes vinculados a un CUI ──
+// Lee con la clave secreta: lo usa el servidor solo para usuarios proveedores.
+const COLS_VINC = 'id, nombre, region, usuario_id, actualizado_en, ioarr_proyecto_id, criterios, ioarr:ioarr_proyectos(id, cui, nombre, monto_inversion, estado, etapa_financista)';
+// { [ioarr_proyecto_id]: número de expedientes } para las tarjetas del kanban
+export async function conteoExpedientes() {
+  if (!supabase) return {};
+  const { data, error } = await supabase.from('ioarr_selector_proyectos').select('ioarr_proyecto_id').not('ioarr_proyecto_id', 'is', null);
+  if (error) { console.warn('[SELECTOR] conteoExpedientes:', error.message); return {}; }
+  const out = {};
+  for (const r of data) out[r.ioarr_proyecto_id] = (out[r.ioarr_proyecto_id] || 0) + 1;
+  return out;
+}
+// Expedientes de un CUI con su avance; «mio» = el usuario puede abrirlo en el Selector
+export async function expedientesDeIoarr(ioarrId, usuarioId) {
+  if (!supabase) return [];
+  const { data, error } = await supabase.from('ioarr_selector_proyectos').select(COLS_VINC).eq('ioarr_proyecto_id', ioarrId).order('actualizado_en', { ascending: false });
+  if (error) { console.warn('[SELECTOR] expedientesDeIoarr:', error.message); return []; }
+  const duenios = await supabase.from('perfiles').select('id, email').in('id', [...new Set(data.map(p => p.usuario_id))]);
+  const email = Object.fromEntries((duenios.data || []).map(x => [x.id, x.email]));
+  return Promise.all(data.map(async p => {
+    let resumen = null;
+    try { resumen = await expediente.resumen(p); } catch (e) { console.warn('[SELECTOR] resumen de expediente:', e.message); }
+    return { id: p.id, nombre: p.nombre, region: p.region, actualizado_en: p.actualizado_en, mio: p.usuario_id === usuarioId, duenio: email[p.usuario_id] || null, resumen };
+  }));
+}
 
 const slug = s => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
   .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'proyecto';

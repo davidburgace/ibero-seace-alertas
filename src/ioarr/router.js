@@ -21,6 +21,7 @@ import { leerArchivo, detectarMapeo, aplicarMapeoGuardado, filaAProyecto, import
 import { sendIoarrDigest } from './alertas.js';
 import { filaACarga, filtrarFilasPmi, guardarCarga, borrarCarga, obtenerDatosCruce, calcularCruce } from './cruce.js';
 import { clienteIA, respaldoFicha, respaldoCostos, indexarDocumento, preguntar, MODELO_CHAT } from './ia.js';
+import { conteoExpedientes, expedientesDeIoarr } from '../selector-ioarr/router.js';
 import { extraerLineasPdf, clasificarDocumento, leerFicha07C, leerTablaCostos, preciosUnicos, anioDeLineas, guardarPrecios, borrarDocumento } from './fichas.js';
 
 const router = express.Router();
@@ -87,6 +88,11 @@ router.get('/api/ioarr/proyectos', async (req, res, next) => {
     }
     const { data, error } = await query.order('actualizado_en', { ascending: false }).limit(2000);
     if (error) throw error;
+    // Proveedores: cuántos expedientes del Selector IOARR tiene cada CUI (tarjetas del kanban)
+    if (req.usuario?.rol === 'proveedor') {
+      const n = await conteoExpedientes();
+      for (const p of data) p.expedientes = n[p.id] || 0;
+    }
     res.json(data);
   } catch (e) { next(e); }
 });
@@ -114,7 +120,9 @@ router.get('/api/ioarr/proyectos/:id', async (req, res, next) => {
       proyecto: p.data, eventos: ev.data, evaluaciones: eva.data, contrapartes: cp.data.map(x => x.contraparte),
       documentos: (docs.data || []).map(({ ruta, subido_por, ...d }) => d),
       documentos_error: docs.error ? 'Falta ejecutar supabase/migrations/004_ioarr_documentos.sql' : null,
-      chats: chats.error ? [] : chats.data, ia_disponible: !!process.env.OPENAI_API_KEY
+      chats: chats.error ? [] : chats.data, ia_disponible: !!process.env.OPENAI_API_KEY,
+      // Expedientes del Selector IOARR vinculados a este CUI (solo proveedores; el financista no ve el expediente)
+      expedientes: req.usuario?.rol === 'proveedor' ? await expedientesDeIoarr(id, req.usuario.id) : null
     });
   } catch (e) { next(e); }
 });

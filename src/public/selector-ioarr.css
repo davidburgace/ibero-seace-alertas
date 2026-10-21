@@ -315,3 +315,7 @@ table.tabla{ width:100%; border-collapse:collapse; font-size:13px; }
 .verif-chk input{ margin-top:2px; flex:none; }
 .verif-nota{ width:100%; margin-top:6px; padding:6px 9px; border:1px solid var(--border2); border-radius:8px; font:inherit; font-size:12.5px; background:var(--surface); }
 .tabla-verif td:last-child{ width:1%; white-space:nowrap; vertical-align:top; }
+/* Expediente: entrega (etapa 4) */
+.exportar.entrega{ border-color:var(--accent); background:var(--accent-soft); margin-bottom:12px; }
+.vinc-radar{ margin-top:6px; font-size:13px; }
+.vinc-radar a{ color:var(--accent); }

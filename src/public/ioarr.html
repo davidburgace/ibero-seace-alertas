@@ -96,6 +96,11 @@
   .badge{ display:inline-block; font-size:11px; font-weight:600; padding:2px 8px; border-radius:6px; background:var(--surface2); white-space:nowrap; }
   .badge-oport{ background:rgba(46,204,113,.14); color:#1e8449; }
   .badge-mob{ background:rgba(58,99,224,.12); color:var(--accent); }
+  .badge-exp{ background:rgba(106,79,209,.12); color:#5a3fbf; }
+  .exp-item{ border:1px solid var(--border); border-radius:10px; padding:10px 12px; margin-bottom:8px; font-size:13px; }
+  .exp-item .exp-barra{ height:6px; border-radius:6px; background:var(--surface2); overflow:hidden; margin:6px 0; }
+  .exp-item .exp-barra span{ display:block; height:100%; background:#2e9e5b; }
+  .exp-item .sub{ color:var(--muted); font-size:12px; }
   .vacio{ padding:30px; text-align:center; color:var(--muted); font-size:14px; }
 
   /* Kanban (mismo patrón que Seguimiento Comercial) */
@@ -538,6 +543,9 @@ async function iniciarApp() {
   await cargarFiltros();
   await buscar();
   await cargarAlertas();
+  // ioarr.html?id=<proyecto> abre su ficha (enlace desde el Expediente del Selector IOARR)
+  const pedido = new URLSearchParams(location.search).get('id');
+  if (pedido && /^[0-9a-f-]{36}$/i.test(pedido)) { history.replaceState(null, '', location.pathname); abrirFicha(pedido); }
 }
 
 async function arrancar() {
@@ -651,6 +659,7 @@ function renderKanban() {
           <div class="card-nombre" title="${esc(p.nombre)}">${esc(p.nombre.length > 90 ? p.nombre.slice(0, 90) + '…' : p.nombre)}</div>
           <div class="card-meta"><span>${esc(p.region || '')}${p.provincia ? ' / ' + esc(p.provincia) : ''}</span><span>${soles(p.monto_inversion)}</span></div>
           ${sinPriorizar(p) ? '<div style="margin-top:6px"><span class="badge badge-oport">💡 Viable sin priorizar</span></div>' : ''}
+          ${p.expedientes ? `<div style="margin-top:6px"><span class="badge badge-exp" title="Expediente armado en Selector IOARR">📁 Expediente${p.expedientes > 1 ? ' ×' + p.expedientes : ''}</span></div>` : ''}
           <div class="card-stage-row">
             ${i > 0 ? `<button class="card-stage-btn" data-mover="${ETAPAS[i - 1].key}">← ${ETAPAS[i - 1].label}</button>` : ''}
             ${i < ETAPAS.length - 1 ? `<button class="card-stage-btn" data-mover="${ETAPAS[i + 1].key}">${ETAPAS[i + 1].label} →</button>` : ''}
@@ -681,6 +690,26 @@ async function abrirFicha(id) {
 function cerrarFicha() { $('ficha-overlay').classList.remove('open'); actual = null; }
 $('ficha-overlay').addEventListener('click', e => { if (e.target.id === 'ficha-overlay') cerrarFicha(); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape') { cerrarFicha(); cerrarPmi(); } });
+
+// Expedientes del Selector IOARR vinculados a este CUI (solo proveedores: el financista recibe null)
+function renderExpedientes(lista, p) {
+  if (!Array.isArray(lista)) return '';
+  const REG = { completo: 'registro completo', abreviado: 'registro abreviado', pendiente: 'registro por definir (falta la UIT)' };
+  const cuerpo = lista.length ? lista.map(x => {
+    const r = x.resumen, pct = r && r.puntos ? Math.round(r.hechos / r.puntos * 100) : 0;
+    const dif = r && p.monto_inversion != null && Number(p.monto_inversion) ? (r.total - Number(p.monto_inversion)) / Number(p.monto_inversion) : null;
+    return `<div class="exp-item">
+      <b>${esc(x.nombre)}</b> <span class="sub">· ${esc(x.region)}${x.mio ? '' : ' · de ' + esc(x.duenio || 'otro usuario')}</span>
+      ${r ? `<div class="sub">${soles2(r.total)} · ${r.masiva ? `masiva, ${r.ups} UP` : '1 UP'} · ${REG[r.registro] || r.registro}</div>
+        <div class="exp-barra"><span style="width:${pct}%"></span></div>
+        <div class="sub">Verificación: ${r.hechos} de ${r.puntos} listos${r.bloqueos ? ` · <b style="color:#b5322a">${r.bloqueos} no cumple${r.bloqueos === 1 ? '' : 'n'}</b>` : ''} · ${r.pendientes} dato${r.pendientes === 1 ? '' : 's'} pendiente${r.pendientes === 1 ? '' : 's'} del 07-C</div>
+        ${dif != null && Math.abs(dif) > 0.01 ? `<div class="sub" style="color:#9a5f0c">⚠ El expediente difiere ${dif > 0 ? '+' : ''}${(dif * 100).toFixed(1)} % del monto del CUI (${soles2(p.monto_inversion)}).</div>` : ''}`
+        : '<div class="sub">No se pudo calcular el avance.</div>'}
+      <div class="sub">Actualizado ${fecha(x.actualizado_en)}${x.mio ? ` · <a href="selector-ioarr.html?proyecto=${esc(x.id)}&tab=exp">Abrir el expediente</a>` : ''}</div>
+    </div>`;
+  }).join('') : '<p class="card-empty">Sin expediente. Arma uno en <a href="selector-ioarr.html">Selector IOARR</a> y vincúlalo con este CUI.</p>';
+  return `<h3 style="margin-top:16px">📁 Expediente IOARR</h3>${cuerpo}`;
+}
 
 function renderFicha() {
   const { proyecto: p, eventos, evaluaciones, contrapartes } = actual;
@@ -722,6 +751,7 @@ function renderFicha() {
         <div class="field"><label>Notas</label><textarea id="fi-notas">${esc(p.notas || '')}</textarea></div>
         <button class="btn btn-ghost" data-accion="guardar">Guardar cambios</button>
         <div class="msg" id="fi-msg"></div>
+        ${renderExpedientes(actual.expedientes, p)}
       </div>
 
       <div>
