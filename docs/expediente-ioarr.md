@@ -55,6 +55,48 @@ Ejecuta `supabase/migrations/017_ioarr_selector_duplicidad.sql`, después de la 
 - Sin la migración 017, todo queda «Sin verificar» y la columna lo avisa.
 - **Mejora futura:** consultar el Banco de Inversiones en forma automática. Hoy la consulta la hace el usuario.
 
+## Una IOARR o una IOARR por nivel (migración 018)
+
+Ejecuta `supabase/migrations/018_ioarr_por_nivel.sql` después de la 017. Agrega:
+- `modo_ioarr` al proyecto: `por_nivel` por defecto, o `una`.
+- `por_nivel` al inventario verificado.
+
+Sin la migración, el proyecto se calcula por nivel y no se puede cambiar a «Una IOARR».
+
+**Por qué:** la norma permite una reposición masiva en varias UP si los activos son homogéneos y el servicio y la entidad son los mismos, pero no aclara si Inicial, Primaria y Secundaria cuentan como un mismo servicio. Está pendiente de confirmar con la OPMI. Un expediente de Huánuco (2023) presentó tres IOARR, una por nivel.
+
+**En pantalla (Expediente):**
+- El panel «Una IOARR o una por nivel» tiene dos cosas:
+  - el selector de la opción;
+  - el comparativo: total, UIT y tipo de registro (abreviado o completo) de la IOARR única y de cada IOARR por nivel, con la suma de las IOARR por nivel.
+- Con «por nivel» hay una pestaña por IOARR. Costos, Documentos y Verificación muestran la IOARR elegida.
+
+**Cálculo (`src/selector-ioarr/niveles.js`):**
+- Un local con varios niveles entra en cada IOARR con lo de ese nivel: los estudiantes de esos servicios (padrón) y sus aulas (censo). Se usa `vistaNivel(D, nivel)` y `calc(D, P, nivel)`.
+- `costear({ grupos })` costea todas las IOARR juntas:
+  - los rubros en % se aplican igual en cada una;
+  - los montos fijos se reparten entre todos los locales de todas, según su base.
+  - Así, la suma de las IOARR por nivel es igual al total de la IOARR única.
+- Cada IOARR tiene su propio aviso de 75 UIT.
+- En el caso de control de Moquegua («mariscal»), Inicial repone 17 bienes, Primaria 101 y Secundaria 80, que suman 198.
+
+**Inventario verificado:**
+- En un local con varios niveles, bueno / regular / malo y el año de adquisición se cargan por nivel: la ventana «Corregir inventario» muestra un bloque por nivel. La visita, el sustento y los archivos siguen siendo por local.
+- La IOARR única suma, en cada tipo corregido, lo de campo en los niveles cargados y el censo en los demás. El año de adquisición es el promedio ponderado por el mobiliario en mal estado de cada nivel.
+- Lo que se cargó antes sin nivel en un local con varios niveles vale para la IOARR única. En las IOARR por nivel se usa el censo, con un aviso para volver a cargarlo por nivel.
+
+**Documentos:**
+- Con «por nivel», cada IOARR tiene su nombre y su CUI, que se guardan en `datos.por_nivel`.
+- El vínculo con Radar IOARR se compara con la IOARR que tiene el mismo CUI.
+- Las marcas manuales de la lista de verificación valen para todo el proyecto.
+
+**Excel y ZIP:**
+- El Excel de costos y los Word se descargan para la IOARR a la vista.
+- El ZIP trae una carpeta por IOARR (`01_IOARR_Inicial/…`) con sus cinco documentos, el sustento común en `06_Sustento/` y un índice con cada IOARR.
+- El Excel del Selector trae la hoja nueva **Por nivel**, y «Mi selección» el panel «Por nivel educativo».
+
+**Radar IOARR:** la ficha del CUI muestra cada IOARR por nivel con su total y su registro.
+
 ## Etapa 1: costos
 
 ### Migración

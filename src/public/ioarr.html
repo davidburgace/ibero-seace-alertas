@@ -697,10 +697,13 @@ function renderExpedientes(lista, p) {
   const REG = { completo: 'registro completo', abreviado: 'registro abreviado', pendiente: 'registro por definir (falta la UIT)' };
   const cuerpo = lista.length ? lista.map(x => {
     const r = x.resumen, pct = r && r.puntos ? Math.round(r.hechos / r.puntos * 100) : 0;
-    const dif = r && p.monto_inversion != null && Number(p.monto_inversion) ? (r.total - Number(p.monto_inversion)) / Number(p.monto_inversion) : null;
+    // Con una IOARR por nivel, el CUI corresponde a una de ellas: basta que alguna coincida
+    const montoCui = Number(p.monto_inversion), porNivel = r?.modo === 'por_nivel' && r.ioarrs?.length;
+    const difDe = t => p.monto_inversion != null && montoCui ? (t - montoCui) / montoCui : null;
+    const dif = !r ? null : porNivel ? (r.ioarrs.some(y => Math.abs(difDe(y.total) ?? 1) <= 0.01) ? 0 : difDe(r.total)) : difDe(r.total);
     return `<div class="exp-item">
       <b>${esc(x.nombre)}</b> <span class="sub">· ${esc(x.region)}${x.mio ? '' : ' · de ' + esc(x.duenio || 'otro usuario')}</span>
-      ${r ? `<div class="sub">${soles2(r.total)} · ${r.masiva ? `masiva, ${r.ups} UP` : '1 UP'} · ${REG[r.registro] || r.registro}</div>
+      ${r ? `<div class="sub">${soles2(r.total)} · ${porNivel ? `${r.ioarrs.length} IOARR por nivel: ${r.ioarrs.map(y => `${esc(y.nombre)} ${soles2(y.total)} (${REG[y.registro] || y.registro})`).join(' · ')}` : `${r.masiva ? `masiva, ${r.ups} UP` : '1 UP'} · ${REG[r.registro] || r.registro}`}</div>
         <div class="exp-barra"><span style="width:${pct}%"></span></div>
         <div class="sub">Verificación: ${r.hechos} de ${r.puntos} listos${r.bloqueos ? ` · <b style="color:#b5322a">${r.bloqueos} no cumple${r.bloqueos === 1 ? '' : 'n'}</b>` : ''} · ${r.pendientes} dato${r.pendientes === 1 ? '' : 's'} pendiente${r.pendientes === 1 ? '' : 's'} del 07-C</div>
         ${dif != null && Math.abs(dif) > 0.01 ? `<div class="sub" style="color:#9a5f0c">⚠ El expediente difiere ${dif > 0 ? '+' : ''}${(dif * 100).toFixed(1)} % del monto del CUI (${soles2(p.monto_inversion)}).</div>` : ''}`

@@ -74,7 +74,7 @@ test('Excel: hojas, fórmulas y totales iguales a la pantalla', async () => {
   const T = totals(D, C, list);
   const { buffer } = await generarExcel(D, C, P, list, { proyecto: 'Prueba', fecha: '2026-10-20', ioarr: null });
   const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buffer);
-  assert.deepEqual(wb.worksheets.map(w => w.name), ['Resumen', 'Locales (UP)', 'Por distrito', 'Servicios', 'Aulas', 'Reposición masiva']);
+  assert.deepEqual(wb.worksheets.map(w => w.name), ['Resumen', 'Locales (UP)', 'Por distrito', 'Por nivel', 'Servicios', 'Aulas', 'Reposición masiva']);
 
   const res = wb.getWorksheet('Resumen');
   const fila = txt => { let r = null; res.eachRow(row => { if (row.getCell(1).value === txt) r = row; }); return r; };

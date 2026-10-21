@@ -43,13 +43,18 @@ const parrafo = (v, max = 4000) => String(v ?? '').replace(/\r/g, '').replace(/[
 const numero = (v, min, max) => { if (v === '' || v == null) return null; const n = Number(v); return Number.isFinite(n) && n >= min && n <= max ? n : null; };
 const entero = (v, min, max) => { const n = numero(v, min, max); return n == null ? null : Math.round(n); };
 
+const cuiValido = v => /^\d{5,8}$/.test(String(v || '').trim()) ? String(v).trim() : '';
+
 /** Valida lo que guarda el formulario de Documentos. Lo desconocido se descarta. */
 export function limpiarDatosDoc(b = {}) {
   const porTipo = (obj, f) => Object.fromEntries(TIPOS.map(k => [k, f(obj?.[k])]).filter(([, v]) => v != null && v !== ''));
   const fecha = /^\d{4}-(0[1-9]|1[0-2])$/.test(String(b.fecha_inicio || '')) ? b.fecha_inicio : null;
   return {
     nombre_inversion: texto(b.nombre_inversion, 500),
-    cui: /^\d{5,8}$/.test(String(b.cui || '').trim()) ? String(b.cui).trim() : '',
+    cui: cuiValido(b.cui),
+    // Con una IOARR por nivel: nombre y CUI de cada una ({ P: { nombre_inversion, cui } })
+    por_nivel: Object.fromEntries(['I', 'P', 'S', 'E'].map(n => [n, b.por_nivel?.[n]]).filter(([, v]) => v && typeof v === 'object')
+      .map(([n, v]) => [n, { nombre_inversion: texto(v.nombre_inversion, 500), cui: cuiValido(v.cui) }]).filter(([, v]) => v.nombre_inversion || v.cui)),
     // A. Alineamiento (se proponen por nivel; el usuario los ajusta al PMI)
     servicio_brecha: texto(b.servicio_brecha, 300),
     tipologia: texto(b.tipologia, 300),

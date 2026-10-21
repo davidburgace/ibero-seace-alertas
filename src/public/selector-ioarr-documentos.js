@@ -11,13 +11,14 @@ const soles = n => n == null ? '—' : 'S/ ' + NS.format(n);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 let ctx = null, vista = null, tGuardar = null, version = 0;
+const qn = () => ctx?.nivel ? `?nivel=${ctx.nivel}` : '';
 
 export async function renderDocumentos(c) {
   ctx = c;
   c.el.innerHTML = '<div class="panel vacio">Preparando los documentos…</div>';
   const mio = ++version;
   try {
-    const v = await c.api(`/proyectos/${c.proyecto.id}/documentos`);
+    const v = await c.api(`/proyectos/${c.proyecto.id}/documentos${qn()}`);
     if (mio !== version) return;
     vista = v; pintar();
   } catch (e) { if (mio === version) c.el.innerHTML = `<div class="panel vacio"><p class="err">${esc(e.message)}</p></div>`; }
@@ -34,6 +35,13 @@ const campo = (k, etiqueta, { tipo = 'text', ph = '', ancho, max = 300, ayuda, .
   return `<div class="campo${ancho ? ' ancho' : ''}"><label>${etiqueta}</label>${ctrl}${ayuda ? `<span class="sub">${ayuda}</span>` : ''}</div>`;
 };
 const SINO = [['', 'Sin indicar'], ['si', 'Sí'], ['no', 'No']];
+// Nombre y CUI de la IOARR del nivel a la vista (datos.por_nivel[nivel])
+const campoNivel = (k, etiqueta, { area, ph = '', ayuda } = {}) => {
+  const v = vista.datos.por_nivel?.[vista.nivel]?.[k] ?? '';
+  const ctrl = area ? `<textarea data-doc-niv="${k}" maxlength="500" rows="2" placeholder="${esc(ph)}">${esc(v)}</textarea>`
+    : `<input data-doc-niv="${k}" type="text" maxlength="8" value="${esc(v)}" placeholder="${esc(ph)}">`;
+  return `<div class="campo${area ? ' ancho' : ''}"><label>${etiqueta}</label>${ctrl}${ayuda ? `<span class="sub">${ayuda}</span>` : ''}</div>`;
+};
 
 function pintar() {
   const R = vista.resumen, d = vista.datos;
@@ -53,7 +61,7 @@ function pintar() {
   ctx.el.innerHTML = `
     ${vista.sin_migracion ? '<div class="avisos"><div class="aviso alerta" role="alert">Falta ejecutar supabase/migrations/015_ioarr_expediente_documentos.sql en Supabase: los datos no se pueden guardar.</div></div>' : ''}
     <div class="kpis kpis-montos">
-      <div class="kpi destacado"><div class="v">${soles(R.total)}</div><div class="l">total de inversión</div></div>
+      <div class="kpi destacado"><div class="v">${soles(R.total)}</div><div class="l">total de inversión${vista.nivel ? ` · IOARR ${esc(vista.nombre_ioarr)}` : ''}</div></div>
       <div class="kpi"><div class="v">${R.masiva ? 'Masiva' : 'Individual'}</div><div class="l">${R.masiva ? `reposición masiva · ${R.ups} UP` : 'IOARR de reposición · 1 UP'}</div></div>
       <div class="kpi"><div class="v">${R.en_uit == null ? '—' : NS.format(R.en_uit) + ' UIT'}</div><div class="l">${reg}</div></div>
       <div class="kpi"><div class="v">${vista.faltan.length}</div><div class="l">${vista.faltan.length === 1 ? 'dato pendiente' : 'datos pendientes'}</div></div>
@@ -73,8 +81,10 @@ function pintar() {
     <form class="panel doc-form" id="doc-form" autocomplete="off">
       <h3>Nombre e identificación</h3>
       <div class="form-grid">
-        ${campo('nombre_inversion', 'Nombre de la inversión', { tipo: 'area', ancho: true, rows: 2, maxlength: 500, ph: R.nombre_sugerido, ayuda: 'Vacío = se usa el propuesto. En el aplicativo, el nombre se arma con la acción, el activo, la UP y la localización.' })}
-        ${campo('cui', 'Código único de inversión (CUI)', { ph: R.cui || 'Se asigna al registrar', max: 8 })}
+        ${vista.nivel ? campoNivel('nombre_inversion', `Nombre de la IOARR ${esc(vista.nombre_ioarr)}`, { area: true, ph: R.nombre_sugerido, ayuda: 'Cada IOARR por nivel tiene su nombre. Vacío = se usa el propuesto.' })
+          : campo('nombre_inversion', 'Nombre de la inversión', { tipo: 'area', ancho: true, rows: 2, maxlength: 500, ph: R.nombre_sugerido, ayuda: 'Vacío = se usa el propuesto. En el aplicativo, el nombre se arma con la acción, el activo, la UP y la localización.' })}
+        ${vista.nivel ? campoNivel('cui', `CUI de la IOARR ${esc(vista.nombre_ioarr)}`, { ph: R.cui || 'Se asigna al registrar', ayuda: 'Si coincide con el CUI vinculado en Radar IOARR, se compara su monto.' })
+          : campo('cui', 'Código único de inversión (CUI)', { ph: R.cui || 'Se asigna al registrar', max: 8 })}
       </div>
       <h3>A. Alineamiento a la brecha</h3>
       <p class="sub">Vacío = se propone por nivel educativo. Verifícalo contra el PMI de la entidad.</p>
@@ -125,6 +135,10 @@ function leer() {
   const datos = { antiguedad: {}, vida_util_estimada: {}, estado_actual: {}, mant_actual: {}, vida_util: {}, mant_nuevo: {} };
   ctx.el.querySelectorAll('[data-doc]').forEach(e => { datos[e.dataset.doc] = e.value; });
   ctx.el.querySelectorAll('[data-doc-t]').forEach(e => { if (e.value !== '') datos[e.dataset.docT][e.dataset.k] = e.value; });
+  if (vista.nivel) {
+    const propio = {}; ctx.el.querySelectorAll('[data-doc-niv]').forEach(e => { propio[e.dataset.docNiv] = e.value; });
+    datos.por_nivel = { ...(vista.datos.por_nivel || {}), [vista.nivel]: propio };
+  }
   return datos;
 }
 function estado(t, cls = '') { const s = document.getElementById('doc-guardado'); if (s) { s.className = 'guardado ' + cls; s.textContent = t; } }
@@ -133,10 +147,10 @@ async function guardar() {
   const mio = ++version;
   estado('Guardando…', 'pend');
   try {
-    const v = await ctx.api(`/proyectos/${ctx.proyecto.id}/documentos`, { method: 'PATCH', body: { datos: leer() } });
+    const v = await ctx.api(`/proyectos/${ctx.proyecto.id}/documentos${qn()}`, { method: 'PATCH', body: { datos: leer() } });
     if (mio !== version) return;
     // Se vuelve a pintar el resumen y los pendientes sin perder el foco del campo
-    const activo = document.activeElement, sel = activo?.dataset?.doc ? `[data-doc="${activo.dataset.doc}"]` : activo?.dataset?.docT ? `[data-doc-t="${activo.dataset.docT}"][data-k="${activo.dataset.k}"]` : null;
+    const activo = document.activeElement, sel = activo?.dataset?.doc ? `[data-doc="${activo.dataset.doc}"]` : activo?.dataset?.docNiv ? `[data-doc-niv="${activo.dataset.docNiv}"]` : activo?.dataset?.docT ? `[data-doc-t="${activo.dataset.docT}"][data-k="${activo.dataset.k}"]` : null;
     const pos = activo && 'selectionStart' in activo ? (() => { try { return activo.selectionStart; } catch { return null; } })() : null;
     vista = v; pintar();
     if (sel) { const e = ctx.el.querySelector(sel); if (e) { e.focus(); if (pos != null) try { e.setSelectionRange(pos, pos); } catch { /* inputs sin selección */ } } }
@@ -148,7 +162,7 @@ async function bajar(btn) {
   btn.disabled = true; const txt = btn.textContent; btn.textContent = 'Generando…';
   try {
     if (tGuardar) { clearTimeout(tGuardar); tGuardar = null; await guardar(); }
-    const r = await fetch(`/api/selector-ioarr/proyectos/${ctx.proyecto.id}/documentos/${btn.dataset.docBajar}`);
+    const r = await fetch(`/api/selector-ioarr/proyectos/${ctx.proyecto.id}/documentos/${btn.dataset.docBajar}${qn()}`);
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Error ' + r.status);
     const blob = await r.blob(), cd = r.headers.get('Content-Disposition') || '';
     const nombre = decodeURIComponent((cd.match(/filename\*=UTF-8''([^;]+)/) || [])[1] || 'documento.docx');

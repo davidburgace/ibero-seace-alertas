@@ -23,6 +23,7 @@ import { supabase } from '../ioarr/db.js';
 import { prep, calc, limpiarParams } from './calculo.js';
 import { generarExcel } from './excel.js';
 import { crearApiExpediente, borrarArchivosProyecto } from './expediente.js';
+import { MODOS } from './niveles.js';
 import { leerDuplicidad, limpiarDuplicidad, aFila, deFila, esVacia, separarLocales, AVISO_DUP } from './duplicidad.js';
 
 export const ANIO_DATOS = 2025;
@@ -32,6 +33,7 @@ const LOTE = 1000;
 
 const faltaMigracion = (e) => e?.code === 'PGRST204' || e?.code === 'PGRST205' || e?.code === '42P01' || /schema cache|does not exist/i.test(e?.message || '');
 const AVISO_MIGRACION = 'Falta ejecutar supabase/migrations/011_ioarr_selector.sql en Supabase';
+const AVISO_NIV = 'Falta ejecutar supabase/migrations/018_ioarr_por_nivel.sql en Supabase para elegir entre una IOARR o una por nivel';
 
 // ─── Datos estáticos: /data/selector-ioarr/<año>/<región>.json ─────────────
 // Públicos (datos abiertos de ESCALE). Cambian una vez al año y la carpeta lleva
@@ -177,6 +179,11 @@ api.patch('/proyectos/:id', async (req, res, next) => {
       if (!cambios.nombre) return res.status(400).json({ error: 'El nombre no puede quedar vacío' });
     }
     if ('criterios' in req.body) cambios.criterios = limpiarParams(req.body.criterios);
+    // Una IOARR o una por nivel (migración 018)
+    if ('modo_ioarr' in req.body) {
+      if (!MODOS[req.body.modo_ioarr]) return res.status(400).json({ error: 'Opción no válida: «una» o «por_nivel»' });
+      cambios.modo_ioarr = req.body.modo_ioarr;
+    }
     if ('ioarr_proyecto_id' in req.body) {
       const v = req.body.ioarr_proyecto_id;
       if (v !== null && !esUuid(v)) return res.status(400).json({ error: 'Registro de Radar IOARR no válido' });
@@ -184,6 +191,7 @@ api.patch('/proyectos/:id', async (req, res, next) => {
     }
     const { data, error } = await supabase.from('ioarr_selector_proyectos').update(cambios)
       .eq('id', p.id).eq('usuario_id', req.usuario.id).select('*, ioarr:ioarr_proyectos(id, cui, nombre, monto_inversion, estado, etapa_financista)').single();
+    if (error && 'modo_ioarr' in cambios && /modo_ioarr/.test(error.message || '')) return res.status(503).json({ error: AVISO_NIV });
     if (error) throw error;
     res.json(data);
   } catch (e) { enviarError(res, next)(e); }
@@ -243,7 +251,7 @@ api.post('/proyectos/:id/duplicar', async (req, res, next) => {
     const nombre = limpiarNombre(req.body?.nombre) || limpiarNombre(p.nombre + ' (copia)');
     const { data, error } = await supabase.from('ioarr_selector_proyectos').insert({
       usuario_id: req.usuario.id, nombre, region: p.region, anio_datos: p.anio_datos, criterios: p.criterios,
-      ioarr_proyecto_id: p.ioarr_proyecto_id
+      ioarr_proyecto_id: p.ioarr_proyecto_id, ...('modo_ioarr' in p ? { modo_ioarr: p.modo_ioarr } : {})
     }).select('*, ioarr:ioarr_proyectos(id, cui, nombre, monto_inversion, estado, etapa_financista)').single();
     if (error) throw error;
     const codigos = await leerCodigos(p.id);

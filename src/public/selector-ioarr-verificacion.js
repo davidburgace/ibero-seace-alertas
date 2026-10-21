@@ -10,13 +10,14 @@ const NS = new Intl.NumberFormat('es-PE', { minimumFractionDigits: 2, maximumFra
 const si = (v, txt = 'Sí') => v ? `<span class="chip-est ok">${txt}</span>` : '<span class="chip-est pend">Falta</span>';
 
 let ctx = null, vista = null, tGuardar = null, version = 0;
+const qn = () => ctx?.nivel ? `?nivel=${ctx.nivel}` : '';
 
 export async function renderVerificacion(c) {
   ctx = c;
   c.el.innerHTML = '<div class="panel vacio">Revisando el expediente…</div>';
   const mio = ++version;
   try {
-    const v = await c.api(`/proyectos/${c.proyecto.id}/documentos`);
+    const v = await c.api(`/proyectos/${c.proyecto.id}/documentos${qn()}`);
     if (mio !== version) return;
     vista = v; pintar();
   } catch (e) { if (mio === version) c.el.innerHTML = `<div class="panel vacio"><p class="err">${esc(e.message)}</p></div>`; }
@@ -35,13 +36,13 @@ function pintar() {
   ctx.el.innerHTML = `
     ${vista.sin_migracion ? '<div class="avisos"><div class="aviso alerta" role="alert">Falta ejecutar supabase/migrations/015_ioarr_expediente_documentos.sql en Supabase: las marcas no se pueden guardar.</div></div>' : ''}
     <div class="exportar">
-      <div><h3>Lista de verificación · ${V.hechos} de ${V.total} listos</h3>
+      <div><h3>Lista de verificación${vista.nivel ? ` de la IOARR ${esc(vista.nombre_ioarr)}` : ''} · ${V.hechos} de ${V.total} listos</h3>
         <div class="avance" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><span style="width:${pct}%"></span></div>
         <p>${V.bloqueos ? `<b class="aviso-linea">${V.bloqueos} punto${V.bloqueos === 1 ? '' : 's'} no cumple${V.bloqueos === 1 ? '' : 'n'}: revísalo antes de presentar.</b> ` : ''}Lo automático se actualiza con los costos, el inventario y los documentos; lo de abajo se marca a mano. <span class="guardado" id="verif-guardado"></span></p></div>
       <button class="btn btn-primary" data-verif-bajar type="button">Lista de verificación (Word)</button>
     </div>
     <div class="exportar entrega">
-      <div><h3>Expediente completo (ZIP)</h3><p>Formato 07-C, memoria, lista de verificación, Excel de costos y de selección, y todos los archivos de sustento ordenados por local, con un índice (00_LEEME.txt).${vista.ioarr ? ' Al descargarlo se registra un hito en la línea de tiempo del CUI en Radar IOARR.' : ''}</p>
+      <div><h3>Expediente completo (ZIP)</h3><p>Formato 07-C, memoria, lista de verificación, Excel de costos y de selección${vista.modo === 'por_nivel' ? ' de cada IOARR por nivel, cada una en su carpeta,' : ''} y todos los archivos de sustento ordenados por local, con un índice (00_LEEME.txt).${vista.ioarr ? ' Al descargarlo se registra un hito en la línea de tiempo del CUI en Radar IOARR.' : ''}</p>
         ${vista.ioarr ? `<p class="vinc-radar">Radar IOARR: <a href="ioarr.html?id=${esc(vista.ioarr.id)}" target="_blank" rel="noopener"><b>CUI ${esc(vista.ioarr.cui)}</b></a> · etapa <b>${esc(ETAPA[vista.ioarr.etapa_financista] || vista.ioarr.etapa_financista || '—')}</b>${vista.ioarr.monto_inversion != null ? ` · monto del CUI S/ ${NS.format(vista.ioarr.monto_inversion)}` : ''}</p>`
           : '<p class="sub">Sin vínculo con Radar IOARR: vincúlalo con el botón «+ Vincular con Radar IOARR» del proyecto para ver el avance en el kanban.</p>'}</div>
       <button class="btn btn-primary" data-zip-bajar type="button">Descargar expediente (ZIP)</button>
@@ -70,7 +71,7 @@ async function guardar() {
   const mio = ++version;
   estado('Guardando…', 'pend');
   try {
-    const v = await ctx.api(`/proyectos/${ctx.proyecto.id}/documentos`, { method: 'PATCH', body: { datos: { verificacion: leer() } } });
+    const v = await ctx.api(`/proyectos/${ctx.proyecto.id}/documentos${qn()}`, { method: 'PATCH', body: { datos: { verificacion: leer() } } });
     if (mio !== version) return;
     const activo = document.activeElement?.dataset?.verifNota, pos = activo ? document.activeElement.selectionStart : null;
     vista = v; pintar();
@@ -98,7 +99,7 @@ async function bajar(btn) {
   btn.disabled = true; const txt = btn.textContent; btn.textContent = 'Generando…';
   try {
     if (tGuardar) { clearTimeout(tGuardar); tGuardar = null; await guardar(); }
-    const r = await fetch(`/api/selector-ioarr/proyectos/${ctx.proyecto.id}/documentos/verificacion`);
+    const r = await fetch(`/api/selector-ioarr/proyectos/${ctx.proyecto.id}/documentos/verificacion${qn()}`);
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Error ' + r.status);
     const blob = await r.blob(), cd = r.headers.get('Content-Disposition') || '';
     const nombre = decodeURIComponent((cd.match(/filename\*=UTF-8''([^;]+)/) || [])[1] || 'Lista_verificacion.docx');

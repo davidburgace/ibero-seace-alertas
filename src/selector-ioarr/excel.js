@@ -2,7 +2,7 @@
 // src/selector-ioarr/excel.js — Libro de Excel del Selector IOARR (exceljs)
 //
 // Mismas hojas y columnas que exportXlsx del prototipo:
-//   Resumen · Locales (UP) · Por distrito · Servicios · Aulas · Reposición masiva
+//   Resumen · Locales (UP) · Por distrito · Por nivel · Servicios · Aulas · Reposición masiva
 //   · Excluidos por duplicidad (solo si algún local con otra inversión se excluyó)
 // Las columnas de resultado llevan fórmulas (con su resultado ya calculado)
 // para que el estudio sea auditable:
@@ -18,7 +18,7 @@
 
 import ExcelJS from 'exceljs';
 import { PassThrough } from 'node:stream';
-import { ITEMS, NIVN, NIVB, lv, totals, coordValidas, urlGoogleMaps } from './calculo.js';
+import { ITEMS, NIVN, NIVB, lv, totals, coordValidas, urlGoogleMaps, totalesPorNivel } from './calculo.js';
 import { ROTULO_DUP, ESTADOS_DUP, estadoDe } from './duplicidad.js';
 
 const ESTADO = { b: 'Bueno', r: 'Regular', m: 'Malo' };
@@ -198,6 +198,22 @@ export async function generarExcel(D, C, P, list, meta) {
       const r = ws.addRow(['', '', 'Total', tot('D', T.n), tot('E', T.est), tot('F', T.aul), tot('G', T.rep), tot('H', T.fal)]);
       r.font = { bold: true }; r.commit();
     }
+    ws.commit();
+  }
+
+  // ── Por nivel (valores: un local con varios niveles cuenta en cada uno) ────
+  {
+    const ws = hoja(wb, 'Por nivel', ['Nivel', 'Locales', 'Estudiantes (padrón)', 'Aulas en uso (censo)', 'Bueno', 'Regular', 'Malo', 'A reponer (Malo)', 'Requerido', FALTANTE],
+      [18, 10, 12, 12, 11, 11, 11, 14, 12, 22]);
+    const filas = totalesPorNivel(D, C, list);
+    for (const o of filas) ws.addRow([o.nombre, o.n, o.est, o.aul, o.b, o.r, o.m, o.rep, o.req, o.fal]).commit();
+    if (filas.length) {
+      const n = filas.length + 1, suma = x => filas.reduce((a, o) => a + o[x], 0);
+      const r = ws.addRow(['Total', '', ...['est', 'aul', 'b', 'r', 'm', 'rep', 'req', 'fal'].map((x, k) => { const c = letra(3 + k); return f(`SUM(${c}2:${c}${n})`, suma(x)); })]);
+      r.font = { bold: true }; r.commit();
+    }
+    ws.addRow([]).commit();
+    ws.addRow(['Un local con varios niveles se cuenta en cada nivel con sus estudiantes y aulas de ese nivel: la columna Locales no suma el total de locales. Con «Una IOARR por nivel», cada fila es una IOARR.']).commit();
     ws.commit();
   }
 

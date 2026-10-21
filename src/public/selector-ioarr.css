@@ -333,3 +333,10 @@ table.tabla{ width:100%; border-collapse:collapse; font-size:13px; }
 .vinc-radar a{ color:var(--accent); }
 .field textarea{ font-family:inherit; resize:vertical; }
 .tabla .c-dup{ min-width:130px; }
+/* Una IOARR o una por nivel */
+.seg{ display:flex; gap:14px; flex-wrap:wrap; }
+.tabla-ioarr tr.activa td{ background:rgba(58,99,224,.06); }
+.ioarr-tabs{ margin-top:12px; }
+.ioarr-tabs button .sub{ font-weight:500; margin-left:4px; }
+.ioarr-tabs button[aria-selected="true"] .sub{ color:rgba(255,255,255,.85); }
+.tabla-inv tr.fila-nivel td{ background:var(--surface2); padding-top:10px; }
