@@ -52,6 +52,7 @@ export async function generarExcelCostos(R, meta) {
   const wsM = wb.addWorksheet('Metrado y costos por local', { views: [{ state: 'frozen', xSplit: 2, ySplit: 1 }] });
   const wsD = wb.addWorksheet('Por distrito', { views: [{ state: 'frozen', ySplit: 1 }] });
   const verificados = R.locales.filter(l => l.verificado);
+  const anioExport = Number(String(meta.fecha || '').slice(0, 4)) || new Date().getFullYear();
   const wsI = verificados.length ? wb.addWorksheet('Inventario verificado', { views: [{ state: 'frozen', ySplit: 3 }] }) : null;
 
   const T = R.totales, L = R.locales, n = L.length;
@@ -299,23 +300,27 @@ export async function generarExcelCostos(R, meta) {
   // ── Inventario verificado en campo ──────────────────────────────────────────
   if (wsI) {
     const ws = wsI;
-    ws.columns = [12, 36, 22, 9, 9, 9, 9, 9, 9, 11, 12, 11, 12, 22, 50, 50].map(width => ({ width }));
+    ws.columns = [12, 36, 22, 9, 9, 9, 9, 9, 9, 11, 12, 11, 12, 22, 50, 50, 12, 12].map(width => ({ width }));
     ws.getCell('A1').value = 'Inventario verificado en campo'; ws.getCell('A1').font = { bold: true, size: 14 };
     ws.getCell('A2').value = 'Reemplaza lo que reporta el Censo Educativo en estos locales y tipos de bien. Reposición = Malo + % de Regular; faltante = Requerido − Existente, por local.';
     ws.getCell('A2').font = { italic: true, color: { argb: 'FF5C6270' } };
     ws.getRow(3).values = ['Código de local', 'Instituciones', 'Tipo de bien', 'Censo: bueno', 'Censo: regular', 'Censo: malo',
-      'Campo: bueno', 'Campo: regular', 'Campo: malo', 'Requerido', 'Reposición', 'Faltante', 'Fecha de visita', 'Responsable', 'Sustento', 'Archivos adjuntos'];
-    cabecera(ws, 3, 16);
+      'Campo: bueno', 'Campo: regular', 'Campo: malo', 'Requerido', 'Reposición', 'Faltante', 'Fecha de visita', 'Responsable', 'Sustento', 'Archivos adjuntos', 'Año de adquisición', 'Antigüedad (años)'];
+    cabecera(ws, 3, 18);
     let r = 4;
     for (const l of verificados) {
       const inv = meta.inventario?.[l.cod] || {};
       const arch = inv.archivos || [];
       const resumen = arch.length ? Object.entries(TIPOS_ARCHIVO).map(([k, n]) => [n, arch.filter(a => a.tipo === k)]).filter(([, xs]) => xs.length)
         .map(([n, xs]) => `${n} (${xs.length}): ${xs.map(a => a.nombre_archivo).join(', ')}`).join(' · ') : 'PENDIENTE: sin archivos adjuntos';
-      for (const k of l.verificado.tipos) {
-        const t = ITEMS.findIndex(x => x.k === k), c = inv.censo?.[k] || {}, v = inv.bienes?.[k] || {};
-        ws.getRow(r).values = [l.cod, l.nom, ITEMS[t].n, c.b ?? '', c.r ?? '', c.m ?? '', v.b, v.r, v.m, c.req ?? '',
-          l.rep[t], l.fal[t], fechaPe(l.verificado.fecha_visita), l.verificado.responsable || '', l.verificado.observacion, resumen];
+      const adq = l.verificado.adquisicion || {};
+      // Tipos corregidos en campo y tipos con año de adquisición (en estos, las cantidades siguen siendo las del censo)
+      const tiposFila = ITEMS.map(x => x.k).filter(k => l.verificado.tipos.includes(k) || adq[k]);
+      for (const k of tiposFila) {
+        const t = ITEMS.findIndex(x => x.k === k), c = inv.censo?.[k] || {}, corr = l.verificado.tipos.includes(k), v = corr ? inv.bienes?.[k] || {} : {};
+        ws.getRow(r).values = [l.cod, l.nom, ITEMS[t].n, c.b ?? '', c.r ?? '', c.m ?? '', corr ? v.b : 'censo', corr ? v.r : 'censo', corr ? v.m : 'censo', c.req ?? '',
+          l.rep[t], l.fal[t], fechaPe(l.verificado.fecha_visita), l.verificado.responsable || '', l.verificado.observacion, resumen,
+          adq[k] || '', adq[k] ? f(`IF(Q${r}="","",${anioExport}-Q${r})`, anioExport - adq[k]) : ''];
         for (let k2 = 4; k2 <= 12; k2++) ws.getCell(r, k2).numFmt = ENTERO;
         for (const k2 of [7, 8, 9]) resaltar(ws.getCell(r, k2), GRIS);
         for (const k2 of [15, 16]) ws.getCell(r, k2).alignment = { wrapText: true, vertical: 'top' };

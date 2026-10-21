@@ -115,6 +115,19 @@ export function limpiarInventario(bienes) {
   return out;
 }
 
+// Año de adquisición por tipo de bien: { mesa: 2008 }. Solo años entre 1950 y anioMax.
+export function limpiarAdquisicion(obj, anioMax) {
+  const out = {};
+  for (const k of TIPOS) {
+    const v = obj?.[k];
+    if (v === '' || v == null) continue;
+    const n = Number(v);
+    if (!Number.isInteger(n) || n < 1950 || n > anioMax) throw Object.assign(new Error(`Año de adquisición no válido: usa un año entre 1950 y ${anioMax}`), { status: 400 });
+    out[k] = n;
+  }
+  return out;
+}
+
 /**
  * Estructura de costos.
  * @param {object} p
@@ -151,7 +164,8 @@ export function costear({ D, C, list, precios, rubros, factores, uit, inventario
         rep[t] = x.m + Math.round(x.r * regPct);
         tipos.push(k);
       });
-      if (tipos.length) verificado = { tipos, fecha_visita: inv.fecha_visita, responsable: inv.responsable || null, observacion: inv.observacion };
+      // Visita registrada: puede corregir cantidades (tipos) o solo traer el año de adquisición
+      verificado = { tipos, adquisicion: inv.adquisicion || {}, fecha_visita: inv.fecha_visita, responsable: inv.responsable || null, observacion: inv.observacion };
     }
     const cdTipo = rep.map((q, t) => q * (pu[t] ?? 0));
     const z = factorZona(d[1], l[4], idx);
@@ -225,7 +239,7 @@ export function costear({ D, C, list, precios, rubros, factores, uit, inventario
   if (T.fal > 0) avisos.push({ tipo: 'faltante', texto: 'El faltante (más bienes de los que hoy existen) no entra al costo de inversión: amplía la capacidad de la UP y una IOARR de reposición no se puede sustentar en eso (Lineamientos IOARR del MEF, 2.4.C). Se muestra valorizado aparte, como referencia; corresponde evaluarlo como ampliación marginal.' });
   if (!valorUit) avisos.push({ tipo: 'uit', texto: `Carga el valor de la UIT${U.anio ? ' de ' + U.anio : ''} para saber si el registro del Formato 07-C es abreviado o completo.` });
   else if (U.supera) avisos.push({ tipo: 'uit75', texto: `El total supera las ${LIMITE_UIT} UIT (UIT ${U.anio}): corresponde el registro completo del Formato 07-C (secciones D, E y F).` });
-  const verif = locales.filter(l => l.verificado);
+  const verif = locales.filter(l => l.verificado?.tipos.length);
   if (verif.length) avisos.push({ tipo: 'inventario', texto: `${verif.length === 1 ? '1 local usa' : verif.length + ' locales usan'} inventario verificado en campo en lugar del Censo Educativo (${verif.map(l => l.cod).join(', ')}). Adjunta al expediente el sustento de la visita (acta, fotos, firma del director).` });
   if (R.every(r => r.valor === 0)) avisos.push({ tipo: 'rubros', texto: 'Todos los rubros están en 0. Ingresa los porcentajes o montos de transporte, gastos generales, utilidad, IGV y demás.' });
 

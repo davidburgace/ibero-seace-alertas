@@ -4,6 +4,7 @@
 import { RUBROS, BASES, FUENTES_PRECIO, LIMITE_UIT, TIPOS_ARCHIVO } from '/selector-ioarr/costos.js';
 import { ITEMS } from '/selector-ioarr/calculo.js';
 import { renderDocumentos, enlazarDocumentos } from '/selector-ioarr-documentos.js';
+import { renderVerificacion, enlazarVerificacion } from '/selector-ioarr-verificacion.js';
 
 const NF = new Intl.NumberFormat('es-PE');
 const NS = new Intl.NumberFormat('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -18,7 +19,7 @@ let ctx = null;        // { el, proyecto, api, toast, guardarYa }
 let datos = null;      // respuesta de /costos
 let catalogo = null;   // precios del catálogo por tipo
 let pagLoc = 0, tGuardar = null, version = 0, filtroLoc = '';
-let vistaExp = 'costos';   // sub-pestaña: 'costos' | 'docs'
+let vistaExp = 'costos';   // sub-pestaña: 'costos' | 'docs' | 'verif'
 const norm = t => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 
 export async function renderExpediente(c) {
@@ -54,8 +55,10 @@ function pintar() {
     <div class="subtabs" role="tablist" aria-label="Expediente">
       <button type="button" role="tab" data-exp-vista="costos" aria-selected="${vistaExp === 'costos'}">Costos</button>
       <button type="button" role="tab" data-exp-vista="docs" aria-selected="${vistaExp === 'docs'}">Documentos: Formato 07-C y memoria</button>
+      <button type="button" role="tab" data-exp-vista="verif" aria-selected="${vistaExp === 'verif'}">Verificación</button>
     </div>
     <div id="exp-v-docs" ${vistaExp === 'docs' ? '' : 'hidden'}></div>
+    <div id="exp-v-verif" ${vistaExp === 'verif' ? '' : 'hidden'}></div>
     <div id="exp-v-costos" ${vistaExp === 'costos' ? '' : 'hidden'}>
     <div id="exp-kpis"></div>
     <div id="exp-avisos"></div>
@@ -71,6 +74,7 @@ function pintar() {
     </div>`;
   pintarPrecios(); pintarRubros(); pintarResultados();
   if (vistaExp === 'docs') abrirDocumentos();
+  if (vistaExp === 'verif') abrirVerificacion();
 }
 
 function pintarKpis() {
@@ -186,12 +190,17 @@ function pintarResultados() {
 function abrirDocumentos() {
   return renderDocumentos({ ...ctx, el: document.getElementById('exp-v-docs') });
 }
+function abrirVerificacion() {
+  return renderVerificacion({ ...ctx, el: document.getElementById('exp-v-verif') });
+}
 function cambiarVista(v) {
   vistaExp = v;
   ctx.el.querySelectorAll('[data-exp-vista]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.expVista === v)));
   document.getElementById('exp-v-costos').hidden = v !== 'costos';
   document.getElementById('exp-v-docs').hidden = v !== 'docs';
+  document.getElementById('exp-v-verif').hidden = v !== 'verif';
   if (v === 'docs') abrirDocumentos();
+  if (v === 'verif') abrirVerificacion();
 }
 
 // ─── Cambios ────────────────────────────────────────────────────────────────
@@ -267,6 +276,7 @@ export function enlazarExpediente(el, abrirNuevo) {
     if (e.target.dataset.precio) cambiarPrecio(e.target.dataset.precio, e.target.value || null);
   });
   enlazarDocumentos(el);
+  enlazarVerificacion(el);
   el.addEventListener('click', e => {
     const sv = e.target.closest('[data-exp-vista]');
     if (sv) cambiarVista(sv.dataset.expVista);
@@ -292,7 +302,8 @@ function modalInventario() {
     <h2 id="m-inv-tit">Inventario verificado en campo</h2>
     <p class="sub" id="inv-local"></p>
     <p class="sub">Marca los tipos de bien que verificaste y escribe lo que encontraste. En esos tipos, el expediente usa tus cantidades en lugar del Censo Educativo: reposición = malo + % de regular; faltante = requerido − existente. El Selector sigue mostrando el censo.</p>
-    <div class="tabla-wrap"><table class="tabla tabla-inv"><thead><tr><th>Tipo de bien</th><th class="num">Requerido</th><th class="num">Censo (B / R / M)</th><th>Corregir</th><th>Bueno</th><th>Regular</th><th>Malo</th></tr></thead><tbody id="inv-tbody"></tbody></table></div>
+    <div class="tabla-wrap"><table class="tabla tabla-inv"><thead><tr><th>Tipo de bien</th><th class="num">Requerido</th><th class="num">Censo (B / R / M)</th><th>Corregir</th><th>Bueno</th><th>Regular</th><th>Malo</th><th>Año de adquisición</th></tr></thead><tbody id="inv-tbody"></tbody></table></div>
+    <p class="sub">El año de adquisición sale del inventario patrimonial o de la placa del bien. Se usa para la antigüedad del Formato 07-C y la memoria; puedes cargarlo aunque no corrijas las cantidades.</p>
     <div class="form-grid">
       <div class="campo"><label for="inv-fecha">Fecha de la visita</label><input id="inv-fecha" type="date" required></div>
       <div class="campo"><label for="inv-resp">Responsable</label><input id="inv-resp" type="text" maxlength="200" placeholder="Quién hizo la visita"></div>
@@ -352,7 +363,8 @@ async function abrirInventario(cod) {
       const c = d.censo[x.k], f = v?.bienes?.[x.k], on = !!f, val = (k) => f ? f[k] : c[k];
       const inp = k => `<input type="number" min="0" step="1" inputmode="numeric" data-inv-k="${x.k}" data-c="${k}" value="${val(k)}" ${on ? '' : 'disabled'} required aria-label="${x.n}: ${{ b: 'bueno', r: 'regular', m: 'malo' }[k]}">`;
       return `<tr><td><b>${x.n}</b></td><td class="num">${ent(c.req)}</td><td class="num">${ent(c.b)} / ${ent(c.r)} / ${ent(c.m)}${c.b + c.r + c.m < c.req ? '<br><span class="sub aviso-linea">faltan ' + ent(c.req - c.b - c.r - c.m) + '</span>' : ''}</td>
-        <td><label class="chk"><input type="checkbox" data-inv-chk="${x.k}" ${on ? 'checked' : ''}> Corregir</label></td><td>${inp('b')}</td><td>${inp('r')}</td><td>${inp('m')}</td></tr>`;
+        <td><label class="chk"><input type="checkbox" data-inv-chk="${x.k}" ${on ? 'checked' : ''}> Corregir</label></td><td>${inp('b')}</td><td>${inp('r')}</td><td>${inp('m')}</td>
+        <td><input type="number" min="1950" max="${new Date().getFullYear()}" step="1" inputmode="numeric" data-inv-anio="${x.k}" value="${v?.adquisicion?.[x.k] ?? ''}" placeholder="AAAA" aria-label="${x.n}: año de adquisición"></td></tr>`;
     }).join('');
     m.querySelector('#inv-fecha').value = v?.fecha_visita || '';
     m.querySelector('#inv-fecha').max = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Lima' });
@@ -373,11 +385,13 @@ async function guardarInventario(e) {
     const k = chk.dataset.invChk, n = c => Number(m.querySelector(`[data-inv-k="${k}"][data-c="${c}"]`).value);
     bienes[k] = { b: n('b'), r: n('r'), m: n('m') };
   });
-  if (!Object.keys(bienes).length) { err.textContent = 'Marca al menos un tipo de bien para corregir.'; err.hidden = false; return; }
+  const adquisicion = {};
+  m.querySelectorAll('[data-inv-anio]').forEach(i => { if (i.value) adquisicion[i.dataset.invAnio] = Number(i.value); });
+  if (!Object.keys(bienes).length && !Object.keys(adquisicion).length) { err.textContent = 'Corrige al menos un tipo de bien o indica un año de adquisición.'; err.hidden = false; return; }
   const btn = m.querySelector('#inv-ok'); btn.disabled = true;
   try {
     datos = await ctx.api(`/proyectos/${ctx.proyecto.id}/costos/inventario/${encodeURIComponent(invCod)}`, { method: 'PUT', body: {
-      bienes, fecha_visita: m.querySelector('#inv-fecha').value, responsable: m.querySelector('#inv-resp').value, observacion: m.querySelector('#inv-obs').value } });
+      bienes, adquisicion, fecha_visita: m.querySelector('#inv-fecha').value, responsable: m.querySelector('#inv-resp').value, observacion: m.querySelector('#inv-obs').value } });
     pintarPrecios(); pintarResultados();
     m.querySelector('#inv-quitar').hidden = false;
     const primera = !invGuardado; invGuardado = true; pintarSustento();

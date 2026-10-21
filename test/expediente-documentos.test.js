@@ -7,9 +7,11 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import JSZip from 'jszip';
 import { prep, calc, filtrar, FILTRO_VACIO, DEF } from '../src/selector-ioarr/calculo.js';
-import { costear } from '../src/selector-ioarr/costos.js';
-import { armarModelo, limpiarDatosDoc } from '../src/selector-ioarr/documentos.js';
-import { generar07C, generarMemoria } from '../src/selector-ioarr/word.js';
+import { costear, limpiarAdquisicion, censoLocal } from '../src/selector-ioarr/costos.js';
+import { armarModelo, limpiarDatosDoc, VERIF_MANUAL } from '../src/selector-ioarr/documentos.js';
+import { generar07C, generarMemoria, generarVerificacion } from '../src/selector-ioarr/word.js';
+import { generarExcelCostos } from '../src/selector-ioarr/excel-costos.js';
+import ExcelJS from 'exceljs';
 
 const DIR = new URL('../src/public/data/selector-ioarr/2025/', import.meta.url);
 const region = n => prep(JSON.parse(readFileSync(new URL(n + '.json', DIR), 'utf8')));
@@ -115,4 +117,101 @@ test('los Word abren en LibreOffice Writer', { skip: !writer && 'LibreOffice Wri
     assert.match(readFileSync(join(dir, 'out', 'f07c.txt'), 'utf8'), /E\.5 Reposición masiva/);
     assert.match(readFileSync(join(dir, 'out', 'memoria.txt'), 'utf8'), /MEMORIA DESCRIPTIVA/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ─── Etapa 3: antigüedad y lista de verificación ────────────────────────────
+// Moquegua «mariscal» con año de adquisición en dos locales y % de Regular
+function mariscalAnios({ regPct = 0, datos = {} } = {}) {
+  const D = region('moquegua'), P = { ...DEF, regPct }, C = calc(D, P), list = filtrar(D, C, { ...FILTRO_VACIO(), q: 'mariscal' });
+  const base = costear({ D, C, list, precios: PRECIOS, rubros: RUB, factores: [], uit: { anio: 2026, valor: 500 } });
+  const ups = base.locales.filter(l => l.rep[4] > 0).slice(0, 2);   // dos locales con armarios a reponer
+  const inv = Object.fromEntries(ups.map((l, j) => [l.cod, { bienes: {}, adquisicion: { arm: j === 0 ? 2006 : 2016 }, fecha_visita: '2026-10-20', observacion: 'Visita', archivos: j === 0 ? [{ tipo: 'acta', nombre_archivo: 'a.pdf' }, { tipo: 'foto', nombre_archivo: 'f.jpg' }] : [] }]));
+  const R = costear({ D, C, list, precios: PRECIOS, rubros: RUB, factores: [], uit: { anio: 2026, valor: 500 }, inventario: inv, regPct });
+  const M = armarModelo({ R, D, list, proyecto: { nombre: 'Mariscal', region: 'Moquegua' }, datos: limpiarDatosDoc({ ...COMPLETOS, antiguedad: {}, ...datos }), precios: DESC, inv, fecha: '2026-10-21', regPct });
+  return { base, R, M, ups };
+}
+
+test('año de adquisición sin corregir cantidades: el censo sigue valiendo y no hay aviso de inventario', () => {
+  const { base, R } = mariscalAnios();
+  assert.deepEqual(R.partidas.map(p => [p.rep, p.fal]), base.partidas.map(p => [p.rep, p.fal]));
+  cerca(R.totales.total, base.totales.total, 'mismo total');
+  assert.ok(R.locales.some(l => l.verificado && !l.verificado.tipos.length && l.verificado.adquisicion.arm));
+  assert.ok(!R.avisos.some(a => a.tipo === 'inventario'));
+});
+
+test('antigüedad: promedio ponderado por lo que se repone, y lo cargado a mano tiene prioridad', () => {
+  const { M, ups } = mariscalAnios();
+  const mesa = M.E.activos.find(a => a.k === 'arm'), [a, b] = ups;
+  const esperado = (20 * a.rep[4] + 10 * b.rep[4]) / (a.rep[4] + b.rep[4]);
+  assert.equal(mesa.antiguedad_origen, 'inventario');
+  assert.equal(mesa.antiguedad_inventario.con, 2); assert.equal(mesa.antiguedad_inventario.min, 10); assert.equal(mesa.antiguedad_inventario.max, 20);
+  cerca(mesa.antiguedad_inventario.promedio, Math.round(esperado * 10) / 10, 'promedio');
+  assert.equal(mesa.antiguedad, Math.round(Math.round(esperado * 10) / 10));
+  const manual = mariscalAnios({ datos: { antiguedad: { arm: 25 } } }).M.E.activos.find(x => x.k === 'arm');
+  assert.deepEqual([manual.antiguedad, manual.antiguedad_origen], [25, 'usuario']);
+});
+
+test('vida útil (2.4.C.b): sin % de Regular basta el estado malo; con % de Regular exige antigüedad ≥ vida útil e informe', () => {
+  const cond = M => M.E.condiciones.find(c => /Vida útil/.test(c.texto));
+  assert.equal(cond(mariscalAnios().M).estado, 'cumple');
+  const antig = { mesa: 20, silla: 20, esc: 20, sdoc: 20, arm: 20 };
+  const pend = mariscalAnios({ regPct: 0.5, datos: { antiguedad: antig } }).M;
+  assert.equal(cond(pend).estado, 'pendiente');
+  assert.ok(pend.faltan.some(x => /2\.4\.C\.b/.test(x)));
+  const vida = v => ({ mesa: v, silla: v, esc: v, sdoc: v, arm: v });
+  assert.equal(cond(mariscalAnios({ regPct: 0.5, datos: { antiguedad: antig, vida_util_estimada: vida(25), informe_vida_util: 'Informe 1' } }).M).estado, 'no');
+  const ok = mariscalAnios({ regPct: 0.5, datos: { antiguedad: antig, vida_util_estimada: vida(10), informe_vida_util: 'Informe 1' } }).M;
+  assert.equal(cond(ok).estado, 'cumple');
+  assert.ok(!ok.faltan.some(x => /2\.4\.C\.b/.test(x)));
+});
+
+test('limpiarAdquisicion: años entre 1950 y el año actual', () => {
+  assert.deepEqual(limpiarAdquisicion({ mesa: '2008', silla: '', otro: 2000 }, 2026), { mesa: 2008 });
+  assert.throws(() => limpiarAdquisicion({ mesa: 2030 }, 2026), /entre 1950 y 2026/);
+  assert.throws(() => limpiarAdquisicion({ mesa: 1900 }, 2026));
+});
+
+test('lista de verificación: automático por local, marcas manuales y conteo', () => {
+  const sinMarcas = mariscalAnios().M.verificacion;
+  const manual = sinMarcas.secciones.find(s => s.items.some(x => x.manual));
+  assert.equal(manual.items.length, VERIF_MANUAL.length);
+  assert.ok(manual.items.every(x => x.estado === 'pendiente'));
+  const loc = sinMarcas.locales;
+  assert.equal(loc.filter(u => u.visita).length, 2); assert.equal(loc.filter(u => u.acta).length, 1); assert.equal(loc.filter(u => u.fotos).length, 1);
+  const acta = sinMarcas.secciones[1].items.find(x => /Acta/.test(x.texto));
+  assert.equal(acta.estado, 'pendiente'); assert.equal(acta.nota, `1 de ${loc.length} locales`);
+  const V = mariscalAnios({ datos: { verificacion: { cotizaciones: { ok: true, nota: '3 cotizaciones' }, pmi: { ok: false, nota: 'en trámite' }, raro: { ok: true } } } }).M.verificacion;
+  const items = V.secciones.flatMap(s => s.items);
+  assert.equal(items.find(x => x.id === 'cotizaciones').estado, 'ok');
+  assert.equal(items.find(x => x.id === 'pmi').nota, 'en trámite');
+  assert.equal(V.hechos, sinMarcas.hechos + 1);
+  assert.equal(V.total, items.length);
+});
+
+test('Word de la lista de verificación y antigüedad en el 07-C y la memoria', async () => {
+  const { M } = mariscalAnios();
+  const v = await textoDocx(await generarVerificacion(M));
+  for (const s of ['LISTA DE VERIFICACIÓN DEL EXPEDIENTE IOARR', 'Costos', 'Locales: visita y sustento', 'Condiciones de los Lineamientos IOARR', 'Documentos y coordinaciones', 'Sustento por local', 'Cotizaciones'])
+    assert.ok(v.includes(s), s);
+  const m = await textoDocx(await generarMemoria(M));
+  assert.ok(m.includes('Año de adquisición por local')); assert.ok(m.includes('2006 (20 años)'));
+  const D = region('lambayeque'), C = calc(D, DEF), i = D.locs.findIndex(l => l[0] === '276008');
+  const inv = { '276008': { bienes: { mesa: { b: 0, r: 0, m: 569 } }, adquisicion: { mesa: 2010 }, fecha_visita: '2026-10-20', observacion: 'Acta', archivos: [] } };
+  const R = costear({ D, C, list: [i], precios: PRECIOS, rubros: RUB, factores: [], uit: { anio: 2026, valor: 1000 }, inventario: inv });
+  const M2 = armarModelo({ R, D, list: [i], proyecto: { nombre: 'Chiclayo', region: 'Lambayeque' }, datos: limpiarDatosDoc({}), precios: DESC, inv, fecha: '2026-10-21' });
+  const f = await textoDocx(await generar07C(M2));
+  assert.match(f, /16 \(promedio según el año de adquisición en 1 de 1 locales\)/);
+});
+
+test('Excel: la hoja «Inventario verificado» trae año de adquisición y antigüedad, también sin corregir cantidades', async () => {
+  const D = region('lambayeque'), C = calc(D, DEF), i = D.locs.findIndex(l => l[0] === '276008');
+  const fila = { cod_local: '276008', bienes: {}, adquisicion: { silla: 2012 }, censo: censoLocal(C, i), fecha_visita: '2026-10-20', observacion: 'Visita', archivos: [] };
+  const R = costear({ D, C, list: [i], precios: PRECIOS, rubros: RUB, factores: [], uit: { anio: 2026, valor: 1000 }, inventario: { '276008': fila } });
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(await generarExcelCostos(R, { proyecto: 'P', region: 'Lambayeque', fecha: '2026-10-21', criterios: '', precios: {}, inventario: { '276008': fila } }));
+  const row = wb.getWorksheet('Inventario verificado').getRow(4);
+  assert.equal(row.getCell(3).value, 'Silla del estudiante');
+  assert.equal(row.getCell(7).value, 'censo');
+  assert.equal(row.getCell(17).value, 2012);
+  assert.equal(row.getCell(18).value.result, 14);
 });
