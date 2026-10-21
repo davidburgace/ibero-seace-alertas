@@ -18,6 +18,7 @@ import ExcelJS from 'exceljs';
 import { ITEMS } from './calculo.js';
 import { RUBROS, BASES, FUENTES_PRECIO, LIMITE_UIT, TIPOS_ARCHIVO } from './costos.js';
 
+const FALTANTE = 'Faltante (brecha de dotación, no reposición)', FALTANTE_MIN = 'faltante (brecha de dotación)';
 const AZUL = 'FF3A63E0', AMARILLO = 'FFFFF3B0', GRIS = 'FFF1F3F7';
 const SOLES = '"S/ "#,##0.00', ENTERO = '#,##0', PCT = '0.00%';
 const letra = n => { let s = ''; while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; };
@@ -121,7 +122,7 @@ export async function generarExcelCostos(R, meta) {
   col('bienes', 'Costo de los bienes con IGV (S/)', 17);
   for (const k of ['supervision', 'expediente', 'gestion', 'imprevistos']) col(k, rub(k).nombre + ' (S/)', 15);
   col('total', 'TOTAL INVERSIÓN (S/)', 18);
-  ITEMS.forEach((x, t) => col('fq' + t, `${x.n} – faltante (${x.u}), no incluido`, 13));
+  ITEMS.forEach((x, t) => col('fq' + t, `${x.n} – ${FALTANTE_MIN} (${x.u}), no incluido`, 15));
   col('fv', 'Faltante valorizado, referencial (S/)', 17);
 
   const ws = wsM;
@@ -193,7 +194,7 @@ export async function generarExcelCostos(R, meta) {
   {
     const ws = wsPa;
     ws.columns = [32, 12, 16, 20, 20, 4, 16, 22].map(width => ({ width }));
-    ws.getRow(1).values = ['Partida', 'Unidad', 'Metrado (reposición)', 'Precio unitario sin IGV (S/)', 'Parcial (S/)', '', 'Faltante, no incluido', 'Faltante valorizado, referencial (S/)'];
+    ws.getRow(1).values = ['Partida', 'Unidad', 'Metrado (reposición)', 'Precio unitario sin IGV (S/)', 'Parcial (S/)', '', FALTANTE + ', no incluido', 'Faltante valorizado, referencial (S/)'];
     cabecera(ws, 1, 8);
     R.partidas.forEach((p, t) => {
       const r = 2 + t;
@@ -255,13 +256,13 @@ export async function generarExcelCostos(R, meta) {
     add(['Registro que corresponde', f(`IF(${celUit}<=0,"PENDIENTE: falta el valor de la UIT",IF(B${filaTot}>${celLim}*${celUit},"COMPLETO: supera 75 UIT (secciones D, E y F)","ABREVIADO: hasta 75 UIT (sección G)"))`, reg)],
       r => { r.font = { bold: true }; if (R.uit.supera || !R.uit.valor) resaltar(r.getCell(2), AMARILLO); });
     add([]);
-    add(['Faltante (no incluido en el total)'], sub);
+    add([FALTANTE + ', no incluido en el total'], sub);
     add(['Faltante valorizado, referencial', f(celFal, T.falValor), 'Bienes por encima de los existentes × precio unitario'], soles);
-    add(['El faltante amplía la capacidad de la UP. Según los Lineamientos IOARR del MEF (2.4.C), una reposición no puede sustentarse en un incremento de capacidad: corresponde evaluarlo como ampliación marginal.']);
+    add(['El faltante es lo que falta para llegar a lo requerido: brecha de dotación, no reposición. Amplía la capacidad de la UP. Según los Lineamientos IOARR del MEF (2.4.C), una reposición no puede sustentarse en un incremento de capacidad: corresponde evaluarlo como ampliación marginal.']);
     add([]);
     add(['Criterios del metrado'], sub);
     add([meta.criterios || '']);
-    add(['Reposición = Malo + el % indicado del estado Regular (redondeado por aula). Faltante = Requerido − Existente, mínimo 0 por aula.']);
+    add(['Reposición = Malo (se repone solo el mobiliario en estado malo). Faltante = Requerido − Existente, mínimo 0 por aula: no entra a la reposición ni al costo.']);
     add([]);
     add(['Fuentes'], sub);
     add([meta.fuente || 'Padrón de ESCALE – Minedu, registros al 29/10/2025']);
@@ -274,9 +275,9 @@ export async function generarExcelCostos(R, meta) {
   // ── Por distrito ────────────────────────────────────────────────────────────
   {
     const ws = wsD;
-    ws.columns = [10, 22, 24, 10, 14, 16, 18, 18, 18].map(width => ({ width }));
-    ws.getRow(1).values = ['Ubigeo', 'Provincia', 'Distrito', 'Locales', 'Estudiantes', 'Bienes a reponer', 'Costo directo (S/)', 'Total de inversión (S/)', 'Costo por estudiante (S/)'];
-    cabecera(ws, 1, 9);
+    ws.columns = [10, 22, 24, 10, 14, 16, 18, 18, 18, 22].map(width => ({ width }));
+    ws.getRow(1).values = ['Ubigeo', 'Provincia', 'Distrito', 'Locales', 'Estudiantes', 'Bienes a reponer', 'Costo directo (S/)', 'Total de inversión (S/)', 'Costo por estudiante (S/)', FALTANTE + ', no incluido'];
+    cabecera(ws, 1, 10);
     const rango = k => `${HM}!$${letra(C[k])}$${ini}:$${letra(C[k])}$${fin}`;
     const crit = `${HM}!$${letra(C.ubigeo)}$${ini}:$${letra(C.ubigeo)}$${fin}`;
     R.distritos.forEach((d, j) => {
@@ -285,14 +286,14 @@ export async function generarExcelCostos(R, meta) {
         f(`COUNTIF(${crit},A${r})`, d.n), f(`SUMIF(${crit},A${r},${rango('est')})`, d.est),
         f(ITEMS.map((_, t) => `SUMIF(${crit},A${r},${rango('q' + t)})`).join('+'), d.rep),
         f(`SUMIF(${crit},A${r},${rango('cd')})`, d.cd), f(`SUMIF(${crit},A${r},${rango('total')})`, d.total),
-        f(`IFERROR(H${r}/E${r},0)`, d.porEstudiante ?? 0)];
+        f(`IFERROR(H${r}/E${r},0)`, d.porEstudiante ?? 0), f(ITEMS.map((_, t) => `SUMIF(${crit},A${r},${rango('fq' + t)})`).join('+'), d.fal)];
     });
     const r = 2 + R.distritos.length;
     ws.getRow(r).values = ['TOTAL', '', '', f(`SUM(D2:D${r - 1})`, T.locales), f(`SUM(E2:E${r - 1})`, T.est), f(`SUM(F2:F${r - 1})`, T.rep),
-      f(`SUM(G2:G${r - 1})`, T.cd), f(`SUM(H2:H${r - 1})`, T.total), f(`IFERROR(H${r}/E${r},0)`, T.porEstudiante ?? 0)];
+      f(`SUM(G2:G${r - 1})`, T.cd), f(`SUM(H2:H${r - 1})`, T.total), f(`IFERROR(H${r}/E${r},0)`, T.porEstudiante ?? 0), f(`SUM(J2:J${r - 1})`, T.fal)];
     ws.getRow(r).font = { bold: true };
     for (let k = 2; k <= r; k++) {
-      for (const c of [4, 5, 6]) ws.getCell(k, c).numFmt = ENTERO;
+      for (const c of [4, 5, 6, 10]) ws.getCell(k, c).numFmt = ENTERO;
       for (const c of [7, 8, 9]) ws.getCell(k, c).numFmt = SOLES;
     }
   }
@@ -302,7 +303,7 @@ export async function generarExcelCostos(R, meta) {
     const ws = wsI;
     ws.columns = [12, 36, 22, 9, 9, 9, 9, 9, 9, 11, 12, 11, 12, 22, 50, 50, 12, 12].map(width => ({ width }));
     ws.getCell('A1').value = 'Inventario verificado en campo'; ws.getCell('A1').font = { bold: true, size: 14 };
-    ws.getCell('A2').value = 'Reemplaza lo que reporta el Censo Educativo en estos locales y tipos de bien. Reposición = Malo + % de Regular; faltante = Requerido − Existente, por local.';
+    ws.getCell('A2').value = 'Reemplaza lo que reporta el Censo Educativo en estos locales y tipos de bien. Reposición = Malo; faltante (brecha de dotación, no reposición) = Requerido − Existente, por local.';
     ws.getCell('A2').font = { italic: true, color: { argb: 'FF5C6270' } };
     ws.getRow(3).values = ['Código de local', 'Instituciones', 'Tipo de bien', 'Censo: bueno', 'Censo: regular', 'Censo: malo',
       'Campo: bueno', 'Campo: regular', 'Campo: malo', 'Requerido', 'Reposición', 'Faltante', 'Fecha de visita', 'Responsable', 'Sustento', 'Archivos adjuntos', 'Año de adquisición', 'Antigüedad (años)'];

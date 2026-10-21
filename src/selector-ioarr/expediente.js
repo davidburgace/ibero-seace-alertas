@@ -272,7 +272,7 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     const P = limpiarParams(p.criterios);
     const C = calc(D, P);
     const inv = Object.fromEntries(inventario.map(x => [x.cod_local, { ...x, archivos: archivos.filter(a => a.cod_local === x.cod_local).map(sinRuta) }]));
-    const R = costear({ D, C, list, precios, rubros: fila?.rubros, factores, uit: { anio: anioUit, valor: uit?.valor ?? null }, inventario: inv, regPct: P.regPct });
+    const R = costear({ D, C, list, precios, rubros: fila?.rubros, factores, uit: { anio: anioUit, valor: uit?.valor ?? null }, inventario: inv });
     // Sustento: cada local corregido debería tener al menos el acta de la visita
     const sinActa = R.locales.filter(l => l.verificado && !inv[l.cod].archivos.some(a => a.tipo === 'acta')).map(l => l.cod);
     if (sinActa.length) R.avisos.push({ tipo: 'sustento', texto: `Falta adjuntar el acta de verificación de: ${sinActa.join(', ')}. Súbela en «Corregir inventario» del local, con las fotos y el inventario patrimonial.` });
@@ -447,7 +447,7 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
   }
   async function modelo(p) {
     const [A, { datos, sinMigracion }] = await Promise.all([armar(p), leerDatosDoc(p)]);
-    const M = armarModelo({ R: A.R, D: A.D, list: A.list, proyecto: p, datos, precios: A.detalle, inv: A.inv, fecha: hoyLima(), regPct: A.P.regPct });
+    const M = armarModelo({ R: A.R, D: A.D, list: A.list, proyecto: p, datos, precios: A.detalle, inv: A.inv, fecha: hoyLima() });
     return { M, datos, sinMigracion, A };
   }
   // Lo que necesita el formulario: datos guardados, lo que se propone y lo que falta
@@ -458,7 +458,6 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
       total: M.F.total, en_uit: M.uit.enUit, uit: M.uit.valor ? { anio: M.uit.anio, valor: M.uit.valor } : null,
       ups: M.ups.length, sin_rep: M.sinRep.map(x => x.cod), ugels: M.ugels, mantenimiento_sugerido: M.D.mantenimiento,
       tipos: M.E.activos.map(a => ({ k: a.k, nombre: a.nombre, cantidad: a.cantidad, descripcion: a.descripcion, antiguedad_inventario: a.antiguedad_inventario })),
-      reg_pct: M.regPct,
       alineamiento: { servicio: M.A.servicio, tipologia: M.A.tipologia, indicadores: M.A.indicadores },
       inicio: M.F.inicio, fin: M.F.fin, condiciones: M.E.condiciones
     },
@@ -579,6 +578,6 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
 
 export function textoCriterios(P) {
   const est = { b: 'Bueno', r: 'Regular', m: 'Malo' }[P.carpEstado];
-  return CRIT.map(([k, l]) => `${l}: ${k === 'regPct' ? Math.round(P[k] * 100) + ' %' : P[k]}`).join(' · ') + ` · Estado asignado a las carpetas: ${est}`;
+  return CRIT.map(([k, l]) => `${l}: ${P[k]}`).join(' · ') + ` · Estado asignado a las carpetas: ${est} · Se repone solo el estado Malo`;
 }
 

@@ -49,7 +49,7 @@ const acciones = {
       aulas: D.locAul[i].map(ai => {
         const a = D.aulas[ai];
         return { aula: a[4], edif: a[2], piso: a[3], grado: a[5], secc: a[6], tur: a[7], comp: !!a[9], est: a[8],
-          t: [0, 1, 2, 3, 4].map(t => [A.b[t][ai] + A.r[t][ai] + A.m[t][ai], A.rep[t][ai]]) };
+          t: [0, 1, 2, 3, 4].map(t => ({ b: A.b[t][ai], r: A.r[t][ai], m: A.m[t][ai], rep: A.rep[t][ai], fal: A.fal[t][ai] })) };
       })
     };
   },
@@ -57,15 +57,15 @@ const acciones = {
   // Totales de la selección (barra inferior) y, con completo, el resumen de «Mi selección»
   resumen({ completo }) {
     const list = selIdx(), T = totals(D, C, list);
-    const base = { n: T.n, est: T.est, aul: T.aul, rep: T.rep };
+    const base = { n: T.n, est: T.est, aul: T.aul, rep: T.rep, fal: T.fal };
     if (!completo) return base;
     const byD = new Map();
     for (const i of list) { const d = D.locs[i][1]; if (!byD.has(d)) byD.set(d, []); byD.get(d).push(i); }
-    const distritos = [...byD.entries()].map(([d, ls]) => { const t = totals(D, C, ls); return { nom: D.dists[d][0], n: ls.length, est: t.est, aul: t.aul, rep: t.rep }; })
+    const distritos = [...byD.entries()].map(([d, ls]) => { const t = totals(D, C, ls); return { nom: D.dists[d][0], n: ls.length, est: t.est, aul: t.aul, rep: t.rep, fal: t.fal }; })
       .sort((a, b) => b.rep - a.rep);
     const locales = list.slice().sort((a, b) => C.L.repTot[b] - C.L.repTot[a] || D.locs[a][0].localeCompare(D.locs[b][0])).map(i => {
       const l = D.locs[i];
-      return { i, cod: l[0], nom: D.locName[i], dist: D.dists[l[1]][0], lat: l[6], lon: l[7], est: D.locEst[i], aul: D.locAul[i].length, rep: C.L.repTot[i],
+      return { i, cod: l[0], nom: D.locName[i], dist: D.dists[l[1]][0], lat: l[6], lon: l[7], est: D.locEst[i], aul: D.locAul[i].length, rep: C.L.repTot[i], fal: C.L.falTot[i],
         t: [0, 1, 2, 3, 4].map(t => lv(C, 'rep', t, i)) };
     });
     return { ...base, tipos: ITEMS.map((x, t) => ({ ...x, ...T.t[t] })), distritos, locales };

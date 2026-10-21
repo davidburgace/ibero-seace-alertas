@@ -120,14 +120,14 @@ test('los Word abren en LibreOffice Writer', { skip: !writer && 'LibreOffice Wri
 });
 
 // ─── Etapa 3: antigüedad y lista de verificación ────────────────────────────
-// Moquegua «mariscal» con año de adquisición en dos locales y % de Regular
-function mariscalAnios({ regPct = 0, datos = {} } = {}) {
-  const D = region('moquegua'), P = { ...DEF, regPct }, C = calc(D, P), list = filtrar(D, C, { ...FILTRO_VACIO(), q: 'mariscal' });
+// Moquegua «mariscal» con año de adquisición en dos locales
+function mariscalAnios({ datos = {} } = {}) {
+  const D = region('moquegua'), C = calc(D, DEF), list = filtrar(D, C, { ...FILTRO_VACIO(), q: 'mariscal' });
   const base = costear({ D, C, list, precios: PRECIOS, rubros: RUB, factores: [], uit: { anio: 2026, valor: 500 } });
   const ups = base.locales.filter(l => l.rep[4] > 0).slice(0, 2);   // dos locales con armarios a reponer
   const inv = Object.fromEntries(ups.map((l, j) => [l.cod, { bienes: {}, adquisicion: { arm: j === 0 ? 2006 : 2016 }, fecha_visita: '2026-10-20', observacion: 'Visita', archivos: j === 0 ? [{ tipo: 'acta', nombre_archivo: 'a.pdf' }, { tipo: 'foto', nombre_archivo: 'f.jpg' }] : [] }]));
-  const R = costear({ D, C, list, precios: PRECIOS, rubros: RUB, factores: [], uit: { anio: 2026, valor: 500 }, inventario: inv, regPct });
-  const M = armarModelo({ R, D, list, proyecto: { nombre: 'Mariscal', region: 'Moquegua' }, datos: limpiarDatosDoc({ ...COMPLETOS, antiguedad: {}, ...datos }), precios: DESC, inv, fecha: '2026-10-21', regPct });
+  const R = costear({ D, C, list, precios: PRECIOS, rubros: RUB, factores: [], uit: { anio: 2026, valor: 500 }, inventario: inv });
+  const M = armarModelo({ R, D, list, proyecto: { nombre: 'Mariscal', region: 'Moquegua' }, datos: limpiarDatosDoc({ ...COMPLETOS, antiguedad: {}, ...datos }), precios: DESC, inv, fecha: '2026-10-21' });
   return { base, R, M, ups };
 }
 
@@ -151,18 +151,14 @@ test('antigüedad: promedio ponderado por lo que se repone, y lo cargado a mano 
   assert.deepEqual([manual.antiguedad, manual.antiguedad_origen], [25, 'usuario']);
 });
 
-test('vida útil (2.4.C.b): sin % de Regular basta el estado malo; con % de Regular exige antigüedad ≥ vida útil e informe', () => {
+test('vida útil: se repone solo el estado malo, así que basta la vida útil efectiva (2.4.B.e)', () => {
   const cond = M => M.E.condiciones.find(c => /Vida útil/.test(c.texto));
-  assert.equal(cond(mariscalAnios().M).estado, 'cumple');
-  const antig = { mesa: 20, silla: 20, esc: 20, sdoc: 20, arm: 20 };
-  const pend = mariscalAnios({ regPct: 0.5, datos: { antiguedad: antig } }).M;
-  assert.equal(cond(pend).estado, 'pendiente');
-  assert.ok(pend.faltan.some(x => /2\.4\.C\.b/.test(x)));
-  const vida = v => ({ mesa: v, silla: v, esc: v, sdoc: v, arm: v });
-  assert.equal(cond(mariscalAnios({ regPct: 0.5, datos: { antiguedad: antig, vida_util_estimada: vida(25), informe_vida_util: 'Informe 1' } }).M).estado, 'no');
-  const ok = mariscalAnios({ regPct: 0.5, datos: { antiguedad: antig, vida_util_estimada: vida(10), informe_vida_util: 'Informe 1' } }).M;
-  assert.equal(cond(ok).estado, 'cumple');
-  assert.ok(!ok.faltan.some(x => /2\.4\.C\.b/.test(x)));
+  const M = mariscalAnios().M;
+  assert.equal(cond(M).estado, 'cumple');
+  assert.ok(!M.faltan.some(x => /2\.4\.C\.b/.test(x)));
+  // El informe de vida útil, si se carga, se cita como respaldo
+  assert.match(cond(mariscalAnios({ datos: { informe_vida_util: 'Informe 1' } }).M).nota, /Informe 1/);
+  assert.match(M.E.sustento.join(' '), /estado malo, que ya/);
 });
 
 test('limpiarAdquisicion: años entre 1950 y el año actual', () => {

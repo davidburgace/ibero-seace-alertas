@@ -1,14 +1,17 @@
 // ============================================================================
 // src/selector-ioarr/calculo.js — Cálculo de reposición de mobiliario (Selector IOARR)
 //
-// Copia fiel del prototipo (docs/selector-ioarr/prototipo.html: prep, calc, totals).
+// Parte del prototipo (docs/selector-ioarr/prototipo.html: prep, calc, totals), con la regla de
+// reposición corregida: solo se repone lo que está en estado Malo.
 // Lo usan el navegador (vía /selector-ioarr/calculo.js, dentro de un Web Worker)
 // y el servidor (exportación a Excel), así la pantalla y el Excel dan lo mismo.
 //
 // Reglas:
 //   Existente = Bueno + Regular + Malo
-//   Faltante  = MAX(0, Requerido − Existente), por aula
-//   A reponer = Malo + Faltante + ROUND(Regular × % de Regular), por aula
+//   A reponer = Malo, por aula. Bueno y Regular solo son diagnóstico.
+//   Faltante  = MAX(0, Requerido − Existente), por aula: brecha de dotación, NO reposición.
+//               Se muestra aparte y no suma a lo que se repone, al costo ni al Formato 07-C
+//               (Lineamientos IOARR 2.4.C: la reposición no puede ampliar la capacidad de la UP).
 //   Requerido: mesa y silla por estudiante; escritorio, silla docente y armario por aula.
 //   Mesa múltiple = kI puestos (Inicial y Especial) o kPS (Primaria y Secundaria);
 //   carpeta bipersonal = carpBip puestos; las carpetas no traen estado (carpEstado).
@@ -29,10 +32,10 @@ export const ITEMS = [
 export const NIVN = { I: 'Inicial', P: 'Primaria', S: 'Secundaria', E: 'Básica Especial' };
 export const NIVS = { I: 'Inicial', P: 'Primaria', S: 'Secundaria', E: 'Especial' };
 export const NIVB = { I: 1, P: 2, S: 4, E: 8 };
-export const DEF = { kI: 4, kPS: 2, carpBip: 2, carpEstado: 'r', regPct: 0, mesaEst: 1, sillaEst: 1, esc: 1, sdoc: 1, arm: 1 };
-// [clave, etiqueta, mín, máx, paso]  (regPct se edita en %, se guarda como fracción)
+export const DEF = { kI: 4, kPS: 2, carpBip: 2, carpEstado: 'r', mesaEst: 1, sillaEst: 1, esc: 1, sdoc: 1, arm: 1 };
+// [clave, etiqueta, mín, máx, paso]
 export const CRIT = [['kI', 'Puestos por mesa múltiple (Inicial y Especial)', 1, 12, 1], ['kPS', 'Puestos por mesa múltiple (Primaria y Secundaria)', 1, 12, 1],
-  ['carpBip', 'Puestos por carpeta bipersonal', 1, 4, 1], ['regPct', '% del estado Regular que se repone', 0, 100, 5],
+  ['carpBip', 'Puestos por carpeta bipersonal', 1, 4, 1],
   ['mesaEst', 'Mesas por estudiante', 0, 2, 0.5], ['sillaEst', 'Sillas por estudiante', 0, 2, 0.5],
   ['esc', 'Escritorios docentes por aula', 0, 3, 1], ['sdoc', 'Sillas docentes por aula', 0, 3, 1], ['arm', 'Armarios o estantes por aula', 0, 5, 1]];
 
@@ -49,14 +52,15 @@ export const urlMapaEmbed = (lat, lon, llave) => llave
 
 export const norm = s =>String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
-// Criterios válidos a partir de lo que venga guardado (ignora claves o valores raros)
+// Criterios válidos a partir de lo que venga guardado (ignora claves o valores raros,
+// como el antiguo «% de Regular que se repone», que ya no existe)
 export function limpiarParams(p) {
   const P = { ...DEF };
   if (p && typeof p === 'object') {
     for (const [k, , mn, mx] of CRIT) {
       const v = Number(p[k]);
       if (!Number.isFinite(v)) continue;
-      P[k] = k === 'regPct' ? Math.min(1, Math.max(0, v)) : Math.min(mx, Math.max(mn, v));
+      P[k] = Math.min(mx, Math.max(mn, v));
     }
     if (['b', 'r', 'm'].includes(p.carpEstado)) P.carpEstado = p.carpEstado;
   }
@@ -87,7 +91,7 @@ export function prep(D) {
 export function calc(D, P) {
   const nA = D.aulas.length, nL = D.locs.length;
   const L = { b: new Float64Array(5 * nL), r: new Float64Array(5 * nL), m: new Float64Array(5 * nL), req: new Float64Array(5 * nL),
-    fal: new Float64Array(5 * nL), rep: new Float64Array(5 * nL), repTot: new Float64Array(nL), reqTot: new Float64Array(nL) };
+    fal: new Float64Array(5 * nL), rep: new Float64Array(5 * nL), repTot: new Float64Array(nL), falTot: new Float64Array(nL), reqTot: new Float64Array(nL) };
   const A = { b: [], r: [], m: [], req: [], fal: [], rep: [] };
   for (const k in A) for (let t = 0; t < 5; t++) A[k].push(new Int32Array(nA));
   for (let i = 0; i < nA; i++) {
@@ -98,10 +102,10 @@ export function calc(D, P) {
     const trip = [[mb, mr, mm], [sb, sr, sm], [f(11), f(12), f(13)], [f(14), f(15), f(16)], [f(17), f(18), f(19)]];
     const req = [Math.round(a[8] * P.mesaEst), Math.round(a[8] * P.sillaEst), P.esc, P.sdoc, P.arm];
     for (let t = 0; t < 5; t++) {
-      const [b, r, m] = trip[t], ex = b + r + m, fal = Math.max(0, req[t] - ex), rep = m + Math.round(r * P.regPct) + fal;
+      const [b, r, m] = trip[t], ex = b + r + m, fal = Math.max(0, req[t] - ex), rep = m;
       A.b[t][i] = b; A.r[t][i] = r; A.m[t][i] = m; A.req[t][i] = req[t]; A.fal[t][i] = fal; A.rep[t][i] = rep;
       const o = t * nL + loc; L.b[o] += b; L.r[o] += r; L.m[o] += m; L.req[o] += req[t]; L.fal[o] += fal; L.rep[o] += rep;
-      L.repTot[loc] += rep; L.reqTot[loc] += req[t];
+      L.repTot[loc] += rep; L.falTot[loc] += fal; L.reqTot[loc] += req[t];
     }
   }
   return { A, L, nL };
@@ -110,9 +114,9 @@ export function calc(D, P) {
 export const lv = (C, m, t, i) => C.L[m][t * C.nL + i];
 
 export function totals(D, C, list) {
-  const T = { n: list.length, est: 0, aul: 0, sec: 0, rep: 0, req: 0, t: ITEMS.map(() => ({ b: 0, r: 0, m: 0, req: 0, fal: 0, rep: 0 })) };
+  const T = { n: list.length, est: 0, aul: 0, sec: 0, rep: 0, fal: 0, req: 0, t: ITEMS.map(() => ({ b: 0, r: 0, m: 0, req: 0, fal: 0, rep: 0 })) };
   for (const i of list) {
-    T.est += D.locEst[i]; T.aul += D.locAul[i].length; T.sec += D.locSec[i]; T.rep += C.L.repTot[i]; T.req += C.L.reqTot[i];
+    T.est += D.locEst[i]; T.aul += D.locAul[i].length; T.sec += D.locSec[i]; T.rep += C.L.repTot[i]; T.fal += C.L.falTot[i]; T.req += C.L.reqTot[i];
     for (let t = 0; t < 5; t++) {
       const o = T.t[t]; o.b += lv(C, 'b', t, i); o.r += lv(C, 'r', t, i); o.m += lv(C, 'm', t, i);
       o.req += lv(C, 'req', t, i); o.fal += lv(C, 'fal', t, i); o.rep += lv(C, 'rep', t, i);

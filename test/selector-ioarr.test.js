@@ -4,13 +4,15 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import ExcelJS from 'exceljs';
 import { prep, calc, totals, filtrar, FILTRO_VACIO, DEF, NIVB, norm, limpiarParams, coordValidas, urlGoogleMaps, urlMapaEmbed } from '../src/selector-ioarr/calculo.js';
-import { generarExcel } from '../src/selector-ioarr/excel.js';
+import { generarExcel, FALTANTE } from '../src/selector-ioarr/excel.js';
 
 const DIR = new URL('../src/public/data/selector-ioarr/2025/', import.meta.url);
 const leer = r => JSON.parse(readFileSync(new URL(r + '.json', DIR), 'utf8'));
 const moquegua = () => prep(leer('moquegua'));
 
-// prep y calc tal cual están en el prototipo, para comparar resultados
+// prep y calc tal cual están en el prototipo, para comparar resultados.
+// El prototipo del repositorio aún suma Faltante y % de Regular en «a reponer»:
+// se compara el diagnóstico (bueno, regular, malo, requerido, faltante), no la reposición.
 function calculoPrototipo() {
   const html = readFileSync(new URL('../docs/selector-ioarr/prototipo.html', import.meta.url), 'utf8');
   const codigo = html.slice(html.indexOf('function prep(D){'), html.indexOf('const lv=(m,t,i)'));
@@ -24,44 +26,71 @@ test('Moquegua: 312 locales, 411 servicios, 1,686 aulas', () => {
   assert.equal(D.aulas.length, 1686);
 });
 
-test('caso de control: Moquegua, «mariscal» → 11 locales, 2,085 estudiantes, 104 aulas, 1,729 bienes', () => {
+test('caso de control: Moquegua, «mariscal» → 11 locales, 2,085 estudiantes, 104 aulas, 198 bienes a reponer', () => {
   const D = moquegua(), C = calc(D, DEF);
   const T = totals(D, C, filtrar(D, C, { ...FILTRO_VACIO(), q: 'mariscal' }));
-  assert.deepEqual([T.n, T.est, T.aul, T.rep], [11, 2085, 104, 1729]);
+  assert.deepEqual([T.n, T.est, T.aul, T.rep], [11, 2085, 104, 198]);
+  // Por tipo: existente, bueno, regular, malo, a reponer, faltante
+  assert.deepEqual(T.t.map(o => [o.b + o.r + o.m, o.b, o.r, o.m, o.rep, o.fal]), [
+    [3217, 675, 2520, 22, 22, 795], [4018, 1034, 2853, 131, 131, 683], [136, 50, 72, 14, 14, 5], [125, 41, 84, 0, 0, 5], [216, 93, 92, 31, 31, 43]]);
+  // El faltante va aparte: 1,531 bienes, que no suman a lo que se repone
+  assert.equal(T.fal, 1531);
+});
+
+test('a reponer = Malo en cada aula: el faltante y el estado Regular no entran', () => {
+  const D = moquegua();
+  for (const P of [DEF, { ...DEF, carpEstado: 'm', mesaEst: 2 }]) {
+    const C = calc(D, P);
+    for (let t = 0; t < 5; t++) assert.deepEqual(C.A.rep[t], C.A.m[t]);
+    for (let i = 0; i < C.nL; i++) {
+      let rep = 0, fal = 0;
+      for (let t = 0; t < 5; t++) { rep += C.L.m[t * C.nL + i]; fal += C.L.fal[t * C.nL + i]; }
+      assert.equal(C.L.repTot[i], rep); assert.equal(C.L.falTot[i], fal);
+    }
+  }
 });
 
 test('el cálculo coincide con el prototipo con varios criterios', () => {
   const fabrica = calculoPrototipo();
-  const casos = [DEF, { ...DEF, regPct: 0.35, carpEstado: 'm' }, { ...DEF, kI: 6, kPS: 3, carpBip: 3, carpEstado: 'b', mesaEst: 1.5, sillaEst: 0.5, esc: 2, sdoc: 0, arm: 3 }];
+  const casos = [DEF, { ...DEF, carpEstado: 'm' }, { ...DEF, kI: 6, kPS: 3, carpBip: 3, carpEstado: 'b', mesaEst: 1.5, sillaEst: 0.5, esc: 2, sdoc: 0, arm: 3 }];
   for (const region of ['moquegua', 'tumbes']) {
     for (const P of casos) {
       const S = { params: P };
       const proto = fabrica(S, norm, NIVB);
       const Dp = leer(region); proto.prep(Dp); S.D = Dp; proto.calc();   // el prototipo lee S.D y S.params, deja S.C
       const D = prep(leer(region)), C = calc(D, P);
-      for (const k of ['b', 'r', 'm', 'req', 'fal', 'rep', 'repTot', 'reqTot']) assert.deepEqual(C.L[k], S.C.L[k], `${region} ${k}`);
+      for (const k of ['b', 'r', 'm', 'req', 'fal', 'reqTot']) assert.deepEqual(C.L[k], S.C.L[k], `${region} ${k}`);
     }
   }
 });
 
 test('limpiarParams descarta valores fuera de rango', () => {
-  const P = limpiarParams({ kI: 99, regPct: 5, carpEstado: 'x', arm: 'abc', esc: 2 });
-  assert.equal(P.kI, 12); assert.equal(P.regPct, 1); assert.equal(P.carpEstado, 'r'); assert.equal(P.arm, 1); assert.equal(P.esc, 2);
+  // regPct: criterio antiguo («% de Regular que se repone»), guardado en proyectos viejos; se ignora
+  const P = limpiarParams({ kI: 99, regPct: 0.5, carpEstado: 'x', arm: 'abc', esc: 2 });
+  assert.equal(P.kI, 12); assert.equal('regPct' in P, false); assert.equal(P.carpEstado, 'r'); assert.equal(P.arm, 1); assert.equal(P.esc, 2);
 });
 
 test('Excel: hojas, fórmulas y totales iguales a la pantalla', async () => {
-  const D = moquegua(), P = { ...DEF, regPct: 0.5 }, C = calc(D, P);
+  const D = moquegua(), P = { ...DEF, regPct: 0.5 }, C = calc(D, limpiarParams(P));
   const list = filtrar(D, C, { ...FILTRO_VACIO(), q: 'mariscal' });
   const T = totals(D, C, list);
   const { buffer } = await generarExcel(D, C, P, list, { proyecto: 'Prueba', fecha: '2026-10-20', ioarr: null });
   const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buffer);
-  assert.deepEqual(wb.worksheets.map(w => w.name), ['Resumen', 'Locales (UP)', 'Servicios', 'Aulas', 'Reposición masiva']);
+  assert.deepEqual(wb.worksheets.map(w => w.name), ['Resumen', 'Locales (UP)', 'Por distrito', 'Servicios', 'Aulas', 'Reposición masiva']);
 
   const res = wb.getWorksheet('Resumen');
   const fila = txt => { let r = null; res.eachRow(row => { if (row.getCell(1).value === txt) r = row; }); return r; };
-  const total = fila('Bienes a reponer (suma de los 5 tipos)').getCell(2).value;
+  const total = fila('Bienes a reponer (estado Malo, suma de los 5 tipos)').getCell(2).value;
   assert.match(total.formula, /^SUM\('Locales \(UP\)'!/);
-  assert.equal(total.result, T.rep);
+  assert.equal(total.result, 198);
+  assert.equal(fila(FALTANTE + ', solo informativo').getCell(2).value.result, 1531);
+  assert.equal(fila('% del estado Regular que se repone'), null);
+  // Mobiliario por tipo: Existente, Bueno, Regular, Malo, A reponer, Requerido, Faltante
+  const cabT = fila('Mobiliario por tipo');
+  assert.deepEqual(cabT.values.slice(1), ['Mobiliario por tipo', 'Unidad', 'Existente', 'Bueno', 'Regular', 'Malo', 'A reponer', 'Requerido', FALTANTE]);
+  const silla = res.getRow(cabT.number + 2);
+  assert.deepEqual([3, 4, 5, 6, 7, 9].map(c => silla.getCell(c).value.result), [4018, 1034, 2853, 131, 131, 683]);
+  assert.equal(silla.getCell(7).value.formula, `F${silla.number}`);
   assert.equal(fila('Locales seleccionados').getCell(2).value.result, 11);
   assert.equal(fila('Estudiantes (padrón)').getCell(2).value.result, T.est);
   assert.equal(fila('Aulas en uso (censo)').getCell(2).value.result, T.aul);
@@ -71,22 +100,30 @@ test('Excel: hojas, fórmulas y totales iguales a la pantalla', async () => {
   const au = wb.getWorksheet('Aulas');
   assert.equal(au.rowCount - 1, T.aul);
   let suma = 0;
-  const pctFila = fila('% del estado Regular que se repone').number;
+  let sumaFal = 0;
   au.eachRow((row, n) => {
     if (n === 1) return;
     for (let t = 0; t < 5; t++) {
       const c = 13 + t * 7, v = k => { const x = row.getCell(c + k).value; return x && typeof x === 'object' ? (x.result ?? 0) : x; }; // exceljs relee <v>0</v> como sin resultado
-      const [b, r, m, ex, req, fal, rep] = [0, 1, 2, 3, 4, 5, 6].map(v);
-      assert.equal(ex, b + r + m); assert.equal(fal, Math.max(0, req - ex)); assert.equal(rep, m + Math.round(r * 0.5) + fal);
-      assert.equal(row.getCell(c + 6).value.formula, `${au.getColumn(c + 2).letter}${n}+ROUND(${au.getColumn(c + 1).letter}${n}*Resumen!$B$${pctFila},0)+${au.getColumn(c + 5).letter}${n}`);
-      suma += rep;
+      const [ex, b, r, m, rep, req, fal] = [0, 1, 2, 3, 4, 5, 6].map(v);
+      assert.equal(ex, b + r + m); assert.equal(rep, m); assert.equal(fal, Math.max(0, req - ex));
+      assert.equal(row.getCell(c + 4).value.formula, `${au.getColumn(c + 3).letter}${n}`);
+      suma += rep; sumaFal += fal;
     }
   });
-  assert.equal(suma, T.rep);
+  assert.equal(suma, T.rep); assert.equal(sumaFal, T.fal);
 
-  // Reposición masiva: misma suma
-  let masiva = 0; wb.getWorksheet('Reposición masiva').eachRow((row, n) => { if (n > 1) masiva += row.getCell(12).value; });
+  // Reposición masiva: misma suma (columna A reponer)
+  const rm = wb.getWorksheet('Reposición masiva');
+  assert.equal(rm.getRow(1).getCell(10).value, 'A reponer');
+  let masiva = 0; rm.eachRow((row, n) => { if (n > 1) masiva += row.getCell(10).value.result; });
   assert.equal(masiva, T.rep);
+
+  // Por distrito: suma igual al total, con el faltante aparte
+  const pd = wb.getWorksheet('Por distrito'), ult = pd.getRow(pd.rowCount);
+  assert.equal(ult.getCell(3).value, 'Total');
+  assert.deepEqual([4, 5, 6, 7, 8].map(c => ult.getCell(c).value.result), [11, 2085, 104, 198, 1531]);
+  assert.match(pd.getRow(2).getCell(7).value.formula, /^SUMIF\('Locales \(UP\)'!/);
   assert.equal(wb.getWorksheet('Locales (UP)').rowCount - 1, 11);
 
   // Locales (UP): latitud y longitud numéricas, enlace satelital a Google Maps
