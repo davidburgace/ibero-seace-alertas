@@ -22,11 +22,16 @@
 //     DELETE /proyectos/:id/costos/precios/:tipo  vuelve a usar el vigente del catálogo
 //     GET    /proyectos/:id/costos/inventario/:cod  censo del local + inventario verificado en campo
 //     PUT    /proyectos/:id/costos/inventario/:cod  { bienes, fecha_visita, responsable?, observacion }  (migración 013)
-//     DELETE /proyectos/:id/costos/inventario/:cod  vuelve a usar el censo
+//     DELETE /proyectos/:id/costos/inventario/:cod  vuelve a usar el censo (borra también sus archivos)
+//     POST   /proyectos/:id/costos/inventario/:cod/archivos  multipart: archivo, tipo, descripcion  (migración 014)
+//     GET    /proyectos/:id/costos/archivos/:archId/url      URL firmada de 10 minutos
+//     DELETE /proyectos/:id/costos/archivos/:archId
 //     GET    /proyectos/:id/costos/excel
 // ============================================================================
 
 import express from 'express';
+import multer from 'multer';
+import { BUCKET_EXPEDIENTE, MAX_ARCHIVO, MAX_POR_LOCAL, TIPOS_ARCHIVO, mimeDe, nombreUtf8, nombreSeguro } from './archivos.js';
 import { supabase } from '../ioarr/db.js';
 import { calc, limpiarParams, CRIT } from './calculo.js';
 import { costear, limpiarRubros, limpiarInventario, censoLocal, TIPOS, FUENTES_PRECIO } from './costos.js';
@@ -35,6 +40,32 @@ import { generarExcelCostos } from './excel-costos.js';
 const AVISO = 'Falta ejecutar supabase/migrations/012_ioarr_expediente_costos.sql en Supabase';
 const faltaMigracion = e => e?.code === 'PGRST204' || e?.code === 'PGRST205' || e?.code === '42P01' || /schema cache|does not exist/i.test(e?.message || '');
 const AVISO_INV = 'Falta ejecutar supabase/migrations/013_ioarr_expediente_inventario.sql en Supabase';
+const AVISO_ARCH = 'Falta ejecutar supabase/migrations/014_ioarr_expediente_archivos.sql en Supabase';
+const URL_FIRMADA_SEG = 600;
+const subida = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_ARCHIVO, files: 1 } });
+const COLS_ARCH = 'id, cod_local, tipo, nombre_archivo, mime, tamano, descripcion, creado_en';
+
+// Archivos de sustento de un proyecto (o de un local). Sin la migración 014, lista vacía.
+async function leerArchivos(proyectoId, cod) {
+  let q = supabase.from('ioarr_expediente_archivos').select(COLS_ARCH + ', ruta').eq('proyecto_id', proyectoId).order('creado_en');
+  if (cod) q = q.eq('cod_local', cod);
+  const { data, error } = await q;
+  if (error) { if (faltaMigracion(error)) return []; throw error; }
+  return data;
+}
+async function borrarDelBucket(rutas) {
+  for (let i = 0; i < rutas.length; i += 100) {
+    const { error } = await supabase.storage.from(BUCKET_EXPEDIENTE).remove(rutas.slice(i, i + 100));
+    if (error) console.error('[EXPEDIENTE] No se pudieron borrar archivos del bucket:', error.message);
+  }
+}
+// Antes de borrar un proyecto: las filas se borran en cascada, los archivos del bucket no
+export async function borrarArchivosProyecto(proyectoId) {
+  const archivos = await leerArchivos(proyectoId);
+  if (archivos.length) await borrarDelBucket(archivos.map(a => a.ruta));
+}
+const sinRuta = ({ ruta, ...a }) => a;
+
 const esUuid = s => /^[0-9a-f-]{36}$/i.test(String(s || ''));
 const texto = (v, max = 300) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 const fechaValida = s => /^\d{4}-\d{2}-\d{2}$/.test(String(s || '')) && !isNaN(Date.parse(s));
@@ -191,14 +222,15 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
 
   // Junta todo y calcula. Devuelve también lo necesario para el Excel.
   async function armar(p) {
-    const [fila, fijados, vigentes, factores, D, codigos, inventario] = await Promise.all([
+    const [fila, fijados, vigentes, factores, D, codigos, inventario, archivos] = await Promise.all([
       supabase.from('ioarr_expediente_costos').select('*').eq('proyecto_id', p.id).maybeSingle().then(ok),
       supabase.from('ioarr_expediente_precios').select('*').eq('proyecto_id', p.id).then(ok),
       supabase.from('ioarr_precios_catalogo').select('*').eq('vigente', true).then(ok),
       supabase.from('ioarr_factores_zona').select('*').then(ok),
       cargarRegion(p.region),
       leerCodigos(p.id),
-      leerInventario(p)
+      leerInventario(p),
+      leerArchivos(p.id)
     ]);
     if (!D) { const e = new Error('No hay datos para la región ' + p.region); e.status = 400; throw e; }
     const anioUit = fila?.anio_uit || anioLima();
@@ -224,17 +256,21 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     D.locs.forEach((l, i) => { if (cod.has(l[0])) list.push(i); });
     const P = limpiarParams(p.criterios);
     const C = calc(D, P);
-    const inv = Object.fromEntries(inventario.map(x => [x.cod_local, x]));
+    const inv = Object.fromEntries(inventario.map(x => [x.cod_local, { ...x, archivos: archivos.filter(a => a.cod_local === x.cod_local).map(sinRuta) }]));
     const R = costear({ D, C, list, precios, rubros: fila?.rubros, factores, uit: { anio: anioUit, valor: uit?.valor ?? null }, inventario: inv, regPct: P.regPct });
+    // Sustento: cada local corregido debería tener al menos el acta de la visita
+    const sinActa = R.locales.filter(l => l.verificado && !inv[l.cod].archivos.some(a => a.tipo === 'acta')).map(l => l.cod);
+    if (sinActa.length) R.avisos.push({ tipo: 'sustento', texto: `Falta adjuntar el acta de verificación de: ${sinActa.join(', ')}. Súbela en «Corregir inventario» del local, con las fotos y el inventario patrimonial.` });
     return { R, P, detalle, anioUit, uit, D, C, list, inv };
   }
 
-  const vista = ({ R, detalle, anioUit, uit }) => ({
+  const vista = ({ R, detalle, anioUit, uit, inv }) => ({
     anio_uit: anioUit, uit: uit || null, precios: detalle,
     rubros: R.rubros, partidas: R.partidas, totales: R.totales, distritos: R.distritos, uitCalc: R.uit, avisos: R.avisos,
     locales: R.locales.map(l => ({ cod: l.cod, nom: l.nom, dist: l.dist, prov: l.prov, rural: l.rural, est: l.est, zona: l.zona,
       rep: l.rep.reduce((a, b) => a + b, 0), fal: l.fal.reduce((a, b) => a + b, 0), cd: l.cd, total: l.total,
-      verificado: l.verificado ? { tipos: l.verificado.tipos, fecha_visita: l.verificado.fecha_visita } : null }))
+      verificado: l.verificado ? { tipos: l.verificado.tipos, fecha_visita: l.verificado.fecha_visita } : null,
+      archivos: inv?.[l.cod]?.archivos.length || 0 }))
   });
 
   api.get('/proyectos/:id/costos', responder(async (req, res) => {
@@ -289,7 +325,8 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     const C = calc(D, limpiarParams(p.criterios));
     const { data, error } = await supabase.from('ioarr_expediente_inventario').select('*').eq('proyecto_id', p.id).eq('cod_local', cod).maybeSingle();
     if (error && !faltaMigracion(error)) throw error;
-    res.json({ cod, nom: D.locName[i], censo: censoLocal(C, i), verificado: data || null, sin_migracion: !!error });
+    const archivos = data ? (await leerArchivos(p.id, cod)).map(sinRuta) : [];
+    res.json({ cod, nom: D.locName[i], censo: censoLocal(C, i), verificado: data || null, archivos, sin_migracion: !!error });
   }));
 
   api.put('/proyectos/:id/costos/inventario/:cod', responder(async (req, res) => {
@@ -311,10 +348,72 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
   }));
 
   api.delete('/proyectos/:id/costos/inventario/:cod', responder(async (req, res) => {
-    const p = await proyecto(req);
-    const { error } = await supabase.from('ioarr_expediente_inventario').delete().eq('proyecto_id', p.id).eq('cod_local', String(req.params.cod));
+    const p = await proyecto(req), cod = String(req.params.cod);
+    const archivos = await leerArchivos(p.id, cod);
+    if (archivos.length) await borrarDelBucket(archivos.map(a => a.ruta));
+    const { error } = await supabase.from('ioarr_expediente_inventario').delete().eq('proyecto_id', p.id).eq('cod_local', cod);
     if (error && !faltaMigracion(error)) throw error;
     res.json(vista(await armar(p)));
+  }));
+
+  // ─── Archivos de sustento ─────────────────────────────────────────────────
+  const recibir = (req, res, next) => subida.single('archivo')(req, res, err => {
+    if (!err) return next();
+    const msg = err.code === 'LIMIT_FILE_SIZE' ? `El archivo pasa de ${MAX_ARCHIVO / 1024 / 1024} MB` : 'No se pudo recibir el archivo: ' + err.message;
+    res.status(400).json({ error: msg });
+  });
+
+  api.post('/proyectos/:id/costos/inventario/:cod/archivos', recibir, responder(async (req, res) => {
+    const p = await proyecto(req), cod = String(req.params.cod), a = req.file;
+    if (!a) return res.status(400).json({ error: 'Elige un archivo' });
+    const tipo = String(req.body?.tipo || '');
+    if (!TIPOS_ARCHIVO[tipo]) return res.status(400).json({ error: 'Tipo de archivo no válido' });
+    const mime = mimeDe(a.buffer);
+    if (!mime) return res.status(400).json({ error: 'Solo se aceptan PDF o fotos (JPG, PNG, WEBP o HEIC)' });
+    const { data: inv, error: eInv } = await supabase.from('ioarr_expediente_inventario').select('cod_local').eq('proyecto_id', p.id).eq('cod_local', cod).maybeSingle();
+    if (eInv) { if (faltaMigracion(eInv)) return res.status(503).json({ error: AVISO_INV }); throw eInv; }
+    if (!inv) return res.status(409).json({ error: 'Guarda primero el inventario verificado de este local' });
+    const { count, error: eCnt } = await supabase.from('ioarr_expediente_archivos').select('id', { count: 'exact', head: true }).eq('proyecto_id', p.id).eq('cod_local', cod);
+    if (eCnt) { if (faltaMigracion(eCnt)) return res.status(503).json({ error: AVISO_ARCH }); throw eCnt; }
+    if (count >= MAX_POR_LOCAL) return res.status(400).json({ error: `Máximo ${MAX_POR_LOCAL} archivos por local` });
+
+    const nombre = nombreUtf8(a.originalname || 'archivo').slice(-200);
+    const ruta = `${p.id}/${nombreSeguro(cod)}/${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${nombreSeguro(nombre)}`;
+    const { error: eUp } = await supabase.storage.from(BUCKET_EXPEDIENTE).upload(ruta, a.buffer, { contentType: mime });
+    if (eUp) return res.status(/bucket not found/i.test(eUp.message) ? 503 : 500).json({ error: /bucket not found/i.test(eUp.message) ? AVISO_ARCH : 'No se pudo guardar el archivo: ' + eUp.message });
+    const { data, error } = await supabase.from('ioarr_expediente_archivos').insert({
+      proyecto_id: p.id, cod_local: cod, tipo, nombre_archivo: nombre, ruta, mime, tamano: a.size,
+      descripcion: texto(req.body?.descripcion, 300) || null, subido_por: req.usuario.id
+    }).select(COLS_ARCH).single();
+    if (error) {
+      await borrarDelBucket([ruta]);
+      if (faltaMigracion(error)) return res.status(503).json({ error: AVISO_ARCH });
+      throw error;
+    }
+    res.status(201).json(data);
+  }));
+
+  async function archivoDelProyecto(req) {
+    const p = await proyecto(req);
+    if (!esUuid(req.params.archId)) { const e = new Error('Archivo no encontrado'); e.status = 404; throw e; }
+    const { data, error } = await supabase.from('ioarr_expediente_archivos').select('*').eq('id', req.params.archId).eq('proyecto_id', p.id).maybeSingle();
+    if (error) throw error;
+    if (!data) { const e = new Error('Archivo no encontrado'); e.status = 404; throw e; }
+    return data;
+  }
+
+  api.get('/proyectos/:id/costos/archivos/:archId/url', responder(async (req, res) => {
+    const a = await archivoDelProyecto(req);
+    const { data, error } = await supabase.storage.from(BUCKET_EXPEDIENTE).createSignedUrl(a.ruta, URL_FIRMADA_SEG, req.query.descargar ? { download: a.nombre_archivo } : undefined);
+    if (error) throw error;
+    res.json({ url: data.signedUrl, expira_en_seg: URL_FIRMADA_SEG });
+  }));
+
+  api.delete('/proyectos/:id/costos/archivos/:archId', responder(async (req, res) => {
+    const a = await archivoDelProyecto(req);
+    ok(await supabase.from('ioarr_expediente_archivos').delete().eq('id', a.id));
+    await borrarDelBucket([a.ruta]);
+    res.json({ ok: true });
   }));
 
   api.get('/proyectos/:id/costos/excel', responder(async (req, res) => {

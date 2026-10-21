@@ -16,7 +16,7 @@
 
 import ExcelJS from 'exceljs';
 import { ITEMS } from './calculo.js';
-import { RUBROS, BASES, FUENTES_PRECIO, LIMITE_UIT } from './costos.js';
+import { RUBROS, BASES, FUENTES_PRECIO, LIMITE_UIT, TIPOS_ARCHIVO } from './costos.js';
 
 const AZUL = 'FF3A63E0', AMARILLO = 'FFFFF3B0', GRIS = 'FFF1F3F7';
 const SOLES = '"S/ "#,##0.00', ENTERO = '#,##0', PCT = '0.00%';
@@ -299,23 +299,27 @@ export async function generarExcelCostos(R, meta) {
   // ── Inventario verificado en campo ──────────────────────────────────────────
   if (wsI) {
     const ws = wsI;
-    ws.columns = [12, 36, 22, 9, 9, 9, 9, 9, 9, 11, 12, 11, 12, 22, 50].map(width => ({ width }));
+    ws.columns = [12, 36, 22, 9, 9, 9, 9, 9, 9, 11, 12, 11, 12, 22, 50, 50].map(width => ({ width }));
     ws.getCell('A1').value = 'Inventario verificado en campo'; ws.getCell('A1').font = { bold: true, size: 14 };
     ws.getCell('A2').value = 'Reemplaza lo que reporta el Censo Educativo en estos locales y tipos de bien. Reposición = Malo + % de Regular; faltante = Requerido − Existente, por local.';
     ws.getCell('A2').font = { italic: true, color: { argb: 'FF5C6270' } };
     ws.getRow(3).values = ['Código de local', 'Instituciones', 'Tipo de bien', 'Censo: bueno', 'Censo: regular', 'Censo: malo',
-      'Campo: bueno', 'Campo: regular', 'Campo: malo', 'Requerido', 'Reposición', 'Faltante', 'Fecha de visita', 'Responsable', 'Sustento'];
-    cabecera(ws, 3, 15);
+      'Campo: bueno', 'Campo: regular', 'Campo: malo', 'Requerido', 'Reposición', 'Faltante', 'Fecha de visita', 'Responsable', 'Sustento', 'Archivos adjuntos'];
+    cabecera(ws, 3, 16);
     let r = 4;
     for (const l of verificados) {
       const inv = meta.inventario?.[l.cod] || {};
+      const arch = inv.archivos || [];
+      const resumen = arch.length ? Object.entries(TIPOS_ARCHIVO).map(([k, n]) => [n, arch.filter(a => a.tipo === k)]).filter(([, xs]) => xs.length)
+        .map(([n, xs]) => `${n} (${xs.length}): ${xs.map(a => a.nombre_archivo).join(', ')}`).join(' · ') : 'PENDIENTE: sin archivos adjuntos';
       for (const k of l.verificado.tipos) {
         const t = ITEMS.findIndex(x => x.k === k), c = inv.censo?.[k] || {}, v = inv.bienes?.[k] || {};
         ws.getRow(r).values = [l.cod, l.nom, ITEMS[t].n, c.b ?? '', c.r ?? '', c.m ?? '', v.b, v.r, v.m, c.req ?? '',
-          l.rep[t], l.fal[t], fechaPe(l.verificado.fecha_visita), l.verificado.responsable || '', l.verificado.observacion];
+          l.rep[t], l.fal[t], fechaPe(l.verificado.fecha_visita), l.verificado.responsable || '', l.verificado.observacion, resumen];
         for (let k2 = 4; k2 <= 12; k2++) ws.getCell(r, k2).numFmt = ENTERO;
         for (const k2 of [7, 8, 9]) resaltar(ws.getCell(r, k2), GRIS);
-        ws.getCell(r, 15).alignment = { wrapText: true, vertical: 'top' };
+        for (const k2 of [15, 16]) ws.getCell(r, k2).alignment = { wrapText: true, vertical: 'top' };
+        if (!arch.some(a => a.tipo === 'acta')) resaltar(ws.getCell(r, 16), AMARILLO);
         r++;
       }
     }

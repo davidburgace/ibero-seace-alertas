@@ -220,3 +220,37 @@ test('Excel de costos: hoja «Inventario verificado» y columna Inventario', asy
   const col = wm.getRow(1).values.indexOf('Inventario');
   assert.equal(wm.getRow(2).getCell(col).value, 'Verificado en campo 20/10/2026');
 });
+
+test('sustento: el tipo real del archivo se reconoce por su contenido', async () => {
+  const { mimeDe, nombreSeguro } = await import('../src/selector-ioarr/archivos.js');
+  const b = (...x) => Buffer.concat([Buffer.from(x), Buffer.alloc(12)]);
+  assert.equal(mimeDe(Buffer.from('%PDF-1.7\n%âãÏÓ\n')), 'application/pdf');
+  assert.equal(mimeDe(b(0xff, 0xd8, 0xff, 0xe0)), 'image/jpeg');
+  assert.equal(mimeDe(b(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a)), 'image/png');
+  assert.equal(mimeDe(Buffer.from('RIFF\0\0\0\0WEBPVP8 ')), 'image/webp');
+  assert.equal(mimeDe(Buffer.from('\0\0\0\x18ftypheic\0\0')), 'image/heic');
+  assert.equal(mimeDe(Buffer.from('\0\0\0\x18ftypmif1\0\0')), 'image/heif');
+  assert.equal(mimeDe(Buffer.from('MZ ejecutable disfrazado.pdf')), null);
+  assert.equal(mimeDe(Buffer.from('<html><script>')), null);
+  assert.equal(nombreSeguro('Acta de visita – 11124 Ñaña.pdf'), 'Acta_de_visita_11124_Nana.pdf');
+  assert.equal(nombreSeguro('../../etc/passwd'), '.._.._etc_passwd');
+});
+
+test('Excel: la hoja «Inventario verificado» lista los archivos y marca si falta el acta', async () => {
+  const D = prep(JSON.parse(readFileSync(new URL('lambayeque.json', DIR), 'utf8'))), C = calc(D, DEF);
+  const i = D.locs.findIndex(l => l[0] === '276008');
+  const base = { cod_local: '276008', bienes: { mesa: { b: 0, r: 0, m: 569 } }, censo: censoLocal(C, i), fecha_visita: '2026-10-20', observacion: 'Visita' };
+  const leer = async archivos => {
+    const fila = { ...base, archivos };
+    const R = costear({ D, C, list: [i], precios: PRECIOS, rubros: RUB, factores: [], uit: { anio: 2026, valor: 1000 }, inventario: { '276008': fila } });
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(await generarExcelCostos(R, { proyecto: 'P', region: 'Lambayeque', fecha: '2026-10-21', criterios: '', precios: {}, inventario: { '276008': fila } }));
+    return wb.getWorksheet('Inventario verificado').getCell(4, 16);
+  };
+  const sin = await leer([]);
+  assert.match(sin.value, /PENDIENTE/);
+  assert.equal(sin.fill?.fgColor?.argb, 'FFFFF3B0');
+  const con = await leer([{ tipo: 'acta', nombre_archivo: 'acta.pdf' }, { tipo: 'foto', nombre_archivo: 'a.jpg' }, { tipo: 'foto', nombre_archivo: 'b.jpg' }]);
+  assert.equal(con.value, 'Acta de verificación (1): acta.pdf · Foto (2): a.jpg, b.jpg');
+  assert.notEqual(con.fill?.fgColor?.argb, 'FFFFF3B0');
+});
