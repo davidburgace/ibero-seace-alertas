@@ -1,3 +1,5 @@
+<!doctype html>
+<html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body>
 <title>Selector de Colegios IOARR</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -207,9 +209,9 @@ const ITEMS=[
 const NIVN={I:'Inicial',P:'Primaria',S:'Secundaria',E:'Básica Especial'};
 const NIVS={I:'Inicial',P:'Primaria',S:'Secundaria',E:'Especial'};
 const NIVB={I:1,P:2,S:4,E:8};
-const DEF={kI:4,kPS:2,carpBip:2,carpEstado:'r',regPct:0,mesaEst:1,sillaEst:1,esc:1,sdoc:1,arm:1};
+const DEF={kI:4,kPS:2,carpBip:2,carpEstado:'r',mesaEst:1,sillaEst:1,esc:1,sdoc:1,arm:1};
 const PAGE=40;
-const S={idx:null,D:null,C:null,params:Object.assign({},DEF),sel:new Set(),view:[],page:0,open:new Set(),
+const S={idx:null,D:null,C:null,params:Object.assign({},DEF),sel:new Set(),view:[],page:0,open:new Set(),maps:new Set(),
   sort:{key:'rep',dir:-1},tab:'elegir',
   f:{q:'',prov:-1,dist:-1,ugel:-1,area:-1,ges:-1,niv:0,rep:0,est:0,censo:false}};
 
@@ -245,7 +247,7 @@ async function loadRegion(i){
   const saved=store('ioarr:sel:'+g.nombre)||[];
   const codes=new Set(S.D.locs.map(l=>l[0]));
   S.sel=new Set(saved.filter(c=>codes.has(c)));
-  S.open.clear();S.page=0;
+  S.open.clear();S.maps.clear();S.page=0;
   S.f={q:'',prov:-1,dist:-1,ugel:-1,area:-1,ges:-1,niv:0,rep:0,est:0,censo:false};
   fillFilters();calc();refresh();
   $('foot').innerHTML='Fuentes: Padrón de ESCALE–Minedu (registros al 29/10/2025) y Censo Educativo 2025, Local escolar, pregunta 6.1. Son datos declarados por cada colegio y no están validados. Incluye servicios públicos escolarizados de Inicial, Primaria, Secundaria y Básica Especial. No hay datos de antigüedad ni de costos.';
@@ -281,7 +283,7 @@ function calc(){
     const trip=[[mb,mr,mm],[sb,sr,sm],[f(11),f(12),f(13)],[f(14),f(15),f(16)],[f(17),f(18),f(19)]];
     const req=[Math.round(a[8]*P.mesaEst),Math.round(a[8]*P.sillaEst),P.esc,P.sdoc,P.arm];
     for(let t=0;t<5;t++){
-      const [b,r,m]=trip[t],ex=b+r+m,fal=Math.max(0,req[t]-ex),rep=m+Math.round(r*P.regPct)+fal;
+      const [b,r,m]=trip[t],ex=b+r+m,fal=Math.max(0,req[t]-ex),rep=m;
       A.b[t][i]=b;A.r[t][i]=r;A.m[t][i]=m;A.req[t][i]=req[t];A.fal[t][i]=fal;A.rep[t][i]=rep;
       const o=t*nL+loc;L.b[o]+=b;L.r[o]+=r;L.m[o]+=m;L.req[o]+=req[t];L.fal[o]+=fal;L.rep[o]+=rep;
       L.repTot[loc]+=rep;L.reqTot[loc]+=req[t];
@@ -340,16 +342,27 @@ function renderHead(){
     const sorted=S.sort.key===k?(S.sort.dir>0?'ascending':'descending'):'none';
     return `<th class="s ${n?'num':''}" data-k="${k}" aria-sort="${sorted}" tabindex="0" role="columnheader">${t}</th>`}).join('');
 }
+function mapHTML(i){
+  const l=S.D.locs[i],lat=l[6],lon=l[7];
+  if(typeof lat!=='number'||typeof lon!=='number'||lat>0||lat<-19||lon>-68||lon<-82)return '<div><h4>Ubicación</h4><p class="muted" style="margin:0">Este local no tiene coordenadas válidas en el padrón.</p></div>';
+  const on=S.maps.has(i);
+  return `<div><h4>Ubicación</h4><div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px">
+    <button class="btn sm" type="button" data-map="${i}">${on?'Ocultar vista satelital':'Ver vista satelital'}</button>
+    <a class="btn sm" style="display:inline-flex;align-items:center;text-decoration:none" href="https://www.google.com/maps?q=${lat},${lon}&t=k&z=18" target="_blank" rel="noopener">Abrir en Google Maps</a>
+    <span class="muted mono">${lat.toFixed(5)}, ${lon.toFixed(5)}</span></div>
+    ${on?`<iframe title="Vista satelital del local ${l[0]}" loading="lazy" referrerpolicy="no-referrer-when-downgrade" allowfullscreen src="https://maps.google.com/maps?q=${lat},${lon}&t=k&z=18&output=embed" style="display:block;width:100%;height:340px;border:1px solid var(--line);border-radius:6px;background:var(--surface)"></iframe><p class="note" style="margin:6px 0 0">Las coordenadas son las declaradas en el padrón y pueden tener error. Si el mapa no se muestra aquí, usa «Abrir en Google Maps».</p>`:''}</div>`;
+}
 function detailHTML(i){
   const D=S.D,A=S.C.A;
   const sv=D.locSvc[i].map(si=>{const s=D.svcs[si];
     return `<tr><td class="mono">${esc(s[0])}</td><td>${NIVN[s[2]]}</td><td>${esc(s[1])}</td><td>${s[4]?'Convenio':'Directa'}</td><td class="num">${fmt(s[6])}</td><td class="num">${fmt(s[5])}</td><td class="num">${fmt(D.svcAulN[si])}</td><td>${esc(s[7])}</td></tr>`}).join('');
-  const au=D.locAul[i].map(ai=>{const a=D.aulas[ai],cell=t=>`${A.b[t][ai]+A.r[t][ai]+A.m[t][ai]} / <b>${A.rep[t][ai]}</b>`;
+  const au=D.locAul[i].map(ai=>{const a=D.aulas[ai],cell=t=>`${A.b[t][ai]} · ${A.r[t][ai]} · <b>${A.m[t][ai]}</b>`;
     return `<tr><td>${esc(a[4])}</td><td>${esc(a[2])} · piso ${a[3]}</td><td>${esc(a[5])}${a[6]?' '+esc(a[6]):''}</td><td>${esc(a[7])}${a[9]?' (compartida)':''}</td><td class="num">${a[8]}</td>`+
       [0,1,2,3,4].map(t=>`<td class="num">${cell(t)}</td>`).join('')+'</tr>'}).join('');
   return `<div class="detail">
+    ${mapHTML(i)}
     <div><h4>Servicios educativos del local</h4><div class="tscroll"><table><thead><tr><th>Cód. modular</th><th>Nivel</th><th>Institución</th><th>Gestión</th><th class="num">Estudiantes</th><th class="num">Secciones</th><th class="num">Aulas (censo)</th><th>Turno</th></tr></thead><tbody>${sv}</tbody></table></div></div>
-    <div><h4>Aulas en uso (existente / <b>a reponer</b>)</h4>${au?`<div class="tscroll"><table><thead><tr><th>Aula</th><th>Ubicación</th><th>Grado y sección</th><th>Turno</th><th class="num">Estud.</th>${ITEMS.map(x=>`<th class="num">${x.n}</th>`).join('')}</tr></thead><tbody>${au}</tbody></table></div>`:'<p class="muted">El censo no registra aulas en uso para este local.</p>'}</div>
+    <div><h4>Aulas en uso (Bueno · Regular · <b>Malo</b>)</h4>${au?`<div class="tscroll"><table><thead><tr><th>Aula</th><th>Ubicación</th><th>Grado y sección</th><th>Turno</th><th class="num">Estud.</th>${ITEMS.map(x=>`<th class="num">${x.n}</th>`).join('')}</tr></thead><tbody>${au}</tbody></table></div>`:'<p class="muted">El censo no registra aulas en uso para este local.</p>'}</div>
   </div>`;
 }
 function renderTable(){
@@ -398,7 +411,7 @@ function renderSel(){
   const byD=new Map();for(const i of list){const d=D.locs[i][1];if(!byD.has(d))byD.set(d,[]);byD.get(d).push(i)}
   const drows=[...byD.entries()].map(([d,ls])=>({d,n:ls.length,t:totals(ls)})).sort((a,b)=>b.t.rep-a.t.rep).map(r=>
     `<tr><td>${esc(D.dists[r.d][0])}</td><td class="num">${r.n}</td><td class="num">${fmt(r.t.est)}</td><td class="num">${fmt(r.t.aul)}</td><td class="num"><b>${fmt(r.t.rep)}</b></td></tr>`).join('');
-  const trows=ITEMS.map((x,t)=>{const o=T.t[t];return `<tr><td>${x.n}<br><span class="muted">${x.u}</span></td><td class="num">${fmt(o.req)}</td><td class="num">${fmt(o.b+o.r+o.m)}</td><td>${stackBar(o)}</td><td class="num">${fmt(o.fal)}</td><td class="num"><b>${fmt(o.rep)}</b></td></tr>`}).join('');
+  const trows=ITEMS.map((x,t)=>{const o=T.t[t];return `<tr><td>${x.n}<br><span class="muted">${x.u}</span></td><td class="num">${fmt(o.b+o.r+o.m)}</td><td class="num" style="color:var(--good)">${fmt(o.b)}</td><td class="num" style="color:var(--warn)">${fmt(o.r)}</td><td class="num" style="color:var(--bad)">${fmt(o.m)}</td><td class="num"><b>${fmt(o.rep)}</b></td><td class="num muted">${fmt(o.req)}</td><td class="num muted">${fmt(o.fal)}</td></tr>`}).join('');
   const lrows=list.slice().sort((a,b)=>S.C.L.repTot[b]-S.C.L.repTot[a]).map(i=>{const l=D.locs[i];
     return `<tr><td class="mono">${l[0]}</td><td><span class="nm">${esc(D.locName[i])}</span></td><td>${esc(D.dists[l[1]][0])}</td><td class="num">${fmt(D.locEst[i])}</td><td class="num">${fmt(S.C.L.repTot[i])}</td><td><button class="x" data-rm="${l[0]}" aria-label="Quitar el local ${l[0]}">Quitar</button></td></tr>`}).join('');
   el.innerHTML=`
@@ -406,7 +419,7 @@ function renderSel(){
      <div class="panel kpi"><div class="v">${fmt(T.n)}</div><div class="l">locales seleccionados</div></div>
      <div class="panel kpi"><div class="v">${fmt(T.est)}</div><div class="l">estudiantes (padrón)</div></div>
      <div class="panel kpi"><div class="v">${fmt(T.aul)}</div><div class="l">aulas en uso (censo)</div></div>
-     <div class="panel kpi"><div class="v">${fmt(T.rep)}</div><div class="l">bienes a reponer (suma de los 5 tipos)</div></div>
+     <div class="panel kpi"><div class="v">${fmt(T.rep)}</div><div class="l">bienes a reponer (Malo, suma de los 5 tipos)</div></div>
    </div>
    <div class="panel pad" style="display:flex;flex-wrap:wrap;gap:12px 20px;align-items:center;justify-content:space-between">
      <div><h3 style="font-size:16px">Exportar para el estudio</h3><p class="note" style="margin:4px 0 0">Un libro de Excel con el resumen, los locales (unidades productoras) con ubigeo y coordenadas, los servicios, las aulas con mobiliario por estado y el listado de bienes a reponer.</p></div>
@@ -414,8 +427,8 @@ function renderSel(){
    </div>
    <div class="cols">
      <div class="panel"><div class="pad"><h3 style="font-size:16px;margin-bottom:8px">Mobiliario por tipo</h3>
-       <div class="legend" style="margin-bottom:8px"><span style="--c:var(--good)">Bueno</span><span style="--c:var(--warn)">Regular</span><span style="--c:var(--bad)">Malo</span></div></div>
-       <div class="tscroll"><table><thead><tr><th>Tipo</th><th class="num">Requerido</th><th class="num">Existente</th><th>Estado</th><th class="num">Faltante</th><th class="num">A reponer</th></tr></thead><tbody>${trows}</tbody></table></div></div>
+       <p class="note" style="margin:0">La propuesta repone solo lo Malo. Bueno, Regular y el faltante (brecha de dotación, no reposición) se muestran como información.</p></div>
+       <div class="tscroll"><table><thead><tr><th>Tipo</th><th class="num">Existente</th><th class="num">Bueno</th><th class="num">Regular</th><th class="num">Malo</th><th class="num">A reponer</th><th class="num">Requerido</th><th class="num">Faltante (aparte)</th></tr></thead><tbody>${trows}</tbody></table></div></div>
      <div class="panel"><div class="pad"><h3 style="font-size:16px">Por distrito</h3></div>
        <div class="tscroll"><table><thead><tr><th>Distrito</th><th class="num">Locales</th><th class="num">Estudiantes</th><th class="num">Aulas</th><th class="num">A reponer</th></tr></thead><tbody>${drows}</tbody></table></div></div>
    </div>
@@ -440,22 +453,22 @@ function refresh(){applyFilter();renderHead();renderTable();renderCount();render
 
 /* ---------- criterios ---------- */
 const CRIT=[['kI','Puestos por mesa múltiple (Inicial y Especial)',1,12,1],['kPS','Puestos por mesa múltiple (Primaria y Secundaria)',1,12,1],
-  ['carpBip','Puestos por carpeta bipersonal',1,4,1],['regPct','% del estado Regular que se repone',0,100,5],
+  ['carpBip','Puestos por carpeta bipersonal',1,4,1],
   ['mesaEst','Mesas por estudiante',0,2,.5],['sillaEst','Sillas por estudiante',0,2,.5],
   ['esc','Escritorios docentes por aula',0,3,1],['sdoc','Sillas docentes por aula',0,3,1],['arm','Armarios o estantes por aula',0,5,1]];
 function renderCrit(){
   const P=S.params;
-  $('critGrid').innerHTML=CRIT.map(([k,l,mn,mx,st])=>`<div class="fld"><label for="c_${k}">${l}</label><input class="in" id="c_${k}" type="number" min="${mn}" max="${mx}" step="${st}" value="${k==='regPct'?P[k]*100:P[k]}"></div>`).join('')+
+  $('critGrid').innerHTML=CRIT.map(([k,l,mn,mx,st])=>`<div class="fld"><label for="c_${k}">${l}</label><input class="in" id="c_${k}" type="number" min="${mn}" max="${mx}" step="${st}" value="${P[k]}"></div>`).join('')+
    `<div class="fld"><label for="c_carpEstado">Estado asignado a las carpetas (vienen sin estado)</label><select class="in" id="c_carpEstado"><option value="b">Bueno</option><option value="r">Regular</option><option value="m">Malo</option></select></div>
     <div class="fld"><span class="lbl">&nbsp;</span><button class="btn" id="critReset" type="button">Restablecer criterios</button></div>`;
   $('c_carpEstado').value=P.carpEstado;
   critSum();
 }
-function critSum(){const P=S.params;$('critSum').textContent=`Mesa múltiple = ${P.kI} puestos (Inicial) o ${P.kPS} (Primaria y Secundaria) · carpeta bipersonal = ${P.carpBip} · a reponer = Malo + Faltante${P.regPct?` + ${Math.round(P.regPct*100)}% de Regular`:''}`}
+function critSum(){const P=S.params;$('critSum').textContent=`Mesa múltiple = ${P.kI} puestos (Inicial) o ${P.kPS} (Primaria y Secundaria) · carpeta bipersonal = ${P.carpBip} · a reponer = solo lo Malo`}
 function onCrit(e){
   const id=e.target.id||'';if(!id.startsWith('c_'))return;const k=id.slice(2),P=S.params;
   if(k==='carpEstado')P.carpEstado=e.target.value;
-  else{let v=parseFloat(e.target.value);if(!isFinite(v)||v<0)return;if(k==='regPct')v=Math.min(100,v)/100;P[k]=v}
+  else{let v=parseFloat(e.target.value);if(!isFinite(v)||v<0)return;P[k]=v}
   store('ioarr:params',P);critSum();calc();refresh();
 }
 
@@ -477,9 +490,9 @@ async function exportXlsx(){
   ITEMS.forEach((x,t)=>{const o=T.t[t];rs.push([x.n,x.u,o.req,o.b,o.r,o.m,o.b+o.r+o.m,o.fal,o.rep])});
   rs.push([],['Criterios de cálculo'],
     ['Puestos por mesa múltiple (Inicial y Básica Especial)',P.kI],['Puestos por mesa múltiple (Primaria y Secundaria)',P.kPS],['Puestos por carpeta bipersonal',P.carpBip],
-    ['Estado asignado a las carpetas (vienen sin estado)',{b:'Bueno',r:'Regular',m:'Malo'}[P.carpEstado]],['% del estado Regular que se repone',P.regPct],
+    ['Estado asignado a las carpetas (vienen sin estado)',{b:'Bueno',r:'Regular',m:'Malo'}[P.carpEstado]],
     ['Mesas por estudiante',P.mesaEst],['Sillas por estudiante',P.sillaEst],['Escritorios docentes por aula',P.esc],['Sillas docentes por aula',P.sdoc],['Armarios o estantes por aula',P.arm],
-    ['Faltante','Requerido menos Existente, mínimo 0 por aula'],['A reponer','Malo + Faltante + el porcentaje indicado del estado Regular'],[],
+    ['Faltante (informativo)','Requerido menos Existente, mínimo 0 por aula; no es reposición'],['A reponer','Solo lo que está en estado Malo. Regular y Faltante se informan, pero no entran en la propuesta (el faltante es brecha de dotación, no reposición).'],[],
     ['Fuentes'],['Padrón de ESCALE – Minedu, registros al 29/10/2025'],['Censo Educativo 2025, Local escolar, pregunta 6.1 (aulas y mobiliario)'],[],
     ['Limitaciones'],['Los datos del censo son declarados por cada colegio y no están validados.'],
     ['Un aula usada por dos niveles o turnos se registra una sola vez, bajo el servicio con más estudiantes; sus estudiantes son el mayor de los turnos.'],
@@ -556,6 +569,8 @@ function bind(){
     const cb=e.target.closest('input[data-i]');
     if(cb){const c=S.D.locs[+cb.dataset.i][0];cb.checked?S.sel.add(c):S.sel.delete(c);persist();
       cb.closest('tr').classList.toggle('sel',cb.checked);renderCount();renderDock();return}
+    const mp=e.target.closest('[data-map]');
+    if(mp){const i=+mp.dataset.map;S.maps.has(i)?S.maps.delete(i):S.maps.add(i);renderTable();return}
     const x=e.target.closest('[data-x]');
     if(x){const i=+x.dataset.x;S.open.has(i)?S.open.delete(i):S.open.add(i);renderTable()}});
   $('v-sel').addEventListener('click',e=>{const r=e.target.closest('[data-rm]');if(r){S.sel.delete(r.dataset.rm);persist();refresh()}});
@@ -565,3 +580,5 @@ function bind(){
 bind();setTab('elegir');boot();
 })();
 </script>
+
+</body></html>

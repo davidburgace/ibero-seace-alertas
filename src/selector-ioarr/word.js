@@ -274,8 +274,9 @@ export async function generarMemoria(M) {
   c.push(tablaUPs(M), ...notaSinRep(M));
 
   c.push(titulo('5. Diagnóstico de la situación actual'));
-  c.push(p(`${M.ups.length === 1 ? 'El local atiende' : 'Los locales atienden'} a ${ent(M.est)} estudiantes en ${ent(M.aulas)} aulas. El mobiliario a reponer (estado malo${M.ups.some(u => u.verificado) ? ' o verificado en campo' : ''}) y el faltante, por tipo de bien:`));
-  c.push(tabla(['Tipo de bien', 'Unidad', 'A reponer', 'Faltante (no incluido)'], M.partidas.map(x => [x.n, x.u, { v: ent(x.rep) }, { v: ent(x.fal) }]), { num: [2, 3] }));
+  c.push(p(`${M.ups.length === 1 ? 'El local atiende' : 'Los locales atienden'} a ${ent(M.est)} estudiantes en ${ent(M.aulas)} aulas. Estado del mobiliario por tipo de bien${M.ups.some(u => u.verificado) ? ' (con el inventario verificado en campo donde lo hay)' : ''}. Se repone solo el estado malo; el faltante es brecha de dotación y no se repone:`));
+  c.push(tabla(['Tipo de bien', 'Unidad', 'Existente', 'Bueno', 'Regular', 'Malo', 'A reponer', 'Requerido', 'Faltante (brecha de dotación, no reposición)'],
+    M.partidas.map(x => [x.n, x.u, ...[x.ex, x.b, x.r, x.m, x.rep, x.req, x.fal].map(v => ({ v: ent(v) }))]), { num: [2, 3, 4, 5, 6, 7, 8], size: 16 }));
   const verif = M.ups.filter(u => u.verificado);
   c.push(p(verif.length
     ? `En ${verif.length} ${verif.length === 1 ? 'local' : 'locales'} el inventario del Censo Educativo 2025 se reemplazó por el verificado en campo: ${verif.map(u => `${u.cod} (visita del ${u.verificado.fecha_visita.split('-').reverse().join('/')})`).join('; ')}. En los demás se usa el Censo Educativo 2025, declarado por cada institución.`
@@ -288,7 +289,7 @@ export async function generarMemoria(M) {
   c.push(p('Antigüedad y vida útil del mobiliario a reponer:', { bold: true, before: 120 }));
   c.push(tabla(['Tipo de bien', 'Antigüedad (años)', 'Vida útil estimada (años)', 'Estado actual', 'Vida útil del nuevo (años)'], M.E.activos.map(a => [a.nombre,
     { v: a.antiguedad == null ? PEND : String(a.antiguedad) + (a.antiguedad_origen === 'inventario' ? '*' : '') },
-    { v: a.vida_estimada == null ? (M.regPct > 0 ? PEND : '—') : String(a.vida_estimada) }, a.estado || (M.supera && !M.masiva ? PEND : '—'),
+    { v: a.vida_estimada == null ? '—' : String(a.vida_estimada) }, a.estado || (M.supera && !M.masiva ? PEND : '—'),
     { v: a.vida_util == null ? PEND : String(a.vida_util) }]), { num: [1, 2, 4] }));
   if (M.E.activos.some(a => a.antiguedad_origen === 'inventario')) c.push(nota(`* Promedio ponderado por la cantidad a reponer, según el año de adquisición registrado en cada local (año de referencia ${M.anioRef}).`));
   if (M.informe_vida_util) c.push(nota('Vida útil estimada según: ' + M.informe_vida_util));

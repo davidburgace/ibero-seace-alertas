@@ -7,6 +7,29 @@ Arma, sobre un proyecto del Selector IOARR, la documentación de una IOARR de re
 3. **Verificación** (lista): lista de verificación, archivos de sustento y antigüedad del mobiliario.
 4. **Entrega** (lista): ZIP del expediente y vínculos con Radar IOARR y su kanban.
 
+## Regla de cálculo: se repone solo lo Malo
+
+Desde la revisión normativa de octubre de 2026 (y el expediente del Gobierno Regional de Huánuco, 2023):
+
+- **A reponer = Malo**, por tipo de bien, aula y local. Ya no existe el criterio «% del estado Regular que se repone»: los proyectos que lo tenían guardado lo ignoran.
+- **Bueno, Regular y Malo** se muestran siempre como diagnóstico: en «Mi selección», en el detalle del aula, en el expediente, en los Excel y en la memoria descriptiva.
+- **Faltante (brecha de dotación, no reposición)** = Requerido − Existente, mínimo 0 por aula. Se muestra aparte, solo como información, con su total por local y por distrito. No suma a lo que se repone, al costo ni al Formato 07-C.
+- Resumen «Mobiliario por tipo»: Existente, Bueno, Regular, Malo, A reponer (= Malo), Requerido y Faltante (aparte).
+
+Caso de control (Moquegua, búsqueda «mariscal», «Seleccionar los filtrados», criterios por defecto): 11 locales, 2,085 estudiantes, 104 aulas y **198 bienes a reponer**; el faltante, aparte, suma 1,531.
+
+| Tipo | Existente | Bueno | Regular | Malo | A reponer | Faltante |
+|---|---:|---:|---:|---:|---:|---:|
+| Mesa | 3,217 | 675 | 2,520 | 22 | 22 | 795 |
+| Silla | 4,018 | 1,034 | 2,853 | 131 | 131 | 683 |
+| Escritorio docente | 136 | 50 | 72 | 14 | 14 | 5 |
+| Silla docente | 125 | 41 | 84 | 0 | 0 | 5 |
+| Armario | 216 | 93 | 92 | 31 | 31 | 43 |
+
+El Excel del Selector trae la hoja nueva **Por distrito** (con SUMIF sobre «Locales (UP)») y, en cada hoja, las columnas en ese orden. En «Aulas», «Locales (UP)» y «Reposición masiva», «A reponer» es una fórmula que apunta a la celda de Malo.
+
+`docs/selector-ioarr/prototipo.html` aplica la misma regla. Las pruebas comparan con él el cálculo completo, por aula y por local.
+
 ## Etapa 1: costos
 
 ### Migración
@@ -35,8 +58,8 @@ No hay variables de entorno nuevas.
 Lo usan la API y el Excel, así la pantalla y el Excel dan lo mismo.
 
 ```
-Reposición  = Malo + ROUND(Regular × % de Regular), por aula          ← entra al costo
-Faltante    = MAX(0, Requerido − Existente), por aula                 ← aparte, referencial
+Reposición  = Malo, por aula                                          ← entra al costo
+Faltante    = MAX(0, Requerido − Existente), por aula                 ← aparte: brecha de dotación, no reposición
 
 Por local:
 CD          = Σ reposición × precio unitario (sin IGV)
@@ -70,7 +93,7 @@ En esos tipos se reemplaza el censo, por local:
 
 ```
 Faltante   = MAX(0, Requerido − (Bueno + Regular + Malo))
-Reposición = Malo + ROUND(Regular × % de Regular)
+Reposición = Malo
 ```
 
 - Solo cambia el expediente (pantalla y Excel). El Selector sigue mostrando el censo.
@@ -106,7 +129,7 @@ Hojas: **Resumen**, **Parámetros**, **Partidas**, **Metrado y costos por local*
 
 Pruebas automáticas: `npm test` (`test/expediente-costos.test.js`). Si LibreOffice está instalado, una prueba recalcula el Excel, comprueba que el total coincide con el cálculo y que cambia al editar un precio y la UIT.
 
-Con los criterios por defecto, el caso de control de Moquegua («mariscal», 11 locales) da 1,729 bienes en el metrado: **198 de reposición** (Malo) y **1,531 de faltante**.
+Con los criterios por defecto, el caso de control de Moquegua («mariscal», 11 locales) da **198 bienes a reponer** (Malo). El faltante, 1,531 bienes, va aparte y no entra al costo.
 
 ## Etapa 2: documentos (Formato 07-C y memoria descriptiva)
 
@@ -164,9 +187,7 @@ Ejecuta `supabase/migrations/016_ioarr_inventario_antiguedad.sql`, después de l
 - Se puede cargar sin corregir las cantidades. En ese caso, para esos tipos sigue valiendo el censo.
 - La antigüedad del proyecto, por tipo, es el promedio de los locales con año cargado, ponderado por la cantidad que se repone. Si en **Documentos** se escribe una antigüedad, esa tiene prioridad.
 - La antigüedad va en el 07-C (E.3) y en la memoria, con su origen y con una tabla del año de adquisición por local. En el Excel, la hoja «Inventario verificado» trae el año y la antigüedad, esta con fórmula.
-- **Vida útil (2.4.C.b):**
-  - Si solo se repone el estado **Malo**, se sustenta con la vida útil efectiva (2.4.B.e).
-  - Si se repone un **% de Regular**, ese mobiliario todavía funciona. La condición se cumple solo si la antigüedad es mayor o igual a la **vida útil estimada** y se indica el **informe técnico** que la fija. Ambos se cargan en Documentos.
+- **Vida útil (2.4.C.b):** se repone solo el estado **Malo**, así que se sustenta con la vida útil efectiva (2.4.B.e). El informe de vida útil estimada es opcional y, si se carga en Documentos, se cita como respaldo.
 
 ### Lista de verificación
 

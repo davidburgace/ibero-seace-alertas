@@ -6,6 +6,7 @@ import { renderExpediente, enlazarExpediente } from '/selector-ioarr-expediente.
 const ANIO = 2025;
 const BASE_DATOS = `/data/selector-ioarr/${ANIO}/`;
 const PAGE = 40;
+const FALTANTE = 'Faltante (brecha de dotación, no reposición)';
 const LS = 'selector-ioarr:';
 const NF = new Intl.NumberFormat('es-PE');
 const fmt = n => NF.format(Math.round(n || 0));
@@ -207,11 +208,11 @@ async function detalleHTML(i) {
   const d = S.detalles.get(i);
   const sv = d.servicios.map(s => `<tr><td class="mono">${esc(s.mod)}</td><td>${s.niv}</td><td>${esc(s.nom)}</td><td>${s.conv ? 'Convenio' : 'Directa'}</td><td class="num">${fmt(s.est)}</td><td class="num">${fmt(s.sec)}</td><td class="num">${fmt(s.aulas)}</td><td>${esc(s.tur)}</td></tr>`).join('');
   const au = d.aulas.map(a => `<tr><td>${esc(a.aula)}</td><td>${esc(a.edif)} · piso ${a.piso}</td><td>${esc(a.grado)}${a.secc ? ' ' + esc(a.secc) : ''}</td><td>${esc(a.tur)}${a.comp ? ' (compartida)' : ''}</td><td class="num">${a.est}</td>` +
-    a.t.map(([ex, rep]) => `<td class="num">${fmt(ex)} / <b>${fmt(rep)}</b></td>`).join('') + '</tr>').join('');
+    a.t.map(o => `<td class="num"><span title="Bueno / Regular / Malo">${fmt(o.b)} / ${fmt(o.r)} / <b>${fmt(o.m)}</b></span>${o.fal ? `<br><span class="sub" title="${FALTANTE}">faltan ${fmt(o.fal)}</span>` : ''}</td>`).join('') + '</tr>').join('');
   return `<div class="detalle">
     ${ubicacionHTML(i, d)}
     <div><h4>Servicios educativos del local</h4><div class="tabla-wrap"><table class="tabla"><thead><tr><th>Cód. modular</th><th>Nivel</th><th>Institución</th><th>Gestión</th><th class="num">Estudiantes</th><th class="num">Secciones</th><th class="num">Aulas (censo)</th><th>Turno</th></tr></thead><tbody>${sv}</tbody></table></div></div>
-    <div><h4>Aulas en uso (existente / <b>a reponer</b>)</h4>${au ? `<div class="tabla-wrap"><table class="tabla"><thead><tr><th>Aula</th><th>Ubicación</th><th>Grado y sección</th><th>Turno</th><th class="num">Estud.</th>${ITEMS.map(x => `<th class="num">${x.n}</th>`).join('')}</tr></thead><tbody>${au}</tbody></table></div>` : '<p class="sub">El censo no registra aulas en uso para este local.</p>'}</div>
+    <div><h4>Aulas en uso (bueno / regular / <b>malo = a reponer</b>)</h4><p class="sub">«Faltan» es el faltante: brecha de dotación, no reposición.</p>${au ? `<div class="tabla-wrap"><table class="tabla"><thead><tr><th>Aula</th><th>Ubicación</th><th>Grado y sección</th><th>Turno</th><th class="num">Estud.</th>${ITEMS.map(x => `<th class="num">${x.n}</th>`).join('')}</tr></thead><tbody>${au}</tbody></table></div>` : '<p class="sub">El censo no registra aulas en uso para este local.</p>'}</div>
   </div>`;
 }
 
@@ -321,33 +322,34 @@ async function renderSel() {
     el.innerHTML = `<div class="panel vacio"><h3 style="color:var(--text);margin-bottom:6px;font-family:var(--font-display)">Aún no hay locales seleccionados</h3><p style="margin:0 0 14px">Vuelve a «Elegir locales» y marca los locales que intervendrás.</p><button class="btn btn-primary" data-ir="elegir" type="button">Elegir locales</button></div>`;
     return;
   }
-  const trows = T.tipos.map(o => `<tr><td>${o.n}<br><span class="sub">${o.u}</span></td><td class="num">${fmt(o.req)}</td><td class="num">${fmt(o.b + o.r + o.m)}</td><td>${stackBar(o)}</td><td class="num">${fmt(o.fal)}</td><td class="num"><b>${fmt(o.rep)}</b></td></tr>`).join('');
-  const drows = T.distritos.map(r => `<tr><td>${esc(r.nom)}</td><td class="num">${fmt(r.n)}</td><td class="num">${fmt(r.est)}</td><td class="num">${fmt(r.aul)}</td><td class="num"><b>${fmt(r.rep)}</b></td></tr>`).join('');
+  const trows = T.tipos.map(o => `<tr><td>${o.n}<br><span class="sub">${o.u}</span>${stackBar(o)}</td><td class="num">${fmt(o.b + o.r + o.m)}</td><td class="num">${fmt(o.b)}</td><td class="num">${fmt(o.r)}</td><td class="num">${fmt(o.m)}</td><td class="num"><b>${fmt(o.rep)}</b></td><td class="num">${fmt(o.req)}</td><td class="num col-fal">${fmt(o.fal)}</td></tr>`).join('');
+  const drows = T.distritos.map(r => `<tr><td>${esc(r.nom)}</td><td class="num">${fmt(r.n)}</td><td class="num">${fmt(r.est)}</td><td class="num">${fmt(r.aul)}</td><td class="num"><b>${fmt(r.rep)}</b></td><td class="num col-fal">${fmt(r.fal)}</td></tr>`).join('');
   const pags = Math.max(1, Math.ceil(T.locales.length / PAGE));
   S.selPage = Math.min(S.selPage || 0, pags - 1);
   const desde = S.selPage * PAGE;
-  const lrows = T.locales.slice(desde, desde + PAGE).map(r => `<tr><td class="mono">${r.cod}</td><td><span class="nm">${esc(r.nom)}</span></td><td>${esc(r.dist)}</td><td class="num">${fmt(r.est)}</td><td class="num">${fmt(r.aul)}</td>${r.t.map(v => `<td class="num">${fmt(v)}</td>`).join('')}<td class="num"><b>${fmt(r.rep)}</b></td><td>${coordValidas(r.lat, r.lon) ? `<a class="x" href="${urlGoogleMaps(r.lat, r.lon)}" target="_blank" rel="noopener" aria-label="Ver el local ${r.cod} en Google Maps">Mapa</a>` : '<span class="sub">—</span>'}</td><td><button class="x" data-rm="${r.cod}" type="button" aria-label="Quitar el local ${r.cod}">Quitar</button></td></tr>`).join('');
+  const lrows = T.locales.slice(desde, desde + PAGE).map(r => `<tr><td class="mono">${r.cod}</td><td><span class="nm">${esc(r.nom)}</span></td><td>${esc(r.dist)}</td><td class="num">${fmt(r.est)}</td><td class="num">${fmt(r.aul)}</td>${r.t.map(v => `<td class="num">${fmt(v)}</td>`).join('')}<td class="num"><b>${fmt(r.rep)}</b></td><td class="num col-fal">${fmt(r.fal)}</td><td>${coordValidas(r.lat, r.lon) ? `<a class="x" href="${urlGoogleMaps(r.lat, r.lon)}" target="_blank" rel="noopener" aria-label="Ver el local ${r.cod} en Google Maps">Mapa</a>` : '<span class="sub">—</span>'}</td><td><button class="x" data-rm="${r.cod}" type="button" aria-label="Quitar el local ${r.cod}">Quitar</button></td></tr>`).join('');
   const sum = k => fmt(T.tipos.reduce((a, o) => a + o[k], 0));
   el.innerHTML = `
     <div class="kpis">
       <div class="kpi"><div class="v">${fmt(T.n)}</div><div class="l">locales seleccionados</div></div>
       <div class="kpi"><div class="v">${fmt(T.est)}</div><div class="l">estudiantes (padrón)</div></div>
       <div class="kpi"><div class="v">${fmt(T.aul)}</div><div class="l">aulas en uso (censo)</div></div>
-      <div class="kpi destacado"><div class="v">${fmt(T.rep)}</div><div class="l">bienes a reponer (suma de los 5 tipos)</div></div>
+      <div class="kpi destacado"><div class="v">${fmt(T.rep)}</div><div class="l">bienes a reponer (estado malo, suma de los 5 tipos)</div></div>
+      <div class="kpi"><div class="v">${fmt(T.fal)}</div><div class="l">${FALTANTE}, solo informativo</div></div>
     </div>
     <div class="exportar">
-      <div><h3>Exportar para el estudio</h3><p>Libro de Excel con el resumen (criterios, fuentes y limitaciones), los locales con ubigeo y coordenadas, los servicios, las aulas con mobiliario por estado y la reposición masiva. Las columnas de resultado llevan fórmulas.</p></div>
+      <div><h3>Exportar para el estudio</h3><p>Libro de Excel con el resumen (criterios, fuentes y limitaciones), los locales con ubigeo y coordenadas, el resumen por distrito, los servicios, las aulas con mobiliario por estado y la reposición masiva. Las columnas de resultado llevan fórmulas.</p></div>
       <button class="btn btn-primary" id="exp" type="button">${S.proyecto ? 'Exportar a Excel' : 'Guardar como proyecto para exportar'}</button>
     </div>
-    <div class="cols">
-      <div class="panel"><div class="panel-cab"><h3>Mobiliario por tipo</h3><div class="leyenda"><span style="--c:var(--bueno)">Bueno</span><span style="--c:var(--regular)">Regular</span><span style="--c:var(--malo)">Malo</span></div></div>
-        <div class="tabla-wrap"><table class="tabla"><thead><tr><th>Tipo</th><th class="num">Requerido</th><th class="num">Existente</th><th>Estado</th><th class="num">Faltante</th><th class="num">A reponer</th></tr></thead><tbody>${trows}</tbody>
-        <tfoot><tr><td>Total</td><td class="num">${sum('req')}</td><td class="num">${fmt(T.tipos.reduce((a, o) => a + o.b + o.r + o.m, 0))}</td><td></td><td class="num">${sum('fal')}</td><td class="num">${fmt(T.rep)}</td></tr></tfoot></table></div></div>
-      <div class="panel"><div class="panel-cab"><h3>Por distrito</h3></div>
-        <div class="tabla-wrap"><table class="tabla"><thead><tr><th>Distrito</th><th class="num">Locales</th><th class="num">Estudiantes</th><th class="num">Aulas</th><th class="num">A reponer</th></tr></thead><tbody>${drows}</tbody></table></div></div>
-    </div>
+    <div class="panel"><div class="panel-cab"><h3>Mobiliario por tipo</h3><div class="leyenda"><span style="--c:var(--bueno)">Bueno</span><span style="--c:var(--regular)">Regular</span><span style="--c:var(--malo)">Malo</span></div></div>
+        <div class="tabla-wrap"><table class="tabla"><thead><tr><th>Tipo</th><th class="num">Existente</th><th class="num">Bueno</th><th class="num">Regular</th><th class="num">Malo</th><th class="num">A reponer</th><th class="num">Requerido</th><th class="num col-fal">${FALTANTE}</th></tr></thead><tbody>${trows}</tbody>
+        <tfoot><tr><td>Total</td><td class="num">${fmt(T.tipos.reduce((a, o) => a + o.b + o.r + o.m, 0))}</td><td class="num">${sum('b')}</td><td class="num">${sum('r')}</td><td class="num">${sum('m')}</td><td class="num">${fmt(T.rep)}</td><td class="num">${sum('req')}</td><td class="num col-fal">${sum('fal')}</td></tr></tfoot></table></div>
+        <p class="sub pad">Se repone solo el estado malo. Bueno y regular son diagnóstico. El faltante es lo que falta para llegar a lo requerido: no suma a lo que se repone, al costo ni al Formato 07-C.</p></div>
+    <div class="panel"><div class="panel-cab"><h3>Por distrito</h3></div>
+        <div class="tabla-wrap"><table class="tabla"><thead><tr><th>Distrito</th><th class="num">Locales</th><th class="num">Estudiantes</th><th class="num">Aulas</th><th class="num">A reponer</th><th class="num col-fal" title="${FALTANTE}">Faltante (no reposición)</th></tr></thead><tbody>${drows}</tbody>
+        <tfoot><tr><td>Total</td><td class="num">${fmt(T.n)}</td><td class="num">${fmt(T.est)}</td><td class="num">${fmt(T.aul)}</td><td class="num">${fmt(T.rep)}</td><td class="num col-fal">${fmt(T.fal)}</td></tr></tfoot></table></div></div>
     <div class="panel"><div class="panel-cab"><h3>Locales seleccionados</h3><button class="btn btn-ghost btn-sm btn-peligro" id="clrSel" type="button">Quitar todos</button></div>
-      <div class="tabla-wrap"><table class="tabla"><thead><tr><th>Código de local</th><th>Instituciones</th><th>Distrito</th><th class="num">Estudiantes</th><th class="num">Aulas</th>${ITEMS.map(x => `<th class="num">${x.n}</th>`).join('')}<th class="num">A reponer</th><th>Ubicación</th><th></th></tr></thead><tbody>${lrows}</tbody></table></div>
+      <div class="tabla-wrap"><table class="tabla"><thead><tr><th>Código de local</th><th>Instituciones</th><th>Distrito</th><th class="num">Estudiantes</th><th class="num">Aulas</th>${ITEMS.map(x => `<th class="num">${x.n}</th>`).join('')}<th class="num">A reponer</th><th class="num col-fal" title="${FALTANTE}">Faltante (no reposición)</th><th>Ubicación</th><th></th></tr></thead><tbody>${lrows}</tbody></table></div>
       ${pags > 1 ? `<div class="paginacion pad-pag"><span class="sub">Mostrando ${fmt(desde + 1)}–${fmt(Math.min(T.locales.length, desde + PAGE))} de ${fmt(T.locales.length)} · ordenados por bienes a reponer</span><div class="pg-btns"><button class="btn btn-ghost btn-sm" data-selpag="-1" type="button" ${S.selPage === 0 ? 'disabled' : ''}>Anterior</button><span class="mono">${S.selPage + 1} / ${pags}</span><button class="btn btn-ghost btn-sm" data-selpag="1" type="button" ${S.selPage >= pags - 1 ? 'disabled' : ''}>Siguiente</button></div></div>` : ''}</div>`;
 }
 
@@ -388,7 +390,7 @@ function abrirExpediente() {
 // ─── Criterios ───────────────────────────────────────────────────────────────
 function renderCrit() {
   const P = S.params;
-  $('critGrid').innerHTML = CRIT.map(([k, l, mn, mx, st]) => `<div class="campo"><label for="c_${k}">${l}</label><input id="c_${k}" type="number" inputmode="decimal" min="${mn}" max="${mx}" step="${st}" value="${k === 'regPct' ? Math.round(P[k] * 100) : P[k]}"></div>`).join('') +
+  $('critGrid').innerHTML = CRIT.map(([k, l, mn, mx, st]) => `<div class="campo"><label for="c_${k}">${l}</label><input id="c_${k}" type="number" inputmode="decimal" min="${mn}" max="${mx}" step="${st}" value="${P[k]}"></div>`).join('') +
     `<div class="campo"><label for="c_carpEstado">Estado de las carpetas (vienen sin estado)</label><select id="c_carpEstado"><option value="b">Bueno</option><option value="r">Regular</option><option value="m">Malo</option></select></div>
      <div class="campo"><span class="lbl">&nbsp;</span><button class="btn btn-ghost" id="critReset" type="button">Restablecer criterios</button></div>`;
   $('c_carpEstado').value = P.carpEstado;
@@ -396,14 +398,14 @@ function renderCrit() {
 }
 function critSum() {
   const P = S.params;
-  $('critSum').textContent = `Mesa múltiple = ${P.kI} puestos (Inicial) o ${P.kPS} (Primaria y Secundaria) · carpeta bipersonal = ${P.carpBip} · carpetas como ${{ b: 'Bueno', r: 'Regular', m: 'Malo' }[P.carpEstado]} · a reponer = Malo + Faltante${P.regPct ? ` + ${Math.round(P.regPct * 100)}% de Regular` : ''}`;
+  $('critSum').textContent = `Mesa múltiple = ${P.kI} puestos (Inicial) o ${P.kPS} (Primaria y Secundaria) · carpeta bipersonal = ${P.carpBip} · carpetas como ${{ b: 'Bueno', r: 'Regular', m: 'Malo' }[P.carpEstado]} · a reponer = Malo (el faltante va aparte, no se repone)`;
 }
 let tCrit;
 function onCrit(e) {
   const id = e.target.id || ''; if (!id.startsWith('c_')) return;
   const k = id.slice(2), P = { ...S.params };
   if (k === 'carpEstado') P.carpEstado = e.target.value;
-  else { let v = parseFloat(e.target.value); if (!isFinite(v) || v < 0) return; if (k === 'regPct') v = Math.min(100, v) / 100; P[k] = v; }
+  else { let v = parseFloat(e.target.value); if (!isFinite(v) || v < 0) return; P[k] = v; }
   S.params = limpiarParams(P);
   critSum();
   clearTimeout(tCrit);

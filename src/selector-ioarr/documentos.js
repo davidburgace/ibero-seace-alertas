@@ -113,9 +113,8 @@ const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', '
  *   precios    detalle de precios por tipo (descripción = descripción técnica)
  *   inv        inventario verificado por código de local (con archivos)
  *   fecha      fecha de generación (AAAA-MM-DD)
- *   regPct     % de Regular que se repone (fracción), para el texto del sustento
  */
-export function armarModelo({ R, D, list, proyecto, datos, precios, inv = {}, fecha, regPct = 0 }) {
+export function armarModelo({ R, D, list, proyecto, datos, precios, inv = {}, fecha }) {
   const d = { ...limpiarDatosDoc({}), ...datos };
   const T = R.totales, U = R.uit;
   // Solo son UP de la inversión los locales con algo que reponer
@@ -240,7 +239,7 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, inv = {}, fe
   const conBaja = ups.filter(u => u.archivos.some(a => a.tipo === 'baja'));
   const sustentoAuto = [
     `${masiva ? `La inversión repone el mobiliario de aula de ${n} locales educativos` : `La inversión repone el mobiliario de aula del local educativo ${u0?.cod}`} (${nomNiveles.toLowerCase()}), ${masiva ? 'que atienden' : 'que atiende'} a ${est.toLocaleString('es-PE')} estudiantes en ${aulas.toLocaleString('es-PE')} aulas.`,
-    `Se reponen ${lista(metas.map(m => `${m.cantidad.toLocaleString('es-PE')} ${m.cantidad === 1 ? m.nombre.toLowerCase() : m.plural}`))}: el mobiliario en estado malo${regPct > 0 ? ` y el ${Math.round(regPct * 100)} % del que está en estado regular` : ''}, que ya no es útil ni operativo y no puede recuperarse con mantenimiento correctivo (vida útil efectiva, Lineamientos IOARR 2.4.B.e).`,
+    `Se reponen ${lista(metas.map(m => `${m.cantidad.toLocaleString('es-PE')} ${m.cantidad === 1 ? m.nombre.toLowerCase() : m.plural}`))}: el mobiliario en estado malo, que ya no es útil ni operativo y no puede recuperarse con mantenimiento correctivo (vida útil efectiva, Lineamientos IOARR 2.4.B.e).`,
     verificados.length
       ? `El estado del mobiliario sale del Censo Educativo 2025 (Minedu) y, en ${verificados.length === n ? (masiva ? 'todos los locales' : 'el local') : `${verificados.length} de los ${n} locales`}, del inventario verificado en campo (${lista(verificados.map(u => fechaPe(new Date(u.verificado.fecha_visita + 'T00:00:00Z'))).filter((v, j, a) => a.indexOf(v) === j))}).`
       : 'El estado del mobiliario sale del Censo Educativo 2025 (Minedu), que es declarado por cada institución educativa; debe confirmarse con el inventario patrimonial y una verificación en campo.',
@@ -248,21 +247,10 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, inv = {}, fe
   ];
   const condiciones = [
     { texto: 'El mobiliario nuevo cumple la misma función que el reemplazado (2.4.C.a).', estado: 'cumple', nota: 'Mesas, sillas, escritorios y armarios de aula reemplazan a los del mismo uso.' },
-    { texto: 'No se sustenta en un incremento de la capacidad de la UP (2.4.C.c).', estado: 'cumple', nota: T.fal > 0 ? 'El faltante se excluyó del metrado y del costo.' : 'No hay faltante.' },
+    { texto: 'No se sustenta en un incremento de la capacidad de la UP (2.4.C.c).', estado: 'cumple', nota: T.fal > 0 ? 'El faltante (brecha de dotación, no reposición) se excluyó del metrado y del costo.' : 'No hay faltante.' },
     { texto: masiva ? 'El mobiliario a reponer está en uso (2.5.c).' : 'El mobiliario a reponer está en uso: no lleva más de un año sin operar (2.4.C.d).', estado: d.en_uso === 'si' ? 'cumple' : d.en_uso === 'no' ? 'no' : 'pendiente', nota: d.en_uso === 'no' ? (masiva ? 'En una reposición masiva el mobiliario debe estar en uso.' : 'Si lleva más de un año sin operar, va como optimización o proyecto de inversión.') : '' },
     { texto: 'Los bienes están registrados en la contabilidad e inventario de la entidad (2.4.C.e).', estado: d.inventario_registrado === 'si' ? 'cumple' : d.inventario_registrado === 'no' ? 'no' : 'pendiente', nota: d.codigo_inventario ? 'Código o documento: ' + d.codigo_inventario : '' },
-    (() => {
-      // Con % de Regular se repone mobiliario que aún funciona: debe haber cumplido su vida útil estimada (informe técnico)
-      if (!(regPct > 0)) return { texto: 'Vida útil: se repone solo mobiliario en estado malo, que ya no es útil ni operativo (vida útil efectiva, 2.4.B.e).', estado: 'cumple', nota: 'El informe de vida útil estimada de la entidad (2.4.C.b) es recomendable como respaldo.' };
-      const conRegular = activos.filter(a => a.cantidad > 0);
-      const sinDato = conRegular.filter(a => a.antiguedad == null || a.vida_estimada == null);
-      const noCumple = conRegular.filter(a => a.antiguedad != null && a.vida_estimada != null && a.antiguedad < a.vida_estimada);
-      const estado = noCumple.length ? 'no' : sinDato.length || !d.informe_vida_util ? 'pendiente' : 'cumple';
-      const nota = noCumple.length ? `No cumplieron la vida útil estimada: ${noCumple.map(a => `${a.nombre.toLowerCase()} (${a.antiguedad} de ${a.vida_estimada} años)`).join(', ')}. Repón solo el estado malo o sustenta la vida útil efectiva.`
-        : sinDato.length ? `Falta la antigüedad o la vida útil estimada de: ${sinDato.map(a => a.nombre.toLowerCase()).join(', ')}.`
-        : !d.informe_vida_util ? 'Indica el informe técnico que fija la vida útil estimada.' : 'Informe: ' + d.informe_vida_util;
-      return { texto: `Vida útil estimada: el mobiliario en estado regular que se repone (${Math.round(regPct * 100)} %) cumplió la vida útil que fija el informe técnico de la entidad (2.4.C.b).`, estado, nota };
-    })(),
+    { texto: 'Vida útil: se repone solo mobiliario en estado malo, que ya no es útil ni operativo (vida útil efectiva, 2.4.B.e).', estado: 'cumple', nota: d.informe_vida_util ? 'Informe de vida útil: ' + d.informe_vida_util : 'El informe de vida útil estimada de la entidad (2.4.C.b) es recomendable como respaldo.' },
     { texto: 'Los bienes reemplazados se darán de baja o se inició su trámite (2.4.C.f).', estado: conBaja.length === n ? 'cumple' : 'pendiente', nota: conBaja.length ? `Hay sustento de baja en ${conBaja.length} de ${n} ${n === 1 ? 'local' : 'locales'}.` : 'Adjunta la resolución o el trámite de baja en «Corregir inventario» de cada local.' },
     { texto: 'Verificación en campo con acta.', estado: n && conActa.length === n ? 'cumple' : 'pendiente', nota: `${conActa.length} de ${n} ${n === 1 ? 'local' : 'locales'} con acta adjunta.` }
   ];
@@ -284,7 +272,6 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, inv = {}, fe
   falta(!d.inventario_registrado, 'Si el mobiliario a reponer está registrado en el inventario de la entidad (Lineamientos 2.4.C.e).');
   falta(!d.en_uso, 'Si el mobiliario a reponer está en uso.');
   if (supera && !masiva) falta(activos.some(a => a.antiguedad == null || !a.estado), 'E.3. Antigüedad y estado actual del mobiliario a reponer, por tipo.');
-  if (regPct > 0) falta(activos.some(a => a.antiguedad == null || a.vida_estimada == null) || !d.informe_vida_util, 'Vida útil estimada (informe técnico) y antigüedad del mobiliario en estado regular que se repone (2.4.C.b).');
   falta(tiposRep.some(x => !precios?.[x.k]?.descripcion), 'Descripción técnica de algún tipo de bien (se toma del precio del catálogo).');
   falta(A.propuesto, 'A. Alineamiento a la brecha: se propuso por nivel; verifícalo contra el PMI.');
 
@@ -303,7 +290,7 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, inv = {}, fe
     totales: T, rubros: R.rubros, partidas: R.partidas, distritos: R.distritos,
     faltante: { cantidad: T.fal, valor: T.falValor, partidas: R.partidas.filter(p => p.fal > 0).map(p => ({ nombre: p.n, cantidad: p.fal, valor: p.falValor })) },
     memoria: { antecedentes: d.antecedentes, objetivo: d.objetivo || `Reponer el mobiliario de aula en mal estado ${masiva ? `de ${n} locales educativos` : 'del local educativo'} de nivel ${nomNiveles.toLowerCase()}, para mantener el nivel y la calidad del servicio educativo que reciben ${est.toLocaleString('es-PE')} estudiantes.` },
-    regPct, anioRef, informe_vida_util: d.informe_vida_util,
+    anioRef, informe_vida_util: d.informe_vida_util,
     faltan, completo: !faltan.length,
     ioarr: proyecto.ioarr || null,
     verificacion: armarVerificacion({ R, ups, activos, condiciones, faltan, precios, U, d, n, ioarr: proyecto.ioarr, total })

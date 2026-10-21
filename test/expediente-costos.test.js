@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import ExcelJS from 'exceljs';
-import { prep, calc, totals, filtrar, FILTRO_VACIO, DEF } from '../src/selector-ioarr/calculo.js';
+import { prep, calc, totals, filtrar, FILTRO_VACIO, DEF, limpiarParams } from '../src/selector-ioarr/calculo.js';
 import { costear, limpiarRubros, limpiarInventario, censoLocal, factorZona, indiceFactores, RUBROS, tipoDesdeDescripcion } from '../src/selector-ioarr/costos.js';
 import { generarExcelCostos } from '../src/selector-ioarr/excel-costos.js';
 
@@ -29,22 +29,23 @@ function casoMariscal(P = DEF, extra = {}) {
   return { D, C, list, T: totals(D, C, list), R: costear({ D, C, list, precios: PRECIOS, rubros: RUB, factores: FACTORES, uit: { anio: 2026, valor: 1000 }, ...extra }) };
 }
 
-test('caso de control: Moquegua «mariscal» → el metrado de costos suma 1,729 bienes (reposición + faltante)', () => {
+test('caso de control: Moquegua «mariscal» → 198 bienes a reponer (Malo) y 1,531 de faltante aparte', () => {
   const { T, R } = casoMariscal();
-  assert.deepEqual([T.n, T.est, T.aul, T.rep], [11, 2085, 104, 1729]);
-  assert.equal(R.totales.locales, 11);
-  assert.equal(R.totales.est, 2085);
-  assert.equal(R.totales.aul, 104);
-  assert.equal(R.totales.rep + R.totales.fal, 1729);
-  // Por tipo de bien: reposición + faltante = «A reponer» del Selector; faltante igual al del Selector
-  R.partidas.forEach((p, t) => { assert.equal(p.rep + p.fal, T.t[t].rep); assert.equal(p.fal, T.t[t].fal); });
+  assert.deepEqual([T.n, T.est, T.aul, T.rep, T.fal], [11, 2085, 104, 198, 1531]);
+  assert.deepEqual([R.totales.locales, R.totales.est, R.totales.aul, R.totales.rep, R.totales.fal], [11, 2085, 104, 198, 1531]);
+  // Por tipo de bien: reposición = «A reponer» del Selector = Malo; faltante y diagnóstico iguales al Selector
+  R.partidas.forEach((p, t) => {
+    assert.equal(p.rep, T.t[t].rep); assert.equal(p.rep, T.t[t].m); assert.equal(p.fal, T.t[t].fal);
+    assert.deepEqual([p.b, p.r, p.m, p.ex, p.req], [T.t[t].b, T.t[t].r, T.t[t].m, T.t[t].b + T.t[t].r + T.t[t].m, T.t[t].req]);
+  });
+  // Faltante por distrito: suma el total y no entra al costo
+  assert.equal(R.distritos.reduce((a, d) => a + d.fal, 0), 1531);
+  assert.equal(R.distritos.reduce((a, d) => a + d.rep, 0), 198);
 });
 
-test('con % de Regular, la reposición crece y el faltante no cambia', () => {
-  const a = casoMariscal(DEF).R, b = casoMariscal({ ...DEF, regPct: 0.5 });
-  assert.equal(b.R.totales.rep + b.R.totales.fal, b.T.rep);
-  assert.equal(b.R.totales.fal, a.totales.fal);
-  assert.ok(b.R.totales.rep > a.totales.rep);
+test('el antiguo «% de Regular» guardado en un proyecto no cambia la reposición', () => {
+  const a = casoMariscal(DEF).R, b = casoMariscal(limpiarParams({ ...DEF, regPct: 0.5 })).R;
+  assert.deepEqual([b.totales.rep, b.totales.fal], [a.totales.rep, a.totales.fal]);
 });
 
 test('el faltante no entra al total y se valoriza aparte con aviso', () => {
@@ -198,9 +199,9 @@ test('inventario verificado: las mesas que el censo no reporta pasan de faltante
   assert.ok(b.avisos.some(x => x.tipo === 'inventario'));
   assert.ok(!b.avisos.some(x => x.tipo === 'faltante'));
 
-  // Con % de Regular y menos de lo requerido: reposición = M + ROUND(R × %), faltante = req − existente
-  const c = costear({ ...base, regPct: 0.5, inventario: { '276008': { bienes: { mesa: { b: 100, r: 101, m: 300 } }, fecha_visita: '2026-10-20', observacion: 'x' } } });
-  assert.deepEqual([c.partidas[0].rep, c.partidas[0].fal], [300 + 51, 569 - 501]);
+  // Menos de lo requerido: reposición = M (el regular no se repone), faltante = req − existente
+  const c = costear({ ...base, inventario: { '276008': { bienes: { mesa: { b: 100, r: 101, m: 300 } }, fecha_visita: '2026-10-20', observacion: 'x' } } });
+  assert.deepEqual([c.partidas[0].rep, c.partidas[0].fal, c.partidas[0].b, c.partidas[0].r, c.partidas[0].m], [300, 569 - 501, 100, 101, 300]);
 
   assert.throws(() => limpiarInventario({ mesa: { b: -1, r: 0, m: 0 } }), /no válidas/);
   assert.deepEqual(limpiarInventario({ mesa: { m: 3 }, otro: { m: 1 } }), { mesa: { b: 0, r: 0, m: 3 } });

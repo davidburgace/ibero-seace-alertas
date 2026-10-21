@@ -102,7 +102,7 @@ function pintar() {
       <p class="sub">Antigüedad, vida útil estimada, estado y mantenimiento del mobiliario a reponer (E.3 y 2.4.C.b), y vida útil y mantenimiento anual del nuevo (F.4 o G.3). La antigüedad vacía se toma del año de adquisición registrado en cada local.</p>
       <div class="tabla-wrap"><table class="tabla tabla-doc"><thead><tr><th>Tipo de bien</th><th>Antigüedad (años)</th><th>Vida útil estimada (años)</th><th>Estado actual</th><th>Mant. anual actual (S/)</th><th>Vida útil del nuevo (años)</th><th>Mant. anual del nuevo (S/)</th></tr></thead><tbody>${tipos || '<tr><td colspan="7" class="vacio">No hay bienes a reponer.</td></tr>'}</tbody></table></div>
       <div class="form-grid">
-        ${campo('informe_vida_util', 'Informe técnico de vida útil estimada', { ancho: true, ph: 'Ej.: Informe N° …-2026-UGEL…/APP, control patrimonial', ayuda: R.reg_pct > 0 ? `Obligatorio: se repone el ${Math.round(R.reg_pct * 100)} % del mobiliario en estado regular, que debe haber cumplido su vida útil estimada (2.4.C.b).` : 'Recomendable. Vacío = la antigüedad sale del año de adquisición registrado en cada local, si lo cargaste.' })}
+        ${campo('informe_vida_util', 'Informe técnico de vida útil estimada', { ancho: true, ph: 'Ej.: Informe N° …-2026-UGEL…/APP, control patrimonial', ayuda: 'Recomendable. Vacío = la antigüedad sale del año de adquisición registrado en cada local, si lo cargaste.' })}
       </div>
       <h3>Plazo de ejecución</h3>
       <div class="form-grid">

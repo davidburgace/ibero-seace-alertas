@@ -5,8 +5,8 @@
 // No trae precios, UIT ni porcentajes: todo lo carga el usuario.
 //
 // Metrado por local y tipo de bien (sale de calc() de calculo.js):
-//   Reposición = A reponer − Faltante = Malo + ROUND(Regular × % de Regular), por aula
-//   Faltante   = MAX(0, Requerido − Existente), por aula
+//   Reposición = Malo, por aula (Bueno y Regular solo son diagnóstico)
+//   Faltante   = MAX(0, Requerido − Existente), por aula: brecha de dotación, no reposición
 // Solo la reposición entra al costo de inversión. El faltante amplía la capacidad
 // de la UP, y los Lineamientos IOARR del MEF (2.4.C) no admiten sustentar una
 // reposición en eso: se valoriza aparte, como referencia, y no suma al total.
@@ -137,12 +137,11 @@ export function limpiarAdquisicion(obj, anioMax) {
  *   factores     filas de ioarr_factores_zona
  *   uit          { anio, valor } | null
  *   inventario   { [codLocal]: { bienes: { mesa: { b, r, m } }, fecha_visita, observacion } } verificado en campo
- *   regPct       % de Regular que se repone (fracción), para los locales con inventario verificado
  *
  * Con inventario verificado, en ese local y tipo se reemplaza el censo:
- *   Faltante = MAX(0, Requerido − (B + R + M)), Reposición = M + ROUND(R × % de Regular), por local.
+ *   Faltante = MAX(0, Requerido − (B + R + M)), Reposición = M, por local.
  */
-export function costear({ D, C, list, precios, rubros, factores, uit, inventario, regPct = 0 }) {
+export function costear({ D, C, list, precios, rubros, factores, uit, inventario }) {
   const R = limpiarRubros(rubros);
   const pu = TIPOS.map(k => Number(precios?.[k]) >= 0 && precios?.[k] != null ? Number(precios[k]) : null);
   const idx = indiceFactores(factores);
@@ -151,8 +150,10 @@ export function costear({ D, C, list, precios, rubros, factores, uit, inventario
   // ── Por local: metrado, CD y factores ─────────────────────────────────────
   const locales = list.map(i => {
     const l = D.locs[i], d = D.dists[l[1]];
-    const rep = TIPOS.map((_, t) => C.L.rep[t * nL + i] - C.L.fal[t * nL + i]);
+    const rep = TIPOS.map((_, t) => C.L.rep[t * nL + i]);
     const fal = TIPOS.map((_, t) => C.L.fal[t * nL + i]);
+    // Diagnóstico (bueno, regular, malo) y requerido: se muestran siempre, aunque solo Malo se reponga
+    const diag = TIPOS.map((_, t) => ({ b: C.L.b[t * nL + i], r: C.L.r[t * nL + i], m: C.L.m[t * nL + i], req: C.L.req[t * nL + i] }));
     const inv = inventario?.[l[0]];
     let verificado = null;
     if (inv) {
@@ -161,7 +162,8 @@ export function costear({ D, C, list, precios, rubros, factores, uit, inventario
         const x = inv.bienes?.[k];
         if (!x) return;
         fal[t] = Math.max(0, C.L.req[t * nL + i] - (x.b + x.r + x.m));
-        rep[t] = x.m + Math.round(x.r * regPct);
+        rep[t] = x.m;
+        diag[t] = { ...diag[t], b: x.b, r: x.r, m: x.m };
         tipos.push(k);
       });
       // Visita registrada: puede corregir cantidades (tipos) o solo traer el año de adquisición
@@ -171,7 +173,7 @@ export function costear({ D, C, list, precios, rubros, factores, uit, inventario
     const z = factorZona(d[1], l[4], idx);
     return {
       i, cod: l[0], nom: D.locName[i], dist: d[0], prov: D.provs[d[2]], ubigeo: d[1], rural: !!l[4],
-      est: D.locEst[i], aul: D.locAul[i].length, zona: z, rep, fal, cdTipo, verificado,
+      est: D.locEst[i], aul: D.locAul[i].length, zona: z, rep, fal, diag, cdTipo, verificado,
       cd: cdTipo.reduce((a, b) => a + b, 0), falValor: fal.reduce((a, q, t) => a + q * (pu[t] ?? 0), 0), r: {}
     };
   });
@@ -213,15 +215,16 @@ export function costear({ D, C, list, precios, rubros, factores, uit, inventario
 
   const partidas = ITEMS.map((x, t) => {
     const rep = sum(l => l.rep[t]), fal = sum(l => l.fal[t]);
-    return { k: x.k, n: x.n, u: x.u, rep, fal, pu: pu[t], parcial: rep * (pu[t] ?? 0), falValor: fal * (pu[t] ?? 0) };
+    const [b, r, m, req] = ['b', 'r', 'm', 'req'].map(k => sum(l => l.diag[t][k]));
+    return { k: x.k, n: x.n, u: x.u, b, r, m, ex: b + r + m, req, rep, fal, pu: pu[t], parcial: rep * (pu[t] ?? 0), falValor: fal * (pu[t] ?? 0) };
   });
   const rubrosOut = R.map(x => ({ ...x, nombre: RUBRO[x.clave].nombre, grupo: RUBRO[x.clave].grupo, monto: sum(l => l.r[x.clave]) }));
 
   // ── Por distrito ──────────────────────────────────────────────────────────
   const porDist = new Map();
   for (const l of locales) {
-    const o = porDist.get(l.ubigeo) || { ubigeo: l.ubigeo, nom: l.dist, prov: l.prov, n: 0, est: 0, rep: 0, cd: 0, total: 0 };
-    o.n++; o.est += l.est; o.rep += l.rep.reduce((a, b) => a + b, 0); o.cd += l.cd; o.total += l.total;
+    const o = porDist.get(l.ubigeo) || { ubigeo: l.ubigeo, nom: l.dist, prov: l.prov, n: 0, est: 0, rep: 0, fal: 0, falValor: 0, cd: 0, total: 0 };
+    o.n++; o.est += l.est; o.rep += l.rep.reduce((a, b) => a + b, 0); o.fal += l.fal.reduce((a, b) => a + b, 0); o.falValor += l.falValor; o.cd += l.cd; o.total += l.total;
     porDist.set(l.ubigeo, o);
   }
   const distritos = [...porDist.values()].map(o => ({ ...o, porEstudiante: o.est ? o.total / o.est : null }))
@@ -236,7 +239,7 @@ export function costear({ D, C, list, precios, rubros, factores, uit, inventario
   const avisos = [];
   const sinPrecio = partidas.filter(p => p.pu == null && (p.rep > 0 || p.fal > 0)).map(p => p.n);
   if (sinPrecio.length) avisos.push({ tipo: 'precio', texto: `Falta el precio unitario de: ${sinPrecio.join(', ')}. Se calcula con 0 hasta que lo cargues.` });
-  if (T.fal > 0) avisos.push({ tipo: 'faltante', texto: 'El faltante (más bienes de los que hoy existen) no entra al costo de inversión: amplía la capacidad de la UP y una IOARR de reposición no se puede sustentar en eso (Lineamientos IOARR del MEF, 2.4.C). Se muestra valorizado aparte, como referencia; corresponde evaluarlo como ampliación marginal.' });
+  if (T.fal > 0) avisos.push({ tipo: 'faltante', texto: 'El faltante (brecha de dotación, no reposición) es lo que falta para llegar a lo requerido. No entra a lo que se repone, al costo de inversión ni al Formato 07-C: amplía la capacidad de la UP y una IOARR de reposición no se puede sustentar en eso (Lineamientos IOARR del MEF, 2.4.C). Se muestra valorizado aparte, como referencia; corresponde evaluarlo como ampliación marginal.' });
   if (!valorUit) avisos.push({ tipo: 'uit', texto: `Carga el valor de la UIT${U.anio ? ' de ' + U.anio : ''} para saber si el registro del Formato 07-C es abreviado o completo.` });
   else if (U.supera) avisos.push({ tipo: 'uit75', texto: `El total supera las ${LIMITE_UIT} UIT (UIT ${U.anio}): corresponde el registro completo del Formato 07-C (secciones D, E y F).` });
   const verif = locales.filter(l => l.verificado?.tipos.length);

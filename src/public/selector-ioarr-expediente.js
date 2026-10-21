@@ -150,7 +150,7 @@ function pintarResultados() {
   const rub = k => lin(`<span class="sangria">${esc(R[k].nombre)}</span>`, R[k].monto);
   const partidas = datos.partidas.map(p => `<tr><td>${p.n}</td><td>${p.u}</td><td class="num">${ent(p.rep)}</td><td class="num">${soles(p.pu)}</td><td class="num">${soles(p.parcial)}</td></tr>`).join('');
   const falt = datos.partidas.map(p => `<tr><td>${p.n}</td><td class="num">${ent(p.fal)}</td><td class="num">${soles(p.falValor)}</td></tr>`).join('');
-  const dist = datos.distritos.map(d => `<tr><td>${esc(d.nom)}<br><span class="sub">${esc(d.prov)} · ${d.ubigeo}</span></td><td class="num">${ent(d.n)}</td><td class="num">${ent(d.est)}</td><td class="num">${ent(d.rep)}</td><td class="num">${soles(d.total)}</td><td class="num">${d.porEstudiante == null ? '—' : soles(d.porEstudiante)}</td></tr>`).join('');
+  const dist = datos.distritos.map(d => `<tr><td>${esc(d.nom)}<br><span class="sub">${esc(d.prov)} · ${d.ubigeo}</span></td><td class="num">${ent(d.n)}</td><td class="num">${ent(d.est)}</td><td class="num">${ent(d.rep)}</td><td class="num">${soles(d.total)}</td><td class="num">${d.porEstudiante == null ? '—' : soles(d.porEstudiante)}</td><td class="num sub">${ent(d.fal)}</td></tr>`).join('');
   const q = norm(filtroLoc).trim();
   const locs = [...datos.locales].filter(l => !q || l.cod.includes(q) || norm(l.nom).includes(q) || norm(l.dist).includes(q))
     .sort((a, b) => b.total - a.total || a.cod.localeCompare(b.cod));
@@ -171,18 +171,18 @@ function pintarResultados() {
           ${lin('<b>Costo de los bienes (con IGV)</b>', T.bienes, 'fuerte')}${rub('supervision')}${rub('expediente')}${rub('gestion')}${rub('imprevistos')}
           ${lin('<b>TOTAL DE INVERSIÓN</b>', T.total, 'total')}
         </tbody></table></div></div>
-      <div class="panel"><div class="panel-cab"><h3>Faltante, no incluido en el total</h3></div>
-        <p class="sub pad">Bienes por encima de los existentes. Amplían la capacidad de la UP: no se sustentan como reposición (Lineamientos IOARR del MEF, 2.4.C). Se valorizan con los mismos precios, solo como referencia para evaluarlos como ampliación marginal.</p>
+      <div class="panel"><div class="panel-cab"><h3>Faltante (brecha de dotación, no reposición)</h3></div>
+        <p class="sub pad">Lo que falta para llegar a lo requerido. No suma a lo que se repone, al costo ni al Formato 07-C. Amplía la capacidad de la UP: no se sustentan como reposición (Lineamientos IOARR del MEF, 2.4.C). Se valorizan con los mismos precios, solo como referencia para evaluarlos como ampliación marginal.</p>
         <div class="tabla-wrap borde-0"><table class="tabla"><thead><tr><th>Tipo</th><th class="num">Faltante</th><th class="num">Valor referencial</th></tr></thead><tbody>${falt}</tbody>
         <tfoot><tr><td>Total</td><td class="num">${ent(T.fal)}</td><td class="num">${soles(T.falValor)}</td></tr></tfoot></table></div>
-        <p class="sub pad">Metrado total del Selector: ${ent(T.rep)} de reposición + ${ent(T.fal)} de faltante = <b>${ent(T.rep + T.fal)}</b> bienes.</p></div>
+      </div>
     </div>
     <div class="panel"><div class="panel-cab"><h3>Por distrito</h3></div>
-      <div class="tabla-wrap borde-0"><table class="tabla"><thead><tr><th>Distrito</th><th class="num">Locales</th><th class="num">Estudiantes</th><th class="num">Bienes a reponer</th><th class="num">Total</th><th class="num">Por estudiante</th></tr></thead><tbody>${dist}</tbody>
-      <tfoot><tr><td>Total</td><td class="num">${ent(T.locales)}</td><td class="num">${ent(T.est)}</td><td class="num">${ent(T.rep)}</td><td class="num">${soles(T.total)}</td><td class="num">${T.porEstudiante == null ? '—' : soles(T.porEstudiante)}</td></tr></tfoot></table></div></div>
+      <div class="tabla-wrap borde-0"><table class="tabla"><thead><tr><th>Distrito</th><th class="num">Locales</th><th class="num">Estudiantes</th><th class="num">Bienes a reponer</th><th class="num">Total</th><th class="num">Por estudiante</th><th class="num" title="Faltante (brecha de dotación, no reposición): no suma al total">Faltante (no reposición)</th></tr></thead><tbody>${dist}</tbody>
+      <tfoot><tr><td>Total</td><td class="num">${ent(T.locales)}</td><td class="num">${ent(T.est)}</td><td class="num">${ent(T.rep)}</td><td class="num">${soles(T.total)}</td><td class="num">${T.porEstudiante == null ? '—' : soles(T.porEstudiante)}</td><td class="num sub">${ent(T.fal)}</td></tr></tfoot></table></div></div>
     <div class="panel"><div class="panel-cab"><h3>Por local</h3><span class="sub">Ordenados por total</span></div>
       <div class="pad"><input id="exp-buscar" type="search" placeholder="Buscar por código de local, nombre o distrito" value="${esc(filtroLoc)}" autocomplete="off" aria-label="Buscar local"></div>
-      <div class="tabla-wrap borde-0"><table class="tabla"><thead><tr><th>Código de local</th><th>Instituciones</th><th class="num">Estudiantes</th><th class="num">Reposición</th><th class="num">Faltante</th><th class="num">Zona (flete / instal.)</th><th class="num">Costo directo</th><th class="num">Total</th><th>Inventario</th></tr></thead><tbody>${lrows || '<tr><td colspan="9" class="vacio">Ningún local coincide con la búsqueda.</td></tr>'}</tbody></table></div>
+      <div class="tabla-wrap borde-0"><table class="tabla"><thead><tr><th>Código de local</th><th>Instituciones</th><th class="num">Estudiantes</th><th class="num">Reposición</th><th class="num" title="Faltante (brecha de dotación, no reposición): no suma al total">Faltante (no reposición)</th><th class="num">Zona (flete / instal.)</th><th class="num">Costo directo</th><th class="num">Total</th><th>Inventario</th></tr></thead><tbody>${lrows || '<tr><td colspan="9" class="vacio">Ningún local coincide con la búsqueda.</td></tr>'}</tbody></table></div>
       ${pags > 1 ? `<div class="paginacion pad-pag"><span class="sub">${ent(desde + 1)}–${ent(Math.min(locs.length, desde + PAGE))} de ${ent(locs.length)}</span><div class="pg-btns"><button class="btn btn-ghost btn-sm" data-exp-pag="-1" type="button" ${pagLoc === 0 ? 'disabled' : ''}>Anterior</button><span class="mono">${pagLoc + 1} / ${pags}</span><button class="btn btn-ghost btn-sm" data-exp-pag="1" type="button" ${pagLoc >= pags - 1 ? 'disabled' : ''}>Siguiente</button></div></div>` : ''}</div>`;
 }
 
@@ -301,7 +301,7 @@ function modalInventario() {
     <button class="cerrar" type="button" data-cerrar aria-label="Cerrar">×</button>
     <h2 id="m-inv-tit">Inventario verificado en campo</h2>
     <p class="sub" id="inv-local"></p>
-    <p class="sub">Marca los tipos de bien que verificaste y escribe lo que encontraste. En esos tipos, el expediente usa tus cantidades en lugar del Censo Educativo: reposición = malo + % de regular; faltante = requerido − existente. El Selector sigue mostrando el censo.</p>
+    <p class="sub">Marca los tipos de bien que verificaste y escribe lo que encontraste. En esos tipos, el expediente usa tus cantidades en lugar del Censo Educativo: reposición = malo; faltante (brecha de dotación, no reposición) = requerido − existente. El Selector sigue mostrando el censo.</p>
     <div class="tabla-wrap"><table class="tabla tabla-inv"><thead><tr><th>Tipo de bien</th><th class="num">Requerido</th><th class="num">Censo (B / R / M)</th><th>Corregir</th><th>Bueno</th><th>Regular</th><th>Malo</th><th>Año de adquisición</th></tr></thead><tbody id="inv-tbody"></tbody></table></div>
     <p class="sub">El año de adquisición sale del inventario patrimonial o de la placa del bien. Se usa para la antigüedad del Formato 07-C y la memoria; puedes cargarlo aunque no corrijas las cantidades.</p>
     <div class="form-grid">
