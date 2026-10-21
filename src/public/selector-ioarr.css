@@ -340,3 +340,9 @@ table.tabla{ width:100%; border-collapse:collapse; font-size:13px; }
 .ioarr-tabs button .sub{ font-weight:500; margin-left:4px; }
 .ioarr-tabs button[aria-selected="true"] .sub{ color:rgba(255,255,255,.85); }
 .tabla-inv tr.fila-nivel td{ background:var(--surface2); padding-top:10px; }
+/* Cuadro de estado situacional */
+.tabla-sit tr.subtotal td{ background:var(--surface2); font-weight:600; }
+.tabla-sit tr.total td{ font-weight:700; border-top:2px solid var(--border2); }
+.lista-ugel{ border:1px solid var(--border); border-radius:10px; margin-top:8px; }
+.lista-ugel summary{ cursor:pointer; padding:10px 12px; }
+.lista-ugel .tabla-wrap{ border-top:1px solid var(--border); }

@@ -1,6 +1,6 @@
 // Selector IOARR — interfaz. Los datos y el cálculo viven en selector-ioarr-worker.js;
 // los proyectos se guardan en Supabase vía /api/selector-ioarr/* (sesión de sesion.js).
-import { CRIT, DEF, ITEMS, NIVN, NIVS, NIVB, FILTRO_VACIO, limpiarParams, coordValidas, urlGoogleMaps, urlMapaEmbed } from '/selector-ioarr/calculo.js';
+import { CRIT, DEF, ITEMS, NIVN, NIVS, NIVB, FILTRO_VACIO, limpiarParams, coordValidas, urlGoogleMaps, urlMapaEmbed, piTexto } from '/selector-ioarr/calculo.js';
 import { renderExpediente, enlazarExpediente } from '/selector-ioarr-expediente.js';
 
 const ANIO = 2025;
@@ -10,7 +10,6 @@ const FALTANTE = 'Faltante (brecha de dotación, no reposición)';
 const DUP = 'Otra inversión vigente o reciente';
 const ESTADO_DUP = { si: 'Sí', no: 'No', sin_verificar: 'Sin verificar' };
 const dupDe = cod => S.dup[cod] || { estado: 'sin_verificar', codigo: null, nota: null, excluir: false };
-const excluidosCods = () => Object.entries(S.dup).filter(([, d]) => d.estado === 'si' && d.excluir).map(([c]) => c);
 const LS = 'selector-ioarr:';
 const NF = new Intl.NumberFormat('es-PE');
 const fmt = n => NF.format(Math.round(n || 0));
@@ -50,7 +49,8 @@ const S = {
   f: FILTRO_VACIO(), sort: { key: 'rep', dir: -1 }, page: 0, open: new Set(), detalles: new Map(),
   mapas: new Set(), mapsKey: null,                     // mapas satelitales abiertos (índice de local) y llave de Maps Embed
   tab: 'elegir', seq: 0, selPage: 0,
-  dup: {}, sinMigDup: false                            // otra inversión vigente o reciente por local (solo proyectos guardados)
+  dup: {}, sinMigDup: false,                           // otra inversión vigente o reciente por local (solo proyectos guardados)
+  revSit: {}, sit: null                                // estado situacional: advertencias explicadas y último cuadro calculado
 };
 
 // ─── Guardado (borrador en localStorage, proyecto en Supabase) ──────────────
@@ -144,7 +144,7 @@ function pintarProyectos() {
 
 async function abrirBorrador(region) {
   await guardarYa().catch(() => {});
-  S.proyecto = null; store('proyecto', null); S.dup = {}; S.sinMigDup = false;
+  S.proyecto = null; store('proyecto', null); S.dup = {}; S.sinMigDup = false; S.revSit = {};
   const nombre = S.idx.regiones.some(g => g.nombre === region) ? region : (S.idx.regiones.find(g => g.nombre === 'Moquegua') || S.idx.regiones[0]).nombre;
   pintarProyectos();
   await cargarRegion(nombre, limpiarParams(store('params')), store('sel:' + nombre) || []);
@@ -157,7 +157,7 @@ async function abrirProyecto(id) {
   try { p = await api('/proyectos/' + id); }
   catch (e) { toast('No se pudo abrir el proyecto: ' + e.message); $('proy').value = S.proyecto?.id || ''; return; }
   S.proyecto = p; guardado.error = false; store('proyecto', p.id);
-  S.dup = p.duplicidad || {}; S.sinMigDup = !!p.sin_migracion_dup;
+  S.dup = p.duplicidad || {}; S.sinMigDup = !!p.sin_migracion_dup; S.revSit = p.revisiones_situacional || {};
   pintarProyectos();
   await cargarRegion(p.region, limpiarParams(p.criterios), p.locales || []);
 }
@@ -177,7 +177,7 @@ async function cargarRegion(nombre, params, codigos) {
     S.region = nombre;
   } else await w('params', { params });
   await w('sel', { codigos: [...S.sel] });
-  await w('excluidos', { codigos: excluidosCods() });
+  await w('duplicidad', { mapa: S.dup });
   fillFilters();
   S.cargando = false;
   await refresh();
@@ -328,6 +328,7 @@ function stackBar(o) {
 }
 async function renderSel() {
   const T = await w('resumen', { completo: true }), el = $('v-sel');
+  S.sit = T.situacional;
   if (!T.n && !T.nExcl) {
     el.innerHTML = `<div class="panel vacio"><h3 style="color:var(--text);margin-bottom:6px;font-family:var(--font-display)">Aún no hay locales seleccionados</h3><p style="margin:0 0 14px">Vuelve a «Elegir locales» y marca los locales que intervendrás.</p><button class="btn btn-primary" data-ir="elegir" type="button">Elegir locales</button></div>`;
     return;
@@ -362,10 +363,76 @@ async function renderSel() {
       <div class="tabla-wrap"><table class="tabla"><thead><tr><th>Nivel</th><th class="num">Locales</th><th class="num">Estudiantes</th><th class="num">Aulas</th><th class="num">Bueno</th><th class="num">Regular</th><th class="num">Malo</th><th class="num">A reponer</th><th class="num col-fal" title="${FALTANTE}">Faltante (no reposición)</th></tr></thead>
         <tbody>${T.niveles.map(o => `<tr><td>${o.nombre}</td><td class="num">${fmt(o.n)}</td><td class="num">${fmt(o.est)}</td><td class="num">${fmt(o.aul)}</td><td class="num">${fmt(o.b)}</td><td class="num">${fmt(o.r)}</td><td class="num">${fmt(o.m)}</td><td class="num"><b>${fmt(o.rep)}</b></td><td class="num col-fal">${fmt(o.fal)}</td></tr>`).join('')}</tbody></table></div>
       <p class="sub pad">Un local con varios niveles cuenta en cada uno con sus estudiantes y aulas de ese nivel. Con «Una IOARR por nivel» (en Expediente), cada nivel es una IOARR con su propio total.</p></div>
+    ${panelSituacional(T.situacional)}
     <div class="panel"><div class="panel-cab"><h3>Locales seleccionados</h3><div class="acc-cab">${botonesDup(T)}<button class="btn btn-ghost btn-sm btn-peligro" id="clrSel" type="button">Quitar todos</button></div></div>
       ${avisoDup(T)}
       <div class="tabla-wrap"><table class="tabla"><thead><tr><th>Código de local</th><th>Instituciones</th><th>Distrito</th><th>${DUP}</th><th class="num">Estudiantes</th><th class="num">Aulas</th>${ITEMS.map(x => `<th class="num">${x.n}</th>`).join('')}<th class="num">A reponer</th><th class="num col-fal" title="${FALTANTE}">Faltante (no reposición)</th><th>Ubicación</th><th></th></tr></thead><tbody>${lrows}</tbody></table></div>
       ${pags > 1 ? `<div class="paginacion pad-pag"><span class="sub">Mostrando ${fmt(desde + 1)}–${fmt(Math.min(T.locales.length, desde + PAGE))} de ${fmt(T.locales.length)} · ordenados por bienes a reponer</span><div class="pg-btns"><button class="btn btn-ghost btn-sm" data-selpag="-1" type="button" ${S.selPage === 0 ? 'disabled' : ''}>Anterior</button><span class="mono">${S.selPage + 1} / ${pags}</span><button class="btn btn-ghost btn-sm" data-selpag="1" type="button" ${S.selPage >= pags - 1 ? 'disabled' : ''}>Siguiente</button></div></div>` : ''}</div>`;
+}
+
+// ─── Cuadro de estado situacional (formato del expediente de Huánuco) ────────
+const PI_CHIP = { 'Sí': 'alerta', 'No': 'ok', 'Sin verificar': 'pend' };
+function panelSituacional(E) {
+  if (!E) return '';
+  const fila = (cls, a, b, o) => `<tr class="${cls}"><td>${a}</td><td>${b}</td><td class="num">${fmt(o.n)}</td><td class="num">${fmt(o.est)}</td><td class="num">${fmt(o.aul)}</td><td class="num">${fmt(o.b)}</td><td class="num">${fmt(o.r)}</td><td class="num">${fmt(o.m)}</td>
+    <td><span class="chip-est ${PI_CHIP[piTexto(o.pi)]}" title="Sí: ${o.pi.si} · No: ${o.pi.no} · Sin verificar: ${o.pi.sin_verificar}">${piTexto(o.pi)}</span></td></tr>`;
+  const cuerpo = E.niveles.map(x => x.filas.map(f => fila('', x.nombre, esc(f.ugel), f)).join('') + fila('subtotal', `Subtotal ${x.nombre}`, '', x.subtotal)).join('') + fila('total', 'Total', '', E.total);
+  const adv = E.advertencias.map(a => {
+    const r = S.revSit[a.clave];
+    return `<div class="aviso ${r ? '' : 'alerta'}" role="${r ? 'note' : 'alert'}">${esc(a.texto)}${r ? `<br><span class="sub">Explicación: ${esc(r.nota)}</span>` : ''}
+      ${S.proyecto ? `<br><button class="x" type="button" data-sit-rev="${esc(a.clave)}">${r ? 'Cambiar la explicación' : 'Explicar'}</button>` : ''}</div>`;
+  }).join('');
+  const listas = E.listas.map(L => `<details class="lista-ugel"><summary><b>${esc(L.ugel)}</b> <span class="sub">· ${((n) => n === 1 ? '1 local' : fmt(n) + ' locales')(new Set(L.filas.map(x => x.cod)).size)} · ${fmt(L.filas.reduce((a, x) => a + x.est, 0))} estudiantes</span></summary>
+    <div class="tabla-wrap"><table class="tabla"><thead><tr><th>Código de local</th><th>Institución educativa</th><th class="num">Población</th><th>Nivel</th><th>Centro poblado</th><th>Distrito</th><th>UGEL</th></tr></thead>
+    <tbody>${L.filas.map(x => `<tr><td class="mono">${esc(x.cod)}</td><td>${esc(x.inst)}<br><span class="sub mono">${esc(x.modular)}</span></td><td class="num">${fmt(x.est)}</td><td>${x.nombreNivel}</td><td>${esc(x.cp)}</td><td>${esc(x.dist)}</td><td>${esc(x.ugel)}</td></tr>`).join('')}</tbody></table></div></details>`).join('');
+  return `<div class="panel"><div class="panel-cab"><h3>Estado situacional por UGEL y nivel</h3><span class="sub">Formato del expediente de Huánuco (2023)</span></div>
+    <div class="tabla-wrap"><table class="tabla tabla-sit"><thead><tr><th>Nivel</th><th>UGEL</th><th class="num">Locales</th><th class="num">Población de estudiantes</th><th class="num">N.° de aulas</th><th class="num">Mobiliario Bueno</th><th class="num">Mobiliario Regular</th><th class="num">Mobiliario Malo</th><th>Cuenta con proyecto de inversión</th></tr></thead><tbody>${cuerpo}</tbody></table></div>
+    <p class="sub pad">Población: matrícula del padrón. Mobiliario: Censo Educativo, los cinco tipos (mesa en puestos). Un local con varios niveles cuenta en cada nivel. «Cuenta con proyecto de inversión» sale de la columna «${DUP}» de cada local.</p>
+    <div class="pad">${adv ? `<div class="avisos">${adv}</div>` : '<p class="sub">Comprobado: los totales por UGEL suman los totales por nivel y no hay dos UGEL con cifras idénticas.</p>'}</div>
+    <div class="pad"><h4>Locales por UGEL</h4>${listas}</div></div>`;
+}
+const sitPendientes = () => (S.sit?.advertencias || []).filter(a => !S.revSit[a.clave]);
+// Ventana para explicar advertencias: claves = las que se muestran; alExportar = se abrió antes de exportar
+function modalSit() {
+  let m = $('m-sit'); if (m) return m;
+  m = Object.assign(document.createElement('div'), { className: 'modal-overlay', id: 'm-sit' });
+  m.setAttribute('role', 'dialog'); m.setAttribute('aria-modal', 'true'); m.setAttribute('aria-labelledby', 'm-sit-tit');
+  m.innerHTML = `<form class="modal" id="f-sit"><button class="cerrar" type="button" data-cerrar aria-label="Cerrar">×</button>
+    <h2 id="m-sit-tit">Revisa el cuadro de estado situacional</h2>
+    <p class="sub">Un expediente real tuvo dos UGEL con cifras idénticas por error de copia. Explica cada caso (la explicación va al Excel) o corrígelo antes de exportar.</p>
+    <div id="sit-lista"></div><p class="err" id="sit-err" hidden></p>
+    <div class="modal-acts"><button class="btn btn-ghost" type="button" id="sit-sin" hidden>Exportar sin explicar</button><button class="btn btn-primary" type="submit" id="sit-ok">Guardar</button></div></form>`;
+  document.body.append(m);
+  m.addEventListener('click', e => { if (e.target === m || e.target.closest('[data-cerrar]')) cerrarModal('m-sit'); });
+  m.querySelector('#f-sit').addEventListener('submit', guardarSit);
+  m.querySelector('#sit-sin').addEventListener('click', () => { cerrarModal('m-sit'); exportarYa(); });
+  return m;
+}
+let sitExportar = false;
+function abrirSit(claves, alExportar) {
+  const m = modalSit(); sitExportar = alExportar;
+  const advs = (S.sit?.advertencias || []).filter(a => claves.includes(a.clave));
+  m.querySelector('#sit-lista').innerHTML = advs.map(a => `<div class="field"><label>${esc(a.texto)}</label><textarea data-sit-nota="${esc(a.clave)}" rows="2" maxlength="500" placeholder="Ej.: dato verificado con el oficio de la UGEL; ambas UGEL tienen la misma matrícula">${esc(S.revSit[a.clave]?.nota || '')}</textarea></div>`).join('');
+  m.querySelector('#sit-sin').hidden = !alExportar;
+  m.querySelector('#sit-ok').textContent = alExportar ? 'Guardar y exportar' : 'Guardar';
+  m.querySelector('#sit-err').hidden = true;
+  abrirModal('m-sit');
+}
+async function guardarSit(e) {
+  e.preventDefault();
+  const m = modalSit(), btn = m.querySelector('#sit-ok'); btn.disabled = true;
+  try {
+    for (const t of m.querySelectorAll('[data-sit-nota]')) {
+      const clave = t.dataset.sitNota, nota = t.value.trim();
+      if ((S.revSit[clave]?.nota || '') === nota) continue;
+      const r = await api(`/proyectos/${S.proyecto.id}/situacional/revisiones`, { method: 'PUT', body: { clave, nota } });
+      S.revSit = r.revisiones || {};
+    }
+    cerrarModal('m-sit');
+    if (S.tab === 'sel') await renderSel();
+    if (sitExportar) exportarYa();
+  } catch (x) { m.querySelector('#sit-err').textContent = x.message; m.querySelector('#sit-err').hidden = false; }
+  finally { btn.disabled = false; }
 }
 
 // ─── Otra inversión vigente o reciente (duplicidad) ─────────────────────────
@@ -415,7 +482,7 @@ async function guardarDup(e) {
     const r = await api(`/proyectos/${S.proyecto.id}/duplicidad/${encodeURIComponent(cod)}`, { method: 'PUT', body });
     const { cod: _, ...d } = r;
     if (d.estado === 'sin_verificar' && !d.codigo && !d.nota) delete S.dup[cod]; else S.dup[cod] = d;
-    await w('excluidos', { codigos: excluidosCods() });
+    await w('duplicidad', { mapa: S.dup });
     cerrarModal('m-dup'); refresh();
     toast(d.estado === 'si' ? (d.excluir ? 'Local marcado con otra inversión y excluido de la propuesta.' : 'Local marcado con otra inversión. Sigue en la propuesta.') : 'Guardado.');
   } catch (err) { $('d-err').textContent = err.message; $('d-err').hidden = false; }
@@ -425,13 +492,20 @@ async function excluirTodosDup(excluir) {
   try {
     const r = await api(`/proyectos/${S.proyecto.id}/duplicidad/excluir`, { method: 'POST', body: { excluir } });
     S.dup = r.duplicidad || {};
-    await w('excluidos', { codigos: excluidosCods() });
+    await w('duplicidad', { mapa: S.dup });
     refresh(); toast(excluir ? 'Locales con otra inversión excluidos de la propuesta.' : 'Locales con otra inversión incluidos otra vez.');
   } catch (e) { toast('No se pudo cambiar: ' + e.message); }
 }
 
+// Antes de exportar se revisa el cuadro de estado situacional
 async function exportar(btn) {
   if (!S.proyecto) { abrirModalProyecto('nuevo'); return; }
+  const pend = sitPendientes();
+  if (pend.length) { abrirSit(pend.map(a => a.clave), true); return; }
+  return exportarYa(btn);
+}
+async function exportarYa(btn = $('exp')) {
+  if (!btn) return;
   btn.disabled = true; btn.classList.add('cargando'); const txt = btn.textContent; btn.textContent = 'Generando…';
   try {
     await guardarYa();
@@ -638,6 +712,7 @@ function bind() {
     if (rm) { S.sel.delete(rm.dataset.rm); await cambioSel(); refresh(); return; }
     if (e.target.id === 'clrSel') { if (!confirm('¿Quitar todos los locales de la selección?')) return; S.sel.clear(); await cambioSel(); refresh(); return; }
     if (e.target.id === 'exp') { exportar(e.target); return; }
+    const sr = e.target.closest('[data-sit-rev]'); if (sr) { abrirSit([sr.dataset.sitRev], false); return; }
     const dp = e.target.closest('[data-dup]'); if (dp) { abrirDup(dp.dataset.dup); return; }
     if (e.target.id === 'dupExcl') { excluirTodosDup(true); return; }
     if (e.target.id === 'dupIncl') { excluirTodosDup(false); return; }
