@@ -5,7 +5,7 @@ Arma, sobre un proyecto del Selector IOARR, la documentación de una IOARR de re
 1. **Costos** (lista): catálogo de precios, rubros, factores por zona, estructura de costos, Excel con fórmulas y aviso de 75 UIT.
 2. **Documentos** (lista): borrador del Formato 07-C y memoria descriptiva en Word.
 3. **Verificación** (lista): lista de verificación, archivos de sustento y antigüedad del mobiliario.
-4. Vínculos con el kanban OxI y Radar IOARR, y ZIP del expediente.
+4. **Entrega** (lista): ZIP del expediente y vínculos con Radar IOARR y su kanban.
 
 ## Etapa 1: costos
 
@@ -181,3 +181,37 @@ En **Expediente → Verificación**. Se actualiza sola con los costos, el invent
 **Lista de verificación (Word)** descarga la misma lista.
 
 `PATCH /documentos` fusiona lo que recibe con lo ya guardado: Documentos y Verificación mandan solo sus campos.
+
+## Etapa 4: ZIP del expediente y vínculos con Radar IOARR
+
+No hay migración nueva.
+
+### ZIP del expediente
+
+**Expediente → Verificación → Descargar expediente (ZIP)**. También está en Documentos. Ruta: `GET /api/selector-ioarr/proyectos/:id/expediente-zip`. Contiene:
+
+```
+Expediente_IOARR_<proyecto>_<fecha>/
+  00_LEEME.txt                              índice, monto, registro, avance y pendientes
+  01_Formato_07C_borrador.docx
+  02_Memoria_descriptiva.docx
+  03_Lista_de_verificacion.docx
+  04_Estructura_de_costos.xlsx              con fórmulas
+  05_Seleccion_de_locales_y_metrado.xlsx    el Excel del Selector, con la hoja Aulas
+  06_Sustento/<código de local> <nombre>/NN_<Tipo>_<archivo>
+```
+
+- Se arma en flujo (`src/selector-ioarr/zip.js`, con archiver): los archivos del bucket se agregan de a uno, así la memoria no crece con el número de fotos.
+- Los Word y los Excel se generan antes de empezar el envío. Si un archivo del bucket no se puede bajar, el ZIP se entrega igual y `00_LEEME.txt` lo lista.
+- Si el proyecto está vinculado a un CUI, cada descarga registra un **hito** en la línea de tiempo de ese CUI en Radar IOARR, con el monto, el registro y el avance.
+
+### Vínculos con Radar IOARR
+
+Solo los ve el rol **proveedor**. El financista no ve el expediente.
+
+- **Kanban:** la tarjeta del CUI muestra «📁 Expediente» si algún proyecto del Selector está vinculado a él.
+- **Ficha del CUI**, sección «📁 Expediente IOARR»: cada proyecto vinculado, con su total, si es masivo o individual, el tipo de registro y el avance de la verificación. Muestra un aviso si el monto difiere más de 1 % del monto del CUI. El dueño ve el enlace **Abrir el expediente**, que lleva a `selector-ioarr.html?proyecto=<id>&tab=exp`.
+- **En el Expediente:** el CUI vinculado, con su etapa del kanban y su monto. El enlace lleva a `ioarr.html?id=<id>`.
+- **Lista de verificación:** suma el punto «Monto coherente con el CUI», con una tolerancia de 1 %.
+
+Funciones para Radar (`src/selector-ioarr/router.js`): `conteoExpedientes()` y `expedientesDeIoarr(id, usuarioId)`. Esta última usa `api.resumen(p)` de `expediente.js`.

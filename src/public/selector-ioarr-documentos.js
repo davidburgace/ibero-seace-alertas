@@ -3,6 +3,8 @@
 // proyecto (src/selector-ioarr/documentos.js); aquí se cargan los datos que no
 // salen de ahí (UF, UEI, plazo, mantenimiento…). Se guardan solos.
 
+import { bajarZip } from '/selector-ioarr-verificacion.js';
+
 const NS = new Intl.NumberFormat('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const NF = new Intl.NumberFormat('es-PE');
 const soles = n => n == null ? '—' : 'S/ ' + NS.format(n);
@@ -59,7 +61,7 @@ function pintar() {
     ${R.sin_rep.length ? `<div class="avisos"><div class="aviso">No se incluyen como UP ${R.sin_rep.length === 1 ? 'el local' : 'los locales'} sin bienes a reponer: ${R.sin_rep.map(esc).join(', ')}.</div></div>` : ''}
     <div class="exportar">
       <div><h3>Documentos en Word</h3><p>Borrador del Formato 07-C para preparar el registro en el Banco de Inversiones, y memoria descriptiva. Lo que falte sale marcado «PENDIENTE» en amarillo.</p></div>
-      <div class="acciones-fila"><button class="btn btn-primary" data-doc-bajar="formato-07c" type="button">Formato 07-C (Word)</button><button class="btn btn-ghost" data-doc-bajar="memoria" type="button">Memoria descriptiva (Word)</button></div>
+      <div class="acciones-fila"><button class="btn btn-primary" data-doc-bajar="formato-07c" type="button">Formato 07-C (Word)</button><button class="btn btn-ghost" data-doc-bajar="memoria" type="button">Memoria descriptiva (Word)</button><button class="btn btn-ghost" data-doc-zip type="button">Expediente completo (ZIP)</button></div>
     </div>
     <div class="cols">
       <div class="panel"><div class="panel-cab"><h3>Pendientes</h3><span class="guardado" id="doc-guardado"></span></div>
@@ -163,5 +165,9 @@ export function enlazarDocumentos(el) {
   el.addEventListener('input', e => { if (e.target.closest('#doc-form') && e.target.tagName !== 'SELECT') programar(900); });
   el.addEventListener('change', e => { if (e.target.closest('#doc-form') && e.target.tagName === 'SELECT') programar(50); });
   el.addEventListener('submit', e => { if (e.target.id === 'doc-form') e.preventDefault(); });
-  el.addEventListener('click', e => { const b = e.target.closest('[data-doc-bajar]'); if (b) bajar(b); });
+  el.addEventListener('click', e => {
+    const b = e.target.closest('[data-doc-bajar]'); if (b) bajar(b);
+    const z = e.target.closest('[data-doc-zip]');
+    if (z && ctx) { if (tGuardar) { clearTimeout(tGuardar); tGuardar = null; guardar().then(() => bajarZip(ctx, z)); } else bajarZip(ctx, z); }
+  });
 }

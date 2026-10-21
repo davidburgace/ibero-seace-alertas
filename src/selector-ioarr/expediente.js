@@ -33,10 +33,15 @@
 //     GET    /proyectos/:id/documentos/formato-07c  Word del borrador del Formato 07-C
 //     GET    /proyectos/:id/documentos/memoria      Word de la memoria descriptiva
 //     GET    /proyectos/:id/documentos/verificacion Word de la lista de verificación (etapa 3)
+//   Entrega (etapa 4)
+//     GET    /proyectos/:id/expediente-zip          ZIP con los Word, los Excel y el sustento por local
+//   También devuelve api.resumen(p): avance del expediente para Radar IOARR (ficha y kanban)
 // ============================================================================
 
 import express from 'express';
 import multer from 'multer';
+import { escribirZip } from './zip.js';
+import { generarExcel } from './excel.js';
 import { BUCKET_EXPEDIENTE, MAX_ARCHIVO, MAX_POR_LOCAL, TIPOS_ARCHIVO, mimeDe, nombreUtf8, nombreSeguro } from './archivos.js';
 import { supabase } from '../ioarr/db.js';
 import { calc, limpiarParams, CRIT } from './calculo.js';
@@ -443,11 +448,11 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
   async function modelo(p) {
     const [A, { datos, sinMigracion }] = await Promise.all([armar(p), leerDatosDoc(p)]);
     const M = armarModelo({ R: A.R, D: A.D, list: A.list, proyecto: p, datos, precios: A.detalle, inv: A.inv, fecha: hoyLima(), regPct: A.P.regPct });
-    return { M, datos, sinMigracion };
+    return { M, datos, sinMigracion, A };
   }
   // Lo que necesita el formulario: datos guardados, lo que se propone y lo que falta
-  const vistaDoc = ({ M, datos, sinMigracion }) => ({
-    datos, sin_migracion: sinMigracion, estados: ESTADOS_ACTIVO, verificacion: M.verificacion,
+  const vistaDoc = ({ M, datos, sinMigracion }, p) => ({
+    datos, sin_migracion: sinMigracion, estados: ESTADOS_ACTIVO, verificacion: M.verificacion, ioarr: p?.ioarr || null,
     resumen: {
       nombre: M.nombre, nombre_sugerido: M.nombreSugerido, cui: M.cui, masiva: M.masiva, registro: M.registro,
       total: M.F.total, en_uit: M.uit.enUit, uit: M.uit.valor ? { anio: M.uit.anio, valor: M.uit.valor } : null,
@@ -461,7 +466,8 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
   });
 
   api.get('/proyectos/:id/documentos', responder(async (req, res) => {
-    res.json(vistaDoc(await modelo(await proyecto(req))));
+    const p = await proyecto(req);
+    res.json(vistaDoc(await modelo(p), p));
   }));
 
   api.patch('/proyectos/:id/documentos', responder(async (req, res) => {
@@ -471,7 +477,7 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     const datos = limpiarDatosDoc({ ...actual, ...(req.body?.datos || {}) });
     const { error } = await supabase.from('ioarr_expediente_documentos').upsert({ proyecto_id: p.id, datos, actualizado_en: new Date().toISOString() }, { onConflict: 'proyecto_id' });
     if (error) { if (faltaMigracion(error)) return res.status(503).json({ error: AVISO_DOC }); throw error; }
-    res.json(vistaDoc(await modelo(p)));
+    res.json(vistaDoc(await modelo(p), p));
   }));
 
   const WORD = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -513,6 +519,60 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
       'Cache-Control': 'no-store'
     }).send(buffer);
   }));
+
+  // ─── Etapa 4: ZIP del expediente ──────────────────────────────────────────
+  // Se arma en flujo (archiver): los archivos del bucket se agregan de a uno, así
+  // la memoria no crece con el número de fotos.
+  api.get('/proyectos/:id/expediente-zip', responder(async (req, res) => {
+    const p = await proyecto(req), { M, A } = await modelo(p);
+    if (!M.ups.length) return res.status(400).json({ error: 'Ningún local del proyecto tiene bienes a reponer' });
+    const fecha = M.fecha, base = `Expediente_IOARR_${slug(p.nombre)}_${fecha}`;
+    const meta = { proyecto: p.nombre, region: p.region, fecha, ioarr: p.ioarr, fuente: (await leerIndice()).fuente };
+    // Todo lo que puede fallar se genera antes de empezar a enviar
+    const [f07c, memoria, verificacion, costos, { buffer: seleccion }, archivos] = await Promise.all([
+      generar07C(M), generarMemoria(M), generarVerificacion(M),
+      generarExcelCostos(A.R, { ...meta, criterios: textoCriterios(A.P), precios: A.detalle, inventario: A.inv }),
+      generarExcel(A.D, A.C, A.P, A.list, meta),
+      leerArchivos(p.id)
+    ]);
+    const nombreLocal = Object.fromEntries(A.R.locales.map(l => [l.cod, l.nom]));
+    res.set({
+      'Content-Type': 'application/zip', 'Cache-Control': 'no-store',
+      'Content-Disposition': `attachment; filename="${base}.zip"; filename*=UTF-8''${encodeURIComponent(base + '.zip')}`
+    });
+    const descargar = async ruta => {
+      const { data, error } = await supabase.storage.from(BUCKET_EXPEDIENTE).download(ruta);
+      if (error || !data) throw new Error(error?.message || 'sin datos');
+      return Buffer.from(await data.arrayBuffer());
+    };
+    try {
+      await escribirZip(res, {
+        base, archivos, nombreLocal, descargar, M, autor: req.usuario.email, proyecto: p.nombre,
+        piezas: [
+          { nombre: '01_Formato_07C_borrador.docx', contenido: f07c, descripcion: 'borrador del Formato 07-C' },
+          { nombre: '02_Memoria_descriptiva.docx', contenido: memoria },
+          { nombre: '03_Lista_de_verificacion.docx', contenido: verificacion },
+          { nombre: '04_Estructura_de_costos.xlsx', contenido: costos, descripcion: 'con fórmulas' },
+          { nombre: '05_Seleccion_de_locales_y_metrado.xlsx', contenido: seleccion, descripcion: 'metrado por aula del Selector' }
+        ]
+      });
+    } catch (e) { console.error('[EXPEDIENTE][ZIP]', e.message); res.destroy(e); return; }
+    const V = M.verificacion;
+
+    // Hito en la línea de tiempo del CUI vinculado en Radar IOARR (no bloquea la descarga)
+    if (p.ioarr?.id) {
+      const detalle = `Expediente exportado (ZIP) desde Selector IOARR «${p.nombre}»: S/ ${M.F.total.toLocaleString('es-PE', { minimumFractionDigits: 2 })}, registro ${M.registro}, verificación ${V.hechos}/${V.total} — ${req.usuario.email}`;
+      supabase.from('ioarr_eventos').insert({ proyecto_id: p.ioarr.id, tipo: 'hito', detalle })
+        .then(({ error }) => { if (error) console.warn('[EXPEDIENTE] No se pudo registrar el hito:', error.message); });
+    }
+  }));
+
+  // Avance del expediente de un proyecto, para Radar IOARR (ficha y kanban)
+  api.resumen = async (p) => {
+    const { M } = await modelo(p);
+    const V = M.verificacion;
+    return { total: M.F.total, registro: M.registro, masiva: M.masiva, ups: M.ups.length, hechos: V.hechos, puntos: V.total, bloqueos: V.bloqueos, pendientes: M.faltan.length };
+  };
 
   return api;
 }

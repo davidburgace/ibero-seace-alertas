@@ -305,14 +305,25 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, inv = {}, fe
     memoria: { antecedentes: d.antecedentes, objetivo: d.objetivo || `Reponer el mobiliario de aula en mal estado ${masiva ? `de ${n} locales educativos` : 'del local educativo'} de nivel ${nomNiveles.toLowerCase()}, para mantener el nivel y la calidad del servicio educativo que reciben ${est.toLocaleString('es-PE')} estudiantes.` },
     regPct, anioRef, informe_vida_util: d.informe_vida_util,
     faltan, completo: !faltan.length,
-    verificacion: armarVerificacion({ R, ups, activos, condiciones, faltan, precios, U, d, n })
+    ioarr: proyecto.ioarr || null,
+    verificacion: armarVerificacion({ R, ups, activos, condiciones, faltan, precios, U, d, n, ioarr: proyecto.ioarr, total })
   };
 }
 
 // ─── Lista de verificación del expediente ───────────────────────────────────
+// Monto del expediente frente al del CUI vinculado en Radar IOARR (tolerancia 1 %)
+const S2 = n => 'S/ ' + Number(n).toLocaleString('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+function montoCui(ioarr, total) {
+  const texto = `Monto coherente con el CUI ${ioarr.cui} de Radar IOARR.`;
+  if (ioarr.monto_inversion == null) return { texto, estado: 'pendiente', nota: 'El CUI no tiene monto en Radar IOARR.' };
+  const m = Number(ioarr.monto_inversion), dif = m ? (total - m) / m : null;
+  const ok = dif != null && Math.abs(dif) <= 0.01;
+  return { texto, estado: ok ? 'ok' : 'pendiente', nota: ok ? `CUI: ${S2(m)}.` : `CUI: ${S2(m)} · expediente: ${S2(total)} (${dif > 0 ? '+' : ''}${(dif * 100).toFixed(1)} %). Actualiza el monto del CUI o revisa los costos.` };
+}
+
 // Junta lo que el sistema comprueba solo (costos, archivos por local, datos del
 // 07-C, condiciones) y lo que se marca a mano (VERIF_MANUAL).
-function armarVerificacion({ R, ups, activos, condiciones, faltan, precios, U, d, n }) {
+function armarVerificacion({ R, ups, activos, condiciones, faltan, precios, U, d, n, ioarr, total }) {
   const it = (texto, ok, nota = '', extra = {}) => ({ texto, estado: ok === true ? 'ok' : ok === false ? 'pendiente' : ok, nota, ...extra });
   const todos = (f) => n > 0 && ups.every(f);
   const cuenta = (f) => `${ups.filter(f).length} de ${n} ${n === 1 ? 'local' : 'locales'}`;
@@ -326,7 +337,8 @@ function armarVerificacion({ R, ups, activos, condiciones, faltan, precios, U, d
       it('Precio unitario de cada tipo de bien a reponer.', !sinPrecio.length, sinPrecio.length ? 'Falta: ' + sinPrecio.join(', ') : ''),
       it('Descripción técnica de cada tipo de bien (del precio del catálogo).', !sinDesc.length, sinDesc.length ? 'Falta: ' + sinDesc.join(', ') : ''),
       it('Rubros de la estructura de costos cargados.', !R.rubros.every(r => r.valor === 0), R.rubros.every(r => r.valor === 0) ? 'Todos los rubros están en 0.' : ''),
-      it('Valor de la UIT del año.', !!U.valor, U.valor ? `UIT ${U.anio}: S/ ${U.valor.toLocaleString('es-PE')}` : '')
+      it('Valor de la UIT del año.', !!U.valor, U.valor ? `UIT ${U.anio}: S/ ${U.valor.toLocaleString('es-PE')}` : ''),
+      ...(ioarr ? [montoCui(ioarr, total)] : [])
     ] },
     { titulo: 'Locales: visita y sustento', items: [
       it('Visita de campo registrada.', todos(u => u.verificado), cuenta(u => u.verificado)),

@@ -102,9 +102,14 @@ async function boot() {
   $('region').innerHTML = opts; $('m-region').innerHTML = opts;
   $('foot').textContent = `Fuentes: ${S.idx.fuente}. Son datos declarados por cada colegio y no están validados. Incluye servicios públicos escolarizados de Inicial, Primaria, Secundaria y Básica Especial. No hay datos de antigüedad ni de costos.`;
   await listarProyectos();
-  const ultimo = store('proyecto');
+  // ?proyecto=<id>&tab=exp abre un proyecto y su pestaña (enlace desde Radar IOARR)
+  const q = new URLSearchParams(location.search), pedido = q.get('proyecto');
+  const ultimo = pedido && S.proyectos.some(p => p.id === pedido) ? pedido : store('proyecto');
+  if (pedido && ultimo !== pedido) toast('Ese proyecto no está entre los tuyos: solo su dueño puede abrirlo.');
   if (ultimo && S.proyectos.some(p => p.id === ultimo)) await abrirProyecto(ultimo);
   else await abrirBorrador(store('region'));
+  if (q.get('tab') && ['elegir', 'sel', 'exp'].includes(q.get('tab'))) setTab(q.get('tab'));
+  if (pedido) history.replaceState(null, '', location.pathname);
 }
 
 async function listarProyectos() {

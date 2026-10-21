@@ -215,3 +215,52 @@ test('Excel: la hoja «Inventario verificado» trae año de adquisición y antig
   assert.equal(row.getCell(17).value, 2012);
   assert.equal(row.getCell(18).value.result, 14);
 });
+
+// ─── Etapa 4: ZIP del expediente ────────────────────────────────────────────
+test('ZIP: documentos, sustento por local, nombres repetidos, fallos e índice', async () => {
+  const { escribirZip } = await import('../src/selector-ioarr/zip.js');
+  const { PassThrough } = await import('node:stream');
+  const { M } = chiclayo();
+  const partes = [], salida = new PassThrough();
+  salida.on('data', c => partes.push(c));
+  const fin = new Promise(ok => salida.on('end', ok));
+  const archivos = [
+    { cod_local: '276008', tipo: 'acta', nombre_archivo: 'Acta de visita.pdf', ruta: 'r1' },
+    { cod_local: '276008', tipo: 'foto', nombre_archivo: 'foto.jpg', ruta: 'r2' },
+    { cod_local: '276008', tipo: 'foto', nombre_archivo: 'foto.jpg', ruta: 'r3' },
+    { cod_local: '276008', tipo: 'baja', nombre_archivo: 'baja.pdf', ruta: 'falla' }
+  ];
+  const descargar = async ruta => { if (ruta === 'falla') throw new Error('no existe'); return Buffer.from('contenido ' + ruta); };
+  const r = await escribirZip(salida, {
+    base: 'Exp', archivos, descargar, M, autor: 'yo@x.pe', proyecto: 'Chiclayo', nombreLocal: { '276008': '11124 NUESTRA SEÑORA DE LA PAZ' },
+    piezas: [{ nombre: '01_Formato_07C_borrador.docx', contenido: await generar07C(M) }, { nombre: '02_Memoria_descriptiva.docx', contenido: await generarMemoria(M) }]
+  });
+  await fin;
+  const z = await JSZip.loadAsync(Buffer.concat(partes));
+  const nombres = Object.keys(z.files).filter(n => !z.files[n].dir).sort();
+  assert.deepEqual(nombres, [
+    'Exp/00_LEEME.txt', 'Exp/01_Formato_07C_borrador.docx', 'Exp/02_Memoria_descriptiva.docx',
+    'Exp/06_Sustento/276008_11124_NUESTRA_SENORA_DE_LA_PAZ/01_Acta_Acta_de_visita.pdf',
+    'Exp/06_Sustento/276008_11124_NUESTRA_SENORA_DE_LA_PAZ/02_Foto_foto.jpg',
+    'Exp/06_Sustento/276008_11124_NUESTRA_SENORA_DE_LA_PAZ/03_Foto_foto.jpg'
+  ]);
+  assert.equal(await z.file('Exp/06_Sustento/276008_11124_NUESTRA_SENORA_DE_LA_PAZ/02_Foto_foto.jpg').async('string'), 'contenido r2');
+  assert.deepEqual(r.fallidos, ['276008: baja.pdf (no existe)']);
+  const leeme = await z.file('Exp/00_LEEME.txt').async('string');
+  for (const s of ['EXPEDIENTE IOARR — Chiclayo', 'por yo@x.pe', 'registro: abreviado'.replace('registro', 'Registro'), '3 archivo(s) de sustento', 'ARCHIVOS QUE NO SE PUDIERON INCLUIR', 'DATOS PENDIENTES', 'borrador de trabajo'])
+    assert.ok(leeme.includes(s), s);
+  assert.ok((await textoDocx(await z.file('Exp/01_Formato_07C_borrador.docx').async('nodebuffer'))).includes('FORMATO N° 07-C'));
+});
+
+test('monto del CUI en Radar IOARR: coherente hasta 1 %, si no queda pendiente', () => {
+  const D = region('lambayeque'), C = calc(D, DEF), list = [D.locs.findIndex(l => l[0] === '276008')];
+  const R = costear({ D, C, list, precios: PRECIOS, rubros: RUB, factores: [], uit: { anio: 2026, valor: 5500 } });
+  const item = monto => armarModelo({ R, D, list, proyecto: { nombre: 'C', region: 'Lambayeque', ioarr: { id: 'x', cui: '2512345', monto_inversion: monto } }, datos: limpiarDatosDoc({}), precios: DESC, fecha: '2026-10-21' })
+    .verificacion.secciones[0].items.find(x => /CUI 2512345/.test(x.texto));
+  assert.equal(item(R.totales.total * 1.005).estado, 'ok');
+  const mal = item(R.totales.total * 1.2);
+  assert.equal(mal.estado, 'pendiente'); assert.match(mal.nota, /-16\.7 %/);
+  assert.match(item(null).nota, /no tiene monto/);
+  const sinVinculo = armarModelo({ R, D, list, proyecto: { nombre: 'C', region: 'Lambayeque' }, datos: limpiarDatosDoc({}), precios: DESC, fecha: '2026-10-21' });
+  assert.ok(!sinVinculo.verificacion.secciones[0].items.some(x => /CUI/.test(x.texto)));
+});
