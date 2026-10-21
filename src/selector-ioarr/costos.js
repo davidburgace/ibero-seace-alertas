@@ -92,6 +92,24 @@ export function indiceFactores(factores) {
   return idx;
 }
 
+// Mobiliario que el censo reporta en el local i: { mesa: { b, r, m, req }, ... }
+export function censoLocal(C, i) {
+  return Object.fromEntries(TIPOS.map((k, t) => { const o = t * C.nL + i; return [k, { b: C.L.b[o], r: C.L.r[o], m: C.L.m[o], req: C.L.req[o] }]; }));
+}
+
+// Valida el inventario verificado en campo: { mesa: { b, r, m }, ... }, solo tipos conocidos
+export function limpiarInventario(bienes) {
+  const out = {};
+  for (const k of TIPOS) {
+    const x = bienes?.[k];
+    if (!x || typeof x !== 'object') continue;
+    const v = ['b', 'r', 'm'].map(c => Number(x[c] ?? 0));
+    if (v.some(n => !Number.isInteger(n) || n < 0 || n > 1e6)) throw Object.assign(new Error('Cantidades no válidas: usa enteros de 0 o más'), { status: 400 });
+    out[k] = { b: v[0], r: v[1], m: v[2] };
+  }
+  return out;
+}
+
 /**
  * Estructura de costos.
  * @param {object} p
@@ -100,8 +118,13 @@ export function indiceFactores(factores) {
  *   rubros       lista de limpiarRubros()
  *   factores     filas de ioarr_factores_zona
  *   uit          { anio, valor } | null
+ *   inventario   { [codLocal]: { bienes: { mesa: { b, r, m } }, fecha_visita, observacion } } verificado en campo
+ *   regPct       % de Regular que se repone (fracción), para los locales con inventario verificado
+ *
+ * Con inventario verificado, en ese local y tipo se reemplaza el censo:
+ *   Faltante = MAX(0, Requerido − (B + R + M)), Reposición = M + ROUND(R × % de Regular), por local.
  */
-export function costear({ D, C, list, precios, rubros, factores, uit }) {
+export function costear({ D, C, list, precios, rubros, factores, uit, inventario, regPct = 0 }) {
   const R = limpiarRubros(rubros);
   const pu = TIPOS.map(k => Number(precios?.[k]) >= 0 && precios?.[k] != null ? Number(precios[k]) : null);
   const idx = indiceFactores(factores);
@@ -112,11 +135,24 @@ export function costear({ D, C, list, precios, rubros, factores, uit }) {
     const l = D.locs[i], d = D.dists[l[1]];
     const rep = TIPOS.map((_, t) => C.L.rep[t * nL + i] - C.L.fal[t * nL + i]);
     const fal = TIPOS.map((_, t) => C.L.fal[t * nL + i]);
+    const inv = inventario?.[l[0]];
+    let verificado = null;
+    if (inv) {
+      const tipos = [];
+      TIPOS.forEach((k, t) => {
+        const x = inv.bienes?.[k];
+        if (!x) return;
+        fal[t] = Math.max(0, C.L.req[t * nL + i] - (x.b + x.r + x.m));
+        rep[t] = x.m + Math.round(x.r * regPct);
+        tipos.push(k);
+      });
+      if (tipos.length) verificado = { tipos, fecha_visita: inv.fecha_visita, responsable: inv.responsable || null, observacion: inv.observacion };
+    }
     const cdTipo = rep.map((q, t) => q * (pu[t] ?? 0));
     const z = factorZona(d[1], l[4], idx);
     return {
       i, cod: l[0], nom: D.locName[i], dist: d[0], prov: D.provs[d[2]], ubigeo: d[1], rural: !!l[4],
-      est: D.locEst[i], aul: D.locAul[i].length, zona: z, rep, fal, cdTipo,
+      est: D.locEst[i], aul: D.locAul[i].length, zona: z, rep, fal, cdTipo, verificado,
       cd: cdTipo.reduce((a, b) => a + b, 0), falValor: fal.reduce((a, q, t) => a + q * (pu[t] ?? 0), 0), r: {}
     };
   });
@@ -184,6 +220,8 @@ export function costear({ D, C, list, precios, rubros, factores, uit }) {
   if (T.fal > 0) avisos.push({ tipo: 'faltante', texto: 'El faltante (más bienes de los que hoy existen) no entra al costo de inversión: amplía la capacidad de la UP y una IOARR de reposición no se puede sustentar en eso (Lineamientos IOARR del MEF, 2.4.C). Se muestra valorizado aparte, como referencia; corresponde evaluarlo como ampliación marginal.' });
   if (!valorUit) avisos.push({ tipo: 'uit', texto: `Carga el valor de la UIT${U.anio ? ' de ' + U.anio : ''} para saber si el registro del Formato 07-C es abreviado o completo.` });
   else if (U.supera) avisos.push({ tipo: 'uit75', texto: `El total supera las ${LIMITE_UIT} UIT (UIT ${U.anio}): corresponde el registro completo del Formato 07-C (secciones D, E y F).` });
+  const verif = locales.filter(l => l.verificado);
+  if (verif.length) avisos.push({ tipo: 'inventario', texto: `${verif.length === 1 ? '1 local usa' : verif.length + ' locales usan'} inventario verificado en campo en lugar del Censo Educativo (${verif.map(l => l.cod).join(', ')}). Adjunta al expediente el sustento de la visita (acta, fotos, firma del director).` });
   if (R.every(r => r.valor === 0)) avisos.push({ tipo: 'rubros', texto: 'Todos los rubros están en 0. Ingresa los porcentajes o montos de transporte, gastos generales, utilidad, IGV y demás.' });
 
   return { partidas, rubros: rubrosOut, totales: T, locales, distritos, uit: U, avisos };

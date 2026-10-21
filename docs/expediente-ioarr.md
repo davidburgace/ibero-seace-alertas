@@ -58,6 +58,27 @@ Total       = bienes + esos cuatro
 - **Aviso de 75 UIT:** hasta 75 UIT el Formato 07-C va en registro abreviado (sección G); por encima, en registro completo (secciones D, E y F). Fuente: Lineamientos IOARR del MEF y capacitación del MEF de 2021.
 - El sistema no propone precios, porcentajes ni UIT: todos los rubros empiezan en 0 y se avisa lo que falta.
 
+### Inventario verificado en campo (migración 013)
+
+El Censo Educativo lo declara cada colegio y a veces está incompleto. Por ejemplo, el local 276008 (11124 Nuestra Señora de la Paz, Chiclayo) no reporta ninguna mesa, así que sus 569 mesas salen como faltante y no entran al costo. Si en la visita se comprueba que las mesas existen y están en mal estado, se corrige el inventario de ese local:
+
+1. Ejecuta `supabase/migrations/013_ioarr_expediente_inventario.sql`, después de la 012. Crea `ioarr_expediente_inventario`, una fila por proyecto y local, con RLS del dueño del proyecto.
+2. En **Expediente → Por local**, busca el local y pulsa **Corregir inventario**.
+3. Marca los tipos que verificaste, escribe bueno, regular y malo, la fecha de la visita y el sustento (acta, fotos, firma del director).
+
+En esos tipos se reemplaza el censo, por local:
+
+```
+Faltante   = MAX(0, Requerido − (Bueno + Regular + Malo))
+Reposición = Malo + ROUND(Regular × % de Regular)
+```
+
+- Solo cambia el expediente (pantalla y Excel). El Selector sigue mostrando el censo.
+- Se guarda una copia de lo que decía el censo al momento de corregir.
+- Aparece un aviso con los locales corregidos.
+- El Excel trae la columna **Inventario** en «Metrado y costos por local» y la hoja **Inventario verificado**, que compara censo y campo e incluye el sustento.
+- Sin la migración 013, el expediente se calcula con el censo, y al guardar una corrección se avisa que falta ejecutarla.
+
 ### Excel (`src/selector-ioarr/excel-costos.js`)
 
 Hojas: **Resumen**, **Parámetros**, **Partidas**, **Metrado y costos por local** y **Por distrito**. Cada cifra calculada es una fórmula de Excel. Si se cambia un precio, un % o la UIT en **Parámetros**, el libro se recalcula, incluido el texto «Registro que corresponde». Las celdas sin cargar van en amarillo. Las cantidades del metrado van como valor: salen del cálculo por aula del Selector, cuyo Excel trae esas fórmulas en la hoja Aulas.

@@ -293,3 +293,7 @@ table.tabla{ width:100%; border-collapse:collapse; font-size:13px; }
   .tabla-rubros td select{ max-width:150px; }
 }
 .seccion + .seccion{ margin-top:16px; }
+/* Expediente: inventario verificado en campo */
+#exp-buscar{ width:100%; max-width:420px; padding:8px 10px; border:1px solid var(--border2); border-radius:8px; font:inherit; }
+.tabla-inv input[type=number]{ width:80px; padding:6px 8px; border:1px solid var(--border2); border-radius:6px; font:inherit; }
+.tabla-inv input:disabled{ background:var(--surface2); color:var(--muted); }

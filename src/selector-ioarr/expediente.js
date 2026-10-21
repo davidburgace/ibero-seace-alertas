@@ -20,17 +20,21 @@
 //     PATCH  /proyectos/:id/costos              { rubros?, anio_uit? }
 //     PUT    /proyectos/:id/costos/precios/:tipo  { precio_id } fija un precio del catálogo
 //     DELETE /proyectos/:id/costos/precios/:tipo  vuelve a usar el vigente del catálogo
+//     GET    /proyectos/:id/costos/inventario/:cod  censo del local + inventario verificado en campo
+//     PUT    /proyectos/:id/costos/inventario/:cod  { bienes, fecha_visita, responsable?, observacion }  (migración 013)
+//     DELETE /proyectos/:id/costos/inventario/:cod  vuelve a usar el censo
 //     GET    /proyectos/:id/costos/excel
 // ============================================================================
 
 import express from 'express';
 import { supabase } from '../ioarr/db.js';
 import { calc, limpiarParams, CRIT } from './calculo.js';
-import { costear, limpiarRubros, TIPOS, FUENTES_PRECIO } from './costos.js';
+import { costear, limpiarRubros, limpiarInventario, censoLocal, TIPOS, FUENTES_PRECIO } from './costos.js';
 import { generarExcelCostos } from './excel-costos.js';
 
 const AVISO = 'Falta ejecutar supabase/migrations/012_ioarr_expediente_costos.sql en Supabase';
 const faltaMigracion = e => e?.code === 'PGRST204' || e?.code === 'PGRST205' || e?.code === '42P01' || /schema cache|does not exist/i.test(e?.message || '');
+const AVISO_INV = 'Falta ejecutar supabase/migrations/013_ioarr_expediente_inventario.sql en Supabase';
 const esUuid = s => /^[0-9a-f-]{36}$/i.test(String(s || ''));
 const texto = (v, max = 300) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 const fechaValida = s => /^\d{4}-\d{2}-\d{2}$/.test(String(s || '')) && !isNaN(Date.parse(s));
@@ -178,15 +182,23 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     return p;
   }
 
+  // Inventario verificado del proyecto. Sin la migración 013 se calcula con el censo.
+  async function leerInventario(p) {
+    const { data, error } = await supabase.from('ioarr_expediente_inventario').select('*').eq('proyecto_id', p.id);
+    if (error) { if (faltaMigracion(error)) return []; throw error; }
+    return data;
+  }
+
   // Junta todo y calcula. Devuelve también lo necesario para el Excel.
   async function armar(p) {
-    const [fila, fijados, vigentes, factores, D, codigos] = await Promise.all([
+    const [fila, fijados, vigentes, factores, D, codigos, inventario] = await Promise.all([
       supabase.from('ioarr_expediente_costos').select('*').eq('proyecto_id', p.id).maybeSingle().then(ok),
       supabase.from('ioarr_expediente_precios').select('*').eq('proyecto_id', p.id).then(ok),
       supabase.from('ioarr_precios_catalogo').select('*').eq('vigente', true).then(ok),
       supabase.from('ioarr_factores_zona').select('*').then(ok),
       cargarRegion(p.region),
-      leerCodigos(p.id)
+      leerCodigos(p.id),
+      leerInventario(p)
     ]);
     if (!D) { const e = new Error('No hay datos para la región ' + p.region); e.status = 400; throw e; }
     const anioUit = fila?.anio_uit || anioLima();
@@ -211,15 +223,18 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     const cod = new Set(codigos), list = [];
     D.locs.forEach((l, i) => { if (cod.has(l[0])) list.push(i); });
     const P = limpiarParams(p.criterios);
-    const R = costear({ D, C: calc(D, P), list, precios, rubros: fila?.rubros, factores, uit: { anio: anioUit, valor: uit?.valor ?? null } });
-    return { R, P, detalle, anioUit, uit };
+    const C = calc(D, P);
+    const inv = Object.fromEntries(inventario.map(x => [x.cod_local, x]));
+    const R = costear({ D, C, list, precios, rubros: fila?.rubros, factores, uit: { anio: anioUit, valor: uit?.valor ?? null }, inventario: inv, regPct: P.regPct });
+    return { R, P, detalle, anioUit, uit, D, C, list, inv };
   }
 
   const vista = ({ R, detalle, anioUit, uit }) => ({
     anio_uit: anioUit, uit: uit || null, precios: detalle,
     rubros: R.rubros, partidas: R.partidas, totales: R.totales, distritos: R.distritos, uitCalc: R.uit, avisos: R.avisos,
     locales: R.locales.map(l => ({ cod: l.cod, nom: l.nom, dist: l.dist, prov: l.prov, rural: l.rural, est: l.est, zona: l.zona,
-      rep: l.rep.reduce((a, b) => a + b, 0), fal: l.fal.reduce((a, b) => a + b, 0), cd: l.cd, total: l.total }))
+      rep: l.rep.reduce((a, b) => a + b, 0), fal: l.fal.reduce((a, b) => a + b, 0), cd: l.cd, total: l.total,
+      verificado: l.verificado ? { tipos: l.verificado.tipos, fecha_visita: l.verificado.fecha_visita } : null }))
   });
 
   api.get('/proyectos/:id/costos', responder(async (req, res) => {
@@ -257,13 +272,58 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     res.json(vista(await armar(p)));
   }));
 
+  // ─── Inventario verificado en campo ───────────────────────────────────────
+  // Índice del local en la región, solo si está en el proyecto
+  async function localDelProyecto(p, cod) {
+    const codigos = new Set(await leerCodigos(p.id));
+    if (!codigos.has(cod)) { const e = new Error('Ese local no está en el proyecto'); e.status = 404; throw e; }
+    const D = await cargarRegion(p.region);
+    const i = D?.locs.findIndex(l => l[0] === cod) ?? -1;
+    if (i < 0) { const e = new Error('Local no encontrado en los datos de la región'); e.status = 404; throw e; }
+    return { D, i };
+  }
+
+  api.get('/proyectos/:id/costos/inventario/:cod', responder(async (req, res) => {
+    const p = await proyecto(req), cod = String(req.params.cod);
+    const { D, i } = await localDelProyecto(p, cod);
+    const C = calc(D, limpiarParams(p.criterios));
+    const { data, error } = await supabase.from('ioarr_expediente_inventario').select('*').eq('proyecto_id', p.id).eq('cod_local', cod).maybeSingle();
+    if (error && !faltaMigracion(error)) throw error;
+    res.json({ cod, nom: D.locName[i], censo: censoLocal(C, i), verificado: data || null, sin_migracion: !!error });
+  }));
+
+  api.put('/proyectos/:id/costos/inventario/:cod', responder(async (req, res) => {
+    const p = await proyecto(req), cod = String(req.params.cod), b = req.body || {};
+    const { D, i } = await localDelProyecto(p, cod);
+    const bienes = limpiarInventario(b.bienes);
+    if (!Object.keys(bienes).length) return res.status(400).json({ error: 'Marca al menos un tipo de bien para corregir' });
+    if (!fechaValida(b.fecha_visita)) return res.status(400).json({ error: 'Indica la fecha de la visita' });
+    if (b.fecha_visita > hoyLima()) return res.status(400).json({ error: 'La fecha de la visita no puede ser futura' });
+    const observacion = texto(b.observacion, 1000);
+    if (!observacion) return res.status(400).json({ error: 'Describe el sustento de la visita (acta, fotos, quién la hizo)' });
+    const C = calc(D, limpiarParams(p.criterios));
+    const { error } = await supabase.from('ioarr_expediente_inventario').upsert({
+      proyecto_id: p.id, cod_local: cod, bienes, censo: censoLocal(C, i), fecha_visita: b.fecha_visita,
+      responsable: texto(b.responsable, 200) || null, observacion, creado_por: req.usuario.id, actualizado_en: new Date().toISOString()
+    }, { onConflict: 'proyecto_id,cod_local' });
+    if (error) { if (faltaMigracion(error)) return res.status(503).json({ error: AVISO_INV }); throw error; }
+    res.json(vista(await armar(p)));
+  }));
+
+  api.delete('/proyectos/:id/costos/inventario/:cod', responder(async (req, res) => {
+    const p = await proyecto(req);
+    const { error } = await supabase.from('ioarr_expediente_inventario').delete().eq('proyecto_id', p.id).eq('cod_local', String(req.params.cod));
+    if (error && !faltaMigracion(error)) throw error;
+    res.json(vista(await armar(p)));
+  }));
+
   api.get('/proyectos/:id/costos/excel', responder(async (req, res) => {
     const p = await proyecto(req), A = await armar(p);
     if (!A.R.locales.length) return res.status(400).json({ error: 'El proyecto no tiene locales seleccionados' });
     const fecha = hoyLima();
     const buffer = await generarExcelCostos(A.R, {
       proyecto: p.nombre, region: p.region, fecha, ioarr: p.ioarr, fuente: (await leerIndice()).fuente,
-      criterios: textoCriterios(A.P), precios: A.detalle
+      criterios: textoCriterios(A.P), precios: A.detalle, inventario: A.inv
     });
     const archivo = `Costos_IOARR_${slug(p.nombre)}_${fecha}.xlsx`;
     res.set({

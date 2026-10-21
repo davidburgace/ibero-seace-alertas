@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import ExcelJS from 'exceljs';
 import { prep, calc, totals, filtrar, FILTRO_VACIO, DEF } from '../src/selector-ioarr/calculo.js';
-import { costear, limpiarRubros, factorZona, indiceFactores, RUBROS, tipoDesdeDescripcion } from '../src/selector-ioarr/costos.js';
+import { costear, limpiarRubros, limpiarInventario, censoLocal, factorZona, indiceFactores, RUBROS, tipoDesdeDescripcion } from '../src/selector-ioarr/costos.js';
 import { generarExcelCostos } from '../src/selector-ioarr/excel-costos.js';
 
 const DIR = new URL('../src/public/data/selector-ioarr/2025/', import.meta.url);
@@ -128,7 +128,8 @@ test('Excel de costos: hojas, fórmulas y total igual a la pantalla', async () =
   const m = wb.getWorksheet('Metrado y costos por local');
   assert.equal(m.rowCount, 11 + 2);  // cabecera + 11 locales + totales
   // Las cantidades de reposición del Excel suman lo mismo que la pantalla
-  let suma = 0; for (let r = 2; r <= 12; r++) for (let c = 11; c <= 15; c++) suma += m.getRow(r).getCell(c).value;
+  const c0 = m.getRow(1).values.findIndex(v => /– reposición/.test(v || ''));
+  let suma = 0; for (let r = 2; r <= 12; r++) for (let c = c0; c < c0 + 5; c++) suma += m.getRow(r).getCell(c).value;
   assert.equal(suma, R.totales.rep);
 });
 
@@ -177,4 +178,45 @@ test('copiar de Radar IOARR: el tipo de bien se propone por la descripción', ()
     'PIZARRA ACRÍLICA': null, '': null
   };
   for (const [d, t] of Object.entries(casos)) assert.equal(tipoDesdeDescripcion(d), t, d);
+});
+
+test('inventario verificado: las mesas que el censo no reporta pasan de faltante a reposición (Chiclayo, 11124)', () => {
+  const D = prep(JSON.parse(readFileSync(new URL('lambayeque.json', DIR), 'utf8'))), C = calc(D, DEF);
+  const i = D.locs.findIndex(l => l[0] === '276008'), list = [i];
+  const base = { D, C, list, precios: PRECIOS, rubros: RUB, factores: [], uit: { anio: 2026, valor: 1000 } };
+  const censo = censoLocal(C, i);
+  assert.deepEqual(censo.mesa, { b: 0, r: 0, m: 0, req: 569 });
+  const a = costear(base);
+  assert.deepEqual([a.partidas[0].rep, a.partidas[0].fal, a.partidas[1].rep], [0, 569, 189]);
+
+  // Visita: las 569 mesas existen y están en mal estado; las sillas no se tocan
+  const inventario = { '276008': { bienes: limpiarInventario({ mesa: { b: 0, r: 0, m: 569 } }), fecha_visita: '2026-10-20', observacion: 'Acta de visita' } };
+  const b = costear({ ...base, inventario });
+  assert.deepEqual([b.partidas[0].rep, b.partidas[0].fal, b.partidas[1].rep, b.partidas[1].fal], [569, 0, 189, 0]);
+  cerca(b.totales.cd, 569 * PRECIOS.mesa + 189 * PRECIOS.silla, 'CD con las mesas');
+  assert.deepEqual(b.locales[0].verificado.tipos, ['mesa']);
+  assert.ok(b.avisos.some(x => x.tipo === 'inventario'));
+  assert.ok(!b.avisos.some(x => x.tipo === 'faltante'));
+
+  // Con % de Regular y menos de lo requerido: reposición = M + ROUND(R × %), faltante = req − existente
+  const c = costear({ ...base, regPct: 0.5, inventario: { '276008': { bienes: { mesa: { b: 100, r: 101, m: 300 } }, fecha_visita: '2026-10-20', observacion: 'x' } } });
+  assert.deepEqual([c.partidas[0].rep, c.partidas[0].fal], [300 + 51, 569 - 501]);
+
+  assert.throws(() => limpiarInventario({ mesa: { b: -1, r: 0, m: 0 } }), /no válidas/);
+  assert.deepEqual(limpiarInventario({ mesa: { m: 3 }, otro: { m: 1 } }), { mesa: { b: 0, r: 0, m: 3 } });
+});
+
+test('Excel de costos: hoja «Inventario verificado» y columna Inventario', async () => {
+  const D = prep(JSON.parse(readFileSync(new URL('lambayeque.json', DIR), 'utf8'))), C = calc(D, DEF);
+  const i = D.locs.findIndex(l => l[0] === '276008');
+  const fila = { cod_local: '276008', bienes: { mesa: { b: 0, r: 0, m: 569 } }, censo: censoLocal(C, i), fecha_visita: '2026-10-20', responsable: 'Equipo Ibero', observacion: 'Acta firmada por el director' };
+  const R = costear({ D, C, list: [i], precios: PRECIOS, rubros: RUB, factores: [], uit: { anio: 2026, valor: 1000 }, inventario: { '276008': fila } });
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(await generarExcelCostos(R, { proyecto: 'Prueba', region: 'Lambayeque', fecha: '2026-10-21', criterios: '', precios: {}, inventario: { '276008': fila } }));
+  const ws = wb.getWorksheet('Inventario verificado');
+  assert.ok(ws);
+  assert.deepEqual(ws.getRow(4).values.slice(1, 13), ['276008', R.locales[0].nom, 'Mesa del estudiante', 0, 0, 0, 0, 0, 569, 569, 569, 0]);
+  const wm = wb.getWorksheet('Metrado y costos por local');
+  const col = wm.getRow(1).values.indexOf('Inventario');
+  assert.equal(wm.getRow(2).getCell(col).value, 'Verificado en campo 20/10/2026');
 });
