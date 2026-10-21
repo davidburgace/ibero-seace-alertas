@@ -30,6 +30,31 @@ El Excel del Selector trae la hoja nueva **Por distrito** (con SUMIF sobre «Loc
 
 `docs/selector-ioarr/prototipo.html` aplica la misma regla. Las pruebas comparan con él el cálculo completo, por aula y por local.
 
+## Otra inversión vigente o reciente (duplicidad, migración 017)
+
+Ejecuta `supabase/migrations/017_ioarr_selector_duplicidad.sql`, después de la 016. Crea `ioarr_selector_duplicidad`: una fila por proyecto y local, con RLS del dueño del proyecto. Sin fila, el local está «Sin verificar».
+
+- **Mi selección → Locales seleccionados**, columna «Otra inversión vigente o reciente». **Editar** abre una ventana con:
+  - el estado: Sí, No o Sin verificar (por defecto);
+  - el código de la otra inversión (CUI);
+  - una nota opcional;
+  - «Excluir este local de la propuesta», que solo aparece con «Sí» y viene marcado.
+- Los locales marcados «Sí» llevan la etiqueta «Otra inversión» en la tabla de «Elegir locales» y en «Expediente → Por local».
+- **Un local excluido** sigue en la selección, tachado y al final de la lista, pero no entra en:
+  - los totales de la pantalla;
+  - el Excel del Selector, que lo lista en la hoja «Excluidos por duplicidad»;
+  - los costos, el Formato 07-C, la memoria descriptiva, que lo menciona en una nota, ni el ZIP.
+- Botones **Excluir los marcados «Sí»** y **Volver a incluir los excluidos**.
+- El Excel del Selector trae, en «Locales (UP)», las columnas «Otra inversión vigente o reciente» (en rojo si es Sí) y «Código de la otra inversión». En el Resumen, el conteo sí / no / sin verificar.
+- **Avisos del expediente:** un local con «Sí» que sigue en la propuesta (en rojo), los excluidos, los que siguen sin verificar y los «Sí» sin código.
+- **Lista de verificación**, sección Locales, punto «Otra inversión vigente o reciente descartada en cada local»:
+  - se cumple con «No» en todos los locales de la propuesta;
+  - un «Sí» que sigue incluido lo bloquea.
+  - El punto manual «Consulta en el Banco de Inversiones» se mantiene como constancia de la consulta.
+- Al duplicar un proyecto se copian las marcas. Si se quita un local de la selección, su marca se conserva por si se vuelve a agregar.
+- Sin la migración 017, todo queda «Sin verificar» y la columna lo avisa.
+- **Mejora futura:** consultar el Banco de Inversiones en forma automática. Hoy la consulta la hace el usuario.
+
 ## Etapa 1: costos
 
 ### Migración

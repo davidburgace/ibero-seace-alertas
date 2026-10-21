@@ -145,6 +145,30 @@
   </div>
 </div>
 
+<!-- Modal: otra inversión vigente o reciente (duplicidad) -->
+<div class="modal-overlay" id="m-dup" role="dialog" aria-modal="true" aria-labelledby="m-dup-tit">
+  <form class="modal modal-sm" id="f-dup">
+    <button class="cerrar" type="button" data-cerrar aria-label="Cerrar">×</button>
+    <h2 id="m-dup-tit">Otra inversión vigente o reciente</h2>
+    <p class="sub">Local <span class="mono" id="d-cod"></span>. Consulta en el Banco de Inversiones del MEF si el local ya tiene otra inversión, vigente o reciente, que incluya su mobiliario.</p>
+    <fieldset class="radios"><legend>¿Tiene otra inversión?</legend>
+      <label class="chk"><input type="radio" name="d-estado" value="sin_verificar"> Sin verificar</label>
+      <label class="chk"><input type="radio" name="d-estado" value="no"> No</label>
+      <label class="chk"><input type="radio" name="d-estado" value="si"> Sí</label>
+    </fieldset>
+    <div id="d-si">
+      <div class="field"><label for="d-codigo">Código de la inversión (CUI)</label><input id="d-codigo" type="text" maxlength="30" placeholder="Ej.: 2512345" autocomplete="off" inputmode="numeric"></div>
+      <label class="chk"><input type="checkbox" id="d-excluir"> Excluir este local de la propuesta</label>
+    </div>
+    <div class="field"><label for="d-nota">Nota (opcional)</label><textarea id="d-nota" rows="3" maxlength="500" placeholder="Ej.: consulta del 21/10/2026; la inversión 2512345 solo cubre la infraestructura"></textarea></div>
+    <p class="err" id="d-err" hidden></p>
+    <div class="modal-acts">
+      <button class="btn btn-ghost" type="button" data-cerrar>Cancelar</button>
+      <button class="btn btn-primary" type="submit" id="d-ok">Guardar</button>
+    </div>
+  </form>
+</div>
+
 <div class="toast" id="toast" role="status" hidden></div>
 
 <script type="module" src="selector-ioarr.js"></script>

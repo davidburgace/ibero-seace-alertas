@@ -49,6 +49,7 @@ import { costear, limpiarRubros, limpiarInventario, limpiarAdquisicion, censoLoc
 import { generarExcelCostos } from './excel-costos.js';
 import { armarModelo, limpiarDatosDoc, ESTADOS_ACTIVO } from './documentos.js';
 import { generar07C, generarMemoria, generarVerificacion } from './word.js';
+import { leerDuplicidad, separarLocales, estadoDe, avisosDuplicidad } from './duplicidad.js';
 
 const AVISO = 'Falta ejecutar supabase/migrations/012_ioarr_expediente_costos.sql en Supabase';
 const faltaMigracion = e => e?.code === 'PGRST204' || e?.code === 'PGRST205' || e?.code === '42P01' || /schema cache|does not exist/i.test(e?.message || '');
@@ -237,7 +238,7 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
 
   // Junta todo y calcula. Devuelve también lo necesario para el Excel.
   async function armar(p) {
-    const [fila, fijados, vigentes, factores, D, codigos, inventario, archivos] = await Promise.all([
+    const [fila, fijados, vigentes, factores, D, codigos, inventario, archivos, dup] = await Promise.all([
       supabase.from('ioarr_expediente_costos').select('*').eq('proyecto_id', p.id).maybeSingle().then(ok),
       supabase.from('ioarr_expediente_precios').select('*').eq('proyecto_id', p.id).then(ok),
       supabase.from('ioarr_precios_catalogo').select('*').eq('vigente', true).then(ok),
@@ -245,7 +246,8 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
       cargarRegion(p.region),
       leerCodigos(p.id),
       leerInventario(p),
-      leerArchivos(p.id)
+      leerArchivos(p.id),
+      leerDuplicidad(supabase, p.id)
     ]);
     if (!D) { const e = new Error('No hay datos para la región ' + p.region); e.status = 400; throw e; }
     const anioUit = fila?.anio_uit || anioLima();
@@ -267,25 +269,28 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
       precios[t] = detalle[t].precio;
     }
 
-    const cod = new Set(codigos), list = [];
-    D.locs.forEach((l, i) => { if (cod.has(l[0])) list.push(i); });
+    // Los locales con otra inversión vigente o reciente que se excluyeron no entran a la propuesta
+    const { list, excluidos } = separarLocales(D, codigos, dup.mapa);
     const P = limpiarParams(p.criterios);
     const C = calc(D, P);
     const inv = Object.fromEntries(inventario.map(x => [x.cod_local, { ...x, archivos: archivos.filter(a => a.cod_local === x.cod_local).map(sinRuta) }]));
     const R = costear({ D, C, list, precios, rubros: fila?.rubros, factores, uit: { anio: anioUit, valor: uit?.valor ?? null }, inventario: inv });
+    for (const l of R.locales) l.duplicidad = estadoDe(dup.mapa, l.cod);
+    R.excluidos = excluidos.map(i => ({ cod: D.locs[i][0], nom: D.locName[i], dist: D.dists[D.locs[i][1]][0], rep: C.L.repTot[i], ...estadoDe(dup.mapa, D.locs[i][0]) }));
+    R.avisos.push(...avisosDuplicidad(dup.mapa, codigos));
     // Sustento: cada local corregido debería tener al menos el acta de la visita
     const sinActa = R.locales.filter(l => l.verificado && !inv[l.cod].archivos.some(a => a.tipo === 'acta')).map(l => l.cod);
     if (sinActa.length) R.avisos.push({ tipo: 'sustento', texto: `Falta adjuntar el acta de verificación de: ${sinActa.join(', ')}. Súbela en «Corregir inventario» del local, con las fotos y el inventario patrimonial.` });
-    return { R, P, detalle, anioUit, uit, D, C, list, inv };
+    return { R, P, detalle, anioUit, uit, D, C, list, inv, dup: dup.mapa, excluidos };
   }
 
   const vista = ({ R, detalle, anioUit, uit, inv }) => ({
     anio_uit: anioUit, uit: uit || null, precios: detalle,
-    rubros: R.rubros, partidas: R.partidas, totales: R.totales, distritos: R.distritos, uitCalc: R.uit, avisos: R.avisos,
+    rubros: R.rubros, partidas: R.partidas, totales: R.totales, distritos: R.distritos, uitCalc: R.uit, avisos: R.avisos, excluidos: R.excluidos,
     locales: R.locales.map(l => ({ cod: l.cod, nom: l.nom, dist: l.dist, prov: l.prov, rural: l.rural, est: l.est, zona: l.zona,
       rep: l.rep.reduce((a, b) => a + b, 0), fal: l.fal.reduce((a, b) => a + b, 0), cd: l.cd, total: l.total,
       verificado: l.verificado ? { tipos: l.verificado.tipos, fecha_visita: l.verificado.fecha_visita } : null,
-      archivos: inv?.[l.cod]?.archivos.length || 0 }))
+      archivos: inv?.[l.cod]?.archivos.length || 0, duplicidad: l.duplicidad }))
   });
 
   api.get('/proyectos/:id/costos', responder(async (req, res) => {
@@ -531,7 +536,7 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     const [f07c, memoria, verificacion, costos, { buffer: seleccion }, archivos] = await Promise.all([
       generar07C(M), generarMemoria(M), generarVerificacion(M),
       generarExcelCostos(A.R, { ...meta, criterios: textoCriterios(A.P), precios: A.detalle, inventario: A.inv }),
-      generarExcel(A.D, A.C, A.P, A.list, meta),
+      generarExcel(A.D, A.C, A.P, A.list, { ...meta, duplicidad: A.dup, excluidos: A.excluidos }),
       leerArchivos(p.id)
     ]);
     const nombreLocal = Object.fromEntries(A.R.locales.map(l => [l.cod, l.nom]));

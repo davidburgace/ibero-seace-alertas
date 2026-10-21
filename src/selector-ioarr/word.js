@@ -90,7 +90,8 @@ const aviso = M => [
 ];
 
 // ─── Secciones comunes ──────────────────────────────────────────────────────
-const notaSinRep = M => M.sinRep.length ? [nota(`No se incluyen como UP ${M.sinRep.length === 1 ? 'el local' : 'los ' + M.sinRep.length + ' locales'} del proyecto sin bienes a reponer: ${M.sinRep.map(x => x.cod + (x.fal ? ` (${ent(x.fal)} faltantes)` : '')).join(', ')}.`)] : [];
+const notaSinRep = M => M.sinRep.length ? [nota(`No se incluyen como UP ${M.sinRep.length === 1 ? 'el local' : 'los ' + M.sinRep.length + ' locales'} del proyecto sin bienes a reponer: ${M.sinRep.map(x => x.cod + (x.fal ? ` (${ent(x.fal)} faltantes)` : '')).join(', ')}.`)] : []
+const notaExcluidos = M => M.excluidos?.length ? [nota(`Se excluyen ${M.excluidos.length === 1 ? 'el local' : 'los ' + M.excluidos.length + ' locales'} con otra inversión vigente o reciente, para evitar duplicidad: ${M.excluidos.map(x => x.cod + (x.codigo ? ` (inversión ${x.codigo})` : '')).join(', ')}.`)] : [];
 
 const tablaUPs = M => tabla(['Código de local (UP)', 'Institución educativa (códigos modulares)', 'Ubicación', 'Coordenadas', 'Estudiantes'],
   M.ups.map(u => [u.cod, `${u.nombre}\n${u.modulares.join(', ')}`, `${u.cp}, ${u.dist}, ${u.prov}, ${u.dpto}`.toLocaleUpperCase('es-PE') + (u.direccion ? '\n' + u.direccion : ''),
@@ -210,7 +211,7 @@ export async function generar07C(M) {
       c.push(espacio());
       c.push(kv([['Nombre genérico de la UP', M.niveles.map(x => 'INSTITUCIÓN EDUCATIVA DE NIVEL ' + x).join('; ')], ['Ámbito geográfico', M.ambito]]));
       c.push(p('Las UP y los activos a reponer:', { bold: true, before: 120 }));
-      c.push(tablaUPs(M), ...notaSinRep(M));
+      c.push(tablaUPs(M), ...notaSinRep(M), ...notaExcluidos(M));
     } else {
       for (const a of M.E.activos) {
         c.push(p(a.nombre, { bold: true, before: 120 }));
@@ -241,7 +242,7 @@ export async function generar07C(M) {
     c.push(tablaMetas(M));
     c.push(p('Cronograma de ejecución (S/):', { bold: true, before: 120 }));
     c.push(...cronogramas(M));
-    if (M.masiva) { c.push(p('Las UP y los activos a reponer:', { bold: true, before: 120 })); c.push(tablaUPs(M), ...notaSinRep(M)); }
+    if (M.masiva) { c.push(p('Las UP y los activos a reponer:', { bold: true, before: 120 })); c.push(tablaUPs(M), ...notaSinRep(M), ...notaExcluidos(M)); }
     c.push(titulo('G.3 Costo de mantenimiento (S/)', 2));
     c.push(...mantenimiento(M, false));
   }
@@ -271,7 +272,7 @@ export async function generarMemoria(M) {
 
   c.push(titulo('4. Ubicación y unidades productoras'));
   c.push(p(`La intervención comprende ${M.ups.length === 1 ? 'un local educativo' : M.ups.length + ' locales educativos'} de nivel ${M.niveles.join(', ').toLowerCase()} de la región ${M.region}${M.ugels.length ? ', bajo ' + (M.ugels.length === 1 ? 'la ' + M.ugels[0] : 'las ' + M.ugels.join(', ')) : ''}.`));
-  c.push(tablaUPs(M), ...notaSinRep(M));
+  c.push(tablaUPs(M), ...notaSinRep(M), ...notaExcluidos(M));
 
   c.push(titulo('5. Diagnóstico de la situación actual'));
   c.push(p(`${M.ups.length === 1 ? 'El local atiende' : 'Los locales atienden'} a ${ent(M.est)} estudiantes en ${ent(M.aulas)} aulas. Estado del mobiliario por tipo de bien${M.ups.some(u => u.verificado) ? ' (con el inventario verificado en campo donde lo hay)' : ''}. Se repone solo el estado malo; el faltante es brecha de dotación y no se repone:`));

@@ -10,6 +10,9 @@
 //
 // /api/selector-ioarr/* queda bajo crearProteccionApi(): sesión y rol proveedor.
 // Proyectos y locales en Supabase: supabase/migrations/011_ioarr_selector.sql
+// Otra inversión vigente o reciente por local: 017_ioarr_selector_duplicidad.sql
+//   PUT  /api/selector-ioarr/proyectos/:id/duplicidad/:cod   { estado, codigo?, nota?, excluir? }
+//   POST /api/selector-ioarr/proyectos/:id/duplicidad/excluir { excluir } a todos los marcados Sí
 // ============================================================================
 
 import express from 'express';
@@ -20,6 +23,7 @@ import { supabase } from '../ioarr/db.js';
 import { prep, calc, limpiarParams } from './calculo.js';
 import { generarExcel } from './excel.js';
 import { crearApiExpediente, borrarArchivosProyecto } from './expediente.js';
+import { leerDuplicidad, limpiarDuplicidad, aFila, deFila, esVacia, separarLocales, AVISO_DUP } from './duplicidad.js';
 
 export const ANIO_DATOS = 2025;
 const DIR_DATOS = fileURLToPath(new URL('../public/data/selector-ioarr/', import.meta.url));
@@ -157,7 +161,8 @@ api.get('/proyectos/:id', async (req, res, next) => {
   try {
     const p = await proyectoDelUsuario(req);
     if (!p) return res.status(404).json({ error: 'Proyecto no encontrado' });
-    res.json({ ...p, locales: await leerCodigos(p.id) });
+    const [locales, dup] = await Promise.all([leerCodigos(p.id), leerDuplicidad(supabase, p.id)]);
+    res.json({ ...p, locales, duplicidad: dup.mapa, sin_migracion_dup: dup.sinMigracion });
   } catch (e) { enviarError(res, next)(e); }
 });
 
@@ -199,6 +204,37 @@ api.put('/proyectos/:id/locales', async (req, res, next) => {
   } catch (e) { enviarError(res, next)(e); }
 });
 
+// ─── Otra inversión vigente o reciente (duplicidad) ─────────────────────────
+// Solo para locales del proyecto. «Sin verificar» sin código ni nota borra la fila.
+api.put('/proyectos/:id/duplicidad/:cod', async (req, res, next) => {
+  try {
+    const p = await proyectoDelUsuario(req);
+    if (!p) return res.status(404).json({ error: 'Proyecto no encontrado' });
+    const cod = String(req.params.cod);
+    if (!(await leerCodigos(p.id)).includes(cod)) return res.status(404).json({ error: 'Ese local no está en el proyecto' });
+    let d;
+    try { d = limpiarDuplicidad(req.body || {}); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
+    const t = supabase.from('ioarr_selector_duplicidad');
+    const { data, error } = esVacia(d)
+      ? await t.delete().eq('proyecto_id', p.id).eq('cod_local', cod).then(r => ({ ...r, data: null }))
+      : await t.upsert(aFila(p.id, cod, d, req.usuario.id), { onConflict: 'proyecto_id,cod_local' }).select('*').single();
+    if (error) return faltaMigracion(error) ? res.status(503).json({ error: AVISO_DUP }) : next(error);
+    res.json({ cod, ...(data ? deFila(data) : { estado: 'sin_verificar', codigo: null, nota: null, excluir: false }) });
+  } catch (e) { next(e); }
+});
+
+// Excluir (o volver a incluir) todos los locales marcados «Sí»
+api.post('/proyectos/:id/duplicidad/excluir', async (req, res, next) => {
+  try {
+    const p = await proyectoDelUsuario(req);
+    if (!p) return res.status(404).json({ error: 'Proyecto no encontrado' });
+    const { error } = await supabase.from('ioarr_selector_duplicidad').update({ excluir: !!req.body?.excluir, actualizado_por: req.usuario.id })
+      .eq('proyecto_id', p.id).eq('estado', 'si');
+    if (error) return faltaMigracion(error) ? res.status(503).json({ error: AVISO_DUP }) : next(error);
+    res.json({ duplicidad: (await leerDuplicidad(supabase, p.id)).mapa });
+  } catch (e) { next(e); }
+});
+
 // Duplicar: { nombre? }
 api.post('/proyectos/:id/duplicar', async (req, res, next) => {
   try {
@@ -212,7 +248,13 @@ api.post('/proyectos/:id/duplicar', async (req, res, next) => {
     if (error) throw error;
     const codigos = await leerCodigos(p.id);
     await insertarCodigos(data.id, codigos);
-    res.status(201).json({ ...data, locales: codigos });
+    // La copia conserva lo verificado sobre otras inversiones
+    const { mapa } = await leerDuplicidad(supabase, p.id), filas = Object.entries(mapa).map(([c, d]) => aFila(data.id, c, d, req.usuario.id));
+    for (let i = 0; i < filas.length; i += LOTE) {
+      const { error: e } = await supabase.from('ioarr_selector_duplicidad').insert(filas.slice(i, i + LOTE));
+      if (e) throw e;
+    }
+    res.status(201).json({ ...data, locales: codigos, duplicidad: mapa });
   } catch (e) { enviarError(res, next)(e); }
 });
 
@@ -246,13 +288,13 @@ api.get('/proyectos/:id/excel', async (req, res, next) => {
     if (!p) return res.status(404).json({ error: 'Proyecto no encontrado' });
     const D = await cargarRegion(p.region);
     if (!D) return res.status(400).json({ error: 'No hay datos para la región ' + p.region });
-    const codigos = new Set(await leerCodigos(p.id));
-    const list = []; D.locs.forEach((l, i) => { if (codigos.has(l[0])) list.push(i); });
-    if (!list.length) return res.status(400).json({ error: 'El proyecto no tiene locales seleccionados' });
+    const [cods, { mapa }] = await Promise.all([leerCodigos(p.id), leerDuplicidad(supabase, p.id)]);
+    const { list, excluidos } = separarLocales(D, cods, mapa);
+    if (!list.length) return res.status(400).json({ error: excluidos.length ? 'Todos los locales del proyecto están excluidos por otra inversión vigente o reciente' : 'El proyecto no tiene locales seleccionados' });
     const P = limpiarParams(p.criterios);
     const fecha = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Lima' }).format(new Date());
     const { buffer } = await generarExcel(D, calc(D, P), P, list, {
-      proyecto: p.nombre, fecha, fuente: (await leerIndice()).fuente, ioarr: p.ioarr
+      proyecto: p.nombre, fecha, fuente: (await leerIndice()).fuente, ioarr: p.ioarr, duplicidad: mapa, excluidos
     });
     const archivo = `IOARR_${slug(p.nombre)}_${fecha}.xlsx`;
     res.set({
