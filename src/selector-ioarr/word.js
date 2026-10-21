@@ -3,6 +3,7 @@
 //
 //   generar07C(M)      Borrador del Formato 07-C: Registro de IOARR
 //   generarMemoria(M)  Memoria descriptiva
+//   generarVerificacion(M)  Lista de verificación del expediente
 // M es el modelo de armarModelo() (src/selector-ioarr/documentos.js).
 // ============================================================================
 
@@ -65,6 +66,9 @@ function tabla(cab, filas, { num = [], anchos, size } = {}) {
 // Tabla de dos columnas: etiqueta | valor
 const kv = (filas, anchos = [38, 62]) => tabla(null, filas.map(([k, v, o = {}]) => [{ v: k, gris: true, bold: true }, { v: v == null || v === '' ? PEND : v, ...o }]), { anchos });
 const espacio = () => new Paragraph({ children: [], spacing: { after: 80 } });
+// De dónde sale la antigüedad: la cargó el usuario o es el promedio del año de adquisición por local
+const origenAnt = a => a.antiguedad_origen === 'inventario' && a.antiguedad_inventario
+  ? ` (promedio según el año de adquisición en ${a.antiguedad_inventario.con} de ${a.antiguedad_inventario.de} locales${a.antiguedad_inventario.min !== a.antiguedad_inventario.max ? `; de ${a.antiguedad_inventario.min} a ${a.antiguedad_inventario.max} años` : ''})` : '';
 const siNo = v => v === 'si' ? 'Sí' : v === 'no' ? 'No' : PEND;
 const trozos = (xs, k) => { const out = []; for (let i = 0; i < xs.length; i += k) out.push([i, xs.slice(i, i + k)]); return out; };
 
@@ -210,7 +214,7 @@ export async function generar07C(M) {
     } else {
       for (const a of M.E.activos) {
         c.push(p(a.nombre, { bold: true, before: 120 }));
-        c.push(kv([['Antigüedad del mobiliario a reponer (años)', a.antiguedad == null ? null : String(a.antiguedad)], ['Estado actual del mobiliario a reponer', a.estado],
+        c.push(kv([['Antigüedad del mobiliario a reponer (años)', a.antiguedad == null ? null : String(a.antiguedad) + origenAnt(a)], ['Estado actual del mobiliario a reponer', a.estado],
           ['Costo anual de mantenimiento del mobiliario a reponer (S/)', a.mant_actual == null ? null : NS.format(a.mant_actual)],
           ['Expectativa de vida útil del mobiliario nuevo (años)', a.vida_util == null ? null : String(a.vida_util)],
           ['Costo anual de mantenimiento del mobiliario nuevo (S/)', a.mant_nuevo == null ? null : NS.format(a.mant_nuevo)]], [60, 40]));
@@ -281,9 +285,19 @@ export async function generarMemoria(M) {
   for (const x of M.E.sustento) c.push(p(x));
   c.push(p('Condiciones de los Lineamientos IOARR (MEF, 9.ª versión, junio 2025):', { bold: true, before: 120 }));
   c.push(tabla(['Condición', 'Estado', 'Observación'], M.E.condiciones.map(x => [x.texto, { v: x.estado === 'cumple' ? 'Cumple' : x.estado === 'no' ? 'No cumple' : PEND, pend: x.estado !== 'cumple' }, x.nota]), { anchos: [46, 14, 40] }));
-  if (M.E.activos.some(a => a.antiguedad != null || a.estado)) {
-    c.push(p('Antigüedad y estado del mobiliario a reponer:', { bold: true, before: 120 }));
-    c.push(tabla(['Tipo de bien', 'Antigüedad (años)', 'Estado actual', 'Vida útil del nuevo (años)'], M.E.activos.map(a => [a.nombre, { v: a.antiguedad == null ? PEND : String(a.antiguedad) }, a.estado || PEND, { v: a.vida_util == null ? PEND : String(a.vida_util) }]), { num: [1, 3] }));
+  c.push(p('Antigüedad y vida útil del mobiliario a reponer:', { bold: true, before: 120 }));
+  c.push(tabla(['Tipo de bien', 'Antigüedad (años)', 'Vida útil estimada (años)', 'Estado actual', 'Vida útil del nuevo (años)'], M.E.activos.map(a => [a.nombre,
+    { v: a.antiguedad == null ? PEND : String(a.antiguedad) + (a.antiguedad_origen === 'inventario' ? '*' : '') },
+    { v: a.vida_estimada == null ? (M.regPct > 0 ? PEND : '—') : String(a.vida_estimada) }, a.estado || (M.supera && !M.masiva ? PEND : '—'),
+    { v: a.vida_util == null ? PEND : String(a.vida_util) }]), { num: [1, 2, 4] }));
+  if (M.E.activos.some(a => a.antiguedad_origen === 'inventario')) c.push(nota(`* Promedio ponderado por la cantidad a reponer, según el año de adquisición registrado en cada local (año de referencia ${M.anioRef}).`));
+  if (M.informe_vida_util) c.push(nota('Vida útil estimada según: ' + M.informe_vida_util));
+  const conAnios = M.ups.filter(u => Object.keys(u.verificado?.adquisicion || {}).length);
+  if (conAnios.length) {
+    const ks = M.E.activos.map(a => a.k);
+    c.push(p('Año de adquisición por local:', { bold: true, before: 120 }));
+    c.push(tabla(['Código de local', 'Institución educativa', ...M.E.activos.map(a => a.nombre)], conAnios.map(u => [u.cod, u.nombre,
+      ...ks.map(k => u.verificado.adquisicion[k] ? `${u.verificado.adquisicion[k]} (${M.anioRef - u.verificado.adquisicion[k]} años)` : '—')]), { size: 15 }));
   }
 
   c.push(titulo('7. Descripción de la intervención'));
@@ -328,4 +342,26 @@ export async function generarMemoria(M) {
   } else c.push(vinieta('PENDIENTE: acta de verificación, fotos, inventario patrimonial y sustento de baja de cada local.'));
   c.push(nota('Fuentes: Padrón de ESCALE y Censo Educativo 2025 (Minedu), datos declarados por cada colegio; Lineamientos IOARR del MEF (9.ª versión, junio 2025). Los precios, porcentajes y la UIT los cargó el equipo.'));
   return Packer.toBuffer(documento(M, 'Memoria descriptiva', c));
+}
+
+// ─── Lista de verificación ──────────────────────────────────────────────────
+export async function generarVerificacion(M) {
+  const V = M.verificacion, c = [];
+  const ESTADO = { ok: 'Listo', pendiente: PEND, no: 'No cumple' };
+  c.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 60 }, children: [run('LISTA DE VERIFICACIÓN DEL EXPEDIENTE IOARR', { bold: true, size: 28 })] }));
+  c.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 200 }, children: [run(M.nombre, { bold: true, size: 20 })] }));
+  c.push(kv([['Proyecto', M.proyecto], ['Tipo', M.masiva ? `Inversión masiva de reposición · ${M.ups.length} UP` : 'IOARR de reposición · 1 UP'],
+    ['Registro', M.registro === 'pendiente' ? null : M.registro === 'completo' ? 'Completo (más de 75 UIT)' : 'Abreviado (hasta 75 UIT)'], ['Monto', soles(M.F.total)],
+    ['Avance', `${V.hechos} de ${V.total} puntos listos${V.bloqueos ? ` · ${V.bloqueos} no cumple${V.bloqueos === 1 ? '' : 'n'}` : ''}`], ['Fecha', M.fecha]]));
+  for (const sec of V.secciones) {
+    c.push(titulo(sec.titulo));
+    c.push(tabla(['Punto', 'Estado', 'Observación'], sec.items.map(x => [x.texto, { v: ESTADO[x.estado], pend: x.estado !== 'ok', bold: x.estado === 'no' }, x.nota]), { anchos: [54, 14, 32], size: 17 }));
+    if (sec.titulo.startsWith('Formato 07-C') && M.faltan.length) { c.push(p('Pendientes:', { bold: true, before: 120 })); M.faltan.forEach(x => c.push(vinieta(x))); }
+  }
+  c.push(titulo('Sustento por local'));
+  const sn = v => v ? 'Sí' : PEND;
+  c.push(tabla(['Código de local', 'Institución educativa', 'Visita', 'Acta', 'Fotos', 'Inventario patrimonial', 'Baja', 'Año de adquisición'],
+    V.locales.map(u => [u.cod, u.nombre, u.visita ? u.visita.split('-').reverse().join('/') : PEND, sn(u.acta), u.fotos ? String(u.fotos) : PEND, sn(u.inventario), sn(u.baja), sn(u.anio)]), { size: 15, anchos: [11, 31, 12, 8, 8, 12, 8, 10] }));
+  c.push(nota('Los puntos de «Documentos y coordinaciones» se marcan a mano en Selector IOARR → Expediente → Verificación. Esta lista no reemplaza la revisión de la UF ni la de la OPMI.'));
+  return Packer.toBuffer(documento(M, 'Lista de verificación', c));
 }

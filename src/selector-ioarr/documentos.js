@@ -26,6 +26,18 @@ const UNIDAD_META = { mesa: 'Número de mobiliario (puestos)', silla: 'Número d
 const PLURAL = { mesa: 'mesas del estudiante', silla: 'sillas del estudiante', esc: 'escritorios del docente', sdoc: 'sillas del docente', arm: 'armarios o estantes' };
 const NIVEL = { I: 'INICIAL', P: 'PRIMARIA', S: 'SECUNDARIA', E: 'BÁSICA ESPECIAL' };
 
+// Lista de verificación: lo que el sistema no puede comprobar y se marca a mano
+export const VERIF_MANUAL = [
+  { id: 'informe_vida_util', texto: 'Informe técnico del área correspondiente que fija la vida útil estimada del mobiliario (Lineamientos IOARR 2.4.C.b; Directiva 005-2016-EF/51.01).' },
+  { id: 'cotizaciones', texto: 'Cotizaciones o estudio de mercado que sustentan los precios unitarios.' },
+  { id: 'especificaciones', texto: 'Especificaciones técnicas del mobiliario conforme a la norma técnica de mobiliario escolar del Minedu.' },
+  { id: 'no_duplicidad', texto: 'Consulta en el Banco de Inversiones: los locales no tienen otra inversión activa que incluya mobiliario (sin duplicidad).' },
+  { id: 'pmi', texto: 'La IOARR está en la cartera del PMI de la entidad, o se coordinó su inclusión con la OPMI.' },
+  { id: 'actas_directores', texto: 'Constancias de los directores sobre el estado y el uso del mobiliario.' },
+  { id: 'panel_fotografico', texto: 'Panel fotográfico por aula, con fecha y firma de quien verificó.' },
+  { id: 'estructura_firmada', texto: 'Estructura referencial de costos (Excel) revisada y firmada por el formulador.' }
+];
+
 const texto = (v, max = 300) => String(v ?? '').replace(/[ \t]+/g, ' ').trim().slice(0, max);
 const parrafo = (v, max = 4000) => String(v ?? '').replace(/\r/g, '').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim().slice(0, max);
 const numero = (v, min, max) => { if (v === '' || v == null) return null; const n = Number(v); return Number.isFinite(n) && n >= min && n <= max ? n : null; };
@@ -52,6 +64,10 @@ export function limpiarDatosDoc(b = {}) {
     ue_mantenimiento: texto(b.ue_mantenimiento, 300),
     // E. Por tipo de bien
     antiguedad: porTipo(b.antiguedad, v => numero(v, 0, 100)),
+    vida_util_estimada: porTipo(b.vida_util_estimada, v => entero(v, 1, 50)),
+    informe_vida_util: texto(b.informe_vida_util, 300),
+    verificacion: Object.fromEntries(VERIF_MANUAL.map(x => [x.id, b.verificacion?.[x.id]]).filter(([, v]) => v && typeof v === 'object')
+      .map(([id, v]) => [id, { ok: v.ok === true, nota: texto(v.nota, 300) }]).filter(([, v]) => v.ok || v.nota)),
     estado_actual: porTipo(b.estado_actual, v => ESTADOS_ACTIVO.includes(v) ? v : null),
     mant_actual: porTipo(b.mant_actual, v => numero(v, 0, 1e9)),
     vida_util: porTipo(b.vida_util, v => entero(v, 1, 30)),
@@ -193,18 +209,34 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, inv = {}, fe
   };
   mantenimiento.totales = Array.from({ length: anios }, (_, j) => r2(mantenimiento.filas.reduce((a, f) => a + f.valores[j], 0)));
 
+  // ── Antigüedad según el año de adquisición registrado en cada local (ponderada por lo que se repone) ──
+  const anioRef = Number(String(fecha || '').slice(0, 4)) || new Date().getFullYear();
+  const antInv = Object.fromEntries(tiposRep.map(x => {
+    const con = ups.filter(u => u.rep[x.t] > 0 && u.verificado?.adquisicion?.[x.k]);
+    const de = ups.filter(u => u.rep[x.t] > 0).length;
+    if (!con.length) return [x.k, null];
+    const peso = con.reduce((a, u) => a + u.rep[x.t], 0);
+    const edades = con.map(u => anioRef - u.verificado.adquisicion[x.k]);
+    const prom = con.reduce((a, u) => a + (anioRef - u.verificado.adquisicion[x.k]) * u.rep[x.t], 0) / peso;
+    return [x.k, { promedio: Math.round(prom * 10) / 10, min: Math.min(...edades), max: Math.max(...edades), con: con.length, de }];
+  }));
+
   // ── E. Activos: descripción técnica (del catálogo de precios) y estado ──
   const activos = tiposRep.map(x => ({
     k: x.k, nombre: x.n, descripcion: precios?.[x.k]?.descripcion || '',
-    antiguedad: d.antiguedad[x.k] ?? null, estado: d.estado_actual[x.k] || null,
+    antiguedad: d.antiguedad[x.k] ?? (antInv[x.k] ? Math.round(antInv[x.k].promedio) : null),
+    antiguedad_origen: d.antiguedad[x.k] != null ? 'usuario' : antInv[x.k] ? 'inventario' : null, antiguedad_inventario: antInv[x.k],
+    vida_estimada: d.vida_util_estimada[x.k] ?? null,
+    estado: d.estado_actual[x.k] || null,
     mant_actual: d.mant_actual[x.k] ?? null, vida_util: d.vida_util[x.k] ?? null, mant_nuevo: d.mant_nuevo[x.k] ?? null,
     cantidad: R.partidas[x.t].rep
   }));
 
   // ── Sustento ──
   const est = ups.reduce((a, u) => a + u.est, 0), aulas = ups.reduce((a, u) => a + u.aulas, 0);
-  const verificados = ups.filter(u => u.verificado);
-  const conActa = verificados.filter(u => u.archivos.some(a => a.tipo === 'acta'));
+  const verificados = ups.filter(u => u.verificado?.tipos.length);   // corrigieron cantidades
+  const visitados = ups.filter(u => u.verificado);                   // tienen visita registrada
+  const conActa = visitados.filter(u => u.archivos.some(a => a.tipo === 'acta'));
   const conBaja = ups.filter(u => u.archivos.some(a => a.tipo === 'baja'));
   const sustentoAuto = [
     `${masiva ? `La inversión repone el mobiliario de aula de ${n} locales educativos` : `La inversión repone el mobiliario de aula del local educativo ${u0?.cod}`} (${nomNiveles.toLowerCase()}), ${masiva ? 'que atienden' : 'que atiende'} a ${est.toLocaleString('es-PE')} estudiantes en ${aulas.toLocaleString('es-PE')} aulas.`,
@@ -219,8 +251,20 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, inv = {}, fe
     { texto: 'No se sustenta en un incremento de la capacidad de la UP (2.4.C.c).', estado: 'cumple', nota: T.fal > 0 ? 'El faltante se excluyó del metrado y del costo.' : 'No hay faltante.' },
     { texto: masiva ? 'El mobiliario a reponer está en uso (2.5.c).' : 'El mobiliario a reponer está en uso: no lleva más de un año sin operar (2.4.C.d).', estado: d.en_uso === 'si' ? 'cumple' : d.en_uso === 'no' ? 'no' : 'pendiente', nota: d.en_uso === 'no' ? (masiva ? 'En una reposición masiva el mobiliario debe estar en uso.' : 'Si lleva más de un año sin operar, va como optimización o proyecto de inversión.') : '' },
     { texto: 'Los bienes están registrados en la contabilidad e inventario de la entidad (2.4.C.e).', estado: d.inventario_registrado === 'si' ? 'cumple' : d.inventario_registrado === 'no' ? 'no' : 'pendiente', nota: d.codigo_inventario ? 'Código o documento: ' + d.codigo_inventario : '' },
-    { texto: 'Los bienes reemplazados se darán de baja o se inició su trámite (2.4.C.f).', estado: conBaja.length === n ? 'cumple' : 'pendiente', nota: conBaja.length ? `Hay sustento de baja en ${conBaja.length} de ${n} locales.` : 'Adjunta la resolución o el trámite de baja en «Corregir inventario» de cada local.' },
-    { texto: 'Verificación en campo con acta.', estado: conActa.length === n ? 'cumple' : 'pendiente', nota: `${conActa.length} de ${n} locales con acta adjunta.` }
+    (() => {
+      // Con % de Regular se repone mobiliario que aún funciona: debe haber cumplido su vida útil estimada (informe técnico)
+      if (!(regPct > 0)) return { texto: 'Vida útil: se repone solo mobiliario en estado malo, que ya no es útil ni operativo (vida útil efectiva, 2.4.B.e).', estado: 'cumple', nota: 'El informe de vida útil estimada de la entidad (2.4.C.b) es recomendable como respaldo.' };
+      const conRegular = activos.filter(a => a.cantidad > 0);
+      const sinDato = conRegular.filter(a => a.antiguedad == null || a.vida_estimada == null);
+      const noCumple = conRegular.filter(a => a.antiguedad != null && a.vida_estimada != null && a.antiguedad < a.vida_estimada);
+      const estado = noCumple.length ? 'no' : sinDato.length || !d.informe_vida_util ? 'pendiente' : 'cumple';
+      const nota = noCumple.length ? `No cumplieron la vida útil estimada: ${noCumple.map(a => `${a.nombre.toLowerCase()} (${a.antiguedad} de ${a.vida_estimada} años)`).join(', ')}. Repón solo el estado malo o sustenta la vida útil efectiva.`
+        : sinDato.length ? `Falta la antigüedad o la vida útil estimada de: ${sinDato.map(a => a.nombre.toLowerCase()).join(', ')}.`
+        : !d.informe_vida_util ? 'Indica el informe técnico que fija la vida útil estimada.' : 'Informe: ' + d.informe_vida_util;
+      return { texto: `Vida útil estimada: el mobiliario en estado regular que se repone (${Math.round(regPct * 100)} %) cumplió la vida útil que fija el informe técnico de la entidad (2.4.C.b).`, estado, nota };
+    })(),
+    { texto: 'Los bienes reemplazados se darán de baja o se inició su trámite (2.4.C.f).', estado: conBaja.length === n ? 'cumple' : 'pendiente', nota: conBaja.length ? `Hay sustento de baja en ${conBaja.length} de ${n} ${n === 1 ? 'local' : 'locales'}.` : 'Adjunta la resolución o el trámite de baja en «Corregir inventario» de cada local.' },
+    { texto: 'Verificación en campo con acta.', estado: n && conActa.length === n ? 'cumple' : 'pendiente', nota: `${conActa.length} de ${n} ${n === 1 ? 'local' : 'locales'} con acta adjunta.` }
   ];
   if (masiva) condiciones.push({ texto: 'Las UP prestan el mismo servicio y las administra la misma entidad, que adquiere los activos (2.5.b).', estado: 'pendiente', nota: ugels.length > 1 ? `Los locales son de ${ugels.length} UGEL (${lista(ugels)}): confirma que la entidad que adquiere es la misma.` : `Locales de ${ugels[0] || 'una misma UGEL'}.` });
 
@@ -239,7 +283,8 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, inv = {}, fe
   falta(!d.ue_mantenimiento && !ugels.length, 'Unidad ejecutora responsable del mantenimiento.');
   falta(!d.inventario_registrado, 'Si el mobiliario a reponer está registrado en el inventario de la entidad (Lineamientos 2.4.C.e).');
   falta(!d.en_uso, 'Si el mobiliario a reponer está en uso.');
-  if (supera && !masiva) falta(tiposRep.some(x => d.antiguedad[x.k] == null || !d.estado_actual[x.k]), 'E.3. Antigüedad y estado actual del mobiliario a reponer, por tipo.');
+  if (supera && !masiva) falta(activos.some(a => a.antiguedad == null || !a.estado), 'E.3. Antigüedad y estado actual del mobiliario a reponer, por tipo.');
+  if (regPct > 0) falta(activos.some(a => a.antiguedad == null || a.vida_estimada == null) || !d.informe_vida_util, 'Vida útil estimada (informe técnico) y antigüedad del mobiliario en estado regular que se repone (2.4.C.b).');
   falta(tiposRep.some(x => !precios?.[x.k]?.descripcion), 'Descripción técnica de algún tipo de bien (se toma del precio del catálogo).');
   falta(A.propuesto, 'A. Alineamiento a la brecha: se propuso por nivel; verifícalo contra el PMI.');
 
@@ -258,6 +303,50 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, inv = {}, fe
     totales: T, rubros: R.rubros, partidas: R.partidas, distritos: R.distritos,
     faltante: { cantidad: T.fal, valor: T.falValor, partidas: R.partidas.filter(p => p.fal > 0).map(p => ({ nombre: p.n, cantidad: p.fal, valor: p.falValor })) },
     memoria: { antecedentes: d.antecedentes, objetivo: d.objetivo || `Reponer el mobiliario de aula en mal estado ${masiva ? `de ${n} locales educativos` : 'del local educativo'} de nivel ${nomNiveles.toLowerCase()}, para mantener el nivel y la calidad del servicio educativo que reciben ${est.toLocaleString('es-PE')} estudiantes.` },
-    faltan, completo: !faltan.length
+    regPct, anioRef, informe_vida_util: d.informe_vida_util,
+    faltan, completo: !faltan.length,
+    verificacion: armarVerificacion({ R, ups, activos, condiciones, faltan, precios, U, d, n })
+  };
+}
+
+// ─── Lista de verificación del expediente ───────────────────────────────────
+// Junta lo que el sistema comprueba solo (costos, archivos por local, datos del
+// 07-C, condiciones) y lo que se marca a mano (VERIF_MANUAL).
+function armarVerificacion({ R, ups, activos, condiciones, faltan, precios, U, d, n }) {
+  const it = (texto, ok, nota = '', extra = {}) => ({ texto, estado: ok === true ? 'ok' : ok === false ? 'pendiente' : ok, nota, ...extra });
+  const todos = (f) => n > 0 && ups.every(f);
+  const cuenta = (f) => `${ups.filter(f).length} de ${n} ${n === 1 ? 'local' : 'locales'}`;
+  const tiene = tipo => u => u.archivos.some(a => a.tipo === tipo);
+  const sinPrecio = R.partidas.filter(p => p.rep > 0 && p.pu == null).map(p => p.n.toLowerCase());
+  const sinDesc = activos.filter(a => !a.descripcion).map(a => a.nombre.toLowerCase());
+  const conAnio = u => activos.every(a => !u.rep[R.partidas.findIndex(p => p.k === a.k)] || u.verificado?.adquisicion?.[a.k]);
+
+  const secciones = [
+    { titulo: 'Costos', items: [
+      it('Precio unitario de cada tipo de bien a reponer.', !sinPrecio.length, sinPrecio.length ? 'Falta: ' + sinPrecio.join(', ') : ''),
+      it('Descripción técnica de cada tipo de bien (del precio del catálogo).', !sinDesc.length, sinDesc.length ? 'Falta: ' + sinDesc.join(', ') : ''),
+      it('Rubros de la estructura de costos cargados.', !R.rubros.every(r => r.valor === 0), R.rubros.every(r => r.valor === 0) ? 'Todos los rubros están en 0.' : ''),
+      it('Valor de la UIT del año.', !!U.valor, U.valor ? `UIT ${U.anio}: S/ ${U.valor.toLocaleString('es-PE')}` : '')
+    ] },
+    { titulo: 'Locales: visita y sustento', items: [
+      it('Visita de campo registrada.', todos(u => u.verificado), cuenta(u => u.verificado)),
+      it('Acta de verificación adjunta.', todos(tiene('acta')), cuenta(tiene('acta'))),
+      it('Fotos del mobiliario adjuntas.', todos(tiene('foto')), cuenta(tiene('foto'))),
+      it('Inventario patrimonial adjunto.', todos(tiene('inventario_patrimonial')), cuenta(tiene('inventario_patrimonial'))),
+      it('Resolución o trámite de baja adjunto.', todos(tiene('baja')), cuenta(tiene('baja'))),
+      it('Año de adquisición de cada tipo de bien a reponer.', todos(conAnio), cuenta(conAnio))
+    ] },
+    { titulo: 'Formato 07-C y memoria descriptiva', items: [
+      it('Datos del Formato 07-C y de la memoria completos.', !faltan.length, faltan.length ? `${faltan.length} pendiente${faltan.length === 1 ? '' : 's'} (ver Documentos).` : '')
+    ] },
+    { titulo: 'Condiciones de los Lineamientos IOARR', items: condiciones.map(c => it(c.texto, c.estado === 'cumple' ? true : c.estado === 'no' ? 'no' : false, c.nota)) },
+    { titulo: 'Documentos y coordinaciones (se marcan a mano)', items: VERIF_MANUAL.map(x => it(x.texto, !!d.verificacion?.[x.id]?.ok, d.verificacion?.[x.id]?.nota || '', { id: x.id, manual: true })) }
+  ];
+  const items = secciones.flatMap(s => s.items);
+  return {
+    secciones,
+    locales: ups.map(u => ({ cod: u.cod, nombre: u.nombre, visita: u.verificado?.fecha_visita || null, acta: tiene('acta')(u), fotos: u.archivos.filter(a => a.tipo === 'foto').length,
+      inventario: tiene('inventario_patrimonial')(u), baja: tiene('baja')(u), anio: conAnio(u) })),
+    hechos: items.filter(x => x.estado === 'ok').length, total: items.length, bloqueos: items.filter(x => x.estado === 'no').length
   };
 }

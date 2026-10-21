@@ -4,7 +4,7 @@ Arma, sobre un proyecto del Selector IOARR, la documentación de una IOARR de re
 
 1. **Costos** (lista): catálogo de precios, rubros, factores por zona, estructura de costos, Excel con fórmulas y aviso de 75 UIT.
 2. **Documentos** (lista): borrador del Formato 07-C y memoria descriptiva en Word.
-3. Lista de verificación, archivos de sustento y antigüedad del mobiliario.
+3. **Verificación** (lista): lista de verificación, archivos de sustento y antigüedad del mobiliario.
 4. Vínculos con el kanban OxI y Radar IOARR, y ZIP del expediente.
 
 ## Etapa 1: costos
@@ -151,3 +151,33 @@ El Word dice **«Borrador de trabajo»**: el registro oficial se hace en el apli
 - Las secciones de cada Word.
 
 Si LibreOffice Writer está instalado (`libreoffice-writer-nogui`), una prueba comprueba además que los Word abren.
+
+## Etapa 3: verificación y antigüedad
+
+### Migración
+
+Ejecuta `supabase/migrations/016_ioarr_inventario_antiguedad.sql`, después de la 015. Agrega a `ioarr_expediente_inventario` la columna `adquisicion`, con el año de adquisición por tipo de bien. Sin esta migración, el inventario se guarda igual, pero sin los años.
+
+### Antigüedad del mobiliario
+
+- En **Corregir inventario**, cada tipo de bien tiene un campo **Año de adquisición**. Se toma del inventario patrimonial o de la placa del bien.
+- Se puede cargar sin corregir las cantidades. En ese caso, para esos tipos sigue valiendo el censo.
+- La antigüedad del proyecto, por tipo, es el promedio de los locales con año cargado, ponderado por la cantidad que se repone. Si en **Documentos** se escribe una antigüedad, esa tiene prioridad.
+- La antigüedad va en el 07-C (E.3) y en la memoria, con su origen y con una tabla del año de adquisición por local. En el Excel, la hoja «Inventario verificado» trae el año y la antigüedad, esta con fórmula.
+- **Vida útil (2.4.C.b):**
+  - Si solo se repone el estado **Malo**, se sustenta con la vida útil efectiva (2.4.B.e).
+  - Si se repone un **% de Regular**, ese mobiliario todavía funciona. La condición se cumple solo si la antigüedad es mayor o igual a la **vida útil estimada** y se indica el **informe técnico** que la fija. Ambos se cargan en Documentos.
+
+### Lista de verificación
+
+En **Expediente → Verificación**. Se actualiza sola con los costos, el inventario y los documentos:
+
+- **Costos:** precios, descripción técnica, rubros y UIT.
+- **Locales:** visita, acta, fotos, inventario patrimonial, baja y año de adquisición, en cada local.
+- **Formato 07-C y memoria:** los pendientes.
+- **Condiciones de los Lineamientos IOARR.**
+- **Documentos y coordinaciones**, que se marcan a mano y aceptan una nota (`VERIF_MANUAL` en `documentos.js`): informe de vida útil, cotizaciones, especificaciones del Minedu, no duplicidad, PMI, constancias de los directores, panel fotográfico y estructura de costos firmada. Se guardan en `ioarr_expediente_documentos.datos.verificacion`, así que no hace falta una migración nueva.
+
+**Lista de verificación (Word)** descarga la misma lista.
+
+`PATCH /documentos` fusiona lo que recibe con lo ya guardado: Documentos y Verificación mandan solo sus campos.

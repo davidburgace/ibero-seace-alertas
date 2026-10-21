@@ -308,3 +308,10 @@ table.tabla{ width:100%; border-collapse:collapse; font-size:13px; }
 .doc-form textarea, .doc-form input[type=month]{ font:inherit; font-size:13px; padding:9px 11px; border-radius:10px; border:1px solid var(--border2); background:var(--surface); width:100%; }
 .tabla-doc input, .tabla-doc select{ width:100%; min-width:80px; padding:6px 8px; border:1px solid var(--border2); border-radius:6px; font:inherit; }
 .pendientes{ margin:0; padding:0 16px 12px 34px; display:flex; flex-direction:column; gap:4px; font-size:13px; }
+/* Expediente: Verificación (etapa 3) */
+.avance{ height:8px; border-radius:8px; background:var(--surface2); overflow:hidden; margin:8px 0; max-width:420px; }
+.avance span{ display:block; height:100%; background:var(--bueno); border-radius:8px; }
+.verif-chk{ align-items:flex-start; color:var(--text); min-height:0; }
+.verif-chk input{ margin-top:2px; flex:none; }
+.verif-nota{ width:100%; margin-top:6px; padding:6px 9px; border:1px solid var(--border2); border-radius:8px; font:inherit; font-size:12.5px; background:var(--surface); }
+.tabla-verif td:last-child{ width:1%; white-space:nowrap; vertical-align:top; }

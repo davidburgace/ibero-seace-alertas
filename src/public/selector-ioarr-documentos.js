@@ -40,7 +40,8 @@ function pintar() {
   const est = { cumple: '<span class="chip-est ok">Cumple</span>', no: '<span class="chip-est alerta">No cumple</span>', pendiente: '<span class="chip-est pend">Pendiente</span>' };
   const tipos = R.tipos.map(t => `<tr>
       <td><b>${esc(t.nombre)}</b><br><span class="sub">${NF.format(t.cantidad)} a reponer</span></td>
-      <td><input data-doc-t="antiguedad" data-k="${t.k}" type="number" min="0" max="100" step="1" value="${d.antiguedad[t.k] ?? ''}" aria-label="Antigüedad de ${esc(t.nombre)}"></td>
+      <td><input data-doc-t="antiguedad" data-k="${t.k}" type="number" min="0" max="100" step="1" value="${d.antiguedad[t.k] ?? ''}" placeholder="${t.antiguedad_inventario ? Math.round(t.antiguedad_inventario.promedio) : ''}" aria-label="Antigüedad de ${esc(t.nombre)}">${t.antiguedad_inventario ? `<span class="sub">Inventario: ${NS.format(t.antiguedad_inventario.promedio)} años (${t.antiguedad_inventario.con} de ${t.antiguedad_inventario.de} locales)</span>` : ''}</td>
+      <td><input data-doc-t="vida_util_estimada" data-k="${t.k}" type="number" min="1" max="50" step="1" value="${d.vida_util_estimada?.[t.k] ?? ''}" aria-label="Vida útil estimada de ${esc(t.nombre)}"></td>
       <td><select data-doc-t="estado_actual" data-k="${t.k}" aria-label="Estado de ${esc(t.nombre)}"><option value=""></option>${vista.estados.map(x => `<option ${d.estado_actual[t.k] === x ? 'selected' : ''}>${x}</option>`).join('')}</select></td>
       <td><input data-doc-t="mant_actual" data-k="${t.k}" type="number" min="0" step="0.01" value="${d.mant_actual[t.k] ?? ''}" aria-label="Mantenimiento actual de ${esc(t.nombre)}"></td>
       <td><input data-doc-t="vida_util" data-k="${t.k}" type="number" min="1" max="30" step="1" value="${d.vida_util[t.k] ?? ''}" aria-label="Vida útil del nuevo: ${esc(t.nombre)}"></td>
@@ -96,8 +97,11 @@ function pintar() {
         ${campo('ue_mantenimiento', 'Unidad ejecutora del mantenimiento', { ph: R.mantenimiento_sugerido || 'Ej.: UGEL …' })}
       </div>
       <h3>Por tipo de bien</h3>
-      <p class="sub">Antigüedad, estado y mantenimiento del mobiliario a reponer (E.3, IOARR individual de más de 75 UIT), y vida útil y mantenimiento anual del nuevo (F.4 o G.3).</p>
-      <div class="tabla-wrap"><table class="tabla tabla-doc"><thead><tr><th>Tipo de bien</th><th>Antigüedad (años)</th><th>Estado actual</th><th>Mant. anual actual (S/)</th><th>Vida útil del nuevo (años)</th><th>Mant. anual del nuevo (S/)</th></tr></thead><tbody>${tipos || '<tr><td colspan="6" class="vacio">No hay bienes a reponer.</td></tr>'}</tbody></table></div>
+      <p class="sub">Antigüedad, vida útil estimada, estado y mantenimiento del mobiliario a reponer (E.3 y 2.4.C.b), y vida útil y mantenimiento anual del nuevo (F.4 o G.3). La antigüedad vacía se toma del año de adquisición registrado en cada local.</p>
+      <div class="tabla-wrap"><table class="tabla tabla-doc"><thead><tr><th>Tipo de bien</th><th>Antigüedad (años)</th><th>Vida útil estimada (años)</th><th>Estado actual</th><th>Mant. anual actual (S/)</th><th>Vida útil del nuevo (años)</th><th>Mant. anual del nuevo (S/)</th></tr></thead><tbody>${tipos || '<tr><td colspan="7" class="vacio">No hay bienes a reponer.</td></tr>'}</tbody></table></div>
+      <div class="form-grid">
+        ${campo('informe_vida_util', 'Informe técnico de vida útil estimada', { ancho: true, ph: 'Ej.: Informe N° …-2026-UGEL…/APP, control patrimonial', ayuda: R.reg_pct > 0 ? `Obligatorio: se repone el ${Math.round(R.reg_pct * 100)} % del mobiliario en estado regular, que debe haber cumplido su vida útil estimada (2.4.C.b).` : 'Recomendable. Vacío = la antigüedad sale del año de adquisición registrado en cada local, si lo cargaste.' })}
+      </div>
       <h3>Plazo de ejecución</h3>
       <div class="form-grid">
         ${campo('fecha_inicio', 'Mes de inicio', { tipo: 'month', ph: 'AAAA-MM' })}
@@ -116,7 +120,7 @@ function pintar() {
 
 // ─── Guardado ────────────────────────────────────────────────────────────────
 function leer() {
-  const datos = { antiguedad: {}, estado_actual: {}, mant_actual: {}, vida_util: {}, mant_nuevo: {} };
+  const datos = { antiguedad: {}, vida_util_estimada: {}, estado_actual: {}, mant_actual: {}, vida_util: {}, mant_nuevo: {} };
   ctx.el.querySelectorAll('[data-doc]').forEach(e => { datos[e.dataset.doc] = e.value; });
   ctx.el.querySelectorAll('[data-doc-t]').forEach(e => { if (e.value !== '') datos[e.dataset.docT][e.dataset.k] = e.value; });
   return datos;

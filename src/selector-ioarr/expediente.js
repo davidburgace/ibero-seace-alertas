@@ -32,6 +32,7 @@
 //     PATCH  /proyectos/:id/documentos              { datos }
 //     GET    /proyectos/:id/documentos/formato-07c  Word del borrador del Formato 07-C
 //     GET    /proyectos/:id/documentos/memoria      Word de la memoria descriptiva
+//     GET    /proyectos/:id/documentos/verificacion Word de la lista de verificación (etapa 3)
 // ============================================================================
 
 import express from 'express';
@@ -39,14 +40,15 @@ import multer from 'multer';
 import { BUCKET_EXPEDIENTE, MAX_ARCHIVO, MAX_POR_LOCAL, TIPOS_ARCHIVO, mimeDe, nombreUtf8, nombreSeguro } from './archivos.js';
 import { supabase } from '../ioarr/db.js';
 import { calc, limpiarParams, CRIT } from './calculo.js';
-import { costear, limpiarRubros, limpiarInventario, censoLocal, TIPOS, FUENTES_PRECIO } from './costos.js';
+import { costear, limpiarRubros, limpiarInventario, limpiarAdquisicion, censoLocal, TIPOS, FUENTES_PRECIO } from './costos.js';
 import { generarExcelCostos } from './excel-costos.js';
 import { armarModelo, limpiarDatosDoc, ESTADOS_ACTIVO } from './documentos.js';
-import { generar07C, generarMemoria } from './word.js';
+import { generar07C, generarMemoria, generarVerificacion } from './word.js';
 
 const AVISO = 'Falta ejecutar supabase/migrations/012_ioarr_expediente_costos.sql en Supabase';
 const faltaMigracion = e => e?.code === 'PGRST204' || e?.code === 'PGRST205' || e?.code === '42P01' || /schema cache|does not exist/i.test(e?.message || '');
 const AVISO_INV = 'Falta ejecutar supabase/migrations/013_ioarr_expediente_inventario.sql en Supabase';
+const AVISO_ADQ = 'Falta ejecutar supabase/migrations/016_ioarr_inventario_antiguedad.sql en Supabase para guardar el año de adquisición';
 const AVISO_DOC = 'Falta ejecutar supabase/migrations/015_ioarr_expediente_documentos.sql en Supabase';
 const AVISO_ARCH = 'Falta ejecutar supabase/migrations/014_ioarr_expediente_archivos.sql en Supabase';
 const URL_FIRMADA_SEG = 600;
@@ -340,17 +342,25 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
   api.put('/proyectos/:id/costos/inventario/:cod', responder(async (req, res) => {
     const p = await proyecto(req), cod = String(req.params.cod), b = req.body || {};
     const { D, i } = await localDelProyecto(p, cod);
-    const bienes = limpiarInventario(b.bienes);
-    if (!Object.keys(bienes).length) return res.status(400).json({ error: 'Marca al menos un tipo de bien para corregir' });
+    const bienes = limpiarInventario(b.bienes), adquisicion = limpiarAdquisicion(b.adquisicion, anioLima());
+    if (!Object.keys(bienes).length && !Object.keys(adquisicion).length) return res.status(400).json({ error: 'Corrige al menos un tipo de bien o indica un año de adquisición' });
     if (!fechaValida(b.fecha_visita)) return res.status(400).json({ error: 'Indica la fecha de la visita' });
     if (b.fecha_visita > hoyLima()) return res.status(400).json({ error: 'La fecha de la visita no puede ser futura' });
     const observacion = texto(b.observacion, 1000);
     if (!observacion) return res.status(400).json({ error: 'Describe el sustento de la visita (acta, fotos, quién la hizo)' });
     const C = calc(D, limpiarParams(p.criterios));
-    const { error } = await supabase.from('ioarr_expediente_inventario').upsert({
-      proyecto_id: p.id, cod_local: cod, bienes, censo: censoLocal(C, i), fecha_visita: b.fecha_visita,
+    const fila = {
+      proyecto_id: p.id, cod_local: cod, bienes, adquisicion, censo: censoLocal(C, i), fecha_visita: b.fecha_visita,
       responsable: texto(b.responsable, 200) || null, observacion, creado_por: req.usuario.id, actualizado_en: new Date().toISOString()
-    }, { onConflict: 'proyecto_id,cod_local' });
+    };
+    const guardar = f => supabase.from('ioarr_expediente_inventario').upsert(f, { onConflict: 'proyecto_id,cod_local' });
+    let { error } = await guardar(fila);
+    // Sin la 016 no existe la columna adquisicion: si no se cargó ningún año, se guarda sin ella
+    if (error && /adquisicion/.test(error.message || '')) {
+      if (Object.keys(adquisicion).length) return res.status(503).json({ error: AVISO_ADQ });
+      const { adquisicion: _, ...sinAdq } = fila;
+      ({ error } = await guardar(sinAdq));
+    }
     if (error) { if (faltaMigracion(error)) return res.status(503).json({ error: AVISO_INV }); throw error; }
     res.json(vista(await armar(p)));
   }));
@@ -437,12 +447,13 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
   }
   // Lo que necesita el formulario: datos guardados, lo que se propone y lo que falta
   const vistaDoc = ({ M, datos, sinMigracion }) => ({
-    datos, sin_migracion: sinMigracion, estados: ESTADOS_ACTIVO,
+    datos, sin_migracion: sinMigracion, estados: ESTADOS_ACTIVO, verificacion: M.verificacion,
     resumen: {
       nombre: M.nombre, nombre_sugerido: M.nombreSugerido, cui: M.cui, masiva: M.masiva, registro: M.registro,
       total: M.F.total, en_uit: M.uit.enUit, uit: M.uit.valor ? { anio: M.uit.anio, valor: M.uit.valor } : null,
       ups: M.ups.length, sin_rep: M.sinRep.map(x => x.cod), ugels: M.ugels, mantenimiento_sugerido: M.D.mantenimiento,
-      tipos: M.E.activos.map(a => ({ k: a.k, nombre: a.nombre, cantidad: a.cantidad, descripcion: a.descripcion })),
+      tipos: M.E.activos.map(a => ({ k: a.k, nombre: a.nombre, cantidad: a.cantidad, descripcion: a.descripcion, antiguedad_inventario: a.antiguedad_inventario })),
+      reg_pct: M.regPct,
       alineamiento: { servicio: M.A.servicio, tipologia: M.A.tipologia, indicadores: M.A.indicadores },
       inicio: M.F.inicio, fin: M.F.fin, condiciones: M.E.condiciones
     },
@@ -455,7 +466,9 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
 
   api.patch('/proyectos/:id/documentos', responder(async (req, res) => {
     const p = await proyecto(req);
-    const datos = limpiarDatosDoc(req.body?.datos || {});
+    // Se fusiona con lo guardado: Documentos y Verificación mandan solo lo suyo
+    const { datos: actual } = await leerDatosDoc(p);
+    const datos = limpiarDatosDoc({ ...actual, ...(req.body?.datos || {}) });
     const { error } = await supabase.from('ioarr_expediente_documentos').upsert({ proyecto_id: p.id, datos, actualizado_en: new Date().toISOString() }, { onConflict: 'proyecto_id' });
     if (error) { if (faltaMigracion(error)) return res.status(503).json({ error: AVISO_DOC }); throw error; }
     res.json(vistaDoc(await modelo(p)));
@@ -477,6 +490,12 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     const p = await proyecto(req), { M } = await modelo(p);
     if (!M.ups.length) return res.status(400).json({ error: 'Ningún local del proyecto tiene bienes a reponer' });
     enviarWord(res, await generarMemoria(M), `Memoria_descriptiva_${slug(p.nombre)}_${M.fecha}.docx`);
+  }));
+
+  api.get('/proyectos/:id/documentos/verificacion', responder(async (req, res) => {
+    const p = await proyecto(req), { M } = await modelo(p);
+    if (!M.ups.length) return res.status(400).json({ error: 'Ningún local del proyecto tiene bienes a reponer' });
+    enviarWord(res, await generarVerificacion(M), `Lista_verificacion_${slug(p.nombre)}_${M.fecha}.docx`);
   }));
 
   api.get('/proyectos/:id/costos/excel', responder(async (req, res) => {
