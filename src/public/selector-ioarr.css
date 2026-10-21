@@ -53,7 +53,7 @@ h1 .accent{ background:linear-gradient(90deg,var(--accent),var(--accent2)); -web
 /* Campos */
 .campo{ display:flex; flex-direction:column; gap:5px; min-width:0; }
 .campo>label, .lbl{ font-size:12px; font-weight:600; color:var(--muted); }
-.campo select, .campo input[type=text], .campo input[type=search], .campo input[type=number], .field input, .field select{
+.campo select, .campo input[type=text], .campo input[type=search], .campo input[type=number], .field input, .field select, .field textarea{
   font-size:13px; padding:9px 11px; border-radius:10px; border:1px solid var(--border2); background:var(--surface); width:100%; min-width:0;
 }
 .chk{ display:flex; align-items:center; gap:7px; font-size:13px; color:var(--muted); cursor:pointer; min-height:38px; }
@@ -123,6 +123,15 @@ table.tabla{ width:100%; border-collapse:collapse; font-size:13px; }
 .panel .tabla .nm{ min-width:24ch; }
 .pill{ display:inline-block; font-size:11px; font-weight:600; padding:1px 7px; border-radius:6px; background:var(--surface2); color:var(--muted); margin:3px 4px 0 0; white-space:nowrap; }
 .pill.conv{ background:rgba(224,150,43,.14); color:#9a5d0c; }
+.pill.dup{ background:rgba(214,69,58,.12); color:#b5322a; }
+/* Local excluido por otra inversión: sigue en la selección, fuera de la propuesta */
+.tabla tr.excluido td{ color:var(--muted); background:rgba(214,69,58,.04); }
+.tabla tr.excluido .nm{ text-decoration:line-through; }
+.acc-cab{ display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+.pad-aviso{ margin:0 16px 8px; }
+.radios{ border:0; padding:0; margin:0; display:flex; gap:16px; flex-wrap:wrap; }
+.radios legend{ font-size:12.5px; font-weight:600; margin-bottom:6px; }
+.sub-dock{ opacity:.75; }
 .x{ background:none; border:0; cursor:pointer; color:var(--accent); font-weight:600; padding:4px 6px; font-size:12.5px; }
 .ck{ width:18px; height:18px; accent-color:var(--accent); cursor:pointer; }
 .meter{ display:flex; align-items:center; gap:8px; justify-content:flex-end; }
@@ -210,7 +219,7 @@ table.tabla{ width:100%; border-collapse:collapse; font-size:13px; }
   .proy-acciones .btn-primary{ grid-column:1 / -1; }
   .filtros-grid{ grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; padding:12px; }
   .filtros-grid .ancho{ grid-column:1 / -1; }
-  .campo select, .campo input[type=text], .campo input[type=search], .campo input[type=number], .field input, .field select{ font-size:16px; } /* evita el zoom de iPhone */
+  .campo select, .campo input[type=text], .campo input[type=search], .campo input[type=number], .field input, .field select, .field textarea{ font-size:16px; } /* evita el zoom de iPhone */
   .crit-grid{ grid-template-columns:1fr 1fr; }
   .kpis{ grid-template-columns:1fr 1fr; gap:10px; }
   .kpi{ padding:12px; } .kpi .v{ font-size:22px; }
@@ -322,3 +331,5 @@ table.tabla{ width:100%; border-collapse:collapse; font-size:13px; }
 .exportar.entrega{ border-color:var(--accent); background:var(--accent-soft); margin-bottom:12px; }
 .vinc-radar{ margin-top:6px; font-size:13px; }
 .vinc-radar a{ color:var(--accent); }
+.field textarea{ font-family:inherit; resize:vertical; }
+.tabla .c-dup{ min-width:130px; }

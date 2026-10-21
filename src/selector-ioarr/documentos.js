@@ -134,7 +134,8 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, inv = {}, fe
       cod: l.cod, nombre: l.nom, modulares: svcs.map(s => `${s[0]} (${NIVEL[s[2]].toLowerCase()})`), niveles,
       dpto: D.dpto || mayus(D.region), prov: l.prov, dist: l.dist, ubigeo: l.ubigeo, cp: loc[3], direccion: loc[5], rural: l.rural,
       lat: loc[6], lon: loc[7], ugel: D.ugels?.[loc[2]] || '', est: l.est, aulas: l.aul,
-      rep: l.rep, fal: l.fal, total: l.total, verificado: l.verificado, archivos: inv[l.cod]?.archivos || []
+      rep: l.rep, fal: l.fal, total: l.total, verificado: l.verificado, archivos: inv[l.cod]?.archivos || [],
+      duplicidad: l.duplicidad || { estado: 'sin_verificar', codigo: null, nota: null, excluir: false }
     };
   });
   const niveles = [...new Set(ups.flatMap(u => u.niveles))].sort((a, b) => 'IPSE'.indexOf(a) - 'IPSE'.indexOf(b));
@@ -287,7 +288,7 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, inv = {}, fe
     E: { sustento: [...sustentoAuto, ...(d.sustento ? d.sustento.split(/\n+/) : [])], activos, condiciones },
     F: { metas, subtotalActivos, expediente: r2(expediente), supervision: r2(supervision), liquidacion, total,
       inicio: inicio && fechaPe(inicio), fin: fin && fechaPe(fin), meses: d.meses, cronograma, mantenimiento },
-    totales: T, rubros: R.rubros, partidas: R.partidas, distritos: R.distritos,
+    totales: T, rubros: R.rubros, partidas: R.partidas, distritos: R.distritos, excluidos: R.excluidos || [],
     faltante: { cantidad: T.fal, valor: T.falValor, partidas: R.partidas.filter(p => p.fal > 0).map(p => ({ nombre: p.n, cantidad: p.fal, valor: p.falValor })) },
     memoria: { antecedentes: d.antecedentes, objetivo: d.objetivo || `Reponer el mobiliario de aula en mal estado ${masiva ? `de ${n} locales educativos` : 'del local educativo'} de nivel ${nomNiveles.toLowerCase()}, para mantener el nivel y la calidad del servicio educativo que reciben ${est.toLocaleString('es-PE')} estudiantes.` },
     anioRef, informe_vida_util: d.informe_vida_util,
@@ -306,6 +307,15 @@ function montoCui(ioarr, total) {
   const m = Number(ioarr.monto_inversion), dif = m ? (total - m) / m : null;
   const ok = dif != null && Math.abs(dif) <= 0.01;
   return { texto, estado: ok ? 'ok' : 'pendiente', nota: ok ? `CUI: ${S2(m)}.` : `CUI: ${S2(m)} · expediente: ${S2(total)} (${dif > 0 ? '+' : ''}${(dif * 100).toFixed(1)} %). Actualiza el monto del CUI o revisa los costos.` };
+}
+
+// Otra inversión vigente o reciente: «No» en cada local de la propuesta. Un «Sí» que sigue incluido bloquea.
+function dupItem(ups, n, excluidos) {
+  const texto = 'Otra inversión vigente o reciente descartada en cada local (sin duplicidad).';
+  const si = ups.filter(u => u.duplicidad.estado === 'si'), no = ups.filter(u => u.duplicidad.estado === 'no').length;
+  const fuera = excluidos.length ? ` ${excluidos.length === 1 ? '1 local excluido' : excluidos.length + ' locales excluidos'} por otra inversión.` : '';
+  if (si.length) return { texto, estado: 'no', nota: `Con otra inversión y aún en la propuesta: ${si.map(u => u.cod + (u.duplicidad.codigo ? ` (${u.duplicidad.codigo})` : '')).join(', ')}.${fuera}` };
+  return { texto, estado: n > 0 && no === n ? 'ok' : 'pendiente', nota: `«No» en ${no} de ${n} ${n === 1 ? 'local' : 'locales'}${no < n ? '; el resto, sin verificar' : ''}.${fuera}` };
 }
 
 // Junta lo que el sistema comprueba solo (costos, archivos por local, datos del
@@ -333,7 +343,8 @@ function armarVerificacion({ R, ups, activos, condiciones, faltan, precios, U, d
       it('Fotos del mobiliario adjuntas.', todos(tiene('foto')), cuenta(tiene('foto'))),
       it('Inventario patrimonial adjunto.', todos(tiene('inventario_patrimonial')), cuenta(tiene('inventario_patrimonial'))),
       it('Resolución o trámite de baja adjunto.', todos(tiene('baja')), cuenta(tiene('baja'))),
-      it('Año de adquisición de cada tipo de bien a reponer.', todos(conAnio), cuenta(conAnio))
+      it('Año de adquisición de cada tipo de bien a reponer.', todos(conAnio), cuenta(conAnio)),
+      dupItem(ups, n, R.excluidos || [])
     ] },
     { titulo: 'Formato 07-C y memoria descriptiva', items: [
       it('Datos del Formato 07-C y de la memoria completos.', !faltan.length, faltan.length ? `${faltan.length} pendiente${faltan.length === 1 ? '' : 's'} (ver Documentos).` : '')

@@ -4,6 +4,7 @@
 import { ITEMS, NIVN, NIVS, NIVB, DEF, prep, calc, totals, filtrar, lv, norm, limpiarParams } from '/selector-ioarr/calculo.js';
 
 let D = null, C = null, P = { ...DEF }, sel = new Set(), view = [], codIdx = new Map();
+let excl = new Set();   // locales excluidos por otra inversión vigente o reciente: siguen seleccionados, fuera de los totales
 
 const pct = i => C.L.reqTot[i] > 0 ? C.L.repTot[i] / C.L.reqTot[i] : null;
 const selIdx = () => [...sel].map(c => codIdx.get(c)).filter(i => i != null);
@@ -20,6 +21,7 @@ const acciones = {
   params({ params }) { P = limpiarParams(params); if (D) C = calc(D, P); return P; },
   // Fija la selección; devuelve los códigos que existen en la región
   sel({ codigos }) { sel = new Set(codigos.filter(c => codIdx.has(c))); return [...sel]; },
+  excluidos({ codigos }) { excl = new Set(codigos); return excl.size; },
 
   consulta({ f, sort, page, size }) {
     view = filtrar(D, C, f);
@@ -56,16 +58,16 @@ const acciones = {
 
   // Totales de la selección (barra inferior) y, con completo, el resumen de «Mi selección»
   resumen({ completo }) {
-    const list = selIdx(), T = totals(D, C, list);
-    const base = { n: T.n, est: T.est, aul: T.aul, rep: T.rep, fal: T.fal };
+    const todos = selIdx(), list = todos.filter(i => !excl.has(D.locs[i][0])), T = totals(D, C, list);
+    const base = { n: T.n, est: T.est, aul: T.aul, rep: T.rep, fal: T.fal, nExcl: todos.length - list.length };
     if (!completo) return base;
     const byD = new Map();
     for (const i of list) { const d = D.locs[i][1]; if (!byD.has(d)) byD.set(d, []); byD.get(d).push(i); }
     const distritos = [...byD.entries()].map(([d, ls]) => { const t = totals(D, C, ls); return { nom: D.dists[d][0], n: ls.length, est: t.est, aul: t.aul, rep: t.rep, fal: t.fal }; })
       .sort((a, b) => b.rep - a.rep);
-    const locales = list.slice().sort((a, b) => C.L.repTot[b] - C.L.repTot[a] || D.locs[a][0].localeCompare(D.locs[b][0])).map(i => {
+    const locales = todos.slice().sort((a, b) => excl.has(D.locs[a][0]) - excl.has(D.locs[b][0]) || C.L.repTot[b] - C.L.repTot[a] || D.locs[a][0].localeCompare(D.locs[b][0])).map(i => {
       const l = D.locs[i];
-      return { i, cod: l[0], nom: D.locName[i], dist: D.dists[l[1]][0], lat: l[6], lon: l[7], est: D.locEst[i], aul: D.locAul[i].length, rep: C.L.repTot[i], fal: C.L.falTot[i],
+      return { i, cod: l[0], excl: excl.has(l[0]), nom: D.locName[i], dist: D.dists[l[1]][0], lat: l[6], lon: l[7], est: D.locEst[i], aul: D.locAul[i].length, rep: C.L.repTot[i], fal: C.L.falTot[i],
         t: [0, 1, 2, 3, 4].map(t => lv(C, 'rep', t, i)) };
     });
     return { ...base, tipos: ITEMS.map((x, t) => ({ ...x, ...T.t[t] })), distritos, locales };

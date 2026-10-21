@@ -7,6 +7,10 @@ const ANIO = 2025;
 const BASE_DATOS = `/data/selector-ioarr/${ANIO}/`;
 const PAGE = 40;
 const FALTANTE = 'Faltante (brecha de dotación, no reposición)';
+const DUP = 'Otra inversión vigente o reciente';
+const ESTADO_DUP = { si: 'Sí', no: 'No', sin_verificar: 'Sin verificar' };
+const dupDe = cod => S.dup[cod] || { estado: 'sin_verificar', codigo: null, nota: null, excluir: false };
+const excluidosCods = () => Object.entries(S.dup).filter(([, d]) => d.estado === 'si' && d.excluir).map(([c]) => c);
 const LS = 'selector-ioarr:';
 const NF = new Intl.NumberFormat('es-PE');
 const fmt = n => NF.format(Math.round(n || 0));
@@ -45,7 +49,8 @@ const S = {
   params: { ...DEF }, sel: new Set(),
   f: FILTRO_VACIO(), sort: { key: 'rep', dir: -1 }, page: 0, open: new Set(), detalles: new Map(),
   mapas: new Set(), mapsKey: null,                     // mapas satelitales abiertos (índice de local) y llave de Maps Embed
-  tab: 'elegir', seq: 0, selPage: 0
+  tab: 'elegir', seq: 0, selPage: 0,
+  dup: {}, sinMigDup: false                            // otra inversión vigente o reciente por local (solo proyectos guardados)
 };
 
 // ─── Guardado (borrador en localStorage, proyecto en Supabase) ──────────────
@@ -139,7 +144,7 @@ function pintarProyectos() {
 
 async function abrirBorrador(region) {
   await guardarYa().catch(() => {});
-  S.proyecto = null; store('proyecto', null);
+  S.proyecto = null; store('proyecto', null); S.dup = {}; S.sinMigDup = false;
   const nombre = S.idx.regiones.some(g => g.nombre === region) ? region : (S.idx.regiones.find(g => g.nombre === 'Moquegua') || S.idx.regiones[0]).nombre;
   pintarProyectos();
   await cargarRegion(nombre, limpiarParams(store('params')), store('sel:' + nombre) || []);
@@ -152,6 +157,7 @@ async function abrirProyecto(id) {
   try { p = await api('/proyectos/' + id); }
   catch (e) { toast('No se pudo abrir el proyecto: ' + e.message); $('proy').value = S.proyecto?.id || ''; return; }
   S.proyecto = p; guardado.error = false; store('proyecto', p.id);
+  S.dup = p.duplicidad || {}; S.sinMigDup = !!p.sin_migracion_dup;
   pintarProyectos();
   await cargarRegion(p.region, limpiarParams(p.criterios), p.locales || []);
 }
@@ -171,6 +177,7 @@ async function cargarRegion(nombre, params, codigos) {
     S.region = nombre;
   } else await w('params', { params });
   await w('sel', { codigos: [...S.sel] });
+  await w('excluidos', { codigos: excluidosCods() });
   fillFilters();
   S.cargando = false;
   await refresh();
@@ -267,7 +274,9 @@ async function renderTable() {
   if (!R.filas.length) $('tbody').innerHTML = `<tr><td colspan="10" class="vacio">Ningún local cumple los filtros. Prueba con menos condiciones.</td></tr>`;
   else $('tbody').innerHTML = R.filas.map(r => {
     const sel = S.sel.has(r.cod), open = S.open.has(r.i);
-    const pills = r.niv.map(n => `<span class="pill">${n}</span>`).join('') + (r.conv ? '<span class="pill conv">Convenio</span>' : '');
+    const dup = dupDe(r.cod);
+    const pills = r.niv.map(n => `<span class="pill">${n}</span>`).join('') + (r.conv ? '<span class="pill conv">Convenio</span>' : '')
+      + (dup.estado === 'si' ? `<span class="pill dup" title="${DUP}${dup.codigo ? ': ' + esc(dup.codigo) : ''}">Otra inversión${dup.excluir ? ' · excluido' : ''}</span>` : '');
     return `<tr class="${sel ? 'sel' : ''}">
       <td class="c-ck"><input class="ck" type="checkbox" data-cod="${r.cod}" ${sel ? 'checked' : ''} aria-label="Seleccionar el local ${r.cod}"></td>
       <td class="c-cod mono">${r.cod}</td>
@@ -296,8 +305,9 @@ async function renderTable() {
 
 async function renderDock() {
   const T = await w('resumen', { completo: false });
-  $('dockTxt').innerHTML = T.n ? `<b>${fmt(T.n)}</b> locales · <b>${fmt(T.est)}</b> estudiantes · <b>${fmt(T.rep)}</b> bienes a reponer` : 'Sin locales seleccionados';
-  $('dockBtn').disabled = !T.n; $('selBadge').textContent = fmt(T.n);
+  const ex = T.nExcl ? ` · <span class="sub-dock">${fmt(T.nExcl)} excluido${T.nExcl === 1 ? '' : 's'} por otra inversión</span>` : '';
+  $('dockTxt').innerHTML = T.n ? `<b>${fmt(T.n)}</b> locales · <b>${fmt(T.est)}</b> estudiantes · <b>${fmt(T.rep)}</b> bienes a reponer${ex}` : T.nExcl ? `Sin locales en la propuesta${ex}` : 'Sin locales seleccionados';
+  $('dockBtn').disabled = !T.n && !T.nExcl; $('selBadge').textContent = fmt(T.n + T.nExcl);
 }
 
 async function refresh() {
@@ -318,7 +328,7 @@ function stackBar(o) {
 }
 async function renderSel() {
   const T = await w('resumen', { completo: true }), el = $('v-sel');
-  if (!T.n) {
+  if (!T.n && !T.nExcl) {
     el.innerHTML = `<div class="panel vacio"><h3 style="color:var(--text);margin-bottom:6px;font-family:var(--font-display)">Aún no hay locales seleccionados</h3><p style="margin:0 0 14px">Vuelve a «Elegir locales» y marca los locales que intervendrás.</p><button class="btn btn-primary" data-ir="elegir" type="button">Elegir locales</button></div>`;
     return;
   }
@@ -327,11 +337,11 @@ async function renderSel() {
   const pags = Math.max(1, Math.ceil(T.locales.length / PAGE));
   S.selPage = Math.min(S.selPage || 0, pags - 1);
   const desde = S.selPage * PAGE;
-  const lrows = T.locales.slice(desde, desde + PAGE).map(r => `<tr><td class="mono">${r.cod}</td><td><span class="nm">${esc(r.nom)}</span></td><td>${esc(r.dist)}</td><td class="num">${fmt(r.est)}</td><td class="num">${fmt(r.aul)}</td>${r.t.map(v => `<td class="num">${fmt(v)}</td>`).join('')}<td class="num"><b>${fmt(r.rep)}</b></td><td class="num col-fal">${fmt(r.fal)}</td><td>${coordValidas(r.lat, r.lon) ? `<a class="x" href="${urlGoogleMaps(r.lat, r.lon)}" target="_blank" rel="noopener" aria-label="Ver el local ${r.cod} en Google Maps">Mapa</a>` : '<span class="sub">—</span>'}</td><td><button class="x" data-rm="${r.cod}" type="button" aria-label="Quitar el local ${r.cod}">Quitar</button></td></tr>`).join('');
+  const lrows = T.locales.slice(desde, desde + PAGE).map(r => `<tr class="${r.excl ? 'excluido' : ''}"><td class="mono">${r.cod}</td><td><span class="nm">${esc(r.nom)}</span></td><td>${esc(r.dist)}</td><td class="c-dup">${celdaDup(r.cod)}</td><td class="num">${fmt(r.est)}</td><td class="num">${fmt(r.aul)}</td>${r.t.map(v => `<td class="num">${fmt(v)}</td>`).join('')}<td class="num"><b>${fmt(r.rep)}</b></td><td class="num col-fal">${fmt(r.fal)}</td><td>${coordValidas(r.lat, r.lon) ? `<a class="x" href="${urlGoogleMaps(r.lat, r.lon)}" target="_blank" rel="noopener" aria-label="Ver el local ${r.cod} en Google Maps">Mapa</a>` : '<span class="sub">—</span>'}</td><td><button class="x" data-rm="${r.cod}" type="button" aria-label="Quitar el local ${r.cod}">Quitar</button></td></tr>`).join('');
   const sum = k => fmt(T.tipos.reduce((a, o) => a + o[k], 0));
   el.innerHTML = `
     <div class="kpis">
-      <div class="kpi"><div class="v">${fmt(T.n)}</div><div class="l">locales seleccionados</div></div>
+      <div class="kpi"><div class="v">${fmt(T.n)}</div><div class="l">locales en la propuesta${T.nExcl ? ` · ${fmt(T.nExcl)} excluido${T.nExcl === 1 ? '' : 's'} por otra inversión` : ''}</div></div>
       <div class="kpi"><div class="v">${fmt(T.est)}</div><div class="l">estudiantes (padrón)</div></div>
       <div class="kpi"><div class="v">${fmt(T.aul)}</div><div class="l">aulas en uso (censo)</div></div>
       <div class="kpi destacado"><div class="v">${fmt(T.rep)}</div><div class="l">bienes a reponer (estado malo, suma de los 5 tipos)</div></div>
@@ -348,9 +358,72 @@ async function renderSel() {
     <div class="panel"><div class="panel-cab"><h3>Por distrito</h3></div>
         <div class="tabla-wrap"><table class="tabla"><thead><tr><th>Distrito</th><th class="num">Locales</th><th class="num">Estudiantes</th><th class="num">Aulas</th><th class="num">A reponer</th><th class="num col-fal" title="${FALTANTE}">Faltante (no reposición)</th></tr></thead><tbody>${drows}</tbody>
         <tfoot><tr><td>Total</td><td class="num">${fmt(T.n)}</td><td class="num">${fmt(T.est)}</td><td class="num">${fmt(T.aul)}</td><td class="num">${fmt(T.rep)}</td><td class="num col-fal">${fmt(T.fal)}</td></tr></tfoot></table></div></div>
-    <div class="panel"><div class="panel-cab"><h3>Locales seleccionados</h3><button class="btn btn-ghost btn-sm btn-peligro" id="clrSel" type="button">Quitar todos</button></div>
-      <div class="tabla-wrap"><table class="tabla"><thead><tr><th>Código de local</th><th>Instituciones</th><th>Distrito</th><th class="num">Estudiantes</th><th class="num">Aulas</th>${ITEMS.map(x => `<th class="num">${x.n}</th>`).join('')}<th class="num">A reponer</th><th class="num col-fal" title="${FALTANTE}">Faltante (no reposición)</th><th>Ubicación</th><th></th></tr></thead><tbody>${lrows}</tbody></table></div>
+    <div class="panel"><div class="panel-cab"><h3>Locales seleccionados</h3><div class="acc-cab">${botonesDup(T)}<button class="btn btn-ghost btn-sm btn-peligro" id="clrSel" type="button">Quitar todos</button></div></div>
+      ${avisoDup(T)}
+      <div class="tabla-wrap"><table class="tabla"><thead><tr><th>Código de local</th><th>Instituciones</th><th>Distrito</th><th>${DUP}</th><th class="num">Estudiantes</th><th class="num">Aulas</th>${ITEMS.map(x => `<th class="num">${x.n}</th>`).join('')}<th class="num">A reponer</th><th class="num col-fal" title="${FALTANTE}">Faltante (no reposición)</th><th>Ubicación</th><th></th></tr></thead><tbody>${lrows}</tbody></table></div>
       ${pags > 1 ? `<div class="paginacion pad-pag"><span class="sub">Mostrando ${fmt(desde + 1)}–${fmt(Math.min(T.locales.length, desde + PAGE))} de ${fmt(T.locales.length)} · ordenados por bienes a reponer</span><div class="pg-btns"><button class="btn btn-ghost btn-sm" data-selpag="-1" type="button" ${S.selPage === 0 ? 'disabled' : ''}>Anterior</button><span class="mono">${S.selPage + 1} / ${pags}</span><button class="btn btn-ghost btn-sm" data-selpag="1" type="button" ${S.selPage >= pags - 1 ? 'disabled' : ''}>Siguiente</button></div></div>` : ''}</div>`;
+}
+
+// ─── Otra inversión vigente o reciente (duplicidad) ─────────────────────────
+// Se registra a mano tras consultar el Banco de Inversiones (la consulta automática es una mejora futura)
+function celdaDup(cod) {
+  if (!S.proyecto) return '<span class="sub">Guarda el proyecto para registrarla</span>';
+  if (S.sinMigDup) return '<span class="sub">Falta la migración 017</span>';
+  const d = dupDe(cod);
+  const chip = d.estado === 'si' ? `<span class="chip-est alerta">Sí${d.codigo ? ' · ' + esc(d.codigo) : ''}</span><br><span class="sub">${d.excluir ? 'Excluido de la propuesta' : 'Sigue en la propuesta'}</span>`
+    : d.estado === 'no' ? '<span class="chip-est ok">No</span>' : '<span class="chip-est pend">Sin verificar</span>';
+  return `${chip}<br><button class="x" type="button" data-dup="${esc(cod)}" aria-label="${DUP}: editar el local ${esc(cod)}">Editar</button>`;
+}
+const dupSel = () => [...S.sel].map(c => [c, dupDe(c)]);
+function botonesDup() {
+  if (!S.proyecto || S.sinMigDup) return '';
+  const si = dupSel().filter(([, d]) => d.estado === 'si');
+  return (si.some(([, d]) => !d.excluir) ? '<button class="btn btn-ghost btn-sm" id="dupExcl" type="button">Excluir los marcados «Sí»</button>' : '')
+    + (si.some(([, d]) => d.excluir) ? '<button class="btn btn-ghost btn-sm" id="dupIncl" type="button">Volver a incluir los excluidos</button>' : '');
+}
+function avisoDup() {
+  if (!S.proyecto || S.sinMigDup) return '';
+  const L = dupSel(), n = e => L.filter(([, d]) => d.estado === e).length, siIn = L.filter(([, d]) => d.estado === 'si' && !d.excluir).length;
+  return `${siIn ? `<div class="aviso alerta pad-aviso" role="alert">${fmt(siIn)} local${siIn === 1 ? '' : 'es'} con otra inversión vigente o reciente sigue${siIn === 1 ? '' : 'n'} en la propuesta: hay riesgo de duplicidad.</div>` : ''}
+    <p class="sub pad">${DUP}: ${fmt(n('si'))} sí · ${fmt(n('no'))} no · ${fmt(n('sin_verificar'))} sin verificar. Consulta cada local en el Banco de Inversiones del MEF y regístralo con «Editar». Los excluidos siguen en la selección, pero no entran en los totales, el Excel ni el expediente.</p>`;
+}
+function abrirDup(cod) {
+  const d = dupDe(cod);
+  $('d-cod').textContent = cod;
+  document.querySelector(`input[name="d-estado"][value="${d.estado}"]`).checked = true;
+  $('d-codigo').value = d.codigo || ''; $('d-nota').value = d.nota || '';
+  $('d-excluir').checked = d.estado === 'si' ? d.excluir : true;   // al marcar «Sí», se propone excluir
+  $('d-err').hidden = true;
+  $('f-dup').dataset.cod = cod;
+  pintarDupModal();
+  abrirModal('m-dup');
+}
+function pintarDupModal() {
+  const si = document.querySelector('input[name="d-estado"]:checked')?.value === 'si';
+  $('d-si').hidden = !si;
+}
+async function guardarDup(e) {
+  e.preventDefault();
+  const cod = $('f-dup').dataset.cod, btn = $('d-ok');
+  const body = { estado: document.querySelector('input[name="d-estado"]:checked').value, codigo: $('d-codigo').value, nota: $('d-nota').value, excluir: $('d-excluir').checked };
+  btn.disabled = true; $('d-err').hidden = true;
+  try {
+    const r = await api(`/proyectos/${S.proyecto.id}/duplicidad/${encodeURIComponent(cod)}`, { method: 'PUT', body });
+    const { cod: _, ...d } = r;
+    if (d.estado === 'sin_verificar' && !d.codigo && !d.nota) delete S.dup[cod]; else S.dup[cod] = d;
+    await w('excluidos', { codigos: excluidosCods() });
+    cerrarModal('m-dup'); refresh();
+    toast(d.estado === 'si' ? (d.excluir ? 'Local marcado con otra inversión y excluido de la propuesta.' : 'Local marcado con otra inversión. Sigue en la propuesta.') : 'Guardado.');
+  } catch (err) { $('d-err').textContent = err.message; $('d-err').hidden = false; }
+  finally { btn.disabled = false; }
+}
+async function excluirTodosDup(excluir) {
+  try {
+    const r = await api(`/proyectos/${S.proyecto.id}/duplicidad/excluir`, { method: 'POST', body: { excluir } });
+    S.dup = r.duplicidad || {};
+    await w('excluidos', { codigos: excluidosCods() });
+    refresh(); toast(excluir ? 'Locales con otra inversión excluidos de la propuesta.' : 'Locales con otra inversión incluidos otra vez.');
+  } catch (e) { toast('No se pudo cambiar: ' + e.message); }
 }
 
 async function exportar(btn) {
@@ -499,6 +572,8 @@ function bind() {
   $('btn-borrar').onclick = borrarProyecto;
   $('m-region').onchange = actualizarCopiar;
   $('f-proy').onsubmit = enviarModalProyecto;
+  $('f-dup').onsubmit = guardarDup;
+  $('f-dup').addEventListener('change', e => { if (e.target.name === 'd-estado') pintarDupModal(); });
   $('btn-vinculo').onclick = () => { $('v-q').value = ''; abrirModal('m-vinc'); $('v-quitar').hidden = !S.proyecto?.ioarr; buscarIoarr(); setTimeout(() => $('v-q').focus(), 30); };
   $('v-q').oninput = () => { clearTimeout(tVinc); tVinc = setTimeout(buscarIoarr, 250); };
   $('v-lista').onclick = e => { const li = e.target.closest('li[data-id]'); if (li) vincular(li.dataset.id); };
@@ -559,6 +634,9 @@ function bind() {
     if (rm) { S.sel.delete(rm.dataset.rm); await cambioSel(); refresh(); return; }
     if (e.target.id === 'clrSel') { if (!confirm('¿Quitar todos los locales de la selección?')) return; S.sel.clear(); await cambioSel(); refresh(); return; }
     if (e.target.id === 'exp') { exportar(e.target); return; }
+    const dp = e.target.closest('[data-dup]'); if (dp) { abrirDup(dp.dataset.dup); return; }
+    if (e.target.id === 'dupExcl') { excluirTodosDup(true); return; }
+    if (e.target.id === 'dupIncl') { excluirTodosDup(false); return; }
     const pg = e.target.closest('[data-selpag]');
     if (pg) { S.selPage = (S.selPage || 0) + +pg.dataset.selpag; await renderSel(); document.querySelector('#v-sel .panel:last-of-type')?.scrollIntoView({ block: 'start' }); return; }
     if (e.target.closest('[data-ir]')) setTab('elegir');
