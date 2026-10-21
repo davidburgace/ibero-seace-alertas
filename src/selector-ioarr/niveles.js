@@ -23,6 +23,7 @@
 
 import { NIVN, calc } from './calculo.js';
 import { TIPOS, censoLocal } from './costos.js';
+import { verifFicha } from './ficha.js';
 
 export const MODOS = { por_nivel: 'Una IOARR por nivel', una: 'Una IOARR' };
 export const MODO_DEF = 'por_nivel';
@@ -70,11 +71,16 @@ export function porNivel(D, P, list) {
 // ─── Inventario verificado ───────────────────────────────────────────────────
 // Lo cargado para un nivel en una fila (por_nivel tiene prioridad; en un local
 // de un solo nivel también vale lo de bienes / adquisicion)
+// También trae lo de la ficha de verificación (ficha.js): la parte de Malo
+// verificada en campo (verif), el requerido con los estudiantes verificados (req)
+// y los tipos con antigüedad estimada por rango.
 function delNivel(fila, nivel, unSoloNivel) {
   const pn = fila.por_nivel?.[nivel] || {};
-  if (unSoloNivel) return { bienes: { ...(fila.bienes || {}), ...(pn.bienes || {}) }, adquisicion: { ...(fila.adquisicion || {}), ...(pn.adquisicion || {}) } };
-  return { bienes: pn.bienes || {}, adquisicion: { ...(fila.adquisicion || {}), ...(pn.adquisicion || {}) } };
+  const bienes = unSoloNivel ? { ...(fila.bienes || {}), ...(pn.bienes || {}) } : pn.bienes || {};
+  const clave = unSoloNivel ? '_' : nivel;
+  return { bienes, adquisicion: { ...(fila.adquisicion || {}), ...(pn.adquisicion || {}) }, ...deFicha(fila, clave, bienes) };
 }
+const deFicha = (fila, clave, bienes) => ({ verif: verifFicha(fila, clave, bienes), req: fila.req_ficha?.[clave] || null, adq_estimada: fila.ficha?.adq_estimada?.[clave] || [] });
 const tieneNiveles = fila => Object.values(fila.por_nivel || {}).some(x => Object.keys(x?.bienes || {}).length || Object.keys(x?.adquisicion || {}).length);
 // Local con varios niveles y cantidades cargadas sin nivel (antes de la migración 018)
 export const sinNivel = (fila, niveles) => niveles.length > 1 && Object.keys(fila.bienes || {}).length > 0 && !tieneNiveles(fila);
@@ -90,7 +96,7 @@ export function inventarioNivel(inv, D, nivel) {
     const ns = nivelesDeLocal(D, i); if (!ns.includes(nivel)) continue;
     const x = delNivel(fila, nivel, ns.length === 1);
     // El censo copiado al guardar: el del nivel (en un local de un solo nivel, el del local)
-    out[cod] = { ...fila, bienes: x.bienes, adquisicion: x.adquisicion, censo: ns.length === 1 ? fila.censo : fila.censo?._niveles?.[nivel] || null };
+    out[cod] = { ...fila, ...x, censo: ns.length === 1 ? fila.censo : fila.censo?._niveles?.[nivel] || null };
   }
   return out;
 }
@@ -106,7 +112,7 @@ export function inventarioUna(inv, D, Cn) {
   for (const [cod, fila] of Object.entries(inv || {})) {
     const i = idx.get(cod); if (i == null) continue;
     const ns = nivelesDeLocal(D, i);
-    if (ns.length < 2 || !tieneNiveles(fila)) { out[cod] = fila; continue; }
+    if (ns.length < 2 || !tieneNiveles(fila)) { out[cod] = { ...fila, ...deFicha(fila, '_', fila.bienes), adq_estimada: [...new Set(Object.values(fila.ficha?.adq_estimada || {}).flat())] }; continue; }
     const bienes = {}, adquisicion = {};
     for (const k of TIPOS) {
       const cargados = ns.filter(n => fila.por_nivel?.[n]?.bienes?.[k]);
@@ -125,7 +131,7 @@ export function inventarioUna(inv, D, Cn) {
         adquisicion[k] = Math.round(peso ? anios.reduce((a, x) => a + x.a * x.m, 0) / peso : anios.reduce((a, x) => a + x.a, 0) / anios.length);
       }
     }
-    out[cod] = { ...fila, bienes, adquisicion };
+    out[cod] = { ...fila, bienes, adquisicion, ...deFicha(fila, '_', bienes), adq_estimada: [...new Set(Object.values(fila.ficha?.adq_estimada || {}).flat())] };
   }
   return out;
 }

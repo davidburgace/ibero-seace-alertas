@@ -226,7 +226,8 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, inv = {}, fe
     const peso = con.reduce((a, u) => a + u.rep[x.t], 0);
     const edades = con.map(u => anioRef - u.verificado.adquisicion[x.k]);
     const prom = con.reduce((a, u) => a + (anioRef - u.verificado.adquisicion[x.k]) * u.rep[x.t], 0) / peso;
-    return [x.k, { promedio: Math.round(prom * 10) / 10, min: Math.min(...edades), max: Math.max(...edades), con: con.length, de }];
+    return [x.k, { promedio: Math.round(prom * 10) / 10, min: Math.min(...edades), max: Math.max(...edades), con: con.length, de,
+      estimada: con.filter(u => u.verificado.adq_estimada?.includes(x.k)).length }];
   }));
 
   // ── E. Activos: descripción técnica (del catálogo de precios) y estado ──
@@ -246,6 +247,14 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, inv = {}, fe
   const visitados = ups.filter(u => u.verificado);                   // tienen visita registrada
   const conActa = visitados.filter(u => u.archivos.some(a => a.tipo === 'acta'));
   const conBaja = ups.filter(u => u.archivos.some(a => a.tipo === 'baja'));
+  // Qué parte de lo que se repone está verificada en campo (fichas o inventario corregido); el resto es del censo
+  const repVerif = T.repVerif || 0;
+  const cantidades = { rep: T.rep, verif: repVerif, pct: T.rep ? Math.round(repVerif / T.rep * 1000) / 10 : 0, locales: verificados.length, de: n };
+  cantidades.texto = !T.rep ? '' : repVerif >= T.rep
+    ? `Todas las cantidades a reponer (${T.rep.toLocaleString('es-PE')}) están verificadas en campo, en ${n === 1 ? 'el local' : `los ${n} locales`}.`
+    : repVerif > 0
+      ? `Cantidades a reponer verificadas en campo: ${cantidades.pct.toLocaleString('es-PE')} % (${repVerif.toLocaleString('es-PE')} de ${T.rep.toLocaleString('es-PE')}), en ${verificados.length} de ${n} ${n === 1 ? 'local' : 'locales'}. El resto sale del Censo Educativo 2025, declarado por cada institución.`
+      : `Ninguna cantidad a reponer está verificada en campo (0 %): las ${T.rep.toLocaleString('es-PE')} salen del Censo Educativo 2025, declarado por cada institución. Carga las fichas de verificación de los locales.`;
   const sustentoAuto = [
     `${masiva ? `La inversión repone el mobiliario de aula de ${n} locales educativos` : `La inversión repone el mobiliario de aula del local educativo ${u0?.cod}`} (${nomNiveles.toLowerCase()}), ${masiva ? 'que atienden' : 'que atiende'} a ${est.toLocaleString('es-PE')} estudiantes en ${aulas.toLocaleString('es-PE')} aulas.`,
     `Se reponen ${lista(metas.map(m => `${m.cantidad.toLocaleString('es-PE')} ${m.cantidad === 1 ? m.nombre.toLowerCase() : m.plural}`))}: el mobiliario en estado malo, que ya no es útil ni operativo y no puede recuperarse con mantenimiento correctivo (vida útil efectiva, Lineamientos IOARR 2.4.B.e).`,
@@ -299,10 +308,10 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, inv = {}, fe
     totales: T, rubros: R.rubros, partidas: R.partidas, distritos: R.distritos, excluidos: R.excluidos || [],
     faltante: { cantidad: T.fal, valor: T.falValor, partidas: R.partidas.filter(p => p.fal > 0).map(p => ({ nombre: p.n, cantidad: p.fal, valor: p.falValor })) },
     memoria: { antecedentes: d.antecedentes, objetivo: d.objetivo || `Reponer el mobiliario de aula en mal estado ${masiva ? `de ${n} locales educativos` : 'del local educativo'} de nivel ${nomNiveles.toLowerCase()}, para mantener el nivel y la calidad del servicio educativo que reciben ${est.toLocaleString('es-PE')} estudiantes.` },
-    anioRef, informe_vida_util: d.informe_vida_util,
+    anioRef, informe_vida_util: d.informe_vida_util, cantidades,
     faltan, completo: !faltan.length,
     ioarr: proyecto.ioarr || null,
-    verificacion: armarVerificacion({ R, ups, activos, condiciones, faltan, precios, U, d, n, ioarr: proyecto.ioarr, total })
+    verificacion: armarVerificacion({ R, ups, activos, condiciones, faltan, precios, U, d, n, ioarr: proyecto.ioarr, total, cantidades })
   };
 }
 
@@ -328,7 +337,7 @@ function dupItem(ups, n, excluidos) {
 
 // Junta lo que el sistema comprueba solo (costos, archivos por local, datos del
 // 07-C, condiciones) y lo que se marca a mano (VERIF_MANUAL).
-function armarVerificacion({ R, ups, activos, condiciones, faltan, precios, U, d, n, ioarr, total }) {
+function armarVerificacion({ R, ups, activos, condiciones, faltan, precios, U, d, n, ioarr, total, cantidades }) {
   const it = (texto, ok, nota = '', extra = {}) => ({ texto, estado: ok === true ? 'ok' : ok === false ? 'pendiente' : ok, nota, ...extra });
   const todos = (f) => n > 0 && ups.every(f);
   const cuenta = (f) => `${ups.filter(f).length} de ${n} ${n === 1 ? 'local' : 'locales'}`;
@@ -347,6 +356,8 @@ function armarVerificacion({ R, ups, activos, condiciones, faltan, precios, U, d
     ] },
     { titulo: 'Locales: visita y sustento', items: [
       it('Visita de campo registrada.', todos(u => u.verificado), cuenta(u => u.verificado)),
+      it('Cantidades a reponer verificadas en campo (fichas de verificación).', !!cantidades?.rep && cantidades.verif >= cantidades.rep,
+        cantidades?.rep ? `${cantidades.pct.toLocaleString('es-PE')} % verificado (${cantidades.verif.toLocaleString('es-PE')} de ${cantidades.rep.toLocaleString('es-PE')}); el resto, del censo.` : ''),
       it('Acta de verificación adjunta.', todos(tiene('acta')), cuenta(tiene('acta'))),
       it('Fotos del mobiliario adjuntas.', todos(tiene('foto')), cuenta(tiene('foto'))),
       it('Inventario patrimonial adjunto.', todos(tiene('inventario_patrimonial')), cuenta(tiene('inventario_patrimonial'))),

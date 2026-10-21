@@ -5,6 +5,7 @@ import { RUBROS, BASES, FUENTES_PRECIO, LIMITE_UIT, TIPOS_ARCHIVO } from '/selec
 import { ITEMS } from '/selector-ioarr/calculo.js';
 import { renderDocumentos, enlazarDocumentos } from '/selector-ioarr-documentos.js';
 import { renderVerificacion, enlazarVerificacion } from '/selector-ioarr-verificacion.js';
+import { renderFichas, enlazarFichas } from '/selector-ioarr-fichas.js';
 
 const NF = new Intl.NumberFormat('es-PE');
 const NS = new Intl.NumberFormat('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -19,7 +20,8 @@ let ctx = null;        // { el, proyecto, api, toast, guardarYa }
 let datos = null;      // respuesta de /costos
 let catalogo = null;   // precios del catálogo por tipo
 let pagLoc = 0, tGuardar = null, version = 0, filtroLoc = '';
-let vistaExp = 'costos';   // sub-pestaña: 'costos' | 'docs' | 'verif'
+let vistaExp = 'costos';   // sub-pestaña: 'costos' | 'fichas' | 'docs' | 'verif'
+let costosViejos = false;  // se importaron fichas: al volver a Costos se recalcula
 let nivelExp = null;       // IOARR a la vista con «Una IOARR por nivel»: 'I' | 'P' | 'S' | 'E'
 let proyectoExp = null;    // al cambiar de proyecto se vuelve a la primera IOARR
 const qn = () => nivelExp ? `?nivel=${nivelExp}` : '';
@@ -39,7 +41,7 @@ export async function renderExpediente(c) {
     if (proyectoExp !== c.proyecto.id) { proyectoExp = c.proyecto.id; nivelExp = null; }
     const [d, cat] = await Promise.all([c.api(`/proyectos/${c.proyecto.id}/costos${qn()}`), c.api('/catalogo')]);
     if (mio !== version) return;
-    datos = d; catalogo = agrupar(cat.precios); pagLoc = 0; nivelExp = d.nivel; ctx.nivel = d.nivel;
+    datos = d; catalogo = agrupar(cat.precios); pagLoc = 0; nivelExp = d.nivel; ctx.nivel = d.nivel; costosViejos = false;
     pintar();
   } catch (e) {
     if (mio !== version) return;
@@ -59,9 +61,11 @@ function pintar() {
     <div id="exp-ioarr"></div>
     <div class="subtabs" role="tablist" aria-label="Expediente">
       <button type="button" role="tab" data-exp-vista="costos" aria-selected="${vistaExp === 'costos'}">Costos</button>
+      <button type="button" role="tab" data-exp-vista="fichas" aria-selected="${vistaExp === 'fichas'}">Fichas de verificación</button>
       <button type="button" role="tab" data-exp-vista="docs" aria-selected="${vistaExp === 'docs'}">Documentos: Formato 07-C y memoria</button>
       <button type="button" role="tab" data-exp-vista="verif" aria-selected="${vistaExp === 'verif'}">Verificación</button>
     </div>
+    <div id="exp-v-fichas" ${vistaExp === 'fichas' ? '' : 'hidden'}></div>
     <div id="exp-v-docs" ${vistaExp === 'docs' ? '' : 'hidden'}></div>
     <div id="exp-v-verif" ${vistaExp === 'verif' ? '' : 'hidden'}></div>
     <div id="exp-v-costos" ${vistaExp === 'costos' ? '' : 'hidden'}>
@@ -78,6 +82,7 @@ function pintar() {
     <div id="exp-resultados"></div>
     </div>`;
   pintarIoarr(); pintarPrecios(); pintarRubros(); pintarResultados();
+  if (vistaExp === 'fichas') abrirFichas();
   if (vistaExp === 'docs') abrirDocumentos();
   if (vistaExp === 'verif') abrirVerificacion();
 }
@@ -196,7 +201,7 @@ function pintarResultados() {
   const pags = Math.max(1, Math.ceil(locs.length / PAGE)); pagLoc = Math.min(pagLoc, pags - 1);
   const desde = pagLoc * PAGE;
   const lrows = locs.slice(desde, desde + PAGE).map(l => `<tr><td class="mono">${l.cod}</td><td><span class="nm">${esc(l.nom)}</span><span class="sub">${esc(l.dist)}${l.rural ? ' · rural' : ''}</span>${l.duplicidad?.estado === 'si' ? `<br><span class="chip-est alerta" title="Otra inversión vigente o reciente: riesgo de duplicidad">Otra inversión${l.duplicidad.codigo ? ' ' + esc(l.duplicidad.codigo) : ''}</span>` : ''}</td><td class="num">${ent(l.est)}</td><td class="num">${ent(l.rep)}</td><td class="num">${ent(l.fal)}</td><td class="num">${l.zona.flete || l.zona.instalacion ? `+${dec(l.zona.flete * 100)} % / +${dec(l.zona.instalacion * 100)} %` : '<span class="sub">—</span>'}</td><td class="num">${soles(l.cd)}</td><td class="num"><b>${soles(l.total)}</b></td>
-    <td>${l.verificado ? `<span class="chip-est ok">Verificado ${fechaPe(l.verificado.fecha_visita)}</span><br>${l.archivos ? `<span class="sub">${l.archivos} archivo${l.archivos === 1 ? '' : 's'}</span><br>` : '<span class="chip-est pend">Sin sustento</span><br>'}` : ''}<button class="x" data-inv="${esc(l.cod)}" type="button">${l.verificado ? 'Editar' : 'Corregir inventario'}</button></td></tr>`).join('');
+    <td>${l.verificado ? `<span class="chip-est ok">Verificado ${fechaPe(l.verificado.fecha_visita)}</span><br>${l.verificado.ficha ? '<span class="sub">con ficha</span><br>' : ''}${l.archivos ? `<span class="sub">${l.archivos} archivo${l.archivos === 1 ? '' : 's'}</span><br>` : '<span class="chip-est pend">Sin sustento</span><br>'}` : ''}<button class="x" data-inv="${esc(l.cod)}" type="button">${l.verificado ? 'Editar' : 'Corregir inventario'}</button></td></tr>`).join('');
 
   document.getElementById('exp-resultados').innerHTML = `
     <div class="cols">
@@ -233,12 +238,19 @@ function abrirDocumentos() {
 function abrirVerificacion() {
   return renderVerificacion({ ...ctx, el: document.getElementById('exp-v-verif') });
 }
+// Fichas: son por local (no por IOARR); al importar, los costos quedan por recalcular
+function abrirFichas() {
+  return renderFichas({ ...ctx, el: document.getElementById('exp-v-fichas'), alCambiarInventario: () => { costosViejos = true; } });
+}
 function cambiarVista(v) {
   vistaExp = v;
   ctx.el.querySelectorAll('[data-exp-vista]').forEach(b => b.setAttribute('aria-selected', String(b.dataset.expVista === v)));
   document.getElementById('exp-v-costos').hidden = v !== 'costos';
   document.getElementById('exp-v-docs').hidden = v !== 'docs';
   document.getElementById('exp-v-verif').hidden = v !== 'verif';
+  document.getElementById('exp-v-fichas').hidden = v !== 'fichas';
+  if (v === 'costos' && costosViejos) { costosViejos = false; renderExpediente(ctx); return; }
+  if (v === 'fichas') abrirFichas();
   if (v === 'docs') abrirDocumentos();
   if (v === 'verif') abrirVerificacion();
 }
@@ -318,6 +330,7 @@ export function enlazarExpediente(el, abrirNuevo) {
   });
   enlazarDocumentos(el);
   enlazarVerificacion(el);
+  enlazarFichas(el);
   el.addEventListener('click', e => {
     const sv = e.target.closest('[data-exp-vista]');
     if (sv) cambiarVista(sv.dataset.expVista);
@@ -403,7 +416,8 @@ async function abrirInventario(cod) {
     const v = d.verificado;
     m.querySelector('#inv-local').innerHTML = `<b>${esc(d.cod)}</b> · ${esc(d.nom)}${d.por_nivel ? `<br>Local con ${d.niveles.length} niveles: carga lo de cada nivel por separado; cada IOARR por nivel usa lo suyo.` : ''}`
       + (d.sin_nivel ? '<br><b class="aviso-linea">Lo cargado antes no tiene nivel: vuelve a cargarlo por nivel (al guardar se reemplaza).</b>' : '')
-      + (d.por_nivel && d.sin_migracion_niveles ? '<br><b class="aviso-linea">Falta ejecutar supabase/migrations/018_ioarr_por_nivel.sql para guardar por nivel.</b>' : '');
+      + (d.por_nivel && d.sin_migracion_niveles ? '<br><b class="aviso-linea">Falta ejecutar supabase/migrations/018_ioarr_por_nivel.sql para guardar por nivel.</b>' : '')
+      + (v?.ficha ? `<br>Cargado desde la ficha de verificación «${esc(v.ficha.archivo)}» (visita del ${fechaPe(v.ficha.fecha)}). Si cambias las cantidades aquí, cuentan como corrección a mano; para volver a la ficha, impórtala de nuevo en «Fichas de verificación».` : '');
     // Un solo nivel: bienes / adquisicion (niv = ''). Varios niveles: un bloque por nivel (por_nivel)
     const bloques = d.por_nivel ? d.niveles.map(x => ({ niv: x.nivel, titulo: x.nombre, censo: x.censo, f: v?.por_nivel?.[x.nivel] || {} }))
       : [{ niv: '', titulo: null, censo: d.censo, f: { bienes: v?.bienes, adquisicion: v?.adquisicion } }];
