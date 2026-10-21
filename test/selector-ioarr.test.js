@@ -10,9 +10,7 @@ const DIR = new URL('../src/public/data/selector-ioarr/2025/', import.meta.url);
 const leer = r => JSON.parse(readFileSync(new URL(r + '.json', DIR), 'utf8'));
 const moquegua = () => prep(leer('moquegua'));
 
-// prep y calc tal cual están en el prototipo, para comparar resultados.
-// El prototipo del repositorio aún suma Faltante y % de Regular en «a reponer»:
-// se compara el diagnóstico (bueno, regular, malo, requerido, faltante), no la reposición.
+// prep y calc tal cual están en el prototipo, para comparar resultados
 function calculoPrototipo() {
   const html = readFileSync(new URL('../docs/selector-ioarr/prototipo.html', import.meta.url), 'utf8');
   const codigo = html.slice(html.indexOf('function prep(D){'), html.indexOf('const lv=(m,t,i)'));
@@ -59,7 +57,7 @@ test('el cálculo coincide con el prototipo con varios criterios', () => {
       const proto = fabrica(S, norm, NIVB);
       const Dp = leer(region); proto.prep(Dp); S.D = Dp; proto.calc();   // el prototipo lee S.D y S.params, deja S.C
       const D = prep(leer(region)), C = calc(D, P);
-      for (const k of ['b', 'r', 'm', 'req', 'fal', 'reqTot']) assert.deepEqual(C.L[k], S.C.L[k], `${region} ${k}`);
+      for (const k of ['b', 'r', 'm', 'req', 'fal', 'rep', 'repTot', 'reqTot']) assert.deepEqual(C.L[k], S.C.L[k], `${region} ${k}`);
     }
   }
 });

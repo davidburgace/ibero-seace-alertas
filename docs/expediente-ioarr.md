@@ -28,7 +28,7 @@ Caso de control (Moquegua, búsqueda «mariscal», «Seleccionar los filtrados»
 
 El Excel del Selector trae la hoja nueva **Por distrito** (con SUMIF sobre «Locales (UP)») y, en cada hoja, las columnas en ese orden. En «Aulas», «Locales (UP)» y «Reposición masiva», «A reponer» es una fórmula que apunta a la celda de Malo.
 
-`docs/selector-ioarr/prototipo.html` todavía usa la regla anterior. Las pruebas lo comparan solo en el diagnóstico (bueno, regular, malo, requerido y faltante).
+`docs/selector-ioarr/prototipo.html` aplica la misma regla. Las pruebas comparan con él el cálculo completo, por aula y por local.
 
 ## Etapa 1: costos
 
