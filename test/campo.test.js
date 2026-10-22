@@ -438,15 +438,6 @@ test('campo: en las tarjetas los botones van en su propia fila (no aprietan el n
   assert.match(css, /\.pag-campo \.lst-item\{ grid-template-columns:30px minmax\(0,1fr\) auto; grid-template-areas:"n cuerpo km" "n acc acc"/);
 });
 
-test('campo: asignar en bloque los colegios del listado o de un día (sin reemplazar el resto del reparto)', () => {
-  const js = leer('src/public/campo.js');
-  assert.match(js, /barraBloque\('lista', S\.filas\.map\(f => f\.cod\)/);
-  assert.match(js, /barraBloque\('dia-' \+ d\.dia, d\.puntos\.map\(p => p\.cod\)/);
-  const f = js.slice(js.indexOf('async function asignarBloque'), js.indexOf('// Lo que el listado muestra del reparto'));
-  assert.match(f, /guardarAsig\(asignaciones\)/);
-  assert.doesNotMatch(f, /reemplazar|guardarAsig\(asignaciones, true\)/);
-});
-
 test('campo: con un proyecto, «Colegios a visitar» llega a todos sus colegios; sin proyecto, a 200', async () => {
   const { limitarN, N_MAX_PROYECTO } = await import('../src/selector-ioarr/cercania.js');
   assert.equal(limitarN(267), 200);
@@ -457,9 +448,8 @@ test('campo: con un proyecto, «Colegios a visitar» llega a todos sus colegios;
   const js = leer('src/public/campo.js');
   assert.match(js, /const maxN = \(\) => S\.proy \? Math\.min\(N_MAX_PROYECTO, Math\.max\(1, S\.proy\.nVer \|\| 1\)\) : N_MAX;/);
   assert.match(js, /w\('listado', \{ max: S\.near\.n \}\)/);
-  assert.doesNotMatch(js, /barraBloque\('ver'/, 'una sola barra: la del listado');
-  // al asignar, se descuentan: el listado pasa a «Sin asignar»
-  assert.match(js, /S\.ver = 'sin'; pintarVer\(\); await aplicarVer\(\);/);
+  // sin barra de asignación en bloque: se reparte con «Repartir por zonas» y se ajusta colegio por colegio
+  assert.doesNotMatch(js, /barraBloque|asignarBloque|data-bloque/);
 });
 
 test('campo: los repartos grandes se guardan en partes de 500 y solo la primera reemplaza', () => {

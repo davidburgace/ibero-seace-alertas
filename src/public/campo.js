@@ -234,39 +234,6 @@ async function guardarAsig(asignaciones, reemplazar = false) {
   return g;
 }
 
-// ─── Asignar en bloque ──────────────────────────────────────────────────────
-// El proveedor asigna de una vez todos los colegios del listado, o los de un día de visita.
-// Para armar el grupo: «Colegios a visitar» (p. ej. 30) + un centro, o «Colegios del proyecto → Sin asignar»
-const puedeAsignar = () => S.rol === 'proveedor' && !!S.proy?.asig && S.sups.length > 0;
-const bloques = new Map();   // clave → códigos del bloque (se rearma en cada pintarLista)
-function barraBloque(clave, cods, texto) {
-  if (!puedeAsignar() || !cods.length) return '';
-  bloques.set(clave, cods);
-  const ops = '<option value="">Elegir supervisor…</option>' + S.sups.map(u => `<option value="${esc(u.id)}">${esc(corto(u.email))}</option>`).join('') + '<option value="sin">Sin asignar</option>';
-  return `<div class="asig-bloque" data-bloque="${esc(clave)}">
-    <label><span class="sub">${esc(texto)} a</span> <select data-bloque-sup aria-label="${esc(texto)}: supervisor">${ops}</select></label>
-    <button class="btn btn-primary btn-sm" type="button" data-bloque-ir>Asignar</button></div>`;
-}
-async function asignarBloque(caja, boton) {
-  const P = S.proy, cods = bloques.get(caja.dataset.bloque) || [], v = caja.querySelector('[data-bloque-sup]').value;
-  if (!v) { toast('Elige el supervisor.'); return; }
-  const id = v === 'sin' ? null : v;
-  const deOtro = cods.filter(c => P.asig[c] && P.asig[c] !== id).length;
-  if (deOtro && !confirm(`${plural(deOtro, 'colegio ya tiene', 'colegios ya tienen')} otro supervisor. ¿${id ? `Pasarlos a ${corto(correoSup(id))}` : 'Dejarlos sin asignar'}?`)) return;
-  boton.disabled = true;
-  try {
-    const asignaciones = Object.fromEntries(cods.map(c => [c, id]));
-    const g = await guardarAsig(asignaciones);
-    P.asig = g.asignaciones; P.sups = g.supervisores;
-    const quedan = conteoAsig().sin;
-    toast(`${plural(cods.length, 'colegio', 'colegios')} ${id ? `asignados a ${corto(correoSup(id))}` : 'sin asignar'}.${id && quedan ? ` Quedan ${fmt(quedan)} sin asignar.` : ''}`);
-    pintarReparto();
-    // Se descuentan del total: si quedan colegios sin asignar, el listado pasa a mostrar solo esos
-    if (id && quedan && (S.ver === 'todo' || S.ver === 'sin')) { S.ver = 'sin'; pintarVer(); await aplicarVer(); }
-    else { pintarVer(); pintarLista(); pintarInfoVisitas(); }
-  } catch (e) { toast(`No se pudo asignar: ${e.message}`); boton.disabled = false; }
-}
-
 // Lo que el listado muestra del reparto: el proveedor elige el supervisor; el supervisor ve de quién es
 function extraAsig(f) {
   const P = S.proy; if (!P?.asig || !f?.cod) return {};
@@ -445,16 +412,13 @@ function pintarTodo(ajustar) {
 function pintarLista() {
   if (!S.near) { $('cLista').innerHTML = '<p class="sub lst-vacio">Aún no hay búsqueda. Usa tu ubicación, elige un distrito o escribe un código de local.</p>'; return; }
   const opts = { extra: extraItem };
-  bloques.clear();
-  const todos = barraBloque('lista', S.filas.map(f => f.cod), `Asignar ${S.filas.length === 1 ? 'el colegio' : `los ${fmt(S.filas.length)} colegios`} del listado`);
-  if (!S.vis) { $('cLista').innerHTML = todos + htmlListado(S.filas, opts); return; }
+  if (!S.vis) { $('cLista').innerHTML = htmlListado(S.filas, opts); return; }
   // Agrupado por día: cada día en su orden de visita, con los datos completos del listado
   const porCod = new Map(S.filas.map(f => [f.cod, f])), total = S.vis.dias.length;
-  $('cLista').innerHTML = todos + S.vis.dias.map(d => {
+  $('cLista').innerHTML = S.vis.dias.map(d => {
     const rep = d.puntos.reduce((a, p) => a + p.rep, 0), nv = visitados(d.puntos);
     return `<h3 class="dia-titulo" style="--c:${colorDia(d.dia, total)}"><span class="sw"></span>Día ${d.dia} <span class="sub">${plural(d.puntos.length, 'colegio', 'colegios')}${nv ? ` (${fmt(nv)} ${nv === 1 ? 'visitado' : 'visitados'})` : ''} · ~${fmtKm(d.km)} km · ${fmt(rep)} a reponer</span></h3>
       ${botonesRuta(d)}
-      ${barraBloque('dia-' + d.dia, d.puntos.map(p => p.cod), `Asignar el día ${d.dia}`)}
       <ol class="lst">${d.puntos.map(p => itemListado({ ...porCod.get(p.cod), orden: p.orden, km: null }, { ...opts, numero: x => x.orden })).join('')}</ol>`;
   }).join('') + (S.vis.sinCoord.length ? `<h3 class="dia-titulo">Sin coordenadas</h3><ol class="lst">${S.vis.sinCoord.map(p => itemListado({ ...porCod.get(p.cod), km: null }, { ...opts, numero: () => '–' })).join('')}</ol>` : '');
 }
@@ -539,7 +503,6 @@ function bind() {
   $('cRepIguales').onclick = partesIguales;
   $('cRepartir').onclick = repartir;
   $('cLista').addEventListener('change', e => { const s = e.target.closest('[data-asignar]'); if (s) asignarUno(s.dataset.asignar, s.value, s); });
-  $('cLista').addEventListener('click', e => { const b = e.target.closest('[data-bloque-ir]'); if (b) asignarBloque(b.closest('[data-bloque]'), b); });
   $('cUbic').onclick = usarUbicacion;
   $('cGo').onclick = async () => { const c = await centroDistrito(); if (c.error) { toast(c.error); return; } buscar(c); };
   $('cCod').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('cGo').click(); } });
