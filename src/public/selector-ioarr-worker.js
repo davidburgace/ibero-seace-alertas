@@ -10,6 +10,7 @@ let excl = new Set();   // locales excluidos por otra inversión vigente o recie
 let dup = {};           // { codLocal: { estado, excluir } } para el cuadro de estado situacional
 let km = new Map();     // con búsqueda por cercanía: índice de local → distancia al centro (km)
 let centro = null;      // centro de la última consulta por cercanía
+let solo = null;        // Visitas de campo: códigos del proyecto elegido (las consultas solo ven esos locales)
 
 const pct = i => C.L.reqTot[i] > 0 ? C.L.repTot[i] / C.L.reqTot[i] : null;
 const selIdx = () => [...sel].map(c => codIdx.get(c)).filter(i => i != null);
@@ -20,12 +21,18 @@ const acciones = {
     if (!r.ok) throw new Error('No se pudo descargar la región (' + r.status + ')');
     D = prep(await r.json());
     codIdx = new Map(D.locs.map((l, i) => [l[0], i]));
-    P = limpiarParams(params); C = calc(D, P); sel = new Set(); view = [];
+    P = limpiarParams(params); C = calc(D, P); sel = new Set(); view = []; solo = null;
     return { region: D.region, provs: D.provs, ugels: D.ugels, dists: D.dists.map(d => [d[0], d[2]]), codigos: D.locs.length };
   },
   params({ params }) { P = limpiarParams(params); if (D) C = calc(D, P); return P; },
   // Fija la selección; devuelve los códigos que existen en la región
   sel({ codigos }) { sel = new Set(codigos.filter(c => codIdx.has(c))); return [...sel]; },
+  // Limita las consultas a estos códigos (null = toda la región). Devuelve cuántos hay en la región y cuántos no
+  limitar({ codigos }) {
+    if (!codigos) { solo = null; return { n: 0, fuera: 0 }; }
+    solo = new Set(codigos.filter(c => codIdx.has(c)));
+    return { n: solo.size, fuera: new Set(codigos).size - solo.size };
+  },
   // Otra inversión vigente o reciente por local: { codLocal: { estado, codigo, excluir } }
   duplicidad({ mapa }) {
     dup = mapa || {};
@@ -36,6 +43,7 @@ const acciones = {
   // near = { lat, lon, n }: los n más cercanos entre los filtrados, en orden de distancia
   consulta({ f, sort, page, size, near }) {
     view = filtrar(D, C, f);
+    if (solo) view = view.filter(i => solo.has(D.locs[i][0]));
     let cerca = null;
     if (near) {
       const r = cercanos(D, view, near, near.n);
@@ -60,8 +68,15 @@ const acciones = {
     });
     return { total: view.length, est, aul, nsel, page: pg, pages, filas, cerca };
   },
-  // Centro de búsqueda: { dist } (promedio de sus locales con coordenadas) o { cod } (un local)
-  centro({ dist, cod }) {
+  // Centro de búsqueda: { dist } (promedio de sus locales con coordenadas), { cod } (un local)
+  // o { proyecto } (promedio de los locales del proyecto con coordenadas)
+  centro({ dist, cod, proyecto }) {
+    if (proyecto) {
+      let lat = 0, lon = 0, n = 0;
+      for (const c of solo || []) { const l = D.locs[codIdx.get(c)]; if (localConCoord(l)) { lat += l[6]; lon += l[7]; n++; } }
+      if (!n) return { error: 'Ningún colegio del proyecto tiene coordenadas válidas en el padrón.' };
+      return { lat: lat / n, lon: lon / n, label: `centro del proyecto «${proyecto}»` };
+    }
     if (cod != null) {
       const i = codIdx.get(String(cod).trim());
       if (i == null) return { error: 'Ese código de local no está en esta región.' };

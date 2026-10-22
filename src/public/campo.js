@@ -1,8 +1,9 @@
 // Visitas de campo — mapa y listado de colegios por cercanía (proveedor y supervisor de campo).
-// Solo lectura: usa los datos estáticos de la región y el mismo Web Worker del Selector IOARR;
-// no llama a la API (salvo la sesión) ni guarda nada en el servidor.
+// Solo lectura: usa los datos estáticos de la región y el mismo Web Worker del Selector IOARR.
+// De la API solo lee la sesión y los proyectos del Selector (/api/campo/*, src/selector-ioarr/campo.js):
+// con un proyecto elegido, la búsqueda por cercanía se limita a sus colegios. No guarda nada en el servidor.
 import { DEF, NIVN, NIVS, NIVB, FILTRO_VACIO, coordValidas } from '/selector-ioarr/calculo.js';
-import { limitarN } from '/selector-ioarr/cercania.js';
+import { limitarN, N_MAX } from '/selector-ioarr/cercania.js';
 import { limitarPorDia, colorDia, tramosRutaDia, AVISO_VISITAS } from '/selector-ioarr/visitas.js';
 import { crearMapa, fmtKm } from '/selector-ioarr-mapa.js';
 import { htmlListado, itemListado } from '/selector-ioarr-listado.js';
@@ -21,6 +22,12 @@ function store(k, v) {
     localStorage.setItem(LS + k, JSON.stringify(v));
   } catch { return null; }
 }
+async function api(ruta) {
+  const r = await fetch(ruta);
+  const b = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(b.error || `error ${r.status}`);
+  return b;
+}
 function toast(t) { const el = $('toast'); el.textContent = t; el.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => { el.hidden = true; }, 4200); }
 
 // ─── Worker (el mismo del Selector) ──────────────────────────────────────────
@@ -33,6 +40,8 @@ const w = (tipo, args = {}) => new Promise((ok, mal) => { const id = ++sigId; pe
 // ─── Estado ──────────────────────────────────────────────────────────────────
 const S = {
   idx: null, region: null, meta: null, f: FILTRO_VACIO(),
+  proys: [],                // proyectos del Selector que el usuario puede ver
+  proy: null,               // proyecto elegido: { id, nombre, n } (n = colegios del proyecto en la región)
   near: null,               // { lat, lon, n, label, gps }
   filas: [],                // listado actual (de más cerca a más lejos)
   vis: null,                // { porDia, dias, sinCoord }
@@ -54,8 +63,57 @@ async function boot() {
   catch { $('cInfo').innerHTML = '<span class="err">No se pudo cargar la lista de regiones. Revisa tu conexión y recarga.</span>'; return; }
   $('cRegion').innerHTML = S.idx.regiones.map(g => `<option value="${esc(g.nombre)}">${esc(g.nombre)}</option>`).join('');
   $('cFuente').textContent = `Fuente: ${S.idx.fuente}. Ubicaciones y direcciones declaradas en el padrón de ESCALE; pueden tener error. Las distancias son en línea recta.`;
+  await cargarProyectos();
+  const p = store('proyecto');
+  if (p && S.proys.some(x => x.id === p)) { $('cProy').value = p; await elegirProyecto(p); return; }
   const r = store('region');
   await cargarRegion(S.idx.regiones.some(g => g.nombre === r) ? r : (S.idx.regiones.find(g => g.nombre === 'Moquegua') || S.idx.regiones[0]).nombre);
+}
+
+// ─── Proyectos del Selector IOARR ───────────────────────────────────────────
+async function cargarProyectos() {
+  try { S.proys = await api('/api/campo/proyectos'); }
+  catch (e) { console.warn('Proyectos', e); S.proys = []; }
+  $('cProyCampo').hidden = !S.proys.length;
+  $('cProy').innerHTML = '<option value="">Ninguno: toda la región</option>' + S.proys.map(p =>
+    `<option value="${esc(p.id)}">${esc(p.nombre)} · ${esc(p.region)} · ${plural(p.n_locales, 'colegio', 'colegios')}</option>`).join('');
+}
+
+// Carga la región del proyecto, limita la búsqueda a sus colegios y trae su cantidad a «Colegios a visitar»
+async function elegirProyecto(id) {
+  if (!id) { await quitarProyecto(); return; }
+  const sel = $('cProy'); sel.disabled = true;
+  try {
+    let p;
+    try { p = await api('/api/campo/proyectos/' + encodeURIComponent(id)); }
+    catch (e) { toast(`No se pudo abrir el proyecto: ${e.message}`); sel.value = S.proy?.id || ''; return; }
+    if (p.region !== S.region) await cargarRegion(p.region);
+    if (p.region !== S.region) { toast(`No se pudo cargar la región ${p.region} del proyecto.`); sel.value = ''; S.proy = null; return; }
+    const r = await w('limitar', { codigos: p.locales });
+    S.proy = { id: p.id, nombre: p.nombre, n: r.n }; store('proyecto', p.id);
+    S.near = null; S.filas = []; S.vis = null;
+    $('cDist').value = '-1'; $('cCod').value = '';
+    $('cN').value = limitarN(r.n || 1);
+    const avisos = [];
+    if (r.n > N_MAX) avisos.push(`El proyecto tiene ${fmt(r.n)} colegios: se listan los ${fmt(N_MAX)} más cercanos al centro que elijas.`);
+    if (r.fuera) avisos.push(`${plural(r.fuera, 'código del proyecto no está', 'códigos del proyecto no están')} en el padrón de ${p.region}.`);
+    if (avisos.length) toast(avisos.join(' '));
+    if (!r.n) { $('cInfo').textContent = `El proyecto «${p.nombre}» no tiene colegios en ${p.region}.`; pintarTodo(true); return; }
+    const c = await w('centro', { proyecto: p.nombre });
+    if (c.error) { $('cInfo').textContent = c.error; pintarTodo(true); return; }
+    await buscar(c);
+  } finally { sel.disabled = false; }
+}
+
+// Vuelve a toda la región (sin recargarla) y a la cantidad de colegios que el usuario tenía
+async function quitarProyecto({ rebuscar = true } = {}) {
+  const habia = !!S.proy;
+  S.proy = null; store('proyecto', null); $('cProy').value = '';
+  if (!habia) return;
+  await w('limitar', { codigos: null });
+  $('cN').value = limitarN(store('n') ?? 20);
+  if (rebuscar && S.near) await buscar(null);
+  else if (rebuscar) $('cInfo').textContent = `${fmt(S.meta.codigos)} colegios en ${S.region}. Elige un centro: tu ubicación, un distrito o un código de local.`;
 }
 
 async function cargarRegion(nombre) {
@@ -79,7 +137,8 @@ async function cargarRegion(nombre) {
 async function buscar(centro, { ajustar = true } = {}) {
   if (centro) S.near = { ...centro, n: limitarN($('cN').value) };
   if (!S.near) return;
-  S.near.n = limitarN($('cN').value); $('cN').value = S.near.n; store('n', S.near.n);
+  S.near.n = limitarN($('cN').value); $('cN').value = S.near.n;
+  if (!S.proy) store('n', S.near.n);      // la cantidad que trae un proyecto no reemplaza la del usuario
   S.pick = false; S.mapa?.modoElegir(false); $('cPick').setAttribute('aria-pressed', 'false');
   const R = await w('consulta', { f: S.f, sort: { key: 'rep', dir: -1 }, page: 0, size: 1, near: { lat: S.near.lat, lon: S.near.lon, n: S.near.n } });
   S.filas = await w('listado');
@@ -87,9 +146,10 @@ async function buscar(centro, { ajustar = true } = {}) {
   if (S.vis) await agrupar(false);
   const c = R.cerca;
   const om = c.omitidos ? ` · ${plural(c.omitidos, 'colegio', 'colegios')} sin coordenadas no se consideran` : '';
-  $('cInfo').innerHTML = c.n
+  const pr = S.proy ? `Proyecto «${esc(S.proy.nombre)}» (${plural(S.proy.n, 'colegio', 'colegios')}): ` : '';
+  $('cInfo').innerHTML = pr + (c.n
     ? `<b>${fmt(c.n)}</b> ${c.n === 1 ? 'colegio más cercano' : 'colegios más cercanos'} ${esc(aCentro(S.near.label))} · el más lejano a <b>${fmtKm(c.max)} km</b> en línea recta${om}`
-    : `Ningún colegio con coordenadas cumple los filtros cerca ${esc(aCentro(S.near.label)).replace(/^al /, 'del ').replace(/^a /, 'de ')}${om}`;
+    : `Ningún colegio con coordenadas cumple los filtros cerca ${esc(aCentro(S.near.label)).replace(/^al /, 'del ').replace(/^a /, 'de ')}${om}`);
   if (S.near.gps && S.filas[0]?.km > LEJOS_KM) toast(`El colegio más cercano está a ${fmtKm(S.filas[0].km)} km de ti: ¿elegiste la región correcta?`);
   $('cAgrupar').disabled = !S.filas.length;
   pintarTodo(ajustar);
@@ -211,7 +271,8 @@ function filtrosSum() {
 // ─── Eventos ─────────────────────────────────────────────────────────────────
 function bind() {
   $('btnSalir').onclick = () => window.radarSesion?.salir();
-  $('cRegion').onchange = e => cargarRegion(e.target.value);
+  $('cRegion').onchange = async e => { await quitarProyecto({ rebuscar: false }); cargarRegion(e.target.value); };
+  $('cProy').onchange = e => elegirProyecto(e.target.value);
   $('cUbic').onclick = usarUbicacion;
   $('cGo').onclick = async () => { const c = await centroDistrito(); if (c.error) { toast(c.error); return; } buscar(c); };
   $('cCod').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('cGo').click(); } });

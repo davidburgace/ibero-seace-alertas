@@ -27,13 +27,14 @@
 
 <header>
   <h1>Visitas de <span class="accent">campo</span></h1>
-  <div class="subtitle">Busca los colegios más cercanos a tu ubicación, a un distrito o a un local, y planifica tus visitas.</div>
+  <div class="subtitle">Busca los colegios más cercanos a tu ubicación, a un distrito o a un local —de toda la región o de un proyecto del Selector IOARR— y planifica tus visitas.</div>
 </header>
 
 <main>
   <section class="cerca-panel campo-buscar" aria-labelledby="c-tit">
     <h2 class="sr" id="c-tit">Buscar colegios cercanos</h2>
     <div class="filtros-grid campo-grid">
+      <div class="campo campo-proy" id="cProyCampo" hidden><label for="cProy">Proyecto del Selector</label><select id="cProy"><option value="">Ninguno: toda la región</option></select></div>
       <div class="campo"><label for="cRegion">Región</label><select id="cRegion"></select></div>
       <div class="campo"><label for="cN">Colegios a visitar</label><input id="cN" type="number" min="1" max="200" step="1" value="20" inputmode="numeric"></div>
       <div class="campo campo-ubic">

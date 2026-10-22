@@ -7,7 +7,7 @@
 //   proveedor  = ve todos los módulos
 //   financista = solo Radar IOARR
 //   supervisor = supervisor de campo: solo /campo.html (mapa y listado por cercanía,
-//                con datos estáticos; no usa la API salvo /api/ioarr/me)
+//                con datos estáticos; de la API solo usa /api/ioarr/me y /api/campo/*)
 //
 // Protege /api/ioarr/* (proveedor y financista; el supervisor solo /me) y, con
 // protegerApi, el resto de la API (solo rol proveedor). Pendiente: endurecer el RLS de las tablas que
@@ -62,12 +62,15 @@ export function bloquearSupervisor(req, res, next) {
 }
 
 // Resto de la API (SEACE, Infra, Seguimiento, Admin): exige sesión y rol proveedor.
+// /api/campo/* (proyectos para Visitas de campo, solo lectura) admite también al supervisor.
 // Quedan fuera /api/health y /api/ioarr/*, que tiene su propio control
 // (config es pública para poder iniciar sesión; lo demás exige sesión).
 // Uso: app.use('/api', crearProteccionApi())
-export function crearProteccionApi(autenticar = requireAuth, autorizar = requireRol('proveedor')) {
+export function crearProteccionApi(autenticar = requireAuth, autorizar = requireRol('proveedor'),
+  autorizarCampo = requireRol('proveedor', 'supervisor')) {
   return (req, res, next) => {
     if (req.path === '/health' || req.path.startsWith('/ioarr/')) return next();
-    autenticar(req, res, err => err ? next(err) : autorizar(req, res, next));
+    const aut = req.path.startsWith('/campo/') ? autorizarCampo : autorizar;
+    autenticar(req, res, err => err ? next(err) : aut(req, res, next));
   };
 }
