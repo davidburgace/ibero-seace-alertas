@@ -196,7 +196,7 @@ async function repartir() {
     const r = await w('repartir', { codigos: P.locales, cuotas });
     const asignaciones = {};
     r.zonas.forEach((z, i) => z.forEach(c => { asignaciones[c] = ids[i]; }));
-    const g = await api(`/api/campo/proyectos/${encodeURIComponent(P.id)}/asignaciones`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ asignaciones, reemplazar: true }) });
+    const g = await guardarAsig(asignaciones, true);
     P.asig = g.asignaciones; P.sups = g.supervisores;
     cuotasDelReparto(); pintarVer(); pintarReparto();
     toast('Reparto guardado: ' + ids.map((id, i) => `${corto(correoSup(id))} ${fmt(r.zonas[i].length)}`).join(' · ') + (r.sobran.length + r.fuera.length ? ` · ${fmt(r.sobran.length + r.fuera.length)} sin asignar` : '') + '.');
@@ -209,7 +209,7 @@ async function repartir() {
 async function asignarUno(cod, id, sel) {
   const P = S.proy; sel.disabled = true;
   try {
-    const g = await api(`/api/campo/proyectos/${encodeURIComponent(P.id)}/asignaciones`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ asignaciones: { [cod]: id || null } }) });
+    const g = await guardarAsig({ [cod]: id || null });
     P.asig = g.asignaciones; P.sups = g.supervisores;
     const nom = S.filas.find(f => f.cod === cod)?.nom || `Local ${cod}`;
     toast(id ? `${nom}: ahora es de ${corto(correoSup(id))}.` : `${nom}: sin asignar.`);
@@ -217,6 +217,19 @@ async function asignarUno(cod, id, sel) {
   } catch (e) { toast(`No se pudo cambiar el supervisor: ${e.message}`); sel.value = P.asig?.[cod] || ''; }
   finally { sel.disabled = false; }
 }
+// Guarda asignaciones en partes de 500 (el servidor acepta cuerpos de hasta 100 KB: ~2000 colegios).
+// Con reemplazar, solo la primera parte borra el reparto anterior. Devuelve el reparto final del servidor
+const POR_ENVIO = 500;
+async function guardarAsig(asignaciones, reemplazar = false) {
+  const P = S.proy, filas = Object.entries(asignaciones);
+  let g = null;
+  for (let i = 0; i < filas.length || i === 0; i += POR_ENVIO) {
+    g = await api(`/api/campo/proyectos/${encodeURIComponent(P.id)}/asignaciones`, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ asignaciones: Object.fromEntries(filas.slice(i, i + POR_ENVIO)), reemplazar: reemplazar && i === 0 }) });
+  }
+  return g;
+}
+
 // ─── Asignar en bloque ──────────────────────────────────────────────────────
 // El proveedor asigna de una vez todos los colegios del listado, o los de un día de visita.
 // Para armar el grupo: «Colegios a visitar» (p. ej. 30) + un centro, o «Colegios del proyecto → Sin asignar»
@@ -239,7 +252,7 @@ async function asignarBloque(caja, boton) {
   boton.disabled = true;
   try {
     const asignaciones = Object.fromEntries(cods.map(c => [c, id]));
-    const g = await api(`/api/campo/proyectos/${encodeURIComponent(P.id)}/asignaciones`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ asignaciones }) });
+    const g = await guardarAsig(asignaciones);
     P.asig = g.asignaciones; P.sups = g.supervisores;
     toast(`${plural(cods.length, 'colegio', 'colegios')} ${id ? `asignados a ${corto(correoSup(id))}` : 'sin asignar'}.`);
     pintarLista(); pintarVer(); pintarReparto(); pintarInfoVisitas();
@@ -425,10 +438,14 @@ function pintarLista() {
   const opts = { extra: extraItem };
   bloques.clear();
   const todos = barraBloque('lista', S.filas.map(f => f.cod), `Asignar ${S.filas.length === 1 ? 'el colegio' : `los ${fmt(S.filas.length)} colegios`} del listado`);
-  if (!S.vis) { $('cLista').innerHTML = todos + htmlListado(S.filas, opts); return; }
+  // El listado llega a N_MAX (200): con más colegios en «Colegios del proyecto», también se asignan todos de una vez
+  const ver = S.proy ? codigosVer() : [];
+  const nombreVer = { todo: 'todo el proyecto', sin: 'los sin asignar' }[S.ver] || (S.ver === S.yo ? 'mis colegios' : corto(correoSup(S.ver)));
+  const todosVer = ver.length > S.filas.length ? barraBloque('ver', ver, `O asignar los ${fmt(ver.length)} colegios de «${nombreVer}»`) : '';
+  if (!S.vis) { $('cLista').innerHTML = todos + todosVer + htmlListado(S.filas, opts); return; }
   // Agrupado por día: cada día en su orden de visita, con los datos completos del listado
   const porCod = new Map(S.filas.map(f => [f.cod, f])), total = S.vis.dias.length;
-  $('cLista').innerHTML = todos + S.vis.dias.map(d => {
+  $('cLista').innerHTML = todos + todosVer + S.vis.dias.map(d => {
     const rep = d.puntos.reduce((a, p) => a + p.rep, 0), nv = visitados(d.puntos);
     return `<h3 class="dia-titulo" style="--c:${colorDia(d.dia, total)}"><span class="sw"></span>Día ${d.dia} <span class="sub">${plural(d.puntos.length, 'colegio', 'colegios')}${nv ? ` (${fmt(nv)} ${nv === 1 ? 'visitado' : 'visitados'})` : ''} · ~${fmtKm(d.km)} km · ${fmt(rep)} a reponer</span></h3>
       ${botonesRuta(d)}
