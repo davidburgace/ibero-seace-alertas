@@ -437,3 +437,12 @@ test('campo: en las tarjetas los botones van en su propia fila (no aprietan el n
   const css = leer('src/public/campo.css');
   assert.match(css, /\.pag-campo \.lst-item\{ grid-template-columns:30px minmax\(0,1fr\) auto; grid-template-areas:"n cuerpo km" "n acc acc"/);
 });
+
+test('campo: asignar en bloque los colegios del listado o de un día (sin reemplazar el resto del reparto)', () => {
+  const js = leer('src/public/campo.js');
+  assert.match(js, /barraBloque\('lista', S\.filas\.map\(f => f\.cod\)/);
+  assert.match(js, /barraBloque\('dia-' \+ d\.dia, d\.puntos\.map\(p => p\.cod\)/);
+  const f = js.slice(js.indexOf('async function asignarBloque'), js.indexOf('// Lo que el listado muestra del reparto'));
+  assert.match(f, /JSON\.stringify\(\{ asignaciones \}\)/);
+  assert.doesNotMatch(f, /reemplazar/);
+});
