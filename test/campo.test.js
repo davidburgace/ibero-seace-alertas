@@ -6,6 +6,7 @@ import { crearProteccionApi, bloquearSupervisor } from '../src/ioarr/auth.js';
 import { ROLES, cambiarRol, invitarUsuario, correoInvitacion, AVISO_SUPERVISOR } from '../src/ioarr/usuarios.js';
 import { cspSelector } from '../src/selector-ioarr/csp.js';
 import ioarrRouter from '../src/ioarr/router.js';
+import { listarProyectosCampo, proyectoCampo, crearApiCampo } from '../src/selector-ioarr/campo.js';
 
 const respuesta = () => {
   const res = { statusCode: 200, body: null };
@@ -115,9 +116,11 @@ test('sesion.js manda a cada rol a su inicio', () => {
   assert.match(leer('src/public/index.html'), /me\?\.rol === 'supervisor'\) \{ location\.replace\('\/campo\.html'\)/);
 });
 
-test('la página de campo no usa la API ni guarda nada en el servidor', () => {
+test('la página de campo solo lee /api/campo/* y no guarda nada en el servidor', () => {
   const js = leer('src/public/campo.js');
-  assert.ok(!/fetch\(['"`]\/api\//.test(js), 'sin llamadas a /api');
+  const rutas = [...js.matchAll(/['"`](\/api\/[^'"`$]*)/g)].map(m => m[1]);
+  assert.ok(rutas.length > 0);
+  for (const r of rutas) assert.match(r, /^\/api\/campo\//, r);
   assert.ok(!/method:\s*['"](POST|PUT|PATCH|DELETE)/.test(js));
 });
 
@@ -132,4 +135,75 @@ test('campo: ruta del día en Google Maps y sin KML', () => {
   assert.match(js, /tramosRutaDia/);
   assert.match(js, /Ruta del día en Google Maps/);
   assert.doesNotMatch(js + html, /kml/i);
+});
+
+// ─── Proyectos del Selector en Visitas de campo ─────────────────────────────
+test('/api/campo/*: entran proveedor y supervisor; financista no', () => {
+  for (const [rol, pasa] of [['proveedor', true], ['supervisor', true], ['financista', false]]) {
+    const proteger = crearProteccionApi((req, _, next) => { req.usuario = { rol }; next(); });
+    const res = respuesta(); let paso = false;
+    proteger({ path: '/campo/proyectos', headers: {} }, res, () => { paso = true; });
+    assert.equal(paso, pasa, rol);
+  }
+  // el resto de la API sigue cerrada al supervisor
+  const proteger = crearProteccionApi((req, _, next) => { req.usuario = { rol: 'supervisor' }; next(); });
+  const res = respuesta(); let paso = false;
+  proteger({ path: '/campos', headers: {} }, res, () => { paso = true; });
+  assert.equal(paso, false);
+});
+
+// Supabase falso: registra los filtros de cada consulta
+const UUID = '11111111-2222-3333-4444-555555555555';
+function sbProyectos({ proyectos = [], locales = [] } = {}) {
+  const consultas = [];
+  const from = tabla => {
+    const q = { tabla, eq: {}, rango: null };
+    consultas.push(q);
+    const b = {
+      select: () => b, order: () => b,
+      eq: (k, v) => { q.eq[k] = v; return b; },
+      range: (a, z) => { q.rango = [a, z]; return b; },
+      maybeSingle: async () => ({ data: filtrar()[0] || null, error: null }),
+      then: (ok, mal) => Promise.resolve(tabla === 'ioarr_selector_locales'
+        ? { data: locales.slice(q.rango[0], q.rango[1] + 1).map(c => ({ codigo_local: c })), error: null }
+        : { data: filtrar(), error: null }).then(ok, mal)
+    };
+    const filtrar = () => proyectos.filter(p => Object.entries(q.eq).every(([k, v]) => p[k] === v));
+    return b;
+  };
+  return { from, consultas };
+}
+const PROYS = [
+  { id: UUID, usuario_id: 'prov-1', nombre: 'Moquegua 2026', region: 'Moquegua', locales: [{ count: 3 }] },
+  { id: 'otro', usuario_id: 'prov-2', nombre: 'Tacna', region: 'Tacna', locales: [{ count: 9 }] }
+];
+
+test('campo: el proveedor ve solo sus proyectos; el supervisor, todos (sin datos de más)', async () => {
+  const prov = await listarProyectosCampo(sbProyectos({ proyectos: PROYS }), { id: 'prov-1', rol: 'proveedor' });
+  assert.deepEqual(prov, [{ id: UUID, nombre: 'Moquegua 2026', region: 'Moquegua', n_locales: 3 }]);
+  const sup = await listarProyectosCampo(sbProyectos({ proyectos: PROYS }), { id: 'sup-1', rol: 'supervisor' });
+  assert.equal(sup.length, 2);
+  for (const p of sup) assert.deepEqual(Object.keys(p).sort(), ['id', 'n_locales', 'nombre', 'region']);
+});
+
+test('campo: abrir un proyecto trae todos sus códigos (por lotes) y respeta al dueño', async () => {
+  const locales = Array.from({ length: 2500 }, (_, i) => String(100000 + i));
+  const p = await proyectoCampo(sbProyectos({ proyectos: PROYS, locales }), { id: 'prov-1', rol: 'proveedor' }, UUID);
+  assert.equal(p.nombre, 'Moquegua 2026'); assert.equal(p.locales.length, 2500); assert.equal(p.locales[2499], '102499');
+  assert.equal(await proyectoCampo(sbProyectos({ proyectos: PROYS }), { id: 'prov-2', rol: 'proveedor' }, UUID), null);
+  assert.ok(await proyectoCampo(sbProyectos({ proyectos: PROYS }), { id: 'sup-1', rol: 'supervisor' }, UUID));
+  assert.equal(await proyectoCampo(sbProyectos({ proyectos: PROYS }), { id: 'sup-1', rol: 'supervisor' }, 'no-es-uuid'), null);
+});
+
+test('campo: la API solo tiene lecturas', () => {
+  const rutas = crearApiCampo(sbProyectos()).stack.filter(l => l.route);
+  assert.deepEqual(rutas.map(l => l.route.path).sort(), ['/proyectos', '/proyectos/:id']);
+  for (const l of rutas) assert.deepEqual(Object.keys(l.route.methods), ['get']);
+});
+
+test('campo: el worker limita la búsqueda a los colegios del proyecto', () => {
+  const js = leer('src/public/selector-ioarr-worker.js');
+  assert.match(js, /limitar\(\{ codigos \}\)/);
+  assert.match(js, /if \(solo\) view = view\.filter/);
+  assert.match(js, /view = \[\]; solo = null;/, 'cargar otra región quita el límite');
 });
