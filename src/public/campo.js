@@ -425,10 +425,14 @@ function pintarLista() {
   const opts = { extra: extraItem };
   bloques.clear();
   const todos = barraBloque('lista', S.filas.map(f => f.cod), `Asignar ${S.filas.length === 1 ? 'el colegio' : `los ${fmt(S.filas.length)} colegios`} del listado`);
-  if (!S.vis) { $('cLista').innerHTML = todos + htmlListado(S.filas, opts); return; }
+  // El listado llega a N_MAX (200): con más colegios en «Colegios del proyecto», también se asignan todos de una vez
+  const ver = S.proy ? codigosVer() : [];
+  const nombreVer = { todo: 'todo el proyecto', sin: 'los sin asignar' }[S.ver] || (S.ver === S.yo ? 'mis colegios' : corto(correoSup(S.ver)));
+  const todosVer = ver.length > S.filas.length ? barraBloque('ver', ver, `O asignar los ${fmt(ver.length)} colegios de «${nombreVer}»`) : '';
+  if (!S.vis) { $('cLista').innerHTML = todos + todosVer + htmlListado(S.filas, opts); return; }
   // Agrupado por día: cada día en su orden de visita, con los datos completos del listado
   const porCod = new Map(S.filas.map(f => [f.cod, f])), total = S.vis.dias.length;
-  $('cLista').innerHTML = todos + S.vis.dias.map(d => {
+  $('cLista').innerHTML = todos + todosVer + S.vis.dias.map(d => {
     const rep = d.puntos.reduce((a, p) => a + p.rep, 0), nv = visitados(d.puntos);
     return `<h3 class="dia-titulo" style="--c:${colorDia(d.dia, total)}"><span class="sw"></span>Día ${d.dia} <span class="sub">${plural(d.puntos.length, 'colegio', 'colegios')}${nv ? ` (${fmt(nv)} ${nv === 1 ? 'visitado' : 'visitados'})` : ''} · ~${fmtKm(d.km)} km · ${fmt(rep)} a reponer</span></h3>
       ${botonesRuta(d)}

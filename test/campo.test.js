@@ -446,3 +446,9 @@ test('campo: asignar en bloque los colegios del listado o de un día (sin reempl
   assert.match(f, /JSON\.stringify\(\{ asignaciones \}\)/);
   assert.doesNotMatch(f, /reemplazar/);
 });
+
+test('campo: con más de 200 colegios, se asigna todo «Colegios del proyecto» de una vez', () => {
+  const js = leer('src/public/campo.js');
+  assert.match(js, /barraBloque\('ver', ver,/);
+  assert.match(js, /ver\.length > S\.filas\.length/);
+});
