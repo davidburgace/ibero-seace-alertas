@@ -8,8 +8,11 @@
 
 import { olvidarUsuario } from './auth.js';
 
-export const ROLES = ['proveedor', 'financista'];
+export const ROLES = ['proveedor', 'financista', 'supervisor'];
 const POR_PAGINA = 200;
+// Sin la migración 020, el CHECK de perfiles.rol rechaza 'supervisor' (código 23514)
+export const AVISO_SUPERVISOR = 'Falta ejecutar supabase/migrations/020_rol_supervisor.sql en Supabase para usar el rol de supervisor de campo';
+const sinRolSupervisor = (e, rol) => rol === 'supervisor' && (e?.code === '23514' || /perfiles_rol_check/.test(e?.message || ''));
 
 // Todas las cuentas de Auth con su rol (sin perfil = financista, como en requireAuth)
 export async function listarUsuarios(supabase) {
@@ -39,6 +42,7 @@ export async function cambiarRol(supabase, { id, rol, usuarioActual }) {
 
   // upsert: crea el perfil si a la cuenta le faltaba
   const { error } = await supabase.from('perfiles').upsert({ id, email: data.user.email, rol }, { onConflict: 'id' });
+  if (sinRolSupervisor(error, rol)) return { status: 503, error: AVISO_SUPERVISOR };
   if (error) throw error;
   olvidarUsuario(id);
   return { status: 200, usuario: { id, email: data.user.email, rol } };
@@ -49,7 +53,7 @@ const esc = t => String(t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;',
 
 // Correo de bienvenida con el enlace para crear la contraseña
 export function correoInvitacion({ email, enlace, rol }) {
-  const acceso = rol === 'proveedor' ? 'todo el Radar Ibero' : 'Radar IOARR';
+  const acceso = { proveedor: 'todo el Radar Ibero', supervisor: 'Visitas de campo (mapa y listado de colegios por cercanía)' }[rol] || 'Radar IOARR';
   return {
     to: email,
     subject: 'Tu acceso a Radar Ibero',
@@ -96,6 +100,7 @@ export async function invitarUsuario(supabase, enviarCorreo, { email, rol, baseU
   }
   // El trigger de la migración 001 crea el perfil como financista; aquí se fija el rol elegido
   const { error: errPerfil } = await supabase.from('perfiles').upsert({ id: data.user.id, email, rol }, { onConflict: 'id' });
+  if (sinRolSupervisor(errPerfil, rol)) return { status: 503, error: AVISO_SUPERVISOR + '. La cuenta quedó creada como financista: después de la migración, cámbiale el rol.' };
   if (errPerfil) throw errPerfil;
 
   const envio = await enviarInvitacion(supabase, enviarCorreo, { email, rol, baseUrl });

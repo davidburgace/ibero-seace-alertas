@@ -400,6 +400,7 @@
         <select class="form-select" id="usuarioRol">
           <option value="proveedor">Proveedor — ve todo el radar</option>
           <option value="financista">Financista — solo Radar IOARR</option>
+          <option value="supervisor">Supervisor de campo — solo Visitas de campo</option>
         </select>
       </div>
       <div id="usuarioError" style="color:var(--red);font-size:13px;min-height:18px;"></div>
@@ -534,6 +535,7 @@ async function loadUsuarios() {
           <select class="form-select rol-select" data-id="${escAttr(u.id)}" data-rol="${u.rol}" ${yo ? 'disabled title="No puedes quitarte tu propio acceso"' : ''}>
             <option value="proveedor" ${u.rol === 'proveedor' ? 'selected' : ''}>Proveedor</option>
             <option value="financista" ${u.rol === 'financista' ? 'selected' : ''}>Financista</option>
+            <option value="supervisor" ${u.rol === 'supervisor' ? 'selected' : ''}>Supervisor de campo</option>
           </select>
         </div>
       </div>`;

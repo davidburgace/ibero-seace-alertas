@@ -2,11 +2,15 @@
 //
 // Se carga en <head>, después de supabase-js y antes de los scripts de la página:
 //   - Sin sesión → manda a /login.html y vuelve a esta página al ingresar.
-//   - Rol financista → manda a /ioarr.html (es lo único que puede usar).
+//   - Roles: la página dice cuáles acepta con data-roles (por defecto solo proveedor):
+//       <script src="/sesion.js" data-roles="proveedor,supervisor"></script>
+//     Otro rol va a su inicio: financista → /ioarr.html, supervisor → /campo.html.
 //   - Envuelve fetch: cada llamada a /api/* sale con "Authorization: Bearer <token>",
 //     así las páginas no tienen que cambiar sus fetch. Un 401 manda al login.
 //   - Oculta la página hasta confirmar la sesión, para no mostrarla vacía.
 (function () {
+  const ROLES = ((document.currentScript && document.currentScript.dataset.roles) || 'proveedor').split(',').map(r => r.trim());
+  const INICIO = { financista: '/ioarr.html', supervisor: '/campo.html', proveedor: '/' };
   const fetchOriginal = window.fetch.bind(window);
   const nunca = new Promise(() => {}); // para cortar la carga mientras se redirige
   let sb = null;
@@ -27,7 +31,7 @@
     const r = await fetchOriginal('/api/ioarr/me', { headers: { Authorization: 'Bearer ' + data.session.access_token } });
     if (!r.ok) { irALogin(); return nunca; }
     const usuario = await r.json();
-    if (usuario.rol !== 'proveedor') { location.replace('/ioarr.html'); return nunca; }
+    if (!ROLES.includes(usuario.rol)) { location.replace(INICIO[usuario.rol] || '/ioarr.html'); return nunca; }
     mostrarPagina();
     return usuario;
   })();
@@ -47,6 +51,8 @@
 
   window.radarSesion = {
     listo,
+    // Usuario de la sesión ({ id, email, rol }), cuando ya se verificó
+    usuario: () => listo,
     // Cliente de Supabase con la sesión del usuario (para leer tablas directo desde la página)
     async cliente() { await listo; return sb; },
     async salir() { await listo; await sb.auth.signOut(); location.replace('/login.html'); }

@@ -3,10 +3,14 @@
 //
 // El navegador inicia sesión con Supabase Auth (email + contraseña) y envía
 // `Authorization: Bearer <access_token>`. Aquí se valida el token con Supabase
-// y se carga el rol (proveedor | financista).
+// y se carga el rol:
+//   proveedor  = ve todos los módulos
+//   financista = solo Radar IOARR
+//   supervisor = supervisor de campo: solo /campo.html (mapa y listado por cercanía,
+//                con datos estáticos; no usa la API salvo /api/ioarr/me)
 //
-// Protege /api/ioarr/* (cualquier rol) y, con protegerApi, el resto de la API
-// (solo rol proveedor). Pendiente: endurecer el RLS de las tablas que
+// Protege /api/ioarr/* (proveedor y financista; el supervisor solo /me) y, con
+// protegerApi, el resto de la API (solo rol proveedor). Pendiente: endurecer el RLS de las tablas que
 // seguimiento.html lee directo con la clave pública.
 // ============================================================================
 
@@ -48,6 +52,13 @@ export function requireRol(...roles) {
   return (req, res, next) => roles.includes(req.usuario?.rol)
     ? next()
     : res.status(403).json({ error: 'Tu perfil no tiene acceso a esta acción' });
+}
+
+// /api/ioarr/* (salvo /me, que va antes): el supervisor de campo no tiene acceso
+export function bloquearSupervisor(req, res, next) {
+  return req.usuario?.rol === 'supervisor'
+    ? res.status(403).json({ error: 'Tu perfil de supervisor de campo no tiene acceso a Radar IOARR' })
+    : next();
 }
 
 // Resto de la API (SEACE, Infra, Seguimiento, Admin): exige sesión y rol proveedor.

@@ -15,7 +15,7 @@ import express from 'express';
 import multer from 'multer';
 import { fileURLToPath } from 'node:url';
 import { supabase } from './db.js';
-import { requireAuth } from './auth.js';
+import { requireAuth, bloquearSupervisor } from './auth.js';
 import { calcularRentabilidad } from './calculadora.js';
 import { leerArchivo, detectarMapeo, aplicarMapeoGuardado, filaAProyecto, importarProyectos, normaliza, CAMPOS_MAPEABLES } from './ingesta.js';
 import { sendIoarrDigest } from './alertas.js';
@@ -59,6 +59,9 @@ router.get('/ioarr/calculadora.js', (_, res) =>
 router.use('/api/ioarr', requireAuth);
 
 router.get('/api/ioarr/me', (req, res) => res.json(req.usuario));
+
+// El supervisor de campo solo usa /campo.html (datos estáticos): Radar IOARR le queda cerrado
+router.use('/api/ioarr', bloquearSupervisor);
 
 // Valores para los filtros (regiones y funciones presentes en la base)
 router.get('/api/ioarr/filtros', async (_, res, next) => {

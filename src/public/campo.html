@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<!-- Sesión de Supabase: entran el proveedor y el supervisor de campo -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="/sesion.js" data-roles="proveedor,supervisor"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#f7f8fa">
+<title>Visitas de campo — Radar Ibero</title>
+<link rel="icon" href="favicon-32.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="selector-ioarr.css">
+<link rel="stylesheet" href="campo.css">
+</head>
+<body class="pag-campo">
+
+<div class="topbar">
+  <a class="logo" href="index.html" id="lnkLogo"><span class="logo-dot"></span> Radar Ibero</a>
+  <div class="top-der">
+    <span class="sub" id="cUsuario"></span>
+    <a class="back" href="index.html" id="lnkInicio" hidden>← Inicio</a>
+    <button class="back" id="btnSalir" type="button">Salir</button>
+  </div>
+</div>
+
+<header>
+  <h1>Visitas de <span class="accent">campo</span></h1>
+  <div class="subtitle">Busca los colegios más cercanos a tu ubicación, a un distrito o a un local, y planifica tus visitas.</div>
+</header>
+
+<main>
+  <section class="cerca-panel campo-buscar" aria-labelledby="c-tit">
+    <h2 class="sr" id="c-tit">Buscar colegios cercanos</h2>
+    <div class="filtros-grid campo-grid">
+      <div class="campo"><label for="cRegion">Región</label><select id="cRegion"></select></div>
+      <div class="campo"><label for="cN">Colegios a visitar</label><input id="cN" type="number" min="1" max="200" step="1" value="20" inputmode="numeric"></div>
+      <div class="campo campo-ubic">
+        <span class="lbl">Centro de la búsqueda</span>
+        <button class="btn btn-primary" id="cUbic" type="button">Usar mi ubicación</button>
+      </div>
+      <div class="campo"><label for="cDist">o un distrito</label><select id="cDist"></select></div>
+      <div class="campo"><label for="cCod">o un código de local</label><input id="cCod" type="text" inputmode="numeric" placeholder="Ej.: 123456" autocomplete="off" maxlength="12"></div>
+      <div class="campo campo-acc"><span class="lbl">&nbsp;</span>
+        <div class="acts">
+          <button class="btn btn-ghost" id="cGo" type="button">Buscar</button>
+          <button class="btn btn-ghost" id="cPick" type="button" aria-pressed="false">Tocar el mapa</button>
+        </div>
+      </div>
+    </div>
+    <details class="campo-filtros" id="cFiltros">
+      <summary>Filtros <span class="sub" id="cFiltSum"></span></summary>
+      <div class="filtros-grid">
+        <div class="campo ancho"><span class="lbl">Nivel</span><div class="chips" id="cNiv"></div></div>
+        <div class="campo"><label for="cArea">Área</label><select id="cArea"><option value="-1">Todas</option><option value="0">Urbana</option><option value="1">Rural</option></select></div>
+        <div class="campo"><label for="cRep">Bienes a reponer, mínimo</label><input id="cRep" type="number" min="0" step="1" inputmode="numeric" placeholder="0"></div>
+      </div>
+    </details>
+    <div class="filtros-bar">
+      <div id="cInfo" class="sub" aria-live="polite">Elige un centro para ver los colegios más cercanos.</div>
+    </div>
+  </section>
+
+  <div class="vista-tabs" role="group" aria-label="Vista">
+    <button class="tab-btn active" type="button" data-vista="lista" aria-pressed="true">Listado</button>
+    <button class="tab-btn" type="button" data-vista="mapa" aria-pressed="false">Mapa</button>
+  </div>
+
+  <div class="campo-cuerpo" id="cCuerpo" data-vista="lista">
+    <section class="campo-lista" aria-label="Listado de colegios">
+      <div id="cLista"><p class="sub lst-vacio">Aún no hay búsqueda.</p></div>
+    </section>
+    <section class="campo-mapa" aria-label="Mapa de colegios">
+      <div class="mapa-wrap">
+        <div class="filtros-bar campo-mapa-bar">
+          <span class="sub" id="cMapaInfo"></span>
+          <button class="btn btn-ghost btn-sm" id="cBase" type="button" hidden>Ver calles</button>
+        </div>
+        <p class="mapa-aviso" id="cAviso" hidden></p>
+        <div class="mapa-locales" id="cMapa" role="region" aria-label="Mapa de los colegios"></div>
+      </div>
+    </section>
+  </div>
+
+  <section class="cerca-panel visitas" id="cVisitas" aria-labelledby="cv-tit">
+    <div class="cerca-cab">
+      <h3 id="cv-tit">Días de visita</h3>
+      <p class="sub">Divide los colegios del listado en grupos cercanos, uno por día, cada uno en una ruta aproximada.</p>
+    </div>
+    <div class="filtros-grid visitas-grid">
+      <div class="campo"><label for="cPorDia">Colegios por día</label><input id="cPorDia" type="number" min="1" max="50" step="1" value="8" inputmode="numeric"></div>
+      <div class="campo cerca-btns"><span class="lbl">&nbsp;</span>
+        <div class="acts">
+          <button class="btn btn-primary" id="cAgrupar" type="button" disabled>Agrupar por días</button>
+          <button class="btn btn-ghost" id="cDesagrupar" type="button" hidden>Quitar agrupación</button>
+          <button class="btn btn-ghost" id="cKml" type="button" hidden>Descargar KML</button>
+        </div>
+      </div>
+    </div>
+    <div class="visitas-res" id="cVisRes" hidden>
+      <p class="aviso" role="note" id="cVisAviso"></p>
+    </div>
+  </section>
+
+  <p class="fuente" id="cFuente"></p>
+</main>
+
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script type="module" src="campo.js"></script>
+</body>
+</html>

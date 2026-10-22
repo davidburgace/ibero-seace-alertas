@@ -1,5 +1,5 @@
 // src/selector-ioarr/csp.js — Content-Security-Policy de la página del Selector IOARR.
-// Solo se aplica a /selector-ioarr.html; las demás páginas del radar no tienen CSP todavía.
+// Se aplica a /selector-ioarr.html y /campo.html; las demás páginas del radar no tienen CSP todavía.
 //   script-src  : la app y supabase-js (cdn.jsdelivr.net, el mismo de las otras páginas)
 //   style-src   : 'unsafe-inline' porque la página usa style="" y Leaflet posiciona el mapa con estilos en línea
 //   img-src     : imágenes del mapa (satélite de Esri y calles de OpenStreetMap)
@@ -29,7 +29,7 @@ export function politicaSelector(supabaseUrl = process.env.SUPABASE_URL) {
   ].join('; ');
 }
 
-const PAGINAS = new Set(['/selector-ioarr.html']);
+const PAGINAS = new Set(['/selector-ioarr.html', '/campo.html']);
 export function cspSelector(req, res, next) {
   if (PAGINAS.has(req.path)) res.set('Content-Security-Policy', politicaSelector());
   next();
