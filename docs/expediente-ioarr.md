@@ -217,14 +217,17 @@ El listado se arma en `src/public/selector-ioarr-listado.js` (lo comparte la pá
 
 ### Visitas de campo (`/campo.html`)
 
-Página pensada para celular, para el **supervisor de campo** (rol `supervisor`, ver `docs/radar-ioarr.md`) y también para el proveedor. Es de solo lectura: usa los datos estáticos de la región y el mismo worker. De la API solo lee los proyectos del Selector (`/api/campo/*`, `src/selector-ioarr/campo.js`) y no guarda nada en el servidor.
+Página pensada para celular, para el **supervisor de campo** (rol `supervisor`, ver `docs/radar-ioarr.md`) y también para el proveedor. Usa los datos estáticos de la región y el mismo worker. De la API (`/api/campo/*`, `src/selector-ioarr/campo.js`) lee los proyectos del Selector y los colegios visitados; lo único que guarda es marcar o desmarcar un colegio como visitado.
 - **Proyecto del Selector (opcional):** al elegir uno, la página carga su región, limita la búsqueda a los colegios del proyecto y pone su cantidad en **Colegios a visitar** (como máximo 200). Arranca con el centro de los colegios del proyecto; después se puede cambiar el centro (ubicación, distrito, local o mapa) y siguen apareciendo solo los colegios del proyecto. El proveedor ve sus proyectos; el supervisor ve todos, pero solo el nombre, la región y los códigos de local. **Ninguno** vuelve a toda la región; cambiar de región también quita el proyecto.
 - **Centro:** **Usar mi ubicación** (GPS del celular; pide permiso la primera vez y solo funciona con https), un distrito, un código de local o **Tocar el mapa** (tocar un colegio también lo fija como centro).
 - **Colegios a visitar:** de 1 a 200. **Filtros:** nivel, área y mínimo de bienes a reponer.
 - **Listado y mapa:** lado a lado en escritorio; en celular, una pestaña para cada uno. El mapa no tiene botón de seleccionar.
 - **Días de visita:** agrupa el listado por días, que queda ordenado por día y parada. Cada día trae **Ruta del día en Google Maps**: abre Google Maps desde la ubicación del supervisor con todas las paradas del día en orden. Google Maps admite hasta 10 paradas por enlace, así que un día con más colegios se parte en tramos («Paradas 1–10», «Paradas 11–15»…). No hay Excel ni KML.
 - Si el colegio más cercano a la ubicación está a más de 30 km, avisa que quizá la región no es la correcta.
-- Recuerda en el navegador la región, el proyecto, la cantidad y los colegios por día.
+- **Colegios visitados (migración 021):** cada colegio del listado tiene **Marcar visitado**. Guarda la fecha (hoy, hora de Perú) y quién lo marcó, y el colegio aparece en verde con «✓ Visitado el …» (y el correo de quien lo marcó, si fue otra persona). La visita es del colegio, no de un proyecto: la ven todos los que usan Visitas de campo. **Desmarcar** pide confirmación; el supervisor solo desmarca lo que marcó él y el proveedor, cualquiera. En **Filtros**, **Ocultar los ya visitados** los saca de la búsqueda por cercanía. Marcar o desmarcar no cambia el listado ni los días hasta la próxima búsqueda, para que no se reordene la ruta. Cada día dice cuántos de sus colegios ya están visitados.
+  - Ejecuta `supabase/migrations/021_campo_visitas.sql` después de la 020. Crea `campo_visitas` (una fila por código de local) con RLS y sin políticas: solo la usa el servidor. Sin la migración, la página avisa que falta y no muestra los botones.
+  - No reemplaza al inventario verificado del expediente: es solo la marca de que el colegio ya se visitó.
+- Recuerda en el navegador la región, el proyecto, la cantidad, los colegios por día y si se ocultan los visitados.
 
 ### Días de visita
 

@@ -8,24 +8,26 @@ const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&a
 const plural = (n, uno, varios) => `${fmt(n)} ${n === 1 ? uno : varios}`;
 
 // filas: acción «listado» del worker (o puntos de un día de visita, con `orden`).
-// opts.numero(f): número que se muestra (por defecto f.n); opts.mapa: muestra «Ver en el mapa»
-export function itemListado(f, { numero = x => x.n, mapa = true } = {}) {
+// opts.numero(f): número que se muestra (por defecto f.n); opts.mapa: muestra «Ver en el mapa»;
+// opts.extra(f): { clase, cuerpo, acc } que agrega la página (campo: «Visitado» y su botón)
+export function itemListado(f, { numero = x => x.n, mapa = true, extra } = {}) {
+  const x = extra?.(f) || {};
   const dir = f.dir ? esc(f.dir) : '<span class="sub">Sin dirección en el padrón</span>';
   const lugar = [f.cp, f.dist].filter(Boolean).map(esc).join(' · ') + (f.rural == null ? '' : ` · ${f.rural ? 'Rural' : 'Urbana'}`);
   const datos = [`Local <span class="mono">${esc(f.cod)}</span>`, f.niv?.length ? f.niv.join(', ') : '', plural(f.est, 'estudiante', 'estudiantes'), `${fmt(f.rep)} a reponer`].filter(Boolean).join(' · ');
   const coord = f.coord ?? (typeof f.lat === 'number');
-  return `<li class="lst-item" data-cod="${esc(f.cod)}">
+  return `<li class="lst-item${x.clase ? ' ' + x.clase : ''}" data-cod="${esc(f.cod)}">
     <span class="lst-n" aria-hidden="true">${numero(f)}</span>
     <div class="lst-cuerpo">
       <div class="lst-nom">${esc(f.nom)}</div>
       <div class="lst-dir">${dir}</div>
       <div class="sub">${lugar}</div>
-      <div class="sub">${datos}</div>
+      <div class="sub">${datos}</div>${x.cuerpo || ''}
     </div>
     ${f.km != null ? `<span class="lst-km" title="Distancia en línea recta al centro">${fmtKm(f.km)} km</span>` : ''}
     <div class="lst-acc">
       ${coord ? `<a class="btn btn-primary btn-sm" href="${urlComoLlegar(f.lat, f.lon)}" target="_blank" rel="noopener" aria-label="Cómo llegar a ${esc(f.nom)} (Google Maps)">Cómo llegar</a>` : '<span class="sub">Sin coordenadas</span>'}
-      ${coord && mapa ? `<button class="btn btn-ghost btn-sm" type="button" data-vermapa="${esc(f.cod)}" aria-label="Ver ${esc(f.nom)} en el mapa">Ver en el mapa</button>` : ''}
+      ${coord && mapa ? `<button class="btn btn-ghost btn-sm" type="button" data-vermapa="${esc(f.cod)}" aria-label="Ver ${esc(f.nom)} en el mapa">Ver en el mapa</button>` : ''}${x.acc || ''}
     </div>
   </li>`;
 }

@@ -62,7 +62,7 @@ export function bloquearSupervisor(req, res, next) {
 }
 
 // Resto de la API (SEACE, Infra, Seguimiento, Admin): exige sesión y rol proveedor.
-// /api/campo/* (proyectos para Visitas de campo, solo lectura) admite también al supervisor.
+// /api/campo/* (Visitas de campo: proyectos, solo lectura, y colegios visitados) admite también al supervisor.
 // Quedan fuera /api/health y /api/ioarr/*, que tiene su propio control
 // (config es pública para poder iniciar sesión; lo demás exige sesión).
 // Uso: app.use('/api', crearProteccionApi())

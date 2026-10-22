@@ -1,7 +1,8 @@
 // Visitas de campo — mapa y listado de colegios por cercanía (proveedor y supervisor de campo).
-// Solo lectura: usa los datos estáticos de la región y el mismo Web Worker del Selector IOARR.
-// De la API solo lee la sesión y los proyectos del Selector (/api/campo/*, src/selector-ioarr/campo.js):
-// con un proyecto elegido, la búsqueda por cercanía se limita a sus colegios. No guarda nada en el servidor.
+// Usa los datos estáticos de la región y el mismo Web Worker del Selector IOARR.
+// De la API (/api/campo/*, src/selector-ioarr/campo.js) lee los proyectos del Selector (con uno elegido,
+// la búsqueda por cercanía se limita a sus colegios) y los colegios visitados. Lo único que guarda en el
+// servidor es marcar o desmarcar un colegio como visitado (/api/campo/visitas/:codigo).
 import { DEF, NIVN, NIVS, NIVB, FILTRO_VACIO, coordValidas } from '/selector-ioarr/calculo.js';
 import { limitarN, N_MAX } from '/selector-ioarr/cercania.js';
 import { limitarPorDia, colorDia, tramosRutaDia, AVISO_VISITAS } from '/selector-ioarr/visitas.js';
@@ -22,8 +23,8 @@ function store(k, v) {
     localStorage.setItem(LS + k, JSON.stringify(v));
   } catch { return null; }
 }
-async function api(ruta) {
-  const r = await fetch(ruta);
+async function api(ruta, opts) {
+  const r = await fetch(ruta, opts);
   const b = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(b.error || `error ${r.status}`);
   return b;
@@ -45,6 +46,9 @@ const S = {
   near: null,               // { lat, lon, n, label, gps }
   filas: [],                // listado actual (de más cerca a más lejos)
   vis: null,                // { porDia, dias, sinCoord }
+  rol: null,
+  visitas: null,            // { códigoLocal: { fecha, por, mia } }; null = no disponible (falta la migración 021)
+  ocultar: false,           // «Ocultar visitados»: no se listan los colegios ya visitados
   mapa: null, mapaCreando: null, mapaFalla: false, pick: false, vista: 'lista'
 };
 
@@ -53,6 +57,7 @@ async function boot() {
   bind();
   window.radarSesion?.usuario().then(u => {
     $('cUsuario').textContent = u.email || '';
+    S.rol = u.rol;
     const prov = u.rol === 'proveedor';
     $('lnkInicio').hidden = !prov;
     if (!prov) $('lnkLogo').removeAttribute('href');
@@ -63,7 +68,7 @@ async function boot() {
   catch { $('cInfo').innerHTML = '<span class="err">No se pudo cargar la lista de regiones. Revisa tu conexión y recarga.</span>'; return; }
   $('cRegion').innerHTML = S.idx.regiones.map(g => `<option value="${esc(g.nombre)}">${esc(g.nombre)}</option>`).join('');
   $('cFuente').textContent = `Fuente: ${S.idx.fuente}. Ubicaciones y direcciones declaradas en el padrón de ESCALE; pueden tener error. Las distancias son en línea recta.`;
-  await cargarProyectos();
+  await Promise.all([cargarProyectos(), cargarVisitas()]);
   const p = store('proyecto');
   if (p && S.proys.some(x => x.id === p)) { $('cProy').value = p; await elegirProyecto(p); return; }
   const r = store('region');
@@ -77,6 +82,51 @@ async function cargarProyectos() {
   $('cProyCampo').hidden = !S.proys.length;
   $('cProy').innerHTML = '<option value="">Ninguno: toda la región</option>' + S.proys.map(p =>
     `<option value="${esc(p.id)}">${esc(p.nombre)} · ${esc(p.region)} · ${plural(p.n_locales, 'colegio', 'colegios')}</option>`).join('');
+}
+
+// ─── Colegios visitados ─────────────────────────────────────────────────────
+async function cargarVisitas() {
+  try { S.visitas = await api('/api/campo/visitas'); }
+  catch (e) { console.warn('Visitas', e); S.visitas = null; toast(e.message); }
+  $('cOcultarCampo').hidden = !S.visitas;
+  S.ocultar = !!S.visitas && !!store('ocultarVisitados'); $('cOcultar').checked = S.ocultar;
+  filtrosSum();
+  await omitirVisitados();
+}
+const omitirVisitados = () => w('omitir', { codigos: S.ocultar && S.visitas ? Object.keys(S.visitas) : null });
+const fechaPe = f => f ? f.split('-').reverse().join('/') : '';
+const visitados = filas => S.visitas ? filas.filter(f => S.visitas[f.cod]).length : 0;
+// Lo que el listado agrega a cada colegio: «Visitado el …» y el botón para marcar o desmarcar
+function extraVisita(f) {
+  if (!S.visitas || !f?.cod) return {};
+  const v = S.visitas[f.cod];
+  if (!v) return { acc: `<button class="btn btn-ghost btn-sm" type="button" data-visita="${esc(f.cod)}" aria-label="Marcar ${esc(f.nom)} como visitado">Marcar visitado</button>` };
+  const puede = v.mia || S.rol === 'proveedor';
+  return {
+    clase: 'visitado',
+    cuerpo: `<div class="lst-visita">✓ Visitado el ${esc(fechaPe(v.fecha))}${v.por && !v.mia ? ` · ${esc(v.por)}` : ''}</div>`,
+    acc: puede ? `<button class="btn btn-ghost btn-sm" type="button" data-desmarcar="${esc(f.cod)}" aria-label="Desmarcar la visita a ${esc(f.nom)}">Desmarcar</button>` : ''
+  };
+}
+async function cambiarVisita(cod, marcar, boton) {
+  const nom = S.filas.find(f => f.cod === cod)?.nom || `el local ${cod}`;
+  if (!marcar && !confirm(`¿Desmarcar la visita a ${nom}?`)) return;
+  boton.disabled = true;
+  try {
+    const r = await api('/api/campo/visitas/' + encodeURIComponent(cod), marcar
+      ? { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) }
+      : { method: 'DELETE' });
+    if (marcar) S.visitas[cod] = { fecha: r.fecha, por: r.por, mia: true }; else delete S.visitas[cod];
+    // El listado no cambia hasta la próxima búsqueda (así no se reordenan los días); la próxima ya omite los visitados
+    await omitirVisitados();
+    toast(marcar ? `${nom}: visitado el ${fechaPe(r.fecha)}.` : `${nom}: visita desmarcada.`);
+    pintarLista(); pintarInfoVisitas();
+  } catch (e) { toast(`No se pudo ${marcar ? 'marcar' : 'desmarcar'} la visita: ${e.message}`); boton.disabled = false; }
+}
+function pintarInfoVisitas() {
+  const el = $('cInfoVis'); if (!el) return;
+  const n = visitados(S.filas);
+  el.textContent = n ? ` · ${plural(n, 'ya visitado', 'ya visitados')}` : '';
 }
 
 // Carga la región del proyecto, limita la búsqueda a sus colegios y trae su cantidad a «Colegios a visitar»
@@ -151,6 +201,7 @@ async function buscar(centro, { ajustar = true } = {}) {
     ? `<b>${fmt(c.n)}</b> ${c.n === 1 ? 'colegio más cercano' : 'colegios más cercanos'} ${esc(aCentro(S.near.label))} · el más lejano a <b>${fmtKm(c.max)} km</b> en línea recta${om}`
     : `Ningún colegio con coordenadas cumple los filtros cerca ${esc(aCentro(S.near.label)).replace(/^al /, 'del ').replace(/^a /, 'de ')}${om}`);
   if (S.near.gps && S.filas[0]?.km > LEJOS_KM) toast(`El colegio más cercano está a ${fmtKm(S.filas[0].km)} km de ti: ¿elegiste la región correcta?`);
+  $('cInfo').insertAdjacentHTML('beforeend', '<span id="cInfoVis"></span>'); pintarInfoVisitas();
   $('cAgrupar').disabled = !S.filas.length;
   pintarTodo(ajustar);
 }
@@ -194,15 +245,16 @@ function pintarTodo(ajustar) {
 }
 function pintarLista() {
   if (!S.near) { $('cLista').innerHTML = '<p class="sub lst-vacio">Aún no hay búsqueda. Usa tu ubicación, elige un distrito o escribe un código de local.</p>'; return; }
-  if (!S.vis) { $('cLista').innerHTML = htmlListado(S.filas); return; }
+  const opts = { extra: extraVisita };
+  if (!S.vis) { $('cLista').innerHTML = htmlListado(S.filas, opts); return; }
   // Agrupado por día: cada día en su orden de visita, con los datos completos del listado
   const porCod = new Map(S.filas.map(f => [f.cod, f])), total = S.vis.dias.length;
   $('cLista').innerHTML = S.vis.dias.map(d => {
-    const rep = d.puntos.reduce((a, p) => a + p.rep, 0);
-    return `<h3 class="dia-titulo" style="--c:${colorDia(d.dia, total)}"><span class="sw"></span>Día ${d.dia} <span class="sub">${plural(d.puntos.length, 'colegio', 'colegios')} · ~${fmtKm(d.km)} km · ${fmt(rep)} a reponer</span></h3>
+    const rep = d.puntos.reduce((a, p) => a + p.rep, 0), nv = visitados(d.puntos);
+    return `<h3 class="dia-titulo" style="--c:${colorDia(d.dia, total)}"><span class="sw"></span>Día ${d.dia} <span class="sub">${plural(d.puntos.length, 'colegio', 'colegios')}${nv ? ` (${fmt(nv)} ${nv === 1 ? 'visitado' : 'visitados'})` : ''} · ~${fmtKm(d.km)} km · ${fmt(rep)} a reponer</span></h3>
       ${botonesRuta(d)}
-      <ol class="lst">${d.puntos.map(p => itemListado({ ...porCod.get(p.cod), orden: p.orden, km: null }, { numero: x => x.orden })).join('')}</ol>`;
-  }).join('') + (S.vis.sinCoord.length ? `<h3 class="dia-titulo">Sin coordenadas</h3><ol class="lst">${S.vis.sinCoord.map(p => itemListado({ ...porCod.get(p.cod), km: null }, { numero: () => '–' })).join('')}</ol>` : '');
+      <ol class="lst">${d.puntos.map(p => itemListado({ ...porCod.get(p.cod), orden: p.orden, km: null }, { ...opts, numero: x => x.orden })).join('')}</ol>`;
+  }).join('') + (S.vis.sinCoord.length ? `<h3 class="dia-titulo">Sin coordenadas</h3><ol class="lst">${S.vis.sinCoord.map(p => itemListado({ ...porCod.get(p.cod), km: null }, { ...opts, numero: () => '–' })).join('')}</ol>` : '');
 }
 // «Ruta del día en Google Maps»: un enlace, o uno por tramo si el día pasa de 10 colegios
 function botonesRuta(d) {
@@ -265,6 +317,7 @@ function filtrosSum() {
   if (S.f.niv) p.push(Object.keys(NIVN).filter(k => S.f.niv & NIVB[k]).map(k => NIVS[k]).join(', '));
   if (S.f.area >= 0) p.push(S.f.area ? 'Rural' : 'Urbana');
   if (S.f.rep) p.push(`≥ ${fmt(S.f.rep)} a reponer`);
+  if (S.ocultar) p.push('sin visitados');
   $('cFiltSum').textContent = p.length ? '· ' + p.join(' · ') : '· ninguno';
 }
 
@@ -294,9 +347,13 @@ function bind() {
     S.f.niv = on ? S.f.niv | NIVB[b.dataset.n] : S.f.niv & ~NIVB[b.dataset.n];
   }));
   $('cArea').onchange = filtro(e => { S.f.area = +e.target.value; });
+  // omitirVisitados va antes que la consulta de buscar (el worker atiende en orden)
+  $('cOcultar').onchange = filtro(e => { S.ocultar = e.target.checked; store('ocultarVisitados', S.ocultar); omitirVisitados(); });
   let t; $('cRep').oninput = e => { clearTimeout(t); t = setTimeout(filtro(() => { S.f.rep = Math.max(0, +e.target.value || 0); }), 250); };
   document.querySelector('.vista-tabs').addEventListener('click', e => { const b = e.target.closest('[data-vista]'); if (b) setVista(b.dataset.vista); });
   $('cLista').addEventListener('click', async e => {
+    const bv = e.target.closest('[data-visita],[data-desmarcar]');
+    if (bv) { cambiarVisita(bv.dataset.visita || bv.dataset.desmarcar, !!bv.dataset.visita, bv); return; }
     const b = e.target.closest('[data-vermapa]'); if (!b) return;
     if (esCelular()) setVista('mapa'); else $('cMapa').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     if (!S.mapa) { toast('El mapa no está disponible.'); return; }

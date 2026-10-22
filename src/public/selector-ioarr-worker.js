@@ -11,6 +11,7 @@ let dup = {};           // { codLocal: { estado, excluir } } para el cuadro de e
 let km = new Map();     // con búsqueda por cercanía: índice de local → distancia al centro (km)
 let centro = null;      // centro de la última consulta por cercanía
 let solo = null;        // Visitas de campo: códigos del proyecto elegido (las consultas solo ven esos locales)
+let omitir = null;      // Visitas de campo: colegios ya visitados que no se listan («Ocultar visitados»)
 
 const pct = i => C.L.reqTot[i] > 0 ? C.L.repTot[i] / C.L.reqTot[i] : null;
 const selIdx = () => [...sel].map(c => codIdx.get(c)).filter(i => i != null);
@@ -33,6 +34,8 @@ const acciones = {
     solo = new Set(codigos.filter(c => codIdx.has(c)));
     return { n: solo.size, fuera: new Set(codigos).size - solo.size };
   },
+  // Visitas de campo: deja fuera de las consultas estos códigos (null = ninguno). No se borra al cambiar de región
+  omitir({ codigos }) { omitir = codigos?.length ? new Set(codigos) : null; return omitir?.size || 0; },
   // Otra inversión vigente o reciente por local: { codLocal: { estado, codigo, excluir } }
   duplicidad({ mapa }) {
     dup = mapa || {};
@@ -44,6 +47,7 @@ const acciones = {
   consulta({ f, sort, page, size, near }) {
     view = filtrar(D, C, f);
     if (solo) view = view.filter(i => solo.has(D.locs[i][0]));
+    if (omitir) view = view.filter(i => !omitir.has(D.locs[i][0]));
     let cerca = null;
     if (near) {
       const r = cercanos(D, view, near, near.n);

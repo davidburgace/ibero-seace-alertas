@@ -19,6 +19,13 @@ header{ padding-bottom:16px; }
 .campo-filtros>summary .sub{ font-weight:400; margin-left:6px; }
 .campo-filtros .filtros-grid{ padding-top:0; }
 #cInfo b{ color:var(--text); }
+.campo-check .check{ display:flex; align-items:center; gap:8px; min-height:38px; font-size:14px; cursor:pointer; }
+.campo-check input{ width:18px; height:18px; accent-color:var(--accent); }
+
+/* Colegios ya visitados */
+.lst-item.visitado{ background:var(--surface2); }
+.lst-item.visitado .lst-n{ background:var(--bueno); color:#fff; }
+.lst-visita{ font-size:13px; font-weight:600; color:var(--bueno); }
 
 /* Listado y mapa: lado a lado en escritorio; en celular, una vista a la vez */
 .vista-tabs{ display:none; }
@@ -44,6 +51,7 @@ header{ padding-bottom:16px; }
   .campo-cuerpo{ grid-template-columns:1fr; }
   .campo-cuerpo[data-vista="lista"] .campo-mapa, .campo-cuerpo[data-vista="mapa"] .campo-lista{ display:none; }
   .campo-mapa{ position:static; }
+  .lst-acc [data-visita], .lst-acc [data-desmarcar]{ min-height:44px; }
   .dia-ruta .btn{ min-height:44px; display:inline-flex; align-items:center; }
   .campo-mapa .mapa-locales{ height:calc(100vh - 190px); min-height:320px; }
 }
