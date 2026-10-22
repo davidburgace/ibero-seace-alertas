@@ -39,7 +39,9 @@
 //     GET    /proyectos/:id/fichas                     locales con su estado (Verificado / Solo censo) y % verificado
 //     GET    /proyectos/:id/fichas/:cod/excel          ficha para llenar en campo
 //     GET    /proyectos/:id/fichas/:cod/pdf            ficha imprimible
-//     GET    /proyectos/:id/fichas-zip                 Excel y PDF de todos los locales
+//     GET    /proyectos/:id/fichas-zip                 Excel y PDF de todos los locales; con reparto entre supervisores
+//                                                      (Visitas de campo), una carpeta por supervisor y «Sin_asignar»
+//            ?paquete=<supervisorId>|sin               solo el paquete de ese supervisor (o los sin asignar)
 //     POST   /proyectos/:id/fichas/importar            multipart: archivos (uno o varios Excel llenos) → informe
 //   También devuelve api.resumen(p): avance del expediente para Radar IOARR (ficha y kanban)
 // ============================================================================
@@ -59,6 +61,7 @@ import { leerDuplicidad, separarLocales, estadoDe, avisosDuplicidad } from './du
 import { porNivel, inventarioNivel, inventarioUna, modoDe, sinNivel, nivelesDeLocal, vistaNivel, limpiarPorNivel, NOMBRE_NIVEL } from './niveles.js';
 import { modeloFicha, generarFichaExcel, generarFichaPdf, leerFicha, procesarFicha, requeridoFicha, ESTADO_VERIF } from './ficha.js';
 import archiver from 'archiver';
+import { asignacionesProyecto, paquetesFichas } from './campo.js';
 
 const AVISO = 'Falta ejecutar supabase/migrations/012_ioarr_expediente_costos.sql en Supabase';
 const faltaMigracion = e => e?.code === 'PGRST204' || e?.code === 'PGRST205' || e?.code === '42P01' || /schema cache|does not exist/i.test(e?.message || '');
@@ -519,7 +522,7 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     return !!error && (faltaMigracion(error) || /ficha/.test(error.message || ''));
   }
   async function vistaFichas(p) {
-    const [A, sinMig] = await Promise.all([armar(p), sinMigracionFicha()]);
+    const [A, sinMig, R] = await Promise.all([armar(p), sinMigracionFicha(), asignacionesProyecto(supabase, p.id)]);
     const est = new Map(A.Runa.locales.map(l => [l.cod, l]));
     const pct = R => R.totales.rep ? Math.round((R.totales.repVerif || 0) / R.totales.rep * 1000) / 10 : 0;
     const locales = A.list.map(i => {
@@ -527,10 +530,13 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
       const estado = l?.verificado?.tipos.length ? 'verificado' : 'solo_censo';
       return { cod, nom: A.D.locName[i], dist: A.D.dists[A.D.locs[i][1]][0], niveles: nivelesDeLocal(A.D, i).map(n => NOMBRE_NIVEL[n]), aulas: A.D.locAul[i].length,
         rep: l ? l.rep.reduce((a, b) => a + b, 0) : 0, rep_verif: l ? l.repVerif.reduce((a, b) => a + b, 0) : 0,
-        estado, estado_texto: ESTADO_VERIF[estado], visita: f?.fecha_visita || null, ficha: fichaDe(f) };
+        estado, estado_texto: ESTADO_VERIF[estado], visita: f?.fecha_visita || null, ficha: fichaDe(f),
+        supervisor: R.asignaciones?.[cod] ? (R.supervisores[R.asignaciones[cod]] || 'supervisor') : null };
     });
+    const paquetes = paquetesFichas(locales.map(l => l.cod), R.asignaciones, R.supervisores)
+      .filter(x => x.clave !== 'todos').map(x => ({ clave: x.clave, email: x.email, n: x.codigos.length }));
     return {
-      sin_migracion: sinMig, locales, excluidos: A.excluidos.length,
+      sin_migracion: sinMig, locales, excluidos: A.excluidos.length, paquetes,
       resumen: { locales: locales.length, verificados: locales.filter(l => l.estado === 'verificado').length, con_ficha: locales.filter(l => l.ficha).length,
         rep: A.Runa.totales.rep, rep_verif: A.Runa.totales.repVerif || 0, pct: pct(A.Runa),
         ioarrs: A.modo === 'por_nivel' ? A.ioarrs.filter(x => x.nivel).map(x => ({ nivel: x.nivel, nombre: x.nombre, rep: x.R.totales.rep, rep_verif: x.R.totales.repVerif || 0, pct: pct(x.R) })) : [] }
@@ -544,7 +550,8 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
   async function fichaLocal(p, cod) {
     const { D, i } = await localDelProyecto(p, cod);
     const C = calc(D, limpiarParams(p.criterios));
-    return modeloFicha(D, C, i, { proyecto: { id: p.id, nombre: p.nombre }, anio: p.anio_datos, fecha: hoyLima() });
+    const R = await asignacionesProyecto(supabase, p.id), sup = R.asignaciones?.[cod];
+    return modeloFicha(D, C, i, { proyecto: { id: p.id, nombre: p.nombre }, anio: p.anio_datos, fecha: hoyLima(), supervisor: sup ? R.supervisores[sup] || '' : '' });
   }
   const nombreFicha = (F, ext) => `Ficha_verificacion_${F.local.cod}_${slug(F.local.nombre).slice(0, 40)}.${ext}`;
   const XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
@@ -564,11 +571,21 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
   // Todas las fichas (Excel y PDF) en un ZIP, en flujo: se genera una ficha a la vez
   api.get('/proyectos/:id/fichas-zip', responder(async (req, res) => {
     const p = await proyecto(req);
-    const [D, codigos, dup] = await Promise.all([cargarRegion(p.region), leerCodigos(p.id), leerDuplicidad(supabase, p.id)]);
+    const [D, codigos, dup, R] = await Promise.all([cargarRegion(p.region), leerCodigos(p.id), leerDuplicidad(supabase, p.id), asignacionesProyecto(supabase, p.id)]);
     if (!D) return res.status(400).json({ error: 'No hay datos para la región ' + p.region });
     const { list } = separarLocales(D, codigos, dup.mapa);
     if (!list.length) return res.status(400).json({ error: 'El proyecto no tiene locales en la propuesta' });
-    const C = calc(D, limpiarParams(p.criterios)), fecha = hoyLima(), base = `Fichas_verificacion_${slug(p.nombre)}_${fecha}`;
+    // Un paquete por supervisor según el reparto de Visitas de campo (sin reparto, uno solo)
+    const idxDe = new Map(list.map(i => [D.locs[i][0], i]));
+    let paquetes = paquetesFichas([...idxDe.keys()], R.asignaciones, R.supervisores);
+    const pedido = req.query.paquete ? String(req.query.paquete) : null;
+    if (pedido) {
+      paquetes = paquetes.filter(x => x.clave === pedido);
+      if (!paquetes.length) return res.status(404).json({ error: 'Ese supervisor no tiene locales en la propuesta del proyecto' });
+    }
+    const C = calc(D, limpiarParams(p.criterios)), fecha = hoyLima();
+    const solo = pedido ? paquetes[0] : null;
+    const base = `Fichas_verificacion_${slug(p.nombre)}${solo?.carpeta ? '_' + solo.carpeta : ''}_${fecha}`;
     res.set({ 'Content-Type': 'application/zip', 'Cache-Control': 'no-store',
       'Content-Disposition': `attachment; filename="${base}.zip"; filename*=UTF-8''${encodeURIComponent(base + '.zip')}` });
     const zip = archiver('zip', { zlib: { level: 6 } });
@@ -576,11 +593,19 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     zip.pipe(res);
     const agregar = (contenido, name) => Promise.race([fallo, new Promise(ok => { zip.once('entry', ok); zip.append(contenido, { name: `${base}/${name}` }); })]);
     try {
-      await agregar(Buffer.from(LEEME_FICHAS(p.nombre, list.length, fecha), 'utf8'), '00_LEEME.txt');
-      for (const i of list) {
-        const F = modeloFicha(D, C, i, { proyecto: { id: p.id, nombre: p.nombre }, anio: p.anio_datos, fecha });
-        await agregar(await generarFichaExcel(F), 'Excel/' + nombreFicha(F, 'xlsx'));
-        await agregar(await generarFichaPdf(F), 'PDF/' + nombreFicha(F, 'pdf'));
+      const varios = paquetes.length > 1 || !!paquetes[0].carpeta;
+      const n = paquetes.reduce((a, x) => a + x.codigos.length, 0);
+      await agregar(Buffer.from(LEEME_FICHAS(p.nombre, n, fecha, varios && !solo ? paquetes : null), 'utf8'), '00_LEEME.txt');
+      for (const paq of paquetes) {
+        // con un solo paquete pedido, sin subcarpeta (el ZIP ya es de ese supervisor)
+        const dir = paq.carpeta && !solo ? paq.carpeta + '/' : '';
+        if (dir) await agregar(Buffer.from(LEEME_PAQUETE(p.nombre, paq, D, idxDe), 'utf8'), dir + '00_LOCALES.txt');
+        for (const cod of paq.codigos) {
+          const F = modeloFicha(D, C, idxDe.get(cod), { proyecto: { id: p.id, nombre: p.nombre }, anio: p.anio_datos, fecha, supervisor: paq.email });
+          await agregar(await generarFichaExcel(F), dir + 'Excel/' + nombreFicha(F, 'xlsx'));
+          await agregar(await generarFichaPdf(F), dir + 'PDF/' + nombreFicha(F, 'pdf'));
+        }
+        if (solo && paq.carpeta) await agregar(Buffer.from(LEEME_PAQUETE(p.nombre, paq, D, idxDe), 'utf8'), '00_LOCALES.txt');
       }
       await zip.finalize();
     } catch (e) { console.error('[EXPEDIENTE][FICHAS]', e.message); res.destroy(e); }
@@ -805,11 +830,19 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
   return api;
 }
 
-const LEEME_FICHAS = (proyecto, n, fecha) => [
-  `Fichas de verificación de mobiliario escolar — proyecto «${proyecto}» (${n} ${n === 1 ? 'local' : 'locales'}), generadas el ${fecha}.`,
+const plLocal = n => `${n} ${n === 1 ? 'local' : 'locales'}`;
+const LEEME_FICHAS = (proyecto, n, fecha, paquetes = null) => [
+  `Fichas de verificación de mobiliario escolar — proyecto «${proyecto}» (${plLocal(n)}), generadas el ${fecha}.`,
   '',
+  ...(paquetes ? [
+    'Un paquete (carpeta) por supervisor de campo, según el reparto de Visitas de campo:',
+    ...paquetes.map(x => `  ${x.carpeta}/  ${x.email || 'colegios sin supervisor asignado'} · ${plLocal(x.codigos.length)}`),
+    '',
+    'Dentro de cada carpeta:'
+  ] : []),
   'Excel/  una ficha por local, para llenar en campo y devolver. Es la que se importa en la app.',
   'PDF/    la misma ficha para imprimir y firmar.',
+  ...(paquetes ? ['00_LOCALES.txt  la lista de locales del paquete.'] : []),
   '',
   'Cómo se llena:',
   '- Lo gris lo llenó la app con el Padrón ESCALE y el Censo Educativo; lo amarillo se llena en campo.',
@@ -819,6 +852,13 @@ const LEEME_FICHAS = (proyecto, n, fecha) => [
   '- No cambies las celdas grises ni borres filas.',
   '',
   'Para cargarlas: Selector IOARR → Expediente → Fichas → Importar fichas llenas (uno o varios Excel a la vez).'
+].join('\r\n');
+
+// Lista de locales de un paquete (00_LOCALES.txt)
+const LEEME_PAQUETE = (proyecto, paq, D, idxDe) => [
+  `Proyecto «${proyecto}» — ${paq.clave === 'sin' ? 'locales sin supervisor asignado' : 'supervisor de campo: ' + (paq.email || '(sin correo)')} · ${plLocal(paq.codigos.length)}`,
+  '',
+  ...paq.codigos.map((c, j) => { const i = idxDe.get(c); return `${String(j + 1).padStart(3, ' ')}. ${c} · ${D.locName[i]} · ${D.dists[D.locs[i][1]][0]}`; })
 ].join('\r\n');
 
 export function textoCriterios(P) {

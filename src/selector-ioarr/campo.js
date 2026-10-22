@@ -76,6 +76,26 @@ export async function asignacionesProyecto(sb, proyectoId) {
   return { asignaciones, supervisores };
 }
 
+// Paquetes de fichas de verificación según el reparto: uno por supervisor (en orden de correo) y
+// «Sin asignar» al final si queda alguno. Sin reparto, un solo paquete sin carpeta (clave 'todos').
+// → [{ clave: supervisorId | 'sin' | 'todos', email, carpeta, codigos }]
+const carpetaDe = email => 'Supervisor_' + (String(email || '').split('@')[0].normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'sin_nombre');
+export function paquetesFichas(codigos, asignaciones, supervisores = {}) {
+  const hay = asignaciones && codigos.some(c => asignaciones[c]);
+  if (!hay) return [{ clave: 'todos', email: '', carpeta: '', codigos: [...codigos] }];
+  const por = new Map(), sin = [];
+  for (const c of codigos) { const id = asignaciones[c]; if (!id) sin.push(c); else { if (!por.has(id)) por.set(id, []); por.get(id).push(c); } }
+  const usadas = new Set();
+  const out = [...por.entries()].sort(([a], [b]) => (supervisores[a] || '').localeCompare(supervisores[b] || '') || a.localeCompare(b)).map(([id, cods]) => {
+    let carpeta = carpetaDe(supervisores[id]), k = 2;
+    while (usadas.has(carpeta)) carpeta = carpetaDe(supervisores[id]) + '_' + k++;
+    usadas.add(carpeta);
+    return { clave: id, email: supervisores[id] || '', carpeta, codigos: cods };
+  });
+  if (sin.length) out.push({ clave: 'sin', email: '', carpeta: 'Sin_asignar', codigos: sin });
+  return out;
+}
+
 export async function listarSupervisores(sb) {
   const { data, error } = await sb.from('perfiles').select('id, email').eq('rol', 'supervisor').order('email');
   if (error) throw error;
