@@ -6,7 +6,7 @@ import { crearProteccionApi, bloquearSupervisor } from '../src/ioarr/auth.js';
 import { ROLES, cambiarRol, invitarUsuario, correoInvitacion, AVISO_SUPERVISOR } from '../src/ioarr/usuarios.js';
 import { cspSelector } from '../src/selector-ioarr/csp.js';
 import ioarrRouter from '../src/ioarr/router.js';
-import { listarProyectosCampo, proyectoCampo, crearApiCampo } from '../src/selector-ioarr/campo.js';
+import { listarProyectosCampo, proyectoCampo, crearApiCampo, listarVisitas, marcarVisita, desmarcarVisita, fechaVisita, hoyPeru, AVISO_MIGRACION_VISITAS } from '../src/selector-ioarr/campo.js';
 
 const respuesta = () => {
   const res = { statusCode: 200, body: null };
@@ -116,12 +116,14 @@ test('sesion.js manda a cada rol a su inicio', () => {
   assert.match(leer('src/public/index.html'), /me\?\.rol === 'supervisor'\) \{ location\.replace\('\/campo\.html'\)/);
 });
 
-test('la página de campo solo lee /api/campo/* y no guarda nada en el servidor', () => {
+test('la página de campo solo usa /api/campo/* y solo escribe las visitas', () => {
   const js = leer('src/public/campo.js');
   const rutas = [...js.matchAll(/['"`](\/api\/[^'"`$]*)/g)].map(m => m[1]);
   assert.ok(rutas.length > 0);
   for (const r of rutas) assert.match(r, /^\/api\/campo\//, r);
-  assert.ok(!/method:\s*['"](POST|PUT|PATCH|DELETE)/.test(js));
+  const metodos = [...js.matchAll(/method:\s*['"](\w+)/g)].map(m => m[1]).sort();
+  assert.deepEqual(metodos, ['DELETE', 'PUT']);
+  assert.ok(!/method:\s*['"](POST|PATCH)/.test(js));
 });
 
 test('CSP también en /campo.html', () => {
@@ -195,10 +197,10 @@ test('campo: abrir un proyecto trae todos sus códigos (por lotes) y respeta al 
   assert.equal(await proyectoCampo(sbProyectos({ proyectos: PROYS }), { id: 'sup-1', rol: 'supervisor' }, 'no-es-uuid'), null);
 });
 
-test('campo: la API solo tiene lecturas', () => {
-  const rutas = crearApiCampo(sbProyectos()).stack.filter(l => l.route);
-  assert.deepEqual(rutas.map(l => l.route.path).sort(), ['/proyectos', '/proyectos/:id']);
-  for (const l of rutas) assert.deepEqual(Object.keys(l.route.methods), ['get']);
+test('campo: la API solo lee proyectos; lo único que escribe son las visitas', () => {
+  const rutas = crearApiCampo(sbProyectos()).stack.filter(l => l.route)
+    .map(l => `${Object.keys(l.route.methods).join(',')} ${l.route.path}`).sort();
+  assert.deepEqual(rutas, ['delete /visitas/:codigo', 'get /proyectos', 'get /proyectos/:id', 'get /visitas', 'put /visitas/:codigo']);
 });
 
 test('campo: el worker limita la búsqueda a los colegios del proyecto', () => {
@@ -206,4 +208,86 @@ test('campo: el worker limita la búsqueda a los colegios del proyecto', () => {
   assert.match(js, /limitar\(\{ codigos \}\)/);
   assert.match(js, /if \(solo\) view = view\.filter/);
   assert.match(js, /view = \[\]; solo = null;/, 'cargar otra región quita el límite');
+});
+
+// ─── Colegios visitados ─────────────────────────────────────────────────────
+function sbVisitas(filas = [], { error = null } = {}) {
+  const ops = [];
+  const from = tabla => {
+    assert.equal(tabla, 'campo_visitas');
+    const q = { eq: {}, rango: null, borrar: false };
+    const b = {
+      select: () => b, order: () => b,
+      eq: (k, v) => { q.eq[k] = v; return b; },
+      range: (a, z) => { q.rango = [a, z]; return b; },
+      maybeSingle: async () => ({ data: error ? null : filas.find(f => f.codigo_local === q.eq.codigo_local) || null, error }),
+      upsert: async (fila, o) => { ops.push({ upsert: fila, o }); return { error }; },
+      delete: () => { q.borrar = true; return b; },
+      then: (ok, mal) => {
+        if (q.borrar) { ops.push({ borrar: q.eq.codigo_local }); return Promise.resolve({ error }).then(ok, mal); }
+        return Promise.resolve(error ? { data: null, error } : { data: filas.slice(q.rango[0], q.rango[1] + 1), error: null }).then(ok, mal);
+      }
+    };
+    return b;
+  };
+  return { from, ops };
+}
+const SUP = { id: 'sup-1', email: 'sup@ibero.pe', rol: 'supervisor' };
+
+test('visitas: fecha de hoy en Perú y validación de la fecha', () => {
+  assert.equal(hoyPeru(Date.parse('2026-10-23T03:00:00Z')), '2026-10-22'); // 22:00 en Lima
+  assert.equal(fechaVisita(undefined, '2026-10-22'), '2026-10-22');
+  assert.equal(fechaVisita('2026-10-01', '2026-10-22'), '2026-10-01');
+  for (const f of ['2026-10-23', '2019-12-31', '2026-02-30', '22/10/2026', 'x']) assert.equal(fechaVisita(f, '2026-10-22'), null, f);
+});
+
+test('visitas: listar trae todas (por lotes) y marca las propias', async () => {
+  const filas = Array.from({ length: 1500 }, (_, i) => ({ codigo_local: String(200000 + i), fecha: '2026-10-20', visitado_por: i % 2 ? 'sup-1' : 'otro', visitado_por_email: 'x@ibero.pe' }));
+  const m = await listarVisitas(sbVisitas(filas), SUP);
+  assert.equal(Object.keys(m).length, 1500);
+  assert.deepEqual(m['200001'], { fecha: '2026-10-20', por: 'x@ibero.pe', mia: true });
+  assert.equal(m['200000'].mia, false);
+});
+
+test('visitas: marcar guarda quién y cuándo; valida código y fecha', async () => {
+  const sb = sbVisitas();
+  const r = await marcarVisita(sb, SUP, '276008', { fecha: '2026-10-01' });
+  assert.equal(r.status, 200); assert.deepEqual(r.body, { codigo: '276008', fecha: '2026-10-01', por: 'sup@ibero.pe', mia: true });
+  assert.equal(sb.ops[0].o.onConflict, 'codigo_local');
+  assert.equal(sb.ops[0].upsert.visitado_por, 'sup-1');
+  assert.equal((await marcarVisita(sb, SUP, 'abc')).status, 400);
+  assert.equal((await marcarVisita(sb, SUP, '276008', { fecha: '2099-01-01' })).status, 400);
+  assert.equal(sb.ops.length, 1);
+});
+
+test('visitas: el supervisor solo desmarca lo suyo; el proveedor, cualquiera', async () => {
+  const filas = [{ codigo_local: '111111', visitado_por: 'sup-1' }, { codigo_local: '222222', visitado_por: 'otro' }];
+  const sb = sbVisitas(filas);
+  assert.equal((await desmarcarVisita(sb, SUP, '111111')).status, 200);
+  assert.equal((await desmarcarVisita(sb, SUP, '222222')).status, 403);
+  assert.equal((await desmarcarVisita(sb, { id: 'prov-1', rol: 'proveedor' }, '222222')).status, 200);
+  assert.deepEqual((await desmarcarVisita(sb, SUP, '333333')).body, { codigo: '333333', borrado: false });
+  assert.deepEqual(sb.ops, [{ borrar: '111111' }, { borrar: '222222' }]);
+});
+
+test('visitas: sin la migración 021, aviso claro (503)', async () => {
+  const api = crearApiCampo(sbVisitas([], { error: { code: 'PGRST205', message: 'Could not find the table in the schema cache' } }));
+  const capa = api.stack.find(l => l.route?.path === '/visitas' && l.route.methods.get);
+  const res = respuesta();
+  await new Promise(ok => { res.json = b => { res.body = b; ok(); return res; }; capa.route.stack[0].handle({ usuario: SUP }, res, ok); });
+  assert.equal(res.statusCode, 503); assert.equal(res.body.error, AVISO_MIGRACION_VISITAS);
+});
+
+test('migración 021: tabla campo_visitas con RLS y sin políticas', () => {
+  const sql = leer('supabase/migrations/021_campo_visitas.sql');
+  assert.match(sql, /create table if not exists public\.campo_visitas/);
+  assert.match(sql, /codigo_local\s+text primary key/);
+  assert.match(sql, /enable row level security/);
+  assert.doesNotMatch(sql, /create policy/);
+});
+
+test('campo: el worker omite los visitados si se pide', () => {
+  const js = leer('src/public/selector-ioarr-worker.js');
+  assert.match(js, /omitir\(\{ codigos \}\)/);
+  assert.match(js, /if \(omitir\) view = view\.filter/);
 });

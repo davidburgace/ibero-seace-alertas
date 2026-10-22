@@ -27,7 +27,7 @@
 
 <header>
   <h1>Visitas de <span class="accent">campo</span></h1>
-  <div class="subtitle">Busca los colegios más cercanos a tu ubicación, a un distrito o a un local —de toda la región o de un proyecto del Selector IOARR— y planifica tus visitas.</div>
+  <div class="subtitle">Busca los colegios más cercanos a tu ubicación, a un distrito o a un local —de toda la región o de un proyecto del Selector IOARR— planifica tus visitas y marca los que ya visitaste.</div>
 </header>
 
 <main>
@@ -56,6 +56,7 @@
         <div class="campo ancho"><span class="lbl">Nivel</span><div class="chips" id="cNiv"></div></div>
         <div class="campo"><label for="cArea">Área</label><select id="cArea"><option value="-1">Todas</option><option value="0">Urbana</option><option value="1">Rural</option></select></div>
         <div class="campo"><label for="cRep">Bienes a reponer, mínimo</label><input id="cRep" type="number" min="0" step="1" inputmode="numeric" placeholder="0"></div>
+        <div class="campo campo-check" id="cOcultarCampo" hidden><span class="lbl">Visitas</span><label class="check"><input id="cOcultar" type="checkbox"> Ocultar los ya visitados</label></div>
       </div>
     </details>
     <div class="filtros-bar">
