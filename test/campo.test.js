@@ -432,3 +432,8 @@ test('fichas-zip: separa por supervisor y acepta ?paquete=', () => {
   assert.match(js, /supervisor: paq\.email/);
   assert.match(leer('src/public/selector-ioarr-fichas.js'), /\?paquete=/);
 });
+
+test('campo: en las tarjetas los botones van en su propia fila (no aprietan el nombre)', () => {
+  const css = leer('src/public/campo.css');
+  assert.match(css, /\.pag-campo \.lst-item\{ grid-template-columns:30px minmax\(0,1fr\) auto; grid-template-areas:"n cuerpo km" "n acc acc"/);
+});
