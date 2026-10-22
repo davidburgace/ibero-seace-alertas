@@ -201,11 +201,11 @@ test('campo: abrir un proyecto trae todos sus códigos (por lotes) y respeta al 
   assert.equal(await proyectoCampo(sbProyectos({ proyectos: PROYS }), { id: 'sup-1', rol: 'supervisor' }, 'no-es-uuid'), null);
 });
 
-test('campo: la API solo lee proyectos; escribe visitas y el reparto entre supervisores', () => {
+test('campo: la API solo lee proyectos; escribe visitas, el reparto entre supervisores y las fichas llenadas en la app', () => {
   const rutas = crearApiCampo(sbProyectos()).stack.filter(l => l.route)
     .map(l => `${Object.keys(l.route.methods).join(',')} ${l.route.path}`).sort();
-  assert.deepEqual(rutas, ['delete /visitas/:codigo', 'get /proyectos', 'get /proyectos/:id', 'get /proyectos/:id/fichas-zip', 'get /supervisores', 'get /visitas',
-    'put /proyectos/:id/asignaciones', 'put /visitas/:codigo']);
+  assert.deepEqual(rutas, ['delete /visitas/:codigo', 'get /proyectos', 'get /proyectos/:id', 'get /proyectos/:id/fichas', 'get /proyectos/:id/fichas-zip', 'get /proyectos/:id/fichas/:cod',
+    'get /supervisores', 'get /visitas', 'post /proyectos/:id/fichas/:cod/enviar', 'put /proyectos/:id/asignaciones', 'put /proyectos/:id/fichas/:cod', 'put /visitas/:codigo']);
 });
 
 test('campo: el worker limita la búsqueda a los colegios del proyecto', () => {
@@ -486,5 +486,5 @@ test('fichas en campo: la ruta pasa el paquete del supervisor a fichasZip', asyn
   await capa.route.stack[0].handle({ usuario: { id: 'sup-1', rol: 'supervisor' }, params: { id: UUID }, query: { paquete: 'otro' } }, res, e => { throw e; });
   assert.deepEqual(llamadas, [[UUID, 'sup-1']]);
   assert.match(leer('src/public/campo.js'), /\/api\/campo\/proyectos\/\$\{encodeURIComponent\(P\.id\)\}\/fichas-zip/);
-  assert.match(leer('src/server.js'), /crearApiCampo\(undefined, \{ fichasZip: fichasZipProyecto \}\)/);
+  assert.match(leer('src/server.js'), /crearApiCampo\(undefined, \{ fichasZip: fichasZipProyecto, fichas: fichasCampo \}\)/);
 });

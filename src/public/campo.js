@@ -4,11 +4,14 @@
 // la búsqueda por cercanía se limita a sus colegios), el reparto de esos colegios entre supervisores y los
 // colegios visitados. Lo que guarda en el servidor: marcar o desmarcar un colegio como visitado
 // (/api/campo/visitas/:codigo) y, el proveedor, el reparto entre supervisores (/api/campo/proyectos/:id/asignaciones).
+// Con un proyecto elegido, cada colegio asignado al supervisor (al proveedor, todos) tiene «Llenar ficha»: la ficha de
+// verificación en el celular, que se envía a revisión del proveedor (campo-ficha.js, /api/campo/proyectos/:id/fichas/*).
 import { DEF, NIVN, NIVS, NIVB, FILTRO_VACIO, coordValidas } from '/selector-ioarr/calculo.js';
 import { limitarN as limitarNBase, N_MAX, N_MAX_PROYECTO } from '/selector-ioarr/cercania.js';
 import { limitarPorDia, colorDia, tramosRutaDia, cuotasIguales, AVISO_VISITAS } from '/selector-ioarr/visitas.js';
 import { crearMapa, fmtKm } from '/selector-ioarr-mapa.js';
 import { htmlListado, itemListado } from '/selector-ioarr-listado.js';
+import { abrirFicha } from '/campo-ficha.js';
 
 const BASE_DATOS = '/data/selector-ioarr/2025/';
 // «Colegios a visitar»: hasta 200 en toda la región; con un proyecto, hasta todos los de «Colegios del proyecto»
@@ -59,6 +62,7 @@ const S = {
   rol: null, yo: null,
   visitas: null,            // { códigoLocal: { fecha, por, mia } }; null = no disponible (falta la migración 021)
   ocultar: false,           // «Ocultar visitados»: no se listan los colegios ya visitados
+  fichas: null,             // fichas llenadas en la app del proyecto: { códigoLocal: { estado, estado_texto, nota, … } }; null = no disponible
   mapa: null, mapaCreando: null, mapaFalla: false, pick: false, vista: 'lista'
 };
 
@@ -252,8 +256,35 @@ function extraAsig(f) {
   };
 }
 function extraItem(f) {
-  const a = extraVisita(f), b = extraAsig(f);
-  return { clase: [a.clase, b.clase].filter(Boolean).join(' '), cuerpo: (b.cuerpo || '') + (a.cuerpo || ''), acc: (a.acc || '') + (b.acc || '') };
+  const a = extraVisita(f), b = extraAsig(f), c = extraFicha(f);
+  return { clase: [a.clase, b.clase].filter(Boolean).join(' '), cuerpo: (b.cuerpo || '') + (a.cuerpo || '') + (c.cuerpo || ''), acc: (c.acc || '') + (a.acc || '') + (b.acc || '') };
+}
+
+// ─── Ficha de verificación en la app ────────────────────────────────────────
+async function cargarFichas() {
+  S.fichas = null;
+  if (!S.proy) return;
+  try { S.fichas = (await api(`/api/campo/proyectos/${encodeURIComponent(S.proy.id)}/fichas`)).fichas; }
+  catch (e) { console.warn('Fichas', e); if (S.rol === 'proveedor') toast(e.message); }
+}
+// El supervisor llena la ficha de sus colegios; el proveedor, de cualquiera de su proyecto
+const puedeFicha = cod => !!S.proy && !!S.fichas && S.proy.set.has(cod) && (S.rol === 'proveedor' || S.proy.asig?.[cod] === S.yo);
+const BOTON_FICHA = { borrador: 'Seguir la ficha', observada: 'Corregir la ficha', enviada: 'Ver la ficha', aprobada: 'Ver la ficha' };
+function extraFicha(f) {
+  if (!f?.cod || !puedeFicha(f.cod)) return {};
+  const x = S.fichas[f.cod];
+  const chip = !x ? '' : `<div class="lst-ficha"><span class="chip-est ${x.estado === 'aprobada' ? 'ok' : x.estado === 'observada' ? 'alerta' : x.estado === 'enviada' ? 'pend' : ''}">Ficha: ${esc(x.estado_texto)}</span>${x.estado === 'observada' && x.nota ? ` <span class="sub">${esc(x.nota)}</span>` : ''}</div>`;
+  const primario = !x || x.estado === 'borrador' || x.estado === 'observada';
+  return { cuerpo: chip, acc: `<button class="btn ${primario ? 'btn-primary' : 'btn-ghost'} btn-sm" type="button" data-ficha="${esc(f.cod)}" aria-label="Ficha de verificación de ${esc(f.nom)}">${x ? BOTON_FICHA[x.estado] : 'Llenar ficha'}</button>` };
+}
+function abrirFichaDe(cod) {
+  abrirFicha({ proyecto: S.proy, cod, toast, alCambiar: (c, ficha) => {
+    if (!S.fichas) return;
+    S.fichas[c] = ficha;
+    // Al enviarla, el servidor marca el colegio como visitado con la fecha de la ficha (si nadie lo marcó)
+    if (ficha.estado === 'enviada' && S.visitas && !S.visitas[c] && ficha.datos?.a?.fecha) S.visitas[c] = { fecha: ficha.datos.a.fecha, por: '', mia: true };
+    pintarLista(); pintarInfoVisitas();
+  } });
 }
 
 // ─── Fichas de verificación del supervisor ──────────────────────────────────
@@ -327,12 +358,13 @@ async function elegirProyecto(id) {
     if (p.region !== S.region) await cargarRegion(p.region);
     if (p.region !== S.region) { toast(`No se pudo cargar la región ${p.region} del proyecto.`); sel.value = ''; S.proy = null; return; }
     const r = await w('limitar', { codigos: p.locales });
-    S.proy = { id: p.id, nombre: p.nombre, region: p.region, n: r.n, nVer: r.n, locales: p.locales, asig: p.asignaciones ?? null, sups: p.supervisores || {} };
+    S.proy = { id: p.id, nombre: p.nombre, region: p.region, n: r.n, nVer: r.n, locales: p.locales, set: new Set(p.locales), asig: p.asignaciones ?? null, sups: p.supervisores || {} };
     store('proyecto', p.id);
     if (r.fuera) toast(`${plural(r.fuera, 'código del proyecto no está', 'códigos del proyecto no están')} en el padrón de ${p.region}.`);
     // El supervisor arranca con sus colegios, si tiene; el proveedor, con todo el proyecto
     S.ver = S.rol === 'supervisor' && S.proy.asig && Object.values(S.proy.asig).includes(S.yo) ? S.yo : 'todo';
     cuotasDelReparto(); pintarVer(); pintarReparto();
+    await cargarFichas();
     await aplicarVer();
   } finally { sel.disabled = false; }
 }
@@ -340,7 +372,7 @@ async function elegirProyecto(id) {
 // Vuelve a toda la región (sin recargarla) y a la cantidad de colegios que el usuario tenía
 async function quitarProyecto({ rebuscar = true } = {}) {
   const habia = !!S.proy;
-  S.proy = null; S.ver = 'todo'; store('proyecto', null); $('cProy').value = '';
+  S.proy = null; S.fichas = null; S.ver = 'todo'; store('proyecto', null); $('cProy').value = '';
   $('cVerCampo').hidden = true; $('cReparto').hidden = true; $('cFichasCampo').hidden = true;
   if (!habia) return;
   await w('limitar', { codigos: null });
@@ -548,6 +580,8 @@ function bind() {
   let t; $('cRep').oninput = e => { clearTimeout(t); t = setTimeout(filtro(() => { S.f.rep = Math.max(0, +e.target.value || 0); }), 250); };
   document.querySelector('.vista-tabs').addEventListener('click', e => { const b = e.target.closest('[data-vista]'); if (b) setVista(b.dataset.vista); });
   $('cLista').addEventListener('click', async e => {
+    const bf = e.target.closest('[data-ficha]');
+    if (bf) { abrirFichaDe(bf.dataset.ficha); return; }
     const bv = e.target.closest('[data-visita],[data-desmarcar]');
     if (bv) { cambiarVisita(bv.dataset.visita || bv.dataset.desmarcar, !!bv.dataset.visita, bv); return; }
     const b = e.target.closest('[data-vermapa]'); if (!b) return;

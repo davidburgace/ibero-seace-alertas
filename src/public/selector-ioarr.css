@@ -450,3 +450,10 @@ table.tabla{ width:100%; border-collapse:collapse; font-size:13px; }
 .inf-cab { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; overflow-wrap: anywhere; }
 .inf-lista { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 6px; }
 .inf-linea { overflow-wrap: anywhere; line-height: 1.4; }
+/* Fichas llenadas en la app: revisión del proveedor (selector-ioarr-fichas.js) */
+.revision-app h4{ margin:16px 0 6px; font-size:14px; }
+.revision-app h4 .sub{ font-weight:400; }
+.revision-app .tabla td .sub{ display:block; }
+.revision-acc{ margin-top:16px; padding-top:12px; border-top:1px solid var(--border); display:flex; flex-direction:column; gap:10px; }
+.revision-acc .field textarea{ width:100%; }
+.revision-acc .acts{ display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end; }

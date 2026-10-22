@@ -38,7 +38,7 @@
       <div class="campo campo-proy" id="cVerCampo" hidden><label for="cVer">Colegios del proyecto</label><select id="cVer"></select></div>
       <div class="campo campo-proy" id="cFichasCampo" hidden><span class="lbl">Fichas de verificación</span>
         <div class="acts"><button class="btn btn-ghost" id="cFichas" type="button">Mis fichas de verificación (ZIP)</button>
-        <span class="sub">Excel para llenar en campo y PDF para imprimir, de tus colegios.</span></div></div>
+        <span class="sub">Excel y PDF para imprimir, de tus colegios. También puedes llenar la ficha aquí: «Llenar ficha» en cada colegio.</span></div></div>
       <div class="campo"><label for="cRegion">Región</label><select id="cRegion"></select></div>
       <div class="campo"><label for="cN">Colegios a visitar</label><input id="cN" type="number" min="1" max="200" step="1" value="20" inputmode="numeric" title="Hasta 200 en toda la región; con un proyecto, hasta todos sus colegios"></div>
       <div class="campo campo-ubic">
@@ -126,6 +126,9 @@
 
   <p class="fuente" id="cFuente"></p>
 </main>
+
+<!-- Ficha de verificación en la app (campo-ficha.js) -->
+<div class="ficha-hoja" id="cFicha" role="dialog" aria-modal="true" aria-label="Ficha de verificación" hidden></div>
 
 <div class="toast" id="toast" role="status" hidden></div>
 

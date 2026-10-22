@@ -395,12 +395,28 @@ api.use(expediente);
 
 // Visitas de campo (src/selector-ioarr/campo.js): el ZIP de fichas de un proyecto, sin validar al dueño
 // (campo.js ya validó que el supervisor tiene colegios asignados o que el proveedor es el dueño)
-export async function fichasZipProyecto(res, proyectoId, paquete) {
-  const { data: p, error } = await supabase.from('ioarr_selector_proyectos').select('*').eq('id', proyectoId).maybeSingle();
+async function proyectoPorId(id) {
+  const { data, error } = await supabase.from('ioarr_selector_proyectos').select('*').eq('id', id).maybeSingle();
   if (error) throw error;
+  return data;
+}
+export async function fichasZipProyecto(res, proyectoId, paquete) {
+  const p = await proyectoPorId(proyectoId);
   if (!p) return res.status(404).json({ error: 'Proyecto no encontrado' });
   return expediente.fichasZip(res, p, paquete);
 }
+// La ficha llenada en la app (campo.js ya validó el acceso al colegio): el modelo para el formulario y la validación
+const sinProyecto = () => Object.assign(new Error('Proyecto no encontrado'), { status: 404 });
+export const fichasCampo = {
+  async modelo(proyectoId, cod) {
+    const p = await proyectoPorId(proyectoId); if (!p) throw sinProyecto();
+    return expediente.fichaLocal(p, cod);
+  },
+  async validar(proyectoId, cod, datos, origen) {
+    const p = await proyectoPorId(proyectoId); if (!p) throw sinProyecto();
+    return expediente.validarFichaDigital(p, cod, datos, origen);
+  }
+};
 
 // ─── Para Radar IOARR (src/ioarr/router.js): expedientes vinculados a un CUI ──
 // Lee con la clave secreta: lo usa el servidor solo para usuarios proveedores.

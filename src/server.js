@@ -11,7 +11,7 @@ import * as pdfjsLib from 'pdfjs-dist/legacy/build/pdf.mjs';
 import infraRouter, { runInfraIngest } from './infra.js';
 import ioarrRouter, { sendIoarrDigest } from './ioarr/router.js';
 import { crearProteccionApi } from './ioarr/auth.js';
-import selectorRouter, { datosSelector, fichasZipProyecto } from './selector-ioarr/router.js';
+import selectorRouter, { datosSelector, fichasZipProyecto, fichasCampo } from './selector-ioarr/router.js';
 import { cspSelector } from './selector-ioarr/csp.js';
 import { crearApiCampo } from './selector-ioarr/campo.js';
 import { listarUsuarios, cambiarRol, invitarUsuario, reenviarInvitacion } from './ioarr/usuarios.js';
@@ -929,7 +929,7 @@ app.patch('/api/admin/usuarios/:id', async (req, res, next) => {
 app.use(infraRouter);
 app.use(ioarrRouter); // Radar IOARR (src/ioarr/)
 app.use(selectorRouter); // Selector IOARR (src/selector-ioarr/)
-app.use('/api/campo', crearApiCampo(undefined, { fichasZip: fichasZipProyecto })); // Proyectos del Selector en Visitas de campo (proveedor y supervisor)
+app.use('/api/campo', crearApiCampo(undefined, { fichasZip: fichasZipProyecto, fichas: fichasCampo })); // Proyectos del Selector en Visitas de campo (proveedor y supervisor)
 app.use((err, _, res, __) => {
   console.error('API error:', err);
   res.status(500).json({ error: err.message, version: VERSION });
