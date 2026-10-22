@@ -6,7 +6,9 @@ import { crearProteccionApi, bloquearSupervisor } from '../src/ioarr/auth.js';
 import { ROLES, cambiarRol, invitarUsuario, correoInvitacion, AVISO_SUPERVISOR } from '../src/ioarr/usuarios.js';
 import { cspSelector } from '../src/selector-ioarr/csp.js';
 import ioarrRouter from '../src/ioarr/router.js';
-import { listarProyectosCampo, proyectoCampo, crearApiCampo, listarVisitas, marcarVisita, desmarcarVisita, fechaVisita, hoyPeru, AVISO_MIGRACION_VISITAS } from '../src/selector-ioarr/campo.js';
+import { listarProyectosCampo, proyectoCampo, crearApiCampo, listarVisitas, marcarVisita, desmarcarVisita, fechaVisita, hoyPeru, AVISO_MIGRACION_VISITAS,
+  guardarAsignaciones, asignacionesProyecto, AVISO_MIGRACION_ASIGNACIONES } from '../src/selector-ioarr/campo.js';
+import { cuotasIguales, repartirZonas } from '../src/selector-ioarr/visitas.js';
 
 const respuesta = () => {
   const res = { statusCode: 200, body: null };
@@ -116,13 +118,15 @@ test('sesion.js manda a cada rol a su inicio', () => {
   assert.match(leer('src/public/index.html'), /me\?\.rol === 'supervisor'\) \{ location\.replace\('\/campo\.html'\)/);
 });
 
-test('la página de campo solo usa /api/campo/* y solo escribe las visitas', () => {
+test('la página de campo solo usa /api/campo/* y solo escribe visitas y reparto', () => {
   const js = leer('src/public/campo.js');
   const rutas = [...js.matchAll(/['"`](\/api\/[^'"`$]*)/g)].map(m => m[1]);
   assert.ok(rutas.length > 0);
   for (const r of rutas) assert.match(r, /^\/api\/campo\//, r);
-  const metodos = [...js.matchAll(/method:\s*['"](\w+)/g)].map(m => m[1]).sort();
-  assert.deepEqual(metodos, ['DELETE', 'PUT']);
+  const metodos = new Set([...js.matchAll(/method:\s*['"](\w+)/g)].map(m => m[1]));
+  assert.deepEqual([...metodos].sort(), ['DELETE', 'PUT']);
+  const escrituras = [...js.matchAll(/api\(([^,]+),[^)]*method:/g)].map(m => m[1]);
+  for (const r of escrituras) assert.match(r, /visitas|asignaciones/, r);
   assert.ok(!/method:\s*['"](POST|PATCH)/.test(js));
 });
 
@@ -197,10 +201,11 @@ test('campo: abrir un proyecto trae todos sus códigos (por lotes) y respeta al 
   assert.equal(await proyectoCampo(sbProyectos({ proyectos: PROYS }), { id: 'sup-1', rol: 'supervisor' }, 'no-es-uuid'), null);
 });
 
-test('campo: la API solo lee proyectos; lo único que escribe son las visitas', () => {
+test('campo: la API solo lee proyectos; escribe visitas y el reparto entre supervisores', () => {
   const rutas = crearApiCampo(sbProyectos()).stack.filter(l => l.route)
     .map(l => `${Object.keys(l.route.methods).join(',')} ${l.route.path}`).sort();
-  assert.deepEqual(rutas, ['delete /visitas/:codigo', 'get /proyectos', 'get /proyectos/:id', 'get /visitas', 'put /visitas/:codigo']);
+  assert.deepEqual(rutas, ['delete /visitas/:codigo', 'get /proyectos', 'get /proyectos/:id', 'get /supervisores', 'get /visitas',
+    'put /proyectos/:id/asignaciones', 'put /visitas/:codigo']);
 });
 
 test('campo: el worker limita la búsqueda a los colegios del proyecto', () => {
@@ -290,4 +295,114 @@ test('campo: el worker omite los visitados si se pide', () => {
   const js = leer('src/public/selector-ioarr-worker.js');
   assert.match(js, /omitir\(\{ codigos \}\)/);
   assert.match(js, /if \(omitir\) view = view\.filter/);
+});
+
+// ─── Reparto entre supervisores ─────────────────────────────────────────────
+test('cuotasIguales: 200 entre 3 → 67, 67, 66', () => {
+  assert.deepEqual(cuotasIguales(200, 3), [67, 67, 66]);
+  assert.deepEqual(cuotasIguales(5, 0), []);
+  assert.deepEqual(cuotasIguales(2, 3), [1, 1, 0]);
+});
+
+test('repartirZonas: respeta la cantidad de cada uno, no repite colegios y separa zonas lejanas', () => {
+  // dos grupos de 60 y 70 colegios a ~100 km, más 70 en un tercer grupo
+  const grupo = (lat, lon, n, pre) => Array.from({ length: n }, (_, i) => ({ cod: pre + String(i).padStart(3, '0'), lat: lat + (i % 10) * 0.005, lon: lon + Math.floor(i / 10) * 0.005 }));
+  const A = grupo(-17.0, -71.0, 60, 'A'), B = grupo(-16.0, -71.0, 70, 'B'), C = grupo(-17.0, -70.0, 70, 'C');
+  const { zonas, sobran } = repartirZonas([...A, ...B, ...C], [60, 70, 70]);
+  assert.deepEqual(zonas.map(z => z.length), [60, 70, 70]);
+  assert.equal(sobran.length, 0);
+  assert.equal(new Set(zonas.flat()).size, 200);
+  for (const z of zonas) assert.equal(new Set(z.map(c => c[0])).size, 1, 'cada zona es un solo grupo');
+});
+
+test('repartirZonas: si las cantidades suman menos, sobran; los sin coordenadas llenan lugares libres', () => {
+  const ps = Array.from({ length: 10 }, (_, i) => ({ cod: 'P' + i, lat: -17 + i * 0.01, lon: -71 }));
+  const r = repartirZonas(ps, [4, 4]);
+  assert.deepEqual(r.zonas.map(z => z.length), [4, 4]); assert.equal(r.sobran.length, 2);
+  const r2 = repartirZonas(ps.slice(0, 6), [4, 4], ['S1', 'S2', 'S3']);
+  assert.deepEqual(r2.zonas.map(z => z.length), [4, 4]); assert.deepEqual(r2.sobran, ['S3']);
+});
+
+// Supabase falso para el reparto: proyectos, locales, perfiles y campo_asignaciones
+function sbReparto({ asig = [], sinTabla = false } = {}) {
+  const tablas = {
+    ioarr_selector_proyectos: [{ id: UUID, usuario_id: 'prov-1', nombre: 'Moquegua 2026', region: 'Moquegua' }],
+    ioarr_selector_locales: ['100001', '100002', '100003'].map(c => ({ proyecto_id: UUID, codigo_local: c })),
+    perfiles: [{ id: 'sup-1', email: 'ana@ibero.pe', rol: 'supervisor' }, { id: 'sup-2', email: 'beto@ibero.pe', rol: 'supervisor' }, { id: 'prov-1', email: 'p@ibero.pe', rol: 'proveedor' }],
+    campo_asignaciones: asig.map(a => ({ proyecto_id: UUID, ...a }))
+  };
+  const ops = [];
+  const from = tabla => {
+    const q = { eq: {}, in: null, rango: null, borrar: false };
+    const filtrar = () => tablas[tabla].filter(f => Object.entries(q.eq).every(([k, v]) => f[k] === v) && (!q.in || q.in[1].includes(f[q.in[0]])));
+    const err = { code: '42P01', message: 'relation "campo_asignaciones" does not exist' };
+    const b = {
+      select: () => b, order: () => b,
+      eq: (k, v) => { q.eq[k] = v; return b; },
+      in: (k, v) => { q.in = [k, v]; return b; },
+      range: (a, z) => { q.rango = [a, z]; return b; },
+      maybeSingle: async () => ({ data: filtrar()[0] || null, error: null }),
+      delete: () => { q.borrar = true; return b; },
+      upsert: async (filas) => { ops.push({ upsert: filas.map(f => [f.codigo_local, f.supervisor_id]) }); tablas[tabla].push(...filas); return { error: null }; },
+      then: (ok, mal) => {
+        if (sinTabla && tabla === 'campo_asignaciones') return Promise.resolve({ data: null, error: err }).then(ok, mal);
+        if (q.borrar) {
+          const quitar = new Set(filtrar()); ops.push({ borrar: q.in ? q.in[1] : 'todo' });
+          tablas[tabla] = tablas[tabla].filter(f => !quitar.has(f));
+          return Promise.resolve({ error: null }).then(ok, mal);
+        }
+        const d = filtrar();
+        return Promise.resolve({ data: q.rango ? d.slice(q.rango[0], q.rango[1] + 1) : d, error: null }).then(ok, mal);
+      }
+    };
+    return b;
+  };
+  return { from, ops, tablas };
+}
+const PROV = { id: 'prov-1', rol: 'proveedor' };
+
+test('reparto: el proyecto trae las asignaciones y el correo de cada supervisor', async () => {
+  const p = await proyectoCampo(sbReparto({ asig: [{ codigo_local: '100001', supervisor_id: 'sup-1' }] }), PROV, UUID);
+  assert.deepEqual(p.asignaciones, { '100001': 'sup-1' });
+  assert.deepEqual(p.supervisores, { 'sup-1': 'ana@ibero.pe' });
+  const sin = await proyectoCampo(sbReparto({ sinTabla: true }), PROV, UUID);
+  assert.equal(sin.asignaciones, null); assert.equal(sin.locales.length, 3);
+});
+
+test('reparto: reemplazar borra el anterior y guarda el nuevo; un cambio suelto solo toca ese colegio', async () => {
+  const sb = sbReparto({ asig: [{ codigo_local: '100003', supervisor_id: 'sup-2' }] });
+  const r = await guardarAsignaciones(sb, PROV, UUID, { asignaciones: { '100001': 'sup-1', '100002': 'sup-2' }, reemplazar: true });
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.body.asignaciones, { '100001': 'sup-1', '100002': 'sup-2' });
+  assert.deepEqual(sb.ops, [{ borrar: 'todo' }, { upsert: [['100001', 'sup-1'], ['100002', 'sup-2']] }]);
+  const r2 = await guardarAsignaciones(sb, PROV, UUID, { asignaciones: { '100001': null, '100003': 'sup-1' } });
+  assert.deepEqual(r2.body.asignaciones, { '100002': 'sup-2', '100003': 'sup-1' });
+});
+
+test('reparto: solo el proveedor dueño, solo colegios del proyecto y solo a supervisores', async () => {
+  const sb = sbReparto();
+  assert.equal((await guardarAsignaciones(sb, { id: 'sup-1', rol: 'supervisor' }, UUID, { asignaciones: {} })).status, 403);
+  assert.equal((await guardarAsignaciones(sb, { id: 'prov-2', rol: 'proveedor' }, UUID, { asignaciones: {} })).status, 404);
+  assert.equal((await guardarAsignaciones(sb, PROV, UUID, { asignaciones: { '999999': 'sup-1' } })).status, 400);
+  const r = await guardarAsignaciones(sb, PROV, UUID, { asignaciones: { '100001': 'prov-1' } });
+  assert.equal(r.status, 400); assert.match(r.body.error, /supervisor/);
+  assert.equal((await guardarAsignaciones(sb, PROV, UUID, {})).status, 400);
+  assert.equal(sb.ops.length, 0);
+  const sinTabla = await guardarAsignaciones(sbReparto({ sinTabla: true }), PROV, UUID, { asignaciones: { '100001': 'sup-1' } });
+  assert.deepEqual(sinTabla, { status: 503, body: { error: AVISO_MIGRACION_ASIGNACIONES } });
+});
+
+test('migración 022: un supervisor por colegio y proyecto, con RLS y sin políticas', () => {
+  const sql = leer('supabase/migrations/022_campo_asignaciones.sql');
+  assert.match(sql, /create table if not exists public\.campo_asignaciones/);
+  assert.match(sql, /primary key \(proyecto_id, codigo_local\)/);
+  assert.match(sql, /references public\.ioarr_selector_proyectos\(id\) on delete cascade/);
+  assert.match(sql, /enable row level security/);
+  assert.doesNotMatch(sql, /create policy/);
+});
+
+test('campo: el worker reparte por zonas', () => {
+  const js = leer('src/public/selector-ioarr-worker.js');
+  assert.match(js, /repartir\(\{ codigos, cuotas \}\)/);
+  assert.match(js, /repartirZonas\(puntos, cuotas/);
 });

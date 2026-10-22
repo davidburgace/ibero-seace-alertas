@@ -75,6 +75,79 @@ export function agruparVisitas(puntos, porDia) {
   return ruta(cs, cs[0]).map(o => o.g).map((g, i) => ({ dia: i + 1, km: g.km, puntos: g.puntos.map((p, j) => ({ ...p, orden: j + 1 })) }));
 }
 
+// ─── Reparto entre supervisores (Visitas de campo) ──────────────────────────
+// n colegios entre k supervisores en partes casi iguales: 200 entre 3 → [67, 67, 66]
+export function cuotasIguales(n, k) {
+  if (!(k > 0)) return [];
+  const base = Math.floor(n / k), resto = n - base * k;
+  return Array.from({ length: k }, (_, i) => base + (i < resto ? 1 : 0));
+}
+
+// Zonas con la capacidad de cada cupo, en ese orden: cada zona empieza en el colegio libre más
+// alejado del centro de todos y suma los libres más cercanos al centro de la zona que se va formando
+function zonasEnOrden(puntos, cupos, centro) {
+  const libres = new Set(puntos);
+  return cupos.map(cupo => {
+    if (!(cupo > 0) || !libres.size) return [];
+    let semilla = null, ds = -1;
+    for (const p of libres) { const d = dist(centro, p); if (!semilla || d > ds || (d === ds && p.cod < semilla.cod)) { semilla = p; ds = d; } }
+    const g = [semilla]; libres.delete(semilla);
+    let c = { lat: semilla.lat, lon: semilla.lon };
+    while (g.length < cupo && libres.size) {
+      let mejor = null, dm = Infinity;
+      for (const p of libres) { const d = dist(c, p); if (!mejor || menor(p, mejor, d, dm)) { mejor = p; dm = d; } }
+      g.push(mejor); libres.delete(mejor);
+      c = { lat: c.lat + (mejor.lat - c.lat) / g.length, lon: c.lon + (mejor.lon - c.lon) / g.length };
+    }
+    return g;
+  });
+}
+// Qué tan dispersas quedan: suma de las distancias de cada colegio al centro de su zona
+const dispersion = zonas => zonas.reduce((a, z) => { if (!z.length) return a; const c = centroide(z); return a + z.reduce((b, p) => b + dist(c, p), 0); }, 0);
+function permutaciones(n) {
+  if (n <= 1) return [[...Array(n).keys()]];
+  return permutaciones(n - 1).flatMap(p => Array.from({ length: n }, (_, i) => [...p.slice(0, i), n - 1, ...p.slice(i)]));
+}
+const MAX_TRABAJO = 4e7;   // tope de cálculo para probar órdenes (n² por cada orden)
+
+/**
+ * Divide los colegios en zonas cercanas, una por supervisor, con la cantidad pedida a cada uno.
+ * Qué zona le toca a quién depende del orden en que se forman: se prueban los órdenes posibles
+ * de las cantidades (los distintos, mientras el cálculo no sea muy grande) y se queda el más compacto.
+ * @param {Array<{cod, lat, lon}>} puntos colegios con coordenadas válidas
+ * @param {number[]} cuotas colegios para cada supervisor, en orden (si suman menos, sobran sin asignar)
+ * @param {string[]} sinCoord códigos sin coordenadas: completan las zonas que quedaron con lugar, en orden
+ * @returns {{ zonas: string[][], sobran: string[] }} códigos de cada zona (en el orden de cuotas) y los que no entraron
+ */
+export function repartirZonas(puntos, cuotas, sinCoord = []) {
+  const k = cuotas.length, n = puntos.length;
+  let mejor = null;
+  if (n && k) {
+    const centro = centroide(puntos);
+    const todas = k <= 6 ? permutaciones(k) : [[...Array(k).keys()]];
+    const vistas = new Set(), ordenes = [];
+    // la primera, el orden pedido; después de mayor a menor; después el resto (sin repetir secuencias de cantidades)
+    for (const o of [[...Array(k).keys()], [...Array(k).keys()].sort((a, b) => cuotas[b] - cuotas[a] || a - b), ...todas]) {
+      const clave = o.map(i => cuotas[i]).join(',');
+      if (!vistas.has(clave)) { vistas.add(clave); ordenes.push(o); }
+    }
+    const tope = Math.max(1, Math.floor(MAX_TRABAJO / Math.max(1, n * n)));
+    for (const o of ordenes.slice(0, tope)) {
+      const zs = zonasEnOrden(puntos, o.map(i => cuotas[i]), centro);
+      const d = dispersion(zs);
+      if (!mejor || d < mejor.d - 1e-9) { const zonas = Array(k); o.forEach((i, j) => { zonas[i] = zs[j]; }); mejor = { d, zonas }; }
+    }
+  }
+  const zonas = mejor ? mejor.zonas.map(z => z.map(p => p.cod)) : cuotas.map(() => []);
+  const usados = new Set(zonas.flat());
+  const sobran = puntos.filter(p => !usados.has(p.cod)).map(p => p.cod).sort();
+  for (const cod of [...sinCoord].sort()) {
+    const z = zonas.findIndex((zona, i) => zona.length < (cuotas[i] || 0));
+    if (z >= 0) zonas[z].push(cod); else sobran.push(cod);
+  }
+  return { zonas, sobran };
+}
+
 // Puntos de visita a partir de índices de locales. D: prep(); C: calc() (bienes a reponer).
 // Devuelve { puntos (con coordenadas válidas), sinCoord (sin coordenadas: no se pueden agrupar) }
 export function puntosVisita(D, C, indices) {

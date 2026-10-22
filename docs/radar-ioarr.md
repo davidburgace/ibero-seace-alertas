@@ -48,7 +48,7 @@ Seguimiento de IOARR de mobiliario escolar en Obras por Impuestos (OxI), visto d
 
   El primer proveedor hay que crearlo así, desde Supabase, porque la sección de Admin solo la pueden usar los proveedores.
 - Nadie se puede quitar su propio acceso de proveedor desde Admin, para que no se quede afuera por error.
-- **Supervisor de campo** (rol `supervisor`, migración `020_rol_supervisor.sql`): solo entra a **Visitas de campo** (`/campo.html`), el mapa y listado de colegios por cercanía de cualquier región. Puede limitar la búsqueda a los colegios de cualquier proyecto del Selector (solo ve nombre, región y códigos de local). Puede marcar los colegios que ya visitó (migración `021_campo_visitas.sql`) y desmarcar los que marcó él. No ve costos, el resto de los proyectos, Admin ni Radar IOARR, y no puede cambiar nada más. Se asigna en **Admin → Usuarios**. Sin la migración 020, Admin avisa que falta ejecutarla.
+- **Supervisor de campo** (rol `supervisor`, migración `020_rol_supervisor.sql`): solo entra a **Visitas de campo** (`/campo.html`), el mapa y listado de colegios por cercanía de cualquier región. Puede limitar la búsqueda a los colegios de cualquier proyecto del Selector (solo ve nombre, región y códigos de local). Puede marcar los colegios que ya visitó (migración `021_campo_visitas.sql`) y desmarcar los que marcó él. Si el proveedor le asignó colegios de un proyecto (migración `022_campo_asignaciones.sql`), arranca viendo los suyos. No ve costos, el resto de los proyectos, Admin ni Radar IOARR, y no puede cambiar nada más. Se asigna en **Admin → Usuarios**. Sin la migración 020, Admin avisa que falta ejecutarla.
 
 ### Contraseñas
 

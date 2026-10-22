@@ -1,11 +1,12 @@
 // Visitas de campo — mapa y listado de colegios por cercanía (proveedor y supervisor de campo).
 // Usa los datos estáticos de la región y el mismo Web Worker del Selector IOARR.
 // De la API (/api/campo/*, src/selector-ioarr/campo.js) lee los proyectos del Selector (con uno elegido,
-// la búsqueda por cercanía se limita a sus colegios) y los colegios visitados. Lo único que guarda en el
-// servidor es marcar o desmarcar un colegio como visitado (/api/campo/visitas/:codigo).
+// la búsqueda por cercanía se limita a sus colegios), el reparto de esos colegios entre supervisores y los
+// colegios visitados. Lo que guarda en el servidor: marcar o desmarcar un colegio como visitado
+// (/api/campo/visitas/:codigo) y, el proveedor, el reparto entre supervisores (/api/campo/proyectos/:id/asignaciones).
 import { DEF, NIVN, NIVS, NIVB, FILTRO_VACIO, coordValidas } from '/selector-ioarr/calculo.js';
 import { limitarN, N_MAX } from '/selector-ioarr/cercania.js';
-import { limitarPorDia, colorDia, tramosRutaDia, AVISO_VISITAS } from '/selector-ioarr/visitas.js';
+import { limitarPorDia, colorDia, tramosRutaDia, cuotasIguales, AVISO_VISITAS } from '/selector-ioarr/visitas.js';
 import { crearMapa, fmtKm } from '/selector-ioarr-mapa.js';
 import { htmlListado, itemListado } from '/selector-ioarr-listado.js';
 
@@ -42,11 +43,16 @@ const w = (tipo, args = {}) => new Promise((ok, mal) => { const id = ++sigId; pe
 const S = {
   idx: null, region: null, meta: null, f: FILTRO_VACIO(),
   proys: [],                // proyectos del Selector que el usuario puede ver
-  proy: null,               // proyecto elegido: { id, nombre, n } (n = colegios del proyecto en la región)
+  proy: null,               // proyecto elegido: { id, nombre, n, nVer, locales, asig, sups }
+                            //   n = colegios del proyecto en la región; nVer = los que muestra «Colegios del proyecto»
+                            //   asig = { cod: supervisorId } (null = falta la migración 022); sups = { supervisorId: correo }
+  ver: 'todo',              // «Colegios del proyecto»: 'todo', 'sin' (sin asignar) o el id de un supervisor
+  sups: [],                 // proveedor: todos los usuarios con rol supervisor [{ id, email }]
+  cuotas: new Map(),        // panel de reparto: supervisorId → colegios (solo los marcados)
   near: null,               // { lat, lon, n, label, gps }
   filas: [],                // listado actual (de más cerca a más lejos)
   vis: null,                // { porDia, dias, sinCoord }
-  rol: null,
+  rol: null, yo: null,
   visitas: null,            // { códigoLocal: { fecha, por, mia } }; null = no disponible (falta la migración 021)
   ocultar: false,           // «Ocultar visitados»: no se listan los colegios ya visitados
   mapa: null, mapaCreando: null, mapaFalla: false, pick: false, vista: 'lista'
@@ -55,20 +61,21 @@ const S = {
 // ─── Arranque ────────────────────────────────────────────────────────────────
 async function boot() {
   bind();
-  window.radarSesion?.usuario().then(u => {
+  const u = await window.radarSesion?.usuario().catch(() => null);
+  if (u) {
     $('cUsuario').textContent = u.email || '';
-    S.rol = u.rol;
+    S.rol = u.rol; S.yo = u.id;
     const prov = u.rol === 'proveedor';
     $('lnkInicio').hidden = !prov;
     if (!prov) $('lnkLogo').removeAttribute('href');
-  }).catch(() => {});
+  }
   $('cN').value = limitarN(store('n') ?? 20);
   $('cPorDia').value = limitarPorDia(store('porDia') ?? 8);
   try { S.idx = await fetch(BASE_DATOS + 'index.json').then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }); }
   catch { $('cInfo').innerHTML = '<span class="err">No se pudo cargar la lista de regiones. Revisa tu conexión y recarga.</span>'; return; }
   $('cRegion').innerHTML = S.idx.regiones.map(g => `<option value="${esc(g.nombre)}">${esc(g.nombre)}</option>`).join('');
   $('cFuente').textContent = `Fuente: ${S.idx.fuente}. Ubicaciones y direcciones declaradas en el padrón de ESCALE; pueden tener error. Las distancias son en línea recta.`;
-  await Promise.all([cargarProyectos(), cargarVisitas()]);
+  await Promise.all([cargarProyectos(), cargarVisitas(), cargarSupervisores()]);
   const p = store('proyecto');
   if (p && S.proys.some(x => x.id === p)) { $('cProy').value = p; await elegirProyecto(p); return; }
   const r = store('region');
@@ -82,6 +89,151 @@ async function cargarProyectos() {
   $('cProyCampo').hidden = !S.proys.length;
   $('cProy').innerHTML = '<option value="">Ninguno: toda la región</option>' + S.proys.map(p =>
     `<option value="${esc(p.id)}">${esc(p.nombre)} · ${esc(p.region)} · ${plural(p.n_locales, 'colegio', 'colegios')}</option>`).join('');
+}
+
+// ─── Reparto entre supervisores ─────────────────────────────────────────────
+async function cargarSupervisores() {
+  if (S.rol !== 'proveedor') return;
+  try { S.sups = await api('/api/campo/supervisores'); }
+  catch (e) { console.warn('Supervisores', e); S.sups = []; }
+}
+const corto = email => String(email || '').split('@')[0] || 'supervisor';
+const correoSup = id => S.proy?.sups?.[id] || S.sups.find(u => u.id === id)?.email || '';
+// Conteo del reparto actual: { porSup: Map(id → n), sin }
+function conteoAsig() {
+  const porSup = new Map(); let sin = 0;
+  for (const c of S.proy?.locales || []) { const id = S.proy.asig?.[c]; if (id) porSup.set(id, (porSup.get(id) || 0) + 1); else sin++; }
+  return { porSup, sin };
+}
+function codigosVer() {
+  const P = S.proy; if (!P) return null;
+  if (S.ver === 'todo' || !P.asig) return P.locales;
+  if (S.ver === 'sin') return P.locales.filter(c => !P.asig[c]);
+  return P.locales.filter(c => P.asig[c] === S.ver);
+}
+const etiquetaVer = () => S.ver === 'sin' ? 'sin asignar' : S.ver === S.yo ? 'tus colegios' : `de ${corto(correoSup(S.ver))}`;
+
+function pintarVer() {
+  const P = S.proy, { porSup, sin } = conteoAsig();
+  const hay = !!P?.asig && (porSup.size > 0 || S.rol === 'proveedor');
+  $('cVerCampo').hidden = !hay;
+  if (!hay) return;
+  const ids = [...porSup.keys()].sort((a, b) => (b === S.yo) - (a === S.yo) || correoSup(a).localeCompare(correoSup(b)));
+  const op = (v, t) => `<option value="${esc(v)}"${S.ver === v ? ' selected' : ''}>${esc(t)}</option>`;
+  $('cVer').innerHTML = op('todo', `Todo el proyecto (${fmt(P.locales.length)})`)
+    + ids.map(id => op(id, `${id === S.yo ? 'Mis colegios' : corto(correoSup(id))} (${fmt(porSup.get(id))})`)).join('')
+    + (sin ? op('sin', `Sin asignar (${fmt(sin)})`) : '');
+}
+
+// Limita la búsqueda a los colegios de «Colegios del proyecto» y busca desde el centro de esos colegios
+async function aplicarVer() {
+  const P = S.proy; if (!P) return;
+  const r = await w('limitar', { codigos: codigosVer() });
+  P.nVer = r.n;
+  S.near = null; S.filas = []; S.vis = null;
+  $('cDist').value = '-1'; $('cCod').value = '';
+  $('cN').value = limitarN(r.n || 1);
+  if (r.n > N_MAX) toast(`Hay ${fmt(r.n)} colegios: se listan los ${fmt(N_MAX)} más cercanos al centro que elijas.`);
+  if (!r.n) { $('cInfo').textContent = `El proyecto «${P.nombre}» no tiene colegios ${S.ver === 'todo' ? 'en ' + P.region : etiquetaVer()}.`; pintarTodo(true); return; }
+  const c = await w('centro', { proyecto: P.nombre });
+  if (c.error) { $('cInfo').textContent = c.error; pintarTodo(true); return; }
+  await buscar(c);
+}
+
+function pintarReparto() {
+  const P = S.proy, panel = $('cReparto');
+  panel.hidden = !(P && S.rol === 'proveedor');
+  if (panel.hidden) return;
+  const { porSup, sin } = conteoAsig();
+  $('cRepResumen').textContent = !P.asig ? '· falta la migración 022'
+    : porSup.size ? `· ${plural(porSup.size, 'supervisor', 'supervisores')}${sin ? ` · ${fmt(sin)} sin asignar` : ' · todos asignados'}` : '· sin repartir';
+  const aviso = !P.asig ? 'Para repartir colegios entre supervisores falta ejecutar supabase/migrations/022_campo_asignaciones.sql en Supabase.'
+    : !S.sups.length ? 'No hay usuarios con rol de supervisor de campo. Invítalos en Admin → Usuarios.' : '';
+  $('cRepAviso').hidden = !aviso; $('cRepAviso').textContent = aviso;
+  const ok = !aviso;
+  $('cRepSups').hidden = !ok; $('cRepartir').disabled = !ok; $('cRepIguales').disabled = !ok;
+  if (!ok) { $('cRepSuma').textContent = ''; return; }
+  const vis = c => S.visitas?.[c] ? 1 : 0;
+  $('cRepSups').innerHTML = S.sups.map(u => {
+    const on = S.cuotas.has(u.id), n = porSup.get(u.id) || 0;
+    const nv = n ? P.locales.filter(c => P.asig[c] === u.id).reduce((a, c) => a + vis(c), 0) : 0;
+    return `<div class="rep-fila">
+      <label class="check"><input type="checkbox" data-sup="${esc(u.id)}"${on ? ' checked' : ''}> ${esc(u.email)}</label>
+      <input type="number" min="0" step="1" inputmode="numeric" data-cuota="${esc(u.id)}" value="${on ? S.cuotas.get(u.id) : ''}"${on ? '' : ' disabled'} aria-label="Colegios para ${esc(u.email)}">
+      <span class="sub rep-actual">${n ? `Hoy: ${plural(n, 'colegio', 'colegios')}${nv ? ` · ${fmt(nv)} ${nv === 1 ? 'visitado' : 'visitados'}` : ''}` : 'Sin colegios'}</span>
+    </div>`;
+  }).join('');
+  pintarSuma();
+}
+function pintarSuma() {
+  const suma = [...S.cuotas.values()].reduce((a, b) => a + b, 0), n = S.proy?.n || 0, el = $('cRepSuma');
+  el.className = 'sub';
+  if (!S.cuotas.size) { el.textContent = `Marca los supervisores y la cantidad para cada uno (${plural(n, 'colegio', 'colegios')} en el proyecto).`; return; }
+  if (suma > n) { el.className = 'err'; el.textContent = `Suma ${fmt(suma)}: el proyecto tiene ${fmt(n)} colegios. Baja ${fmt(suma - n)}.`; return; }
+  el.textContent = `Suma ${fmt(suma)} de ${fmt(n)} colegios${suma < n ? ` · ${fmt(n - suma)} quedan sin asignar` : ''}.`;
+}
+function partesIguales() {
+  const ids = [...S.cuotas.keys()];
+  cuotasIguales(S.proy?.n || 0, ids.length).forEach((q, i) => S.cuotas.set(ids[i], q));
+  pintarReparto();
+}
+// Al abrir un proyecto: marca los supervisores que ya tienen colegios, con su cantidad actual
+function cuotasDelReparto() {
+  S.cuotas = new Map();
+  const { porSup } = conteoAsig();
+  for (const u of S.sups) if (porSup.has(u.id)) S.cuotas.set(u.id, porSup.get(u.id));
+}
+
+async function repartir() {
+  const P = S.proy, ids = [...S.cuotas.keys()], cuotas = ids.map(id => S.cuotas.get(id) || 0);
+  const suma = cuotas.reduce((a, b) => a + b, 0);
+  if (!ids.length || !suma) { toast('Marca al menos un supervisor y la cantidad de colegios que le das.'); return; }
+  if (suma > P.n) { toast(`La suma (${fmt(suma)}) pasa los ${fmt(P.n)} colegios del proyecto.`); return; }
+  const { porSup } = conteoAsig();
+  if (porSup.size && !confirm(`Esto reemplaza el reparto actual del proyecto «${P.nombre}». ¿Seguir?`)) return;
+  const b = $('cRepartir'); b.disabled = true; b.textContent = 'Repartiendo…';
+  try {
+    const r = await w('repartir', { codigos: P.locales, cuotas });
+    const asignaciones = {};
+    r.zonas.forEach((z, i) => z.forEach(c => { asignaciones[c] = ids[i]; }));
+    const g = await api(`/api/campo/proyectos/${encodeURIComponent(P.id)}/asignaciones`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ asignaciones, reemplazar: true }) });
+    P.asig = g.asignaciones; P.sups = g.supervisores;
+    cuotasDelReparto(); pintarVer(); pintarReparto();
+    toast('Reparto guardado: ' + ids.map((id, i) => `${corto(correoSup(id))} ${fmt(r.zonas[i].length)}`).join(' · ') + (r.sobran.length + r.fuera.length ? ` · ${fmt(r.sobran.length + r.fuera.length)} sin asignar` : '') + '.');
+    if (S.ver !== 'todo') { S.ver = 'todo'; pintarVer(); await aplicarVer(); } else pintarLista();
+  } catch (e) { toast(`No se pudo guardar el reparto: ${e.message}`); }
+  finally { b.disabled = false; b.textContent = 'Repartir por zonas'; }
+}
+
+// Pasar un colegio suelto a otro supervisor (desde el listado)
+async function asignarUno(cod, id, sel) {
+  const P = S.proy; sel.disabled = true;
+  try {
+    const g = await api(`/api/campo/proyectos/${encodeURIComponent(P.id)}/asignaciones`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ asignaciones: { [cod]: id || null } }) });
+    P.asig = g.asignaciones; P.sups = g.supervisores;
+    const nom = S.filas.find(f => f.cod === cod)?.nom || `Local ${cod}`;
+    toast(id ? `${nom}: ahora es de ${corto(correoSup(id))}.` : `${nom}: sin asignar.`);
+    pintarVer(); pintarReparto(); pintarInfoVisitas();
+  } catch (e) { toast(`No se pudo cambiar el supervisor: ${e.message}`); sel.value = P.asig?.[cod] || ''; }
+  finally { sel.disabled = false; }
+}
+// Lo que el listado muestra del reparto: el proveedor elige el supervisor; el supervisor ve de quién es
+function extraAsig(f) {
+  const P = S.proy; if (!P?.asig || !f?.cod) return {};
+  const id = P.asig[f.cod];
+  if (S.rol === 'proveedor') {
+    if (!S.sups.length) return {};
+    const ops = '<option value="">Sin asignar</option>' + S.sups.map(u => `<option value="${esc(u.id)}"${u.id === id ? ' selected' : ''}>${esc(corto(u.email))}</option>`).join('');
+    return { acc: `<label class="asig-sel"><span class="sr">Supervisor de ${esc(f.nom)}</span><select data-asignar="${esc(f.cod)}">${ops}</select></label>` };
+  }
+  return {
+    clase: id && id !== S.yo ? 'de-otro' : '',
+    cuerpo: `<div class="lst-asig">${id ? (id === S.yo ? 'Asignado a ti' : `Asignado a ${esc(corto(correoSup(id)))}`) : '<span class="sub">Sin asignar</span>'}</div>`
+  };
+}
+function extraItem(f) {
+  const a = extraVisita(f), b = extraAsig(f);
+  return { clase: [a.clase, b.clase].filter(Boolean).join(' '), cuerpo: (b.cuerpo || '') + (a.cuerpo || ''), acc: (a.acc || '') + (b.acc || '') };
 }
 
 // ─── Colegios visitados ─────────────────────────────────────────────────────
@@ -140,25 +292,21 @@ async function elegirProyecto(id) {
     if (p.region !== S.region) await cargarRegion(p.region);
     if (p.region !== S.region) { toast(`No se pudo cargar la región ${p.region} del proyecto.`); sel.value = ''; S.proy = null; return; }
     const r = await w('limitar', { codigos: p.locales });
-    S.proy = { id: p.id, nombre: p.nombre, n: r.n }; store('proyecto', p.id);
-    S.near = null; S.filas = []; S.vis = null;
-    $('cDist').value = '-1'; $('cCod').value = '';
-    $('cN').value = limitarN(r.n || 1);
-    const avisos = [];
-    if (r.n > N_MAX) avisos.push(`El proyecto tiene ${fmt(r.n)} colegios: se listan los ${fmt(N_MAX)} más cercanos al centro que elijas.`);
-    if (r.fuera) avisos.push(`${plural(r.fuera, 'código del proyecto no está', 'códigos del proyecto no están')} en el padrón de ${p.region}.`);
-    if (avisos.length) toast(avisos.join(' '));
-    if (!r.n) { $('cInfo').textContent = `El proyecto «${p.nombre}» no tiene colegios en ${p.region}.`; pintarTodo(true); return; }
-    const c = await w('centro', { proyecto: p.nombre });
-    if (c.error) { $('cInfo').textContent = c.error; pintarTodo(true); return; }
-    await buscar(c);
+    S.proy = { id: p.id, nombre: p.nombre, region: p.region, n: r.n, nVer: r.n, locales: p.locales, asig: p.asignaciones ?? null, sups: p.supervisores || {} };
+    store('proyecto', p.id);
+    if (r.fuera) toast(`${plural(r.fuera, 'código del proyecto no está', 'códigos del proyecto no están')} en el padrón de ${p.region}.`);
+    // El supervisor arranca con sus colegios, si tiene; el proveedor, con todo el proyecto
+    S.ver = S.rol === 'supervisor' && S.proy.asig && Object.values(S.proy.asig).includes(S.yo) ? S.yo : 'todo';
+    cuotasDelReparto(); pintarVer(); pintarReparto();
+    await aplicarVer();
   } finally { sel.disabled = false; }
 }
 
 // Vuelve a toda la región (sin recargarla) y a la cantidad de colegios que el usuario tenía
 async function quitarProyecto({ rebuscar = true } = {}) {
   const habia = !!S.proy;
-  S.proy = null; store('proyecto', null); $('cProy').value = '';
+  S.proy = null; S.ver = 'todo'; store('proyecto', null); $('cProy').value = '';
+  $('cVerCampo').hidden = true; $('cReparto').hidden = true;
   if (!habia) return;
   await w('limitar', { codigos: null });
   $('cN').value = limitarN(store('n') ?? 20);
@@ -196,7 +344,7 @@ async function buscar(centro, { ajustar = true } = {}) {
   if (S.vis) await agrupar(false);
   const c = R.cerca;
   const om = c.omitidos ? ` · ${plural(c.omitidos, 'colegio', 'colegios')} sin coordenadas no se consideran` : '';
-  const pr = S.proy ? `Proyecto «${esc(S.proy.nombre)}» (${plural(S.proy.n, 'colegio', 'colegios')}): ` : '';
+  const pr = S.proy ? `Proyecto «${esc(S.proy.nombre)}» (${plural(S.proy.n, 'colegio', 'colegios')}${S.ver !== 'todo' ? ` · ${esc(etiquetaVer())}: ${fmt(S.proy.nVer)}` : ''}): ` : '';
   $('cInfo').innerHTML = pr + (c.n
     ? `<b>${fmt(c.n)}</b> ${c.n === 1 ? 'colegio más cercano' : 'colegios más cercanos'} ${esc(aCentro(S.near.label))} · el más lejano a <b>${fmtKm(c.max)} km</b> en línea recta${om}`
     : `Ningún colegio con coordenadas cumple los filtros cerca ${esc(aCentro(S.near.label)).replace(/^al /, 'del ').replace(/^a /, 'de ')}${om}`);
@@ -245,7 +393,7 @@ function pintarTodo(ajustar) {
 }
 function pintarLista() {
   if (!S.near) { $('cLista').innerHTML = '<p class="sub lst-vacio">Aún no hay búsqueda. Usa tu ubicación, elige un distrito o escribe un código de local.</p>'; return; }
-  const opts = { extra: extraVisita };
+  const opts = { extra: extraItem };
   if (!S.vis) { $('cLista').innerHTML = htmlListado(S.filas, opts); return; }
   // Agrupado por día: cada día en su orden de visita, con los datos completos del listado
   const porCod = new Map(S.filas.map(f => [f.cod, f])), total = S.vis.dias.length;
@@ -326,6 +474,17 @@ function bind() {
   $('btnSalir').onclick = () => window.radarSesion?.salir();
   $('cRegion').onchange = async e => { await quitarProyecto({ rebuscar: false }); cargarRegion(e.target.value); };
   $('cProy').onchange = e => elegirProyecto(e.target.value);
+  $('cVer').onchange = e => { S.ver = e.target.value; aplicarVer(); };
+  $('cRepSups').addEventListener('change', e => {
+    const ch = e.target.closest('[data-sup]');
+    if (ch) { if (ch.checked) S.cuotas.set(ch.dataset.sup, 0); else S.cuotas.delete(ch.dataset.sup); partesIguales(); return; }
+    const q = e.target.closest('[data-cuota]');
+    if (q) { const v = Math.max(0, Math.round(+q.value || 0)); q.value = v; S.cuotas.set(q.dataset.cuota, v); pintarSuma(); }
+  });
+  $('cRepSups').addEventListener('input', e => { const q = e.target.closest('[data-cuota]'); if (q) { S.cuotas.set(q.dataset.cuota, Math.max(0, Math.round(+q.value || 0))); pintarSuma(); } });
+  $('cRepIguales').onclick = partesIguales;
+  $('cRepartir').onclick = repartir;
+  $('cLista').addEventListener('change', e => { const s = e.target.closest('[data-asignar]'); if (s) asignarUno(s.dataset.asignar, s.value, s); });
   $('cUbic').onclick = usarUbicacion;
   $('cGo').onclick = async () => { const c = await centroDistrito(); if (c.error) { toast(c.error); return; } buscar(c); };
   $('cCod').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('cGo').click(); } });

@@ -3,7 +3,7 @@
 // así Lima (32 mil aulas) no congela la pantalla.
 import { ITEMS, NIVN, NIVS, NIVB, DEF, prep, calc, totals, filtrar, lv, norm, limpiarParams, totalesPorNivel, estadoSituacional } from '/selector-ioarr/calculo.js';
 import { cercanos, centroDistrito, localConCoord, haversine, MAX_PUNTOS } from '/selector-ioarr/cercania.js';
-import { agruparVisitas, puntosVisita } from '/selector-ioarr/visitas.js';
+import { agruparVisitas, puntosVisita, repartirZonas } from '/selector-ioarr/visitas.js';
 
 let D = null, C = null, P = { ...DEF }, sel = new Set(), view = [], codIdx = new Map();
 let excl = new Set();   // locales excluidos por otra inversión vigente o reciente: siguen seleccionados, fuera de los totales
@@ -36,6 +36,15 @@ const acciones = {
   },
   // Visitas de campo: deja fuera de las consultas estos códigos (null = ninguno). No se borra al cambiar de región
   omitir({ codigos }) { omitir = codigos?.length ? new Set(codigos) : null; return omitir?.size || 0; },
+  // Visitas de campo: reparte estos códigos en zonas cercanas, una por supervisor (cuotas = cantidad de cada uno).
+  // Los que no están en el padrón de la región no se pueden ubicar: van en sobran
+  repartir({ codigos, cuotas }) {
+    const idx = codigos.map(c => codIdx.get(c)).filter(i => i != null);
+    const { puntos, sinCoord } = puntosVisita(D, C, idx);
+    const r = repartirZonas(puntos, cuotas, sinCoord.map(p => p.cod));
+    const enRegion = new Set(idx.map(i => D.locs[i][0]));
+    return { zonas: r.zonas, sobran: r.sobran, fuera: codigos.filter(c => !enRegion.has(c)) };
+  },
   // Otra inversión vigente o reciente por local: { codLocal: { estado, codigo, excluir } }
   duplicidad({ mapa }) {
     dup = mapa || {};

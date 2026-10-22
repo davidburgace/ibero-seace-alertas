@@ -35,6 +35,7 @@
     <h2 class="sr" id="c-tit">Buscar colegios cercanos</h2>
     <div class="filtros-grid campo-grid">
       <div class="campo campo-proy" id="cProyCampo" hidden><label for="cProy">Proyecto del Selector</label><select id="cProy"><option value="">Ninguno: toda la región</option></select></div>
+      <div class="campo campo-proy" id="cVerCampo" hidden><label for="cVer">Colegios del proyecto</label><select id="cVer"></select></div>
       <div class="campo"><label for="cRegion">Región</label><select id="cRegion"></select></div>
       <div class="campo"><label for="cN">Colegios a visitar</label><input id="cN" type="number" min="1" max="200" step="1" value="20" inputmode="numeric"></div>
       <div class="campo campo-ubic">
@@ -63,6 +64,22 @@
       <div id="cInfo" class="sub" aria-live="polite">Elige un centro para ver los colegios más cercanos.</div>
     </div>
   </section>
+
+  <details class="cerca-panel reparto" id="cReparto" hidden>
+    <summary><span class="reparto-tit">Supervisores del proyecto</span> <span class="sub" id="cRepResumen"></span></summary>
+    <div class="reparto-cuerpo">
+      <p class="sub">Reparte los colegios del proyecto en zonas cercanas, una por supervisor, con la cantidad que elijas para cada uno. Después puedes pasar colegios sueltos de un supervisor a otro desde el listado.</p>
+      <p class="aviso" id="cRepAviso" hidden></p>
+      <div class="reparto-sups" id="cRepSups"></div>
+      <div class="reparto-bar">
+        <span class="sub" id="cRepSuma" aria-live="polite"></span>
+        <div class="acts">
+          <button class="btn btn-ghost btn-sm" id="cRepIguales" type="button">Partes iguales</button>
+          <button class="btn btn-primary" id="cRepartir" type="button">Repartir por zonas</button>
+        </div>
+      </div>
+    </div>
+  </details>
 
   <div class="vista-tabs" role="group" aria-label="Vista">
     <button class="tab-btn active" type="button" data-vista="lista" aria-pressed="true">Listado</button>
