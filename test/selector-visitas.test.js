@@ -144,3 +144,29 @@ test('ruta POST /api/selector-ioarr/visitas.xlsx (también para borradores)', as
     assert.deepEqual(servidor, esperado.flatMap(d => d.puntos.map(p => [`Día ${d.dia}`, p.orden, p.cod])));
   } finally { srv.close(); }
 });
+
+test('tramosRutaDia: un enlace de Google Maps con las paradas en orden, sin origen', async () => {
+  const { tramosRutaDia } = await import('../src/selector-ioarr/visitas.js');
+  const ps = [1, 2, 3].map(i => ({ cod: 'L' + i, lat: -17 - i / 100, lon: -71 }));
+  const [t, ...resto] = tramosRutaDia(ps);
+  assert.equal(resto.length, 0);
+  assert.deepEqual([t.desde, t.hasta], [1, 3]);
+  const u = new URL(t.url);
+  assert.equal(u.origin + u.pathname, 'https://www.google.com/maps/dir/');
+  assert.equal(u.searchParams.get('api'), '1');
+  assert.equal(u.searchParams.get('origin'), null);       // sale de donde esté el supervisor
+  assert.equal(u.searchParams.get('destination'), '-17.03,-71');
+  assert.equal(u.searchParams.get('waypoints'), '-17.01,-71|-17.02,-71');
+});
+
+test('tramosRutaDia: más de 10 colegios se parten en tramos; uno solo va sin paradas intermedias', async () => {
+  const { tramosRutaDia, PARADAS_POR_TRAMO } = await import('../src/selector-ioarr/visitas.js');
+  assert.equal(PARADAS_POR_TRAMO, 10);
+  const ps = Array.from({ length: 23 }, (_, i) => ({ cod: 'L' + i, lat: -12 - i / 1000, lon: -77 }));
+  const ts = tramosRutaDia(ps);
+  assert.deepEqual(ts.map(t => [t.desde, t.hasta]), [[1, 10], [11, 20], [21, 23]]);
+  for (const t of ts) assert.equal(new URL(t.url).searchParams.get('waypoints').split('|').length, t.hasta - t.desde);
+  const [uno] = tramosRutaDia([{ cod: 'X', lat: -12, lon: -77 }]);
+  assert.equal(new URL(uno.url).searchParams.get('waypoints'), null);
+  assert.deepEqual(tramosRutaDia([{ cod: 'S', lat: null, lon: null }]), []);
+});

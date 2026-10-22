@@ -126,3 +126,10 @@ test('CSP también en /campo.html', () => {
   cspSelector({ path: '/campo.html' }, { set: (k, v) => { h[k] = v; } }, () => {});
   assert.match(h['Content-Security-Policy'], /img-src 'self' data: https:\/\/server\.arcgisonline\.com/);
 });
+
+test('campo: ruta del día en Google Maps y sin KML', () => {
+  const js = leer('src/public/campo.js'), html = leer('src/public/campo.html');
+  assert.match(js, /tramosRutaDia/);
+  assert.match(js, /Ruta del día en Google Maps/);
+  assert.doesNotMatch(js + html, /kml/i);
+});
