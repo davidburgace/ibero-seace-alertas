@@ -30,6 +30,7 @@ header{ padding-bottom:16px; }
 .dia-titulo:first-child{ margin-top:0; }
 .dia-titulo .sw{ width:12px; height:12px; border-radius:50%; background:var(--c); box-shadow:0 0 0 2px #fff, 0 0 0 3px var(--border2); }
 .dia-titulo .sub{ font-family:var(--font-body); font-weight:400; }
+.dia-ruta{ display:flex; flex-wrap:wrap; align-items:center; gap:6px; margin:0 0 10px; }
 
 @media (max-width:900px){
   .campo-grid{ grid-template-columns:repeat(2,minmax(0,1fr)); }
@@ -42,6 +43,7 @@ header{ padding-bottom:16px; }
   .campo-cuerpo{ grid-template-columns:1fr; }
   .campo-cuerpo[data-vista="lista"] .campo-mapa, .campo-cuerpo[data-vista="mapa"] .campo-lista{ display:none; }
   .campo-mapa{ position:static; }
+  .dia-ruta .btn{ min-height:44px; display:inline-flex; align-items:center; }
   .campo-mapa .mapa-locales{ height:calc(100vh - 190px); min-height:320px; }
 }
 @media (max-width:640px){

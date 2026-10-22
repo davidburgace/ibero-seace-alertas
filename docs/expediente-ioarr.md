@@ -221,7 +221,7 @@ Página pensada para celular, para el **supervisor de campo** (rol `supervisor`,
 - **Centro:** **Usar mi ubicación** (GPS del celular; pide permiso la primera vez y solo funciona con https), un distrito, un código de local o **Tocar el mapa** (tocar un colegio también lo fija como centro).
 - **Colegios a visitar:** de 1 a 200. **Filtros:** nivel, área y mínimo de bienes a reponer.
 - **Listado y mapa:** lado a lado en escritorio; en celular, una pestaña para cada uno. El mapa no tiene botón de seleccionar.
-- **Días de visita:** agrupa el listado por días, que queda ordenado por día y parada, y se puede descargar en **KML**. No hay Excel.
+- **Días de visita:** agrupa el listado por días, que queda ordenado por día y parada. Cada día trae **Ruta del día en Google Maps**: abre Google Maps desde la ubicación del supervisor con todas las paradas del día en orden. Google Maps admite hasta 10 paradas por enlace, así que un día con más colegios se parte en tramos («Paradas 1–10», «Paradas 11–15»…). No hay Excel ni KML.
 - Si el colegio más cercano a la ubicación está a más de 30 km, avisa que quizá la región no es la correcta.
 - Recuerda en el navegador la región, la cantidad y los colegios por día.
 
@@ -250,7 +250,7 @@ El resultado no depende del orden en que se eligieron los locales. Se recalcula 
 
 **Mejora futura: tiempos por carretera.** No está implementado. La recomendación es **OpenRouteService**, que tiene un plan gratuito con llave (del orden de 2,000 rutas y 500 matrices de distancia por día) y alcanza para planificar visitas. Para mucho volumen, conviene **OSRM** alojado por nosotros, con el mapa de Perú en un servidor de unos 10 a 20 USD al mes. Hay que confirmar los límites y precios vigentes antes de contratar.
 
-**Código:** `src/selector-ioarr/visitas.js` (agrupación, colores y KML), `src/selector-ioarr/excel-visitas.js` y la acción `visitas` del worker. **Pruebas:** `test/selector-visitas.test.js`.
+**Código:** `src/selector-ioarr/visitas.js` (agrupación, colores, KML y tramos de ruta para Google Maps), `src/selector-ioarr/excel-visitas.js` y la acción `visitas` del worker. **Pruebas:** `test/selector-visitas.test.js`.
 
 ## Etapa 1: costos
 

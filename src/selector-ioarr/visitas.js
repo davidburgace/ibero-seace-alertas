@@ -124,3 +124,20 @@ ${carpetas}
 </Document></kml>
 `;
 }
+
+// Ruta de un día en Google Maps, parando en cada local en orden de visita.
+// Sale de la ubicación de quien abre el enlace (sin origen) y admite hasta 9 paradas
+// intermedias más el destino: con más de 10 locales, el día se parte en tramos y
+// cada tramo se abre al terminar el anterior.
+export const PARADAS_POR_TRAMO = 10;
+export function tramosRutaDia(puntos, max = PARADAS_POR_TRAMO) {
+  const ps = puntos.filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lon));
+  const coord = p => `${p.lat},${p.lon}`, tramos = [];
+  for (let i = 0; i < ps.length; i += max) {
+    const t = ps.slice(i, i + max), dest = t[t.length - 1], medio = t.slice(0, -1);
+    const url = 'https://www.google.com/maps/dir/?api=1&travelmode=driving&destination=' + encodeURIComponent(coord(dest))
+      + (medio.length ? '&waypoints=' + encodeURIComponent(medio.map(coord).join('|')) : '');
+    tramos.push({ desde: i + 1, hasta: i + t.length, url });
+  }
+  return tramos;
+}

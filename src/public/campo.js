@@ -3,7 +3,7 @@
 // no llama a la API (salvo la sesión) ni guarda nada en el servidor.
 import { DEF, NIVN, NIVS, NIVB, FILTRO_VACIO, coordValidas } from '/selector-ioarr/calculo.js';
 import { limitarN } from '/selector-ioarr/cercania.js';
-import { limitarPorDia, colorDia, generarKML, AVISO_VISITAS } from '/selector-ioarr/visitas.js';
+import { limitarPorDia, colorDia, tramosRutaDia, AVISO_VISITAS } from '/selector-ioarr/visitas.js';
 import { crearMapa, fmtKm } from '/selector-ioarr-mapa.js';
 import { htmlListado, itemListado } from '/selector-ioarr-listado.js';
 
@@ -140,17 +140,27 @@ function pintarLista() {
   $('cLista').innerHTML = S.vis.dias.map(d => {
     const rep = d.puntos.reduce((a, p) => a + p.rep, 0);
     return `<h3 class="dia-titulo" style="--c:${colorDia(d.dia, total)}"><span class="sw"></span>Día ${d.dia} <span class="sub">${plural(d.puntos.length, 'colegio', 'colegios')} · ~${fmtKm(d.km)} km · ${fmt(rep)} a reponer</span></h3>
+      ${botonesRuta(d)}
       <ol class="lst">${d.puntos.map(p => itemListado({ ...porCod.get(p.cod), orden: p.orden, km: null }, { numero: x => x.orden })).join('')}</ol>`;
   }).join('') + (S.vis.sinCoord.length ? `<h3 class="dia-titulo">Sin coordenadas</h3><ol class="lst">${S.vis.sinCoord.map(p => itemListado({ ...porCod.get(p.cod), km: null }, { numero: () => '–' })).join('')}</ol>` : '');
 }
+// «Ruta del día en Google Maps»: un enlace, o uno por tramo si el día pasa de 10 colegios
+function botonesRuta(d) {
+  const tramos = tramosRutaDia(d.puntos);
+  if (!tramos.length) return '';
+  const enlace = (t, texto) => `<a class="btn btn-primary btn-sm" href="${esc(t.url)}" target="_blank" rel="noopener" aria-label="${esc(texto)} del día ${d.dia} en Google Maps">${esc(texto)}</a>`;
+  return `<div class="dia-ruta">${tramos.length === 1
+    ? enlace(tramos[0], 'Ruta del día en Google Maps')
+    : `<span class="sub">Ruta en Google Maps, por tramos:</span> ${tramos.map(t => enlace(t, `Paradas ${t.desde}–${t.hasta}`)).join('')}`}</div>`;
+}
 function pintarVisitas() {
   const V = S.vis;
-  $('cVisRes').hidden = !V; $('cDesagrupar').hidden = !V; $('cKml').hidden = !V;
+  $('cVisRes').hidden = !V; $('cDesagrupar').hidden = !V;
   $('cAgrupar').textContent = V ? 'Volver a agrupar' : 'Agrupar por días';
   $('cAgrupar').disabled = !S.filas.length;
   if (!V) return;
   const n = V.dias.reduce((a, d) => a + d.puntos.length, 0);
-  $('cVisAviso').innerHTML = `<b>${fmt(n)}</b> ${n === 1 ? 'colegio' : 'colegios'} en <b>${fmt(V.dias.length)}</b> ${V.dias.length === 1 ? 'día' : 'días'} de hasta ${fmt(V.porDia)}. ${esc(AVISO_VISITAS)} El listado de arriba queda ordenado por día y parada.`;
+  $('cVisAviso').innerHTML = `<b>${fmt(n)}</b> ${n === 1 ? 'colegio' : 'colegios'} en <b>${fmt(V.dias.length)}</b> ${V.dias.length === 1 ? 'día' : 'días'} de hasta ${fmt(V.porDia)}. ${esc(AVISO_VISITAS)} El listado de arriba queda ordenado por día y parada, con la ruta de cada día en Google Maps.`;
 }
 
 async function asegurarMapa() {
@@ -234,13 +244,6 @@ function bind() {
   $('cAgrupar').onclick = () => agrupar(true);
   $('cPorDia').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); agrupar(true); } });
   $('cDesagrupar').onclick = () => { S.vis = null; pintarTodo(true); };
-  $('cKml').onclick = () => {
-    const hoy = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Lima' }).format(new Date());
-    const kml = generarKML(S.vis.dias, { proyecto: `Visitas de campo — cerca ${S.near ? aCentro(S.near.label) : ''}`, region: S.region, porDia: S.vis.porDia });
-    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([kml], { type: 'application/vnd.google-earth.kml+xml' })), download: `Visitas_campo_${S.region.replace(/[^A-Za-z0-9]+/g, '_')}_${hoy}.kml` });
-    document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 10000);
-    toast('KML descargado: ábrelo en Google Earth o impórtalo en Google My Maps.');
-  };
   filtrosSum();
 }
 
