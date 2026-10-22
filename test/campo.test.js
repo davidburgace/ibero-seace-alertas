@@ -447,10 +447,19 @@ test('campo: asignar en bloque los colegios del listado o de un día (sin reempl
   assert.doesNotMatch(f, /reemplazar|guardarAsig\(asignaciones, true\)/);
 });
 
-test('campo: con más de 200 colegios, se asigna todo «Colegios del proyecto» de una vez', () => {
+test('campo: con un proyecto, «Colegios a visitar» llega a todos sus colegios; sin proyecto, a 200', async () => {
+  const { limitarN, N_MAX_PROYECTO } = await import('../src/selector-ioarr/cercania.js');
+  assert.equal(limitarN(267), 200);
+  assert.equal(limitarN(267, 267), 267);
+  assert.equal(limitarN(999, 267), 267);
+  assert.equal(limitarN('', 5), 5);
+  assert.equal(N_MAX_PROYECTO, 2000);
   const js = leer('src/public/campo.js');
-  assert.match(js, /barraBloque\('ver', ver,/);
-  assert.match(js, /ver\.length > S\.filas\.length/);
+  assert.match(js, /const maxN = \(\) => S\.proy \? Math\.min\(N_MAX_PROYECTO, Math\.max\(1, S\.proy\.nVer \|\| 1\)\) : N_MAX;/);
+  assert.match(js, /w\('listado', \{ max: S\.near\.n \}\)/);
+  assert.doesNotMatch(js, /barraBloque\('ver'/, 'una sola barra: la del listado');
+  // al asignar, se descuentan: el listado pasa a «Sin asignar»
+  assert.match(js, /S\.ver = 'sin'; pintarVer\(\); await aplicarVer\(\);/);
 });
 
 test('campo: los repartos grandes se guardan en partes de 500 y solo la primera reemplaza', () => {

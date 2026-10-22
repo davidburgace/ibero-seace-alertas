@@ -5,12 +5,16 @@
 // colegios visitados. Lo que guarda en el servidor: marcar o desmarcar un colegio como visitado
 // (/api/campo/visitas/:codigo) y, el proveedor, el reparto entre supervisores (/api/campo/proyectos/:id/asignaciones).
 import { DEF, NIVN, NIVS, NIVB, FILTRO_VACIO, coordValidas } from '/selector-ioarr/calculo.js';
-import { limitarN, N_MAX } from '/selector-ioarr/cercania.js';
+import { limitarN as limitarNBase, N_MAX, N_MAX_PROYECTO } from '/selector-ioarr/cercania.js';
 import { limitarPorDia, colorDia, tramosRutaDia, cuotasIguales, AVISO_VISITAS } from '/selector-ioarr/visitas.js';
 import { crearMapa, fmtKm } from '/selector-ioarr-mapa.js';
 import { htmlListado, itemListado } from '/selector-ioarr-listado.js';
 
 const BASE_DATOS = '/data/selector-ioarr/2025/';
+// «Colegios a visitar»: hasta 200 en toda la región; con un proyecto, hasta todos los de «Colegios del proyecto»
+const maxN = () => S.proy ? Math.min(N_MAX_PROYECTO, Math.max(1, S.proy.nVer || 1)) : N_MAX;
+const limitarN = v => limitarNBase(v, maxN());
+const fijarMaxN = () => { $('cN').max = maxN(); };
 const LS = 'campo:';
 const LEJOS_KM = 30;      // si el colegio más cercano está más lejos, quizá la región no es la correcta
 const NF = new Intl.NumberFormat('es-PE');
@@ -129,11 +133,11 @@ function pintarVer() {
 async function aplicarVer() {
   const P = S.proy; if (!P) return;
   const r = await w('limitar', { codigos: codigosVer() });
-  P.nVer = r.n;
+  P.nVer = r.n; fijarMaxN();
   S.near = null; S.filas = []; S.vis = null;
   $('cDist').value = '-1'; $('cCod').value = '';
   $('cN').value = limitarN(r.n || 1);
-  if (r.n > N_MAX) toast(`Hay ${fmt(r.n)} colegios: se listan los ${fmt(N_MAX)} más cercanos al centro que elijas.`);
+  if (r.n > N_MAX_PROYECTO) toast(`Hay ${fmt(r.n)} colegios: se listan los ${fmt(N_MAX_PROYECTO)} más cercanos al centro que elijas.`);
   if (!r.n) { $('cInfo').textContent = `El proyecto «${P.nombre}» no tiene colegios ${S.ver === 'todo' ? 'en ' + P.region : etiquetaVer()}.`; pintarTodo(true); return; }
   const c = await w('centro', { proyecto: P.nombre });
   if (c.error) { $('cInfo').textContent = c.error; pintarTodo(true); return; }
@@ -254,8 +258,12 @@ async function asignarBloque(caja, boton) {
     const asignaciones = Object.fromEntries(cods.map(c => [c, id]));
     const g = await guardarAsig(asignaciones);
     P.asig = g.asignaciones; P.sups = g.supervisores;
-    toast(`${plural(cods.length, 'colegio', 'colegios')} ${id ? `asignados a ${corto(correoSup(id))}` : 'sin asignar'}.`);
-    pintarLista(); pintarVer(); pintarReparto(); pintarInfoVisitas();
+    const quedan = conteoAsig().sin;
+    toast(`${plural(cods.length, 'colegio', 'colegios')} ${id ? `asignados a ${corto(correoSup(id))}` : 'sin asignar'}.${id && quedan ? ` Quedan ${fmt(quedan)} sin asignar.` : ''}`);
+    pintarReparto();
+    // Se descuentan del total: si quedan colegios sin asignar, el listado pasa a mostrar solo esos
+    if (id && quedan && (S.ver === 'todo' || S.ver === 'sin')) { S.ver = 'sin'; pintarVer(); await aplicarVer(); }
+    else { pintarVer(); pintarLista(); pintarInfoVisitas(); }
   } catch (e) { toast(`No se pudo asignar: ${e.message}`); boton.disabled = false; }
 }
 
@@ -351,6 +359,7 @@ async function quitarProyecto({ rebuscar = true } = {}) {
   $('cVerCampo').hidden = true; $('cReparto').hidden = true;
   if (!habia) return;
   await w('limitar', { codigos: null });
+  fijarMaxN();
   $('cN').value = limitarN(store('n') ?? 20);
   if (rebuscar && S.near) await buscar(null);
   else if (rebuscar) $('cInfo').textContent = `${fmt(S.meta.codigos)} colegios en ${S.region}. Elige un centro: tu ubicación, un distrito o un código de local.`;
@@ -381,7 +390,7 @@ async function buscar(centro, { ajustar = true } = {}) {
   if (!S.proy) store('n', S.near.n);      // la cantidad que trae un proyecto no reemplaza la del usuario
   S.pick = false; S.mapa?.modoElegir(false); $('cPick').setAttribute('aria-pressed', 'false');
   const R = await w('consulta', { f: S.f, sort: { key: 'rep', dir: -1 }, page: 0, size: 1, near: { lat: S.near.lat, lon: S.near.lon, n: S.near.n } });
-  S.filas = await w('listado');
+  S.filas = await w('listado', { max: S.near.n });
   await w('sel', { codigos: S.filas.map(f => f.cod) });          // los días de visita agrupan el listado
   if (S.vis) await agrupar(false);
   const c = R.cerca;
@@ -438,14 +447,10 @@ function pintarLista() {
   const opts = { extra: extraItem };
   bloques.clear();
   const todos = barraBloque('lista', S.filas.map(f => f.cod), `Asignar ${S.filas.length === 1 ? 'el colegio' : `los ${fmt(S.filas.length)} colegios`} del listado`);
-  // El listado llega a N_MAX (200): con más colegios en «Colegios del proyecto», también se asignan todos de una vez
-  const ver = S.proy ? codigosVer() : [];
-  const nombreVer = { todo: 'todo el proyecto', sin: 'los sin asignar' }[S.ver] || (S.ver === S.yo ? 'mis colegios' : corto(correoSup(S.ver)));
-  const todosVer = ver.length > S.filas.length ? barraBloque('ver', ver, `O asignar los ${fmt(ver.length)} colegios de «${nombreVer}»`) : '';
-  if (!S.vis) { $('cLista').innerHTML = todos + todosVer + htmlListado(S.filas, opts); return; }
+  if (!S.vis) { $('cLista').innerHTML = todos + htmlListado(S.filas, opts); return; }
   // Agrupado por día: cada día en su orden de visita, con los datos completos del listado
   const porCod = new Map(S.filas.map(f => [f.cod, f])), total = S.vis.dias.length;
-  $('cLista').innerHTML = todos + todosVer + S.vis.dias.map(d => {
+  $('cLista').innerHTML = todos + S.vis.dias.map(d => {
     const rep = d.puntos.reduce((a, p) => a + p.rep, 0), nv = visitados(d.puntos);
     return `<h3 class="dia-titulo" style="--c:${colorDia(d.dia, total)}"><span class="sw"></span>Día ${d.dia} <span class="sub">${plural(d.puntos.length, 'colegio', 'colegios')}${nv ? ` (${fmt(nv)} ${nv === 1 ? 'visitado' : 'visitados'})` : ''} · ~${fmtKm(d.km)} km · ${fmt(rep)} a reponer</span></h3>
       ${botonesRuta(d)}
@@ -497,7 +502,7 @@ async function pintarMapa(ajustar) {
     const P = S.near ? await w('puntos') : { puntos: [], centro: null };
     m.pintar(P.puntos, P.centro, ajustar, S.near?.gps ? 'Tu ubicación' : 'Centro de la búsqueda');
     if (ajustar && !P.puntos.length && !P.centro) m.encuadrarPeru();
-    $('cMapaInfo').textContent = S.pick ? 'Toca el mapa para fijar el centro.' : S.near ? `${plural(P.puntos.length, 'colegio', 'colegios')} · círculo rojo: ${S.near.gps ? 'tu ubicación' : 'centro'}` : '';
+    $('cMapaInfo').textContent = S.pick ? 'Toca el mapa para fijar el centro.' : S.near ? `${plural(P.puntos.length, 'colegio', 'colegios')}${P.recortado ? ` (el mapa dibuja los ${fmt(P.puntos.length)} más cercanos)` : ''} · círculo rojo: ${S.near.gps ? 'tu ubicación' : 'centro'}` : '';
   }
 }
 

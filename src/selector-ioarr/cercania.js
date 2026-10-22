@@ -4,13 +4,14 @@
 import { coordValidas } from './calculo.js';
 
 export const N_DEF = 20, N_MIN = 1, N_MAX = 200;
+export const N_MAX_PROYECTO = 2000;       // Visitas de campo con un proyecto elegido: hasta todos sus colegios
 export const MAX_PUNTOS = 500;            // puntos que se dibujan en el mapa como máximo
 
-// Cantidad pedida, entre 1 y 200; vacío o inválido vuelve a 20
-export function limitarN(v) {
+// Cantidad pedida, entre 1 y max (200 por defecto); vacío o inválido vuelve a 20 (o a max si es menor)
+export function limitarN(v, max = N_MAX) {
   const n = Math.round(Number(v));
-  if (v === '' || v == null || !Number.isFinite(n)) return N_DEF;
-  return Math.min(N_MAX, Math.max(N_MIN, n));
+  if (v === '' || v == null || !Number.isFinite(n)) return Math.min(N_DEF, max);
+  return Math.min(max, Math.max(N_MIN, n));
 }
 
 const RAD = Math.PI / 180, R_TIERRA = 6371;
