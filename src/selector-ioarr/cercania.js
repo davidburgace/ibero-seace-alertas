@@ -40,7 +40,8 @@ export function cercanos(D, indices, centro, n) {
     if (localConCoord(l)) ds.push([haversine(centro.lat, centro.lon, l[6], l[7]), i]);
   }
   ds.sort((a, b) => a[0] - b[0] || D.locs[a[1]][0].localeCompare(D.locs[b[1]][0]));
-  const top = ds.slice(0, limitarN(n));
+  // El tope lo pone quien llama (200 en el Selector y en toda una región; con un proyecto, hasta N_MAX_PROYECTO)
+  const top = ds.slice(0, limitarN(n, N_MAX_PROYECTO));
   return { idx: top.map(x => x[1]), km: top.map(x => x[0]), omitidos: indices.length - ds.length };
 }
 

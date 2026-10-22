@@ -468,3 +468,11 @@ test('campo: los repartos grandes se guardan en partes de 500 y solo la primera 
   assert.match(js, /reemplazar: reemplazar && i === 0/);
   assert.equal((js.match(/method: 'PUT'/g) || []).length, 2, 'un PUT de visitas y uno de asignaciones (guardarAsig)');
 });
+
+test('cercanos: devuelve más de 200 si se piden (proyecto de 267 colegios)', async () => {
+  const { cercanos } = await import('../src/selector-ioarr/cercania.js');
+  const D = { locs: Array.from({ length: 300 }, (_, i) => [String(100000 + i), 0, 0, '', 0, '', -6.7 + i * 0.001, -79.9]) };
+  const r = cercanos(D, D.locs.map((_, i) => i).slice(0, 267), { lat: -6.7, lon: -79.9 }, 267);
+  assert.equal(r.idx.length, 267);
+  assert.equal(cercanos(D, D.locs.map((_, i) => i), { lat: -6.7, lon: -79.9 }, 30).idx.length, 30);
+});
