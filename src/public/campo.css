@@ -27,6 +27,8 @@ header{ padding-bottom:16px; }
 .pag-campo .lst-item{ grid-template-columns:30px minmax(0,1fr) auto; grid-template-areas:"n cuerpo km" "n acc acc"; align-items:start; }
 .pag-campo .lst-acc{ justify-content:flex-start; }
 
+#cFichasCampo .acts{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+
 /* Reparto entre supervisores */
 .reparto>summary{ padding:14px 16px; cursor:pointer; }
 .reparto-tit{ font-family:var(--font-display); font-weight:700; font-size:15px; }

@@ -570,7 +570,11 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
 
   // Todas las fichas (Excel y PDF) en un ZIP, en flujo: se genera una ficha a la vez
   api.get('/proyectos/:id/fichas-zip', responder(async (req, res) => {
-    const p = await proyecto(req);
+    await fichasZip(res, await proyecto(req), req.query.paquete ? String(req.query.paquete) : null);
+  }));
+  // p: fila de ioarr_selector_proyectos (quien llama ya validó el acceso). pedido: id de un supervisor,
+  // 'sin' o null (todos). También lo usa Visitas de campo: el supervisor baja sus fichas (src/selector-ioarr/campo.js)
+  async function fichasZip(res, p, pedido) {
     const [D, codigos, dup, R] = await Promise.all([cargarRegion(p.region), leerCodigos(p.id), leerDuplicidad(supabase, p.id), asignacionesProyecto(supabase, p.id)]);
     if (!D) return res.status(400).json({ error: 'No hay datos para la región ' + p.region });
     const { list } = separarLocales(D, codigos, dup.mapa);
@@ -578,7 +582,6 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     // Un paquete por supervisor según el reparto de Visitas de campo (sin reparto, uno solo)
     const idxDe = new Map(list.map(i => [D.locs[i][0], i]));
     let paquetes = paquetesFichas([...idxDe.keys()], R.asignaciones, R.supervisores);
-    const pedido = req.query.paquete ? String(req.query.paquete) : null;
     if (pedido) {
       paquetes = paquetes.filter(x => x.clave === pedido);
       if (!paquetes.length) return res.status(404).json({ error: 'Ese supervisor no tiene locales en la propuesta del proyecto' });
@@ -609,7 +612,8 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
       }
       await zip.finalize();
     } catch (e) { console.error('[EXPEDIENTE][FICHAS]', e.message); res.destroy(e); }
-  }));
+  }
+  api.fichasZip = fichasZip;
 
   // Importar una o varias fichas llenas. Cada archivo se valida y se guarda por separado:
   // un archivo rechazado no impide importar los demás; dentro de un archivo, las filas

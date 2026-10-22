@@ -393,6 +393,15 @@ api.post('/visitas.xlsx', async (req, res, next) => {
 const expediente = crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegion, leerIndice });
 api.use(expediente);
 
+// Visitas de campo (src/selector-ioarr/campo.js): el ZIP de fichas de un proyecto, sin validar al dueño
+// (campo.js ya validó que el supervisor tiene colegios asignados o que el proveedor es el dueño)
+export async function fichasZipProyecto(res, proyectoId, paquete) {
+  const { data: p, error } = await supabase.from('ioarr_selector_proyectos').select('*').eq('id', proyectoId).maybeSingle();
+  if (error) throw error;
+  if (!p) return res.status(404).json({ error: 'Proyecto no encontrado' });
+  return expediente.fichasZip(res, p, paquete);
+}
+
 // ─── Para Radar IOARR (src/ioarr/router.js): expedientes vinculados a un CUI ──
 // Lee con la clave secreta: lo usa el servidor solo para usuarios proveedores.
 const COLS_VINC = 'id, nombre, region, usuario_id, actualizado_en, ioarr_proyecto_id, criterios, ioarr:ioarr_proyectos(id, cui, nombre, monto_inversion, estado, etapa_financista)';

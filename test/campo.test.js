@@ -7,7 +7,7 @@ import { ROLES, cambiarRol, invitarUsuario, correoInvitacion, AVISO_SUPERVISOR }
 import { cspSelector } from '../src/selector-ioarr/csp.js';
 import ioarrRouter from '../src/ioarr/router.js';
 import { listarProyectosCampo, proyectoCampo, crearApiCampo, listarVisitas, marcarVisita, desmarcarVisita, fechaVisita, hoyPeru, AVISO_MIGRACION_VISITAS,
-  guardarAsignaciones, asignacionesProyecto, AVISO_MIGRACION_ASIGNACIONES } from '../src/selector-ioarr/campo.js';
+  guardarAsignaciones, asignacionesProyecto, AVISO_MIGRACION_ASIGNACIONES, paqueteFichasCampo } from '../src/selector-ioarr/campo.js';
 import { cuotasIguales, repartirZonas } from '../src/selector-ioarr/visitas.js';
 
 const respuesta = () => {
@@ -204,7 +204,7 @@ test('campo: abrir un proyecto trae todos sus códigos (por lotes) y respeta al 
 test('campo: la API solo lee proyectos; escribe visitas y el reparto entre supervisores', () => {
   const rutas = crearApiCampo(sbProyectos()).stack.filter(l => l.route)
     .map(l => `${Object.keys(l.route.methods).join(',')} ${l.route.path}`).sort();
-  assert.deepEqual(rutas, ['delete /visitas/:codigo', 'get /proyectos', 'get /proyectos/:id', 'get /supervisores', 'get /visitas',
+  assert.deepEqual(rutas, ['delete /visitas/:codigo', 'get /proyectos', 'get /proyectos/:id', 'get /proyectos/:id/fichas-zip', 'get /supervisores', 'get /visitas',
     'put /proyectos/:id/asignaciones', 'put /visitas/:codigo']);
 });
 
@@ -465,4 +465,26 @@ test('cercanos: devuelve más de 200 si se piden (proyecto de 267 colegios)', as
   const r = cercanos(D, D.locs.map((_, i) => i).slice(0, 267), { lat: -6.7, lon: -79.9 }, 267);
   assert.equal(r.idx.length, 267);
   assert.equal(cercanos(D, D.locs.map((_, i) => i), { lat: -6.7, lon: -79.9 }, 30).idx.length, 30);
+});
+
+// ─── El supervisor baja sus fichas ──────────────────────────────────────────
+test('fichas en campo: el supervisor solo baja su paquete; el proveedor dueño, el que pida', async () => {
+  const sb = () => sbReparto({ asig: [{ codigo_local: '100001', supervisor_id: 'sup-1' }, { codigo_local: '100002', supervisor_id: 'sup-2' }] });
+  assert.deepEqual(await paqueteFichasCampo(sb(), { id: 'sup-1', rol: 'supervisor' }, UUID, 'sup-2'), { paquete: 'sup-1' }, 'no puede pedir el de otro');
+  assert.equal((await paqueteFichasCampo(sb(), { id: 'sup-9', rol: 'supervisor' }, UUID)).status, 404, 'sin colegios asignados');
+  assert.equal((await paqueteFichasCampo(sbReparto({ sinTabla: true }), { id: 'sup-1', rol: 'supervisor' }, UUID)).status, 404);
+  assert.deepEqual(await paqueteFichasCampo(sb(), PROV, UUID), { paquete: null });
+  assert.deepEqual(await paqueteFichasCampo(sb(), PROV, UUID, 'sup-2'), { paquete: 'sup-2' });
+  assert.equal((await paqueteFichasCampo(sb(), { id: 'prov-2', rol: 'proveedor' }, UUID)).status, 404, 'otro proveedor');
+});
+
+test('fichas en campo: la ruta pasa el paquete del supervisor a fichasZip', async () => {
+  const llamadas = [];
+  const api = crearApiCampo(sbReparto({ asig: [{ codigo_local: '100001', supervisor_id: 'sup-1' }] }), { fichasZip: async (res, id, paq) => { llamadas.push([id, paq]); res.json({ ok: true }); } });
+  const capa = api.stack.find(l => l.route?.path === '/proyectos/:id/fichas-zip');
+  const res = respuesta();
+  await capa.route.stack[0].handle({ usuario: { id: 'sup-1', rol: 'supervisor' }, params: { id: UUID }, query: { paquete: 'otro' } }, res, e => { throw e; });
+  assert.deepEqual(llamadas, [[UUID, 'sup-1']]);
+  assert.match(leer('src/public/campo.js'), /\/api\/campo\/proyectos\/\$\{encodeURIComponent\(P\.id\)\}\/fichas-zip/);
+  assert.match(leer('src/server.js'), /crearApiCampo\(undefined, \{ fichasZip: fichasZipProyecto \}\)/);
 });
