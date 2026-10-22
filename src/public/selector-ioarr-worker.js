@@ -2,10 +2,14 @@
 // La página solo recibe lo que pinta (una página de la tabla, un detalle, un resumen),
 // así Lima (32 mil aulas) no congela la pantalla.
 import { ITEMS, NIVN, NIVS, NIVB, DEF, prep, calc, totals, filtrar, lv, norm, limpiarParams, totalesPorNivel, estadoSituacional } from '/selector-ioarr/calculo.js';
+import { cercanos, centroDistrito, localConCoord, haversine, MAX_PUNTOS } from '/selector-ioarr/cercania.js';
+import { agruparVisitas, puntosVisita } from '/selector-ioarr/visitas.js';
 
 let D = null, C = null, P = { ...DEF }, sel = new Set(), view = [], codIdx = new Map();
 let excl = new Set();   // locales excluidos por otra inversión vigente o reciente: siguen seleccionados, fuera de los totales
 let dup = {};           // { codLocal: { estado, excluir } } para el cuadro de estado situacional
+let km = new Map();     // con búsqueda por cercanía: índice de local → distancia al centro (km)
+let centro = null;      // centro de la última consulta por cercanía
 
 const pct = i => C.L.reqTot[i] > 0 ? C.L.repTot[i] / C.L.reqTot[i] : null;
 const selIdx = () => [...sel].map(c => codIdx.get(c)).filter(i => i != null);
@@ -29,22 +33,58 @@ const acciones = {
     return excl.size;
   },
 
-  consulta({ f, sort, page, size }) {
+  // near = { lat, lon, n }: los n más cercanos entre los filtrados, en orden de distancia
+  consulta({ f, sort, page, size, near }) {
     view = filtrar(D, C, f);
-    const k = sort.key, d = sort.dir;
-    const val = { cod: i => D.locs[i][0], nom: i => norm(D.locName[i]), dist: i => norm(D.dists[D.locs[i][1]][0]), est: i => D.locEst[i],
-      aul: i => D.locAul[i].length, rep: i => C.L.repTot[i], pct: i => pct(i) == null ? -1 : pct(i) }[k] || (i => C.L.repTot[i]);
-    const vals = new Map(view.map(i => [i, val(i)]));
-    view.sort((a, b) => { const x = vals.get(a), y = vals.get(b); return (x < y ? -1 : x > y ? 1 : 0) * d || D.locs[a][0].localeCompare(D.locs[b][0]); });
+    let cerca = null;
+    if (near) {
+      const r = cercanos(D, view, near, near.n);
+      view = r.idx; km = new Map(r.idx.map((i, j) => [i, r.km[j]])); centro = { lat: near.lat, lon: near.lon };
+      cerca = { n: view.length, max: r.km.length ? r.km[r.km.length - 1] : 0, omitidos: r.omitidos };
+    } else {
+      km = new Map(); centro = null;
+      const k = sort.key, d = sort.dir;
+      const val = { cod: i => D.locs[i][0], nom: i => norm(D.locName[i]), dist: i => norm(D.dists[D.locs[i][1]][0]), est: i => D.locEst[i],
+        aul: i => D.locAul[i].length, rep: i => C.L.repTot[i], pct: i => pct(i) == null ? -1 : pct(i) }[k] || (i => C.L.repTot[i]);
+      const vals = new Map(view.map(i => [i, val(i)]));
+      view.sort((a, b) => { const x = vals.get(a), y = vals.get(b); return (x < y ? -1 : x > y ? 1 : 0) * d || D.locs[a][0].localeCompare(D.locs[b][0]); });
+    }
     let est = 0, aul = 0, nsel = 0;
     for (const i of view) { est += D.locEst[i]; aul += D.locAul[i].length; if (sel.has(D.locs[i][0])) nsel++; }
     const pages = Math.max(1, Math.ceil(view.length / size)), pg = Math.min(page, pages - 1);
     const filas = view.slice(pg * size, pg * size + size).map(i => {
       const l = D.locs[i];
       return { i, cod: l[0], nom: D.locName[i], dist: D.dists[l[1]][0], cp: l[3], rural: l[4], est: D.locEst[i], aul: D.locAul[i].length,
-        rep: C.L.repTot[i], pct: pct(i), niv: Object.keys(NIVN).filter(n => D.locNiv[i] & NIVB[n]).map(n => NIVS[n]), conv: !!(D.locGes[i] & 2) };
+        rep: C.L.repTot[i], pct: pct(i), niv: Object.keys(NIVN).filter(n => D.locNiv[i] & NIVB[n]).map(n => NIVS[n]), conv: !!(D.locGes[i] & 2),
+        coord: localConCoord(l), km: km.has(i) ? km.get(i) : null };
     });
-    return { total: view.length, est, aul, nsel, page: pg, pages, filas };
+    return { total: view.length, est, aul, nsel, page: pg, pages, filas, cerca };
+  },
+  // Centro de búsqueda: { dist } (promedio de sus locales con coordenadas) o { cod } (un local)
+  centro({ dist, cod }) {
+    if (cod != null) {
+      const i = codIdx.get(String(cod).trim());
+      if (i == null) return { error: 'Ese código de local no está en esta región.' };
+      const l = D.locs[i];
+      if (!localConCoord(l)) return { error: `El local ${l[0]} no tiene coordenadas válidas en el padrón.` };
+      return { lat: l[6], lon: l[7], label: `local ${l[0]}` };
+    }
+    const c = centroDistrito(D, dist);
+    if (!c) return { error: 'Ese distrito no tiene locales con coordenadas válidas.' };
+    return { lat: c.lat, lon: c.lon, label: `distrito de ${D.dists[dist][0]}` };
+  },
+  // Puntos del mapa: los primeros MAX_PUNTOS de la vista actual con coordenadas válidas
+  puntos() {
+    const out = [];
+    for (const i of view) {
+      if (out.length >= MAX_PUNTOS) break;
+      const l = D.locs[i];
+      if (!localConCoord(l)) continue;
+      out.push({ cod: l[0], nom: D.locName[i], dist: D.dists[l[1]][0], lat: l[6], lon: l[7], est: D.locEst[i], rep: C.L.repTot[i],
+        sel: sel.has(l[0]), km: km.has(i) ? km.get(i) : centro ? haversine(centro.lat, centro.lon, l[6], l[7]) : null });
+    }
+    const conCoord = view.reduce((a, i) => a + (localConCoord(D.locs[i]) ? 1 : 0), 0);
+    return { puntos: out, total: view.length, conCoord, recortado: conCoord > out.length, centro };
   },
   // Códigos de todo lo filtrado (para «Seleccionar / Quitar los filtrados»)
   codigosVista() { return view.map(i => D.locs[i][0]); },
@@ -60,6 +100,15 @@ const acciones = {
           t: [0, 1, 2, 3, 4].map(t => ({ b: A.b[t][ai], r: A.r[t][ai], m: A.m[t][ai], rep: A.rep[t][ai], fal: A.fal[t][ai] })) };
       })
     };
+  },
+
+  // Días de visita de la selección (sin los excluidos por otra inversión)
+  visitas({ porDia }) {
+    const todos = selIdx(), list = todos.filter(i => !excl.has(D.locs[i][0]));
+    const { puntos, sinCoord } = puntosVisita(D, C, list);
+    const sinI = ({ i, ...p }) => p;
+    return { dias: agruparVisitas(puntos, porDia).map(d => ({ ...d, puntos: d.puntos.map(sinI) })), sinCoord: sinCoord.map(sinI),
+      nExcl: todos.length - list.length, codigos: list.map(i => D.locs[i][0]) };
   },
 
   // Totales de la selección (barra inferior) y, con completo, el resumen de «Mi selección»

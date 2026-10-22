@@ -169,6 +169,71 @@ Ejecuta `supabase/migrations/019_ioarr_ficha_verificacion.sql` después de la 01
 - **Fuera de aulas:** se guarda como información y no entra al costo, porque está por confirmar si el proyecto lo incluye.
 - Si después se corrige a mano un tipo cargado desde la ficha, ese tipo cuenta como verificado en su totalidad.
 
+## Búsqueda por cercanía y mapa de locales
+
+**Para qué sirve:** planificar las visitas de verificación. No necesita migración.
+
+**Dónde está:** Elegir locales → panel **Buscar por cercanía**, entre los filtros y la tabla.
+
+**Centro de la búsqueda** (cuatro formas):
+- Un distrito: el centro es el promedio de las coordenadas válidas de sus locales.
+- El código de un local.
+- **Centro en el mapa**, y luego un toque en el mapa.
+- El botón **Cercanos** de cada fila de la tabla.
+
+**Qué muestra:**
+- Los N locales más cercanos al centro (por defecto 20, de 1 a 200), en orden de distancia y con la columna «Distancia (km)».
+- La distancia es en línea recta (fórmula de Haversine), no por carretera.
+- Respeta todos los filtros activos: la cercanía se aplica sobre los locales que los pasan.
+- Los locales sin coordenadas válidas (latitud de −19 a 0, longitud de −82 a −68) no entran, y se dice cuántos se omitieron.
+- «Seleccionar / Quitar los filtrados» actúan sobre esos N.
+- **Quitar cercanía** vuelve a la lista normal.
+
+**Mapa** (Leaflet 1.9.4, servido por la app en `/vendor/leaflet-1.9.4/`, sin CDN):
+- Se abre al buscar por cercanía o con **Ver mapa de los filtrados**. Muestra hasta 500 puntos; si hay más, avisa.
+- Un punto por local: el tamaño crece con los bienes a reponer, y el color distingue los seleccionados. El centro va con un círculo rojo punteado.
+- Al tocar un punto: datos del local, distancia al centro, **Abrir en Google Maps** y un botón para seleccionar o quitar el local.
+- Capas: satélite (Esri World Imagery) y calles (OpenStreetMap), con sus atribuciones.
+- Si Leaflet no carga, se muestra un aviso y la lista por cercanía sigue funcionando.
+
+**Content-Security-Policy:** solo la página `/selector-ioarr.html` la tiene (`src/selector-ioarr/csp.js`). Permite las imágenes del mapa (`server.arcgisonline.com`, `tile.openstreetmap.org`) en `img-src`; scripts solo de la app y de `cdn.jsdelivr.net` (supabase-js); sin `unsafe-eval` ni scripts en línea. Las demás páginas del radar todavía no tienen CSP.
+
+**Imágenes del mapa en producción:** Esri y OSM sirven para uso interno con poco tráfico. Para uso comercial o intensivo conviene un proveedor con llave propia, por ejemplo MapTiler, o ArcGIS Location Platform de Esri. El cambio es la URL en `src/public/selector-ioarr-mapa.js` y el origen en `ORIGENES_MAPA` de `csp.js`.
+
+**Código:**
+- `src/selector-ioarr/cercania.js`: distancia, centro del distrito y más cercanos. Lo usan el Web Worker y las pruebas.
+- `src/public/selector-ioarr-worker.js`: acciones `consulta` (con `near`), `centro` y `puntos`.
+- `src/public/selector-ioarr-mapa.js`: el mapa.
+
+**Pruebas:** `test/selector-cercania.test.js`. En Moquegua, los 20 más cercanos al distrito de Moquegua llegan hasta 1.20 km y suman 7,373 estudiantes.
+
+### Días de visita
+
+**Dónde está:** el mismo panel, debajo del mapa → **Días de visita**.
+
+**Agrupar por días de visita:** se indica cuántos locales por día (por defecto 8, de 1 a 50) y la app divide la **selección** (sin los excluidos por otra inversión) así:
+1. Toma el local sin asignar más alejado del centro de todos, y le suma los más cercanos al centro del grupo que se va formando, hasta llenar el día.
+2. Ordena cada día por vecino más cercano, empezando por el extremo del grupo.
+3. Ordena los días de la misma forma, para que días seguidos queden cerca.
+
+El resultado no depende del orden en que se eligieron los locales. Se recalcula solo al cambiar la selección.
+
+**Qué muestra:**
+- Una tarjeta por día, con sus locales en orden, el recorrido aproximado y los bienes a reponer.
+- En el mapa, puntos numerados por orden de visita y la ruta punteada de cada día.
+- Hasta 8 días, cada uno lleva su color (paleta fija). Con más de 8, todos van en gris y el día elegido en «Ver en el mapa» se resalta: así no se repiten colores.
+- Con todos los días a la vista, el mapa dibuja hasta 500 puntos y avisa si hay más.
+- Un aviso de que las distancias son en línea recta y no incluyen carreteras ni tiempos de viaje.
+- Los locales sin coordenadas no se agrupan; van al final del Excel.
+
+**Exportar:**
+- **Excel** (`POST /api/selector-ioarr/visitas.xlsx`, sirve también para borradores): hoja «Visitas» con grupo, orden, código de local, institución, distrito, centro poblado, dirección, latitud, longitud y bienes a reponer, y hoja «Resumen por día». El servidor agrupa con el mismo código que la pantalla.
+- **KML** (se arma en el navegador): una carpeta por día, con los puntos y la ruta aproximada. Se abre en Google Earth o se importa en Google My Maps.
+
+**Mejora futura: tiempos por carretera.** No está implementado. La recomendación es **OpenRouteService**, que tiene un plan gratuito con llave (del orden de 2,000 rutas y 500 matrices de distancia por día) y alcanza para planificar visitas. Para mucho volumen, conviene **OSRM** alojado por nosotros, con el mapa de Perú en un servidor de unos 10 a 20 USD al mes. Hay que confirmar los límites y precios vigentes antes de contratar.
+
+**Código:** `src/selector-ioarr/visitas.js` (agrupación, colores y KML), `src/selector-ioarr/excel-visitas.js` y la acción `visitas` del worker. **Pruebas:** `test/selector-visitas.test.js`.
+
 ## Etapa 1: costos
 
 ### Migración

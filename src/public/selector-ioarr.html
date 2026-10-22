@@ -85,6 +85,64 @@
       </div>
     </div>
 
+    <section class="cerca-panel" id="cercaPanel" aria-labelledby="cerca-tit">
+      <div class="cerca-cab">
+        <h3 id="cerca-tit">Buscar por cercanía</h3>
+        <p class="sub">Elige un centro y cuántos locales quieres ver: se muestran los más cercanos entre los que pasan los filtros de arriba. La distancia es en línea recta, no por carretera.</p>
+      </div>
+      <div class="filtros-grid cerca-grid">
+        <div class="campo"><label for="nDist">Centro: un distrito</label><select id="nDist"></select></div>
+        <div class="campo"><label for="nCod">o un código de local</label><input id="nCod" type="text" inputmode="numeric" placeholder="Ej.: 123456" autocomplete="off" maxlength="12"></div>
+        <div class="campo"><label for="nN">Cantidad de locales</label><input id="nN" type="number" min="1" max="200" step="1" value="20" inputmode="numeric"></div>
+        <div class="campo cerca-btns"><span class="lbl">&nbsp;</span>
+          <div class="acts">
+            <button class="btn btn-primary" id="nGo" type="button">Mostrar cercanos</button>
+            <button class="btn btn-ghost" id="nPick" type="button" aria-pressed="false">Centro en el mapa</button>
+            <button class="btn btn-ghost" id="nClr" type="button" hidden>Quitar cercanía</button>
+          </div>
+        </div>
+      </div>
+      <div class="filtros-bar cerca-bar">
+        <div id="nInfo" aria-live="polite" class="sub">Sin búsqueda por cercanía.</div>
+        <div class="acts">
+          <button class="btn btn-ghost btn-sm" id="nBase" type="button" hidden>Ver calles</button>
+          <button class="btn btn-ghost btn-sm" id="nMap" type="button" aria-expanded="false" aria-controls="mapaWrap">Ver mapa de los filtrados</button>
+        </div>
+      </div>
+      <div class="mapa-wrap" id="mapaWrap" hidden>
+        <p class="mapa-aviso" id="mapaAviso" hidden></p>
+        <div class="mapa-locales" id="mapaBox" role="region" aria-label="Mapa de los locales"></div>
+        <div class="mapa-leyenda sub" id="mapaLeyenda"><span class="ley sel">Seleccionado</span><span class="ley libre">No seleccionado</span><span class="ley centro">Centro</span><span>El tamaño del punto crece con los bienes a reponer.</span></div>
+      </div>
+
+      <div class="visitas" id="visitas">
+        <div class="cerca-cab">
+          <h3>Días de visita</h3>
+          <p class="sub">Divide tu selección en grupos de locales cercanos, uno por día, y ordena cada grupo en una ruta aproximada.</p>
+        </div>
+        <div class="filtros-grid visitas-grid">
+          <div class="campo"><label for="vPorDia">Locales por día</label><input id="vPorDia" type="number" min="1" max="50" step="1" value="8" inputmode="numeric"></div>
+          <div class="campo cerca-btns"><span class="lbl">&nbsp;</span>
+            <div class="acts">
+              <button class="btn btn-primary" id="vGo" type="button">Agrupar por días de visita</button>
+              <button class="btn btn-ghost" id="vClr" type="button" hidden>Quitar agrupación</button>
+            </div>
+          </div>
+        </div>
+        <div class="visitas-res" id="vRes" hidden>
+          <p class="aviso" role="note" id="vAviso"></p>
+          <div class="visitas-acc">
+            <div class="campo"><label for="vDia">Ver en el mapa</label><select id="vDia"></select></div>
+            <div class="acts">
+              <button class="btn btn-ghost btn-sm" id="vXls" type="button">Descargar Excel</button>
+              <button class="btn btn-ghost btn-sm" id="vKml" type="button">Descargar KML</button>
+            </div>
+          </div>
+          <div id="vLista" class="visitas-lista"></div>
+        </div>
+      </div>
+    </section>
+
     <div class="tabla-wrap">
       <table class="tabla tabla-locales">
         <caption>Cada fila es un local educativo (unidad productora). Un local puede tener varios servicios: inicial, primaria o secundaria.</caption>

@@ -21,9 +21,13 @@ import express from 'express';
 import compression from 'compression';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+import path from 'node:path';
 import { supabase } from '../ioarr/db.js';
 import { prep, calc, limpiarParams } from './calculo.js';
 import { generarExcel } from './excel.js';
+import { generarExcelVisitas } from './excel-visitas.js';
+import { agruparVisitas, puntosVisita, limitarPorDia } from './visitas.js';
 import { crearApiExpediente, borrarArchivosProyecto } from './expediente.js';
 import { MODOS } from './niveles.js';
 import { limpiarDatosDoc } from './documentos.js';
@@ -77,6 +81,20 @@ router.get('/selector-ioarr/calculo.js', (_, res) =>
 router.get('/selector-ioarr/costos.js', (_, res) =>
   res.type('application/javascript').set('Cache-Control', 'no-cache')
     .sendFile(fileURLToPath(new URL('./costos.js', import.meta.url))));
+
+// Búsqueda por cercanía (la importa el Web Worker)
+router.get('/selector-ioarr/cercania.js', (_, res) =>
+  res.type('application/javascript').set('Cache-Control', 'no-cache')
+    .sendFile(fileURLToPath(new URL('./cercania.js', import.meta.url))));
+// Agrupación por días de visita (la importa el Web Worker)
+router.get('/selector-ioarr/visitas.js', (_, res) =>
+  res.type('application/javascript').set('Cache-Control', 'no-cache')
+    .sendFile(fileURLToPath(new URL('./visitas.js', import.meta.url))));
+// Leaflet para el mapa, servido por la app (sin CDN). La versión va en la ruta: caché larga.
+export const LEAFLET_VERSION = '1.9.4';
+export const RUTA_LEAFLET = `/vendor/leaflet-${LEAFLET_VERSION}`;
+const DIR_LEAFLET = path.dirname(createRequire(import.meta.url).resolve('leaflet/dist/leaflet.js'));
+router.use(RUTA_LEAFLET, express.static(DIR_LEAFLET, { maxAge: '30d', immutable: true, index: false }));
 
 const api = express.Router();
 router.use('/api/selector-ioarr', api);
@@ -341,6 +359,34 @@ api.get('/proyectos/:id/excel', async (req, res, next) => {
       'Cache-Control': 'no-store'
     }).send(buffer);
   } catch (e) { enviarError(res, next)(e); }
+});
+
+// Plan de visitas en Excel. Sirve también para borradores: recibe la región, los códigos
+// (sin los excluidos por otra inversión), los criterios y los locales por día, y agrupa aquí
+// con el mismo código que la pantalla.
+api.post('/visitas.xlsx', async (req, res, next) => {
+  try {
+    const { region, codigos, criterios, porDia, proyecto } = req.body || {};
+    const D = await cargarRegion(String(region || ''));
+    if (!D) return res.status(400).json({ error: 'Región no válida' });
+    const cods = codigosValidos(codigos);
+    if (!cods.length) return res.status(400).json({ error: 'No hay locales seleccionados' });
+    if (cods.length > MAX_LOCALES) return res.status(400).json({ error: 'Demasiados locales' });
+    const idx = new Map(D.locs.map((l, i) => [l[0], i]));
+    const list = cods.map(c => idx.get(c)).filter(i => i != null);
+    if (!list.length) return res.status(400).json({ error: 'Ningún código pertenece a la región ' + region });
+    const P = limpiarParams(criterios), n = limitarPorDia(porDia);
+    const { puntos, sinCoord } = puntosVisita(D, calc(D, P), list);
+    const fecha = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Lima' }).format(new Date());
+    const nombre = limpiarNombre(proyecto) || 'Borrador';
+    const buffer = await generarExcelVisitas(agruparVisitas(puntos, n), sinCoord, { proyecto: nombre, region: D.region || region, porDia: n, fecha });
+    const archivo = `Visitas_${slug(nombre)}_${fecha}.xlsx`;
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="${archivo}"; filename*=UTF-8''${encodeURIComponent(archivo)}`,
+      'Cache-Control': 'no-store'
+    }).send(buffer);
+  } catch (e) { next(e); }
 });
 
 // Expediente IOARR (costos): supabase/migrations/012_ioarr_expediente_costos.sql
