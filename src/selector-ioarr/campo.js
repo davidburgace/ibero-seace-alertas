@@ -14,11 +14,24 @@
 //   GET    /api/campo/visitas          → { códigoLocal: { fecha, por, mia } }
 //   PUT    /api/campo/visitas/:codigo  → marca el local como visitado ({ fecha? } 'AAAA-MM-DD', por defecto hoy en Perú)
 //   DELETE /api/campo/visitas/:codigo  → lo desmarca (el supervisor, solo lo que marcó él; el proveedor, cualquiera)
+// Ficha de verificación en la app (migración 023, tabla campo_fichas; ver ficha-digital.js). El supervisor, solo
+// en sus colegios asignados; el proveedor, en los de sus proyectos. La revisión la hace el proveedor en Expediente → Fichas.
+//   GET  /api/campo/proyectos/:id/fichas              → { fichas: { códigoLocal: { estado, nota, … } } }
+//   GET  /api/campo/proyectos/:id/fichas/:cod         → { modelo (padrón y censo), ficha (lo llenado) | null, editable }
+//   PUT  /api/campo/proyectos/:id/fichas/:cod         { datos } guarda el borrador
+//   POST /api/campo/proyectos/:id/fichas/:cod/enviar  { datos } valida como la importación del Excel y, sin errores,
+//        la manda a revisión (422 con los errores si no). Marca el colegio como visitado si aún no lo está.
 // Acceso (ver crearProteccionApi en src/ioarr/auth.js): proveedor y supervisor de campo.
 //   proveedor  → solo sus proyectos
 //   supervisor → todos los proyectos, pero solo nombre, región y códigos de local
 import express from 'express';
 import { supabase } from '../ioarr/db.js';
+import { limpiarFormulario, leerFichaDigital, estadosFichas, guardarFichaDigital, puedeEditar, origenDigital,
+  AVISO_MIGRACION_FICHAS, faltaMigracion as faltaMigracionFichas } from './ficha-digital.js';
+import { BIENES_FICHA, RANGOS, FIRMAS, CRITERIOS, MAX_PUESTOS, TOLERANCIA } from './ficha.js';
+
+// Lo que el formulario necesita saber de la ficha (src/public/campo-ficha.js)
+export const GUIA_FICHA = { bienes: BIENES_FICHA, rangos: RANGOS.map(r => r.texto), firmas: FIRMAS, criterios: CRITERIOS, max_puestos: MAX_PUESTOS, tolerancia: TOLERANCIA };
 
 const LOTE = 1000;
 const esUuid = s => /^[0-9a-f-]{36}$/i.test(String(s || ''));
@@ -197,6 +210,71 @@ export async function paqueteFichasCampo(sb, usuario, proyectoId, pedido) {
   return { paquete: pedido ? String(pedido) : null };
 }
 
+// ─── Ficha de verificación en la app ────────────────────────────────────────
+// ¿Puede este usuario llenar la ficha de ese colegio? → { p } o { status, error }
+export async function accesoFicha(sb, usuario, proyectoId, cod) {
+  if (!esCodigo(cod)) return { status: 400, error: 'Código de local no válido' };
+  const p = await proyectoCampo(sb, usuario, proyectoId);
+  if (!p) return { status: 404, error: 'Proyecto no encontrado' };
+  if (!p.locales.includes(cod)) return { status: 404, error: 'Ese colegio no está en el proyecto' };
+  if (usuario.rol === 'supervisor' && p.asignaciones?.[cod] !== usuario.id) return { status: 403, error: 'Este colegio no está asignado a ti' };
+  return { p };
+}
+
+// Estado de las fichas del proyecto: el supervisor ve solo las de sus colegios → { status, body }
+export async function fichasDelUsuario(sb, usuario, proyectoId) {
+  const p = await proyectoCampo(sb, usuario, proyectoId);
+  if (!p) return { status: 404, body: { error: 'Proyecto no encontrado' } };
+  const estados = await estadosFichas(sb, p.id);
+  if (!estados) return { status: 503, body: { error: AVISO_MIGRACION_FICHAS } };
+  const mias = usuario.rol === 'supervisor' ? new Set(Object.entries(p.asignaciones || {}).filter(([, id]) => id === usuario.id).map(([c]) => c)) : null;
+  const fichas = Object.fromEntries(Object.entries(estados).filter(([c]) => !mias || mias.has(c)).map(([c, { por_id, ...f }]) => [c, f]));
+  return { status: 200, body: { fichas } };
+}
+
+// deps.modelo(proyectoId, cod): la ficha del local con el padrón y el censo (modeloFicha)
+export async function abrirFichaCampo(sb, usuario, proyectoId, cod, deps) {
+  const acc = await accesoFicha(sb, usuario, proyectoId, cod);
+  if (acc.error) return { status: acc.status, body: { error: acc.error } };
+  const ficha = await leerFichaDigital(sb, acc.p.id, cod);
+  const modelo = await deps.modelo(acc.p.id, cod);
+  return { status: 200, body: { modelo, ficha, editable: puedeEditar(ficha?.estado), guia: GUIA_FICHA } };
+}
+
+const quien = usuario => ({ editado_por: usuario.id, editado_por_email: usuario.email || null });
+const YA_ENVIADA = f => f.estado === 'aprobada' ? 'La ficha ya fue aprobada: no se puede cambiar.' : 'La ficha ya está enviada a revisión: no se puede cambiar hasta que el proveedor la devuelva.';
+
+export async function guardarBorradorFicha(sb, usuario, proyectoId, cod, { datos } = {}) {
+  const acc = await accesoFicha(sb, usuario, proyectoId, cod);
+  if (acc.error) return { status: acc.status, body: { error: acc.error } };
+  const actual = await leerFichaDigital(sb, acc.p.id, cod);
+  if (!puedeEditar(actual?.estado)) return { status: 409, body: { error: YA_ENVIADA(actual), ficha: actual } };
+  const ficha = await guardarFichaDigital(sb, acc.p.id, cod, { estado: actual?.estado === 'observada' ? 'observada' : 'borrador', datos: limpiarFormulario(datos), ...quien(usuario) });
+  return { status: 200, body: { ficha } };
+}
+
+// deps.validar(proyectoId, cod, datos, origen): procesarFicha con el contexto del proyecto (como la importación)
+export async function enviarFicha(sb, usuario, proyectoId, cod, { datos } = {}, deps) {
+  const acc = await accesoFicha(sb, usuario, proyectoId, cod);
+  if (acc.error) return { status: acc.status, body: { error: acc.error } };
+  const actual = await leerFichaDigital(sb, acc.p.id, cod);
+  if (!puedeEditar(actual?.estado)) return { status: 409, body: { error: YA_ENVIADA(actual), ficha: actual } };
+  const limpio = limpiarFormulario(datos);
+  const r = await deps.validar(acc.p.id, cod, limpio, origenDigital(usuario.email));
+  if (r.rechazada || r.errores.length) {
+    // Lo llenado no se pierde: queda como borrador
+    const ficha = await guardarFichaDigital(sb, acc.p.id, cod, { estado: actual?.estado === 'observada' ? 'observada' : 'borrador', datos: limpio, ...quien(usuario) });
+    return { status: 422, body: { error: 'La ficha tiene errores: corrígelos y vuelve a enviarla.', errores: r.errores, avisos: r.avisos, ficha } };
+  }
+  const ficha = await guardarFichaDigital(sb, acc.p.id, cod, { estado: 'enviada', datos: limpio, enviada_en: new Date().toISOString(), ...quien(usuario) });
+  // El colegio queda visitado con la fecha de la ficha, si nadie lo marcó antes (sin la migración 021, nada)
+  try {
+    const { data: v, error } = await sb.from('campo_visitas').select('codigo_local').eq('codigo_local', cod).maybeSingle();
+    if (!error && !v) await marcarVisita(sb, usuario, cod, { fecha: limpio.a.fecha });
+  } catch (e) { console.warn('[CAMPO] No se pudo marcar la visita al enviar la ficha:', e.message); }
+  return { status: 200, body: { ficha, avisos: r.avisos, filas: r.filas } };
+}
+
 // deps.fichasZip(res, proyectoId, paquete): arma el ZIP (src/selector-ioarr/router.js → fichasZipProyecto)
 export function crearApiCampo(sb = supabase, deps = {}) {
   const api = express.Router();
@@ -218,6 +296,24 @@ export function crearApiCampo(sb = supabase, deps = {}) {
     : listarSupervisores(sb).then(d => res.json(d), next));
   api.put('/proyectos/:id/asignaciones', (req, res, next) =>
     guardarAsignaciones(sb, req.usuario, req.params.id, req.body || {}).then(r => res.status(r.status).json(r.body), falloAsig(res, next)));
+
+  // Ficha en la app: deps.fichas = { modelo(proyectoId, cod), validar(proyectoId, cod, datos, origen) }
+  const enFicha = fn => async (req, res, next) => {
+    try {
+      if (!deps.fichas) return res.status(503).json({ error: 'Las fichas no están disponibles' });
+      const r = await fn(req);
+      res.status(r.status).json(r.body);
+    } catch (e) {
+      if (faltaMigracionFichas(e)) return res.status(503).json({ error: AVISO_MIGRACION_FICHAS });
+      if (e.status) return res.status(e.status).json({ error: e.message });
+      next(e);
+    }
+  };
+  const cod = req => String(req.params.cod);
+  api.get('/proyectos/:id/fichas', enFicha(req => fichasDelUsuario(sb, req.usuario, req.params.id)));
+  api.get('/proyectos/:id/fichas/:cod', enFicha(req => abrirFichaCampo(sb, req.usuario, req.params.id, cod(req), deps.fichas)));
+  api.put('/proyectos/:id/fichas/:cod', enFicha(req => guardarBorradorFicha(sb, req.usuario, req.params.id, cod(req), req.body || {})));
+  api.post('/proyectos/:id/fichas/:cod/enviar', enFicha(req => enviarFicha(sb, req.usuario, req.params.id, cod(req), req.body || {}, deps.fichas)));
 
   api.get('/proyectos/:id/fichas-zip', async (req, res, next) => {
     try {

@@ -50,7 +50,7 @@ export const RANGOS = [
   { clave: '5a10', texto: 'De 5 a 10', anios: 8, re: /^(de\s*)?5\s*(a|-|–)\s*10/ },
   { clave: 'mas10', texto: 'Más de 10', anios: 12, re: /^(mas\s*de\s*10|>\s*10)/ }];
 export const TOLERANCIA = 0.15;
-const MAX_PUESTOS = 12;
+export const MAX_PUESTOS = 12;
 const COLS = 13;              // A..L visibles; M = clave oculta
 const COL_CLAVE = 13;
 

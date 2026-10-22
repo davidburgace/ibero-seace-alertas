@@ -43,6 +43,10 @@
 //                                                      (Visitas de campo), una carpeta por supervisor y «Sin_asignar»
 //            ?paquete=<supervisorId>|sin               solo el paquete de ese supervisor (o los sin asignar)
 //     POST   /proyectos/:id/fichas/importar            multipart: archivos (uno o varios Excel llenos) → informe
+//   Fichas llenadas en la app por el supervisor (Visitas de campo, ficha-digital.js, migración 023)
+//     GET    /proyectos/:id/fichas/:cod/digital          lo llenado, el padrón y censo del local y la validación
+//     POST   /proyectos/:id/fichas/:cod/digital/aprobar  pasa la ficha enviada al inventario verificado (como importar el Excel)
+//     POST   /proyectos/:id/fichas/:cod/digital/observar { nota } la devuelve al supervisor para que la corrija
 //   También devuelve api.resumen(p): avance del expediente para Radar IOARR (ficha y kanban)
 // ============================================================================
 
@@ -62,6 +66,7 @@ import { porNivel, inventarioNivel, inventarioUna, modoDe, sinNivel, nivelesDeLo
 import { modeloFicha, generarFichaExcel, generarFichaPdf, leerFicha, procesarFicha, requeridoFicha, ESTADO_VERIF } from './ficha.js';
 import archiver from 'archiver';
 import { asignacionesProyecto, paquetesFichas } from './campo.js';
+import { fichaDesdeFormulario, leerFichaDigital, estadosFichas, guardarFichaDigital, origenDigital, AVISO_MIGRACION_FICHAS } from './ficha-digital.js';
 
 const AVISO = 'Falta ejecutar supabase/migrations/012_ioarr_expediente_costos.sql en Supabase';
 const faltaMigracion = e => e?.code === 'PGRST204' || e?.code === 'PGRST205' || e?.code === '42P01' || /schema cache|does not exist/i.test(e?.message || '');
@@ -521,8 +526,9 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     const { error } = await supabase.from('ioarr_expediente_inventario').select('ficha').limit(1);
     return !!error && (faltaMigracion(error) || /ficha/.test(error.message || ''));
   }
+  const digitalDe = f => ({ estado: f.estado, estado_texto: f.estado_texto, por: f.por, enviada_en: f.enviada_en, revisada_en: f.revisada_en, nota: f.nota });
   async function vistaFichas(p) {
-    const [A, sinMig, R] = await Promise.all([armar(p), sinMigracionFicha(), asignacionesProyecto(supabase, p.id)]);
+    const [A, sinMig, R, dig] = await Promise.all([armar(p), sinMigracionFicha(), asignacionesProyecto(supabase, p.id), estadosFichas(supabase, p.id)]);
     const est = new Map(A.Runa.locales.map(l => [l.cod, l]));
     const pct = R => R.totales.rep ? Math.round((R.totales.repVerif || 0) / R.totales.rep * 1000) / 10 : 0;
     const locales = A.list.map(i => {
@@ -531,13 +537,14 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
       return { cod, nom: A.D.locName[i], dist: A.D.dists[A.D.locs[i][1]][0], niveles: nivelesDeLocal(A.D, i).map(n => NOMBRE_NIVEL[n]), aulas: A.D.locAul[i].length,
         rep: l ? l.rep.reduce((a, b) => a + b, 0) : 0, rep_verif: l ? l.repVerif.reduce((a, b) => a + b, 0) : 0,
         estado, estado_texto: ESTADO_VERIF[estado], visita: f?.fecha_visita || null, ficha: fichaDe(f),
-        supervisor: R.asignaciones?.[cod] ? (R.supervisores[R.asignaciones[cod]] || 'supervisor') : null };
+        supervisor: R.asignaciones?.[cod] ? (R.supervisores[R.asignaciones[cod]] || 'supervisor') : null,
+        digital: dig?.[cod] ? digitalDe(dig[cod]) : null };
     });
     const paquetes = paquetesFichas(locales.map(l => l.cod), R.asignaciones, R.supervisores)
       .filter(x => x.clave !== 'todos').map(x => ({ clave: x.clave, email: x.email, n: x.codigos.length }));
     return {
-      sin_migracion: sinMig, locales, excluidos: A.excluidos.length, paquetes,
-      resumen: { locales: locales.length, verificados: locales.filter(l => l.estado === 'verificado').length, con_ficha: locales.filter(l => l.ficha).length,
+      sin_migracion: sinMig, sin_migracion_digital: !dig, locales, excluidos: A.excluidos.length, paquetes,
+      resumen: { locales: locales.length, por_revisar: locales.filter(l => l.digital?.estado === 'enviada').length, verificados: locales.filter(l => l.estado === 'verificado').length, con_ficha: locales.filter(l => l.ficha).length,
         rep: A.Runa.totales.rep, rep_verif: A.Runa.totales.repVerif || 0, pct: pct(A.Runa),
         ioarrs: A.modo === 'por_nivel' ? A.ioarrs.filter(x => x.nivel).map(x => ({ nivel: x.nivel, nombre: x.nombre, rep: x.R.totales.rep, rep_verif: x.R.totales.repVerif || 0, pct: pct(x.R) })) : [] }
     };
@@ -623,43 +630,99 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     const msg = err.code === 'LIMIT_FILE_SIZE' ? `Algún archivo pasa de ${MAX_FICHA_MB} MB` : err.code === 'LIMIT_FILE_COUNT' || err.code === 'LIMIT_UNEXPECTED_FILE' ? `Máximo ${MAX_FICHAS} archivos por vez` : 'No se pudieron recibir los archivos: ' + err.message;
     res.status(400).json({ error: msg });
   });
+  // Lo que hace falta para validar fichas del proyecto (Excel o la app) y guardarlas en el inventario
+  async function contextoFichas(p) {
+    const [D, codigos, dup, inventario] = await Promise.all([cargarRegion(p.region), leerCodigos(p.id), leerDuplicidad(supabase, p.id), leerInventario(p)]);
+    if (!D) { const e = new Error('No hay datos para la región ' + p.region); e.status = 400; throw e; }
+    const P = limpiarParams(p.criterios);
+    // Solo los locales de la propuesta: un excluido por otra inversión no se verifica
+    const { list } = separarLocales(D, codigos, dup.mapa);
+    return { p, D, P, C: calc(D, P), hoy: hoyLima(), codigos: new Set(codigos), enPropuesta: new Set(list.map(i => D.locs[i][0])),
+      previas: Object.fromEntries(inventario.map(x => [x.cod_local, x])) };
+  }
+  // x: estructura de leerFicha() (o fichaDesdeFormulario()); origen: nombre del archivo o «Ficha digital de …»
+  function validarFicha(K, x, origen) {
+    const cod = x.meta?.cod_local;
+    if (cod && K.codigos.has(cod) && !K.enPropuesta.has(cod)) return { cod, errores: [{ hoja: '—', fila: null, motivo: `El local ${cod} está excluido de la propuesta por otra inversión vigente o reciente. Vuelve a incluirlo en Mi selección si corresponde.` }], avisos: [], rechazada: true, filas: { ok: 0, rechazadas: 0 } };
+    return procesarFicha(x, { D: K.D, C: K.C, P: K.P, codigos: K.codigos, proyectoId: K.p.id, anioDatos: K.p.anio_datos, hoy: K.hoy, archivo: origen, filaPrevia: K.previas[cod] });
+  }
+  const error503 = msg => Object.assign(new Error(msg), { status: 503 });
+  // Guarda una ficha validada (no rechazada) en el inventario verificado del local
+  async function guardarFichaInventario(K, r, usuarioId) {
+    const { censo, porNiv } = censoConNiveles(K.D, K.P, r.i);
+    const fila = { proyecto_id: K.p.id, cod_local: r.cod, ...r.fila, censo: porNiv ? { ...censo, _niveles: porNiv } : censo, creado_por: usuarioId, actualizado_en: new Date().toISOString() };
+    const { error } = await supabase.from('ioarr_expediente_inventario').upsert(fila, { onConflict: 'proyecto_id,cod_local' });
+    if (error) {
+      if (faltaMigracion(error) && !/ficha|por_nivel|adquisicion/.test(error.message || '')) throw error503(AVISO_INV);
+      if (/ficha/.test(error.message || '')) throw error503(AVISO_FICHA);
+      if (/por_nivel/.test(error.message || '')) throw error503(AVISO_NIV);
+      if (/adquisicion/.test(error.message || '')) throw error503(AVISO_ADQ);
+      throw error;
+    }
+    K.previas[r.cod] = fila;
+  }
+
   api.post('/proyectos/:id/fichas/importar', recibirFichas, responder(async (req, res) => {
     const p = await proyecto(req), archivos = req.files || [];
     if (!archivos.length) return res.status(400).json({ error: 'Elige uno o varios Excel de fichas llenas' });
     if (await sinMigracionFicha()) return res.status(503).json({ error: AVISO_FICHA });
-    const [D, codigos, dup, inventario] = await Promise.all([cargarRegion(p.region), leerCodigos(p.id), leerDuplicidad(supabase, p.id), leerInventario(p)]);
-    if (!D) return res.status(400).json({ error: 'No hay datos para la región ' + p.region });
-    const P = limpiarParams(p.criterios), C = calc(D, P), hoy = hoyLima();
-    // Solo los locales de la propuesta: un excluido por otra inversión no se verifica
-    const { list } = separarLocales(D, codigos, dup.mapa), enPropuesta = new Set(list.map(i => D.locs[i][0]));
-    const previas = Object.fromEntries(inventario.map(x => [x.cod_local, x])), vistos = new Map();
+    const K = await contextoFichas(p), vistos = new Map();
     const resultados = [];
     for (const a of archivos) {
       const nombre = nombreUtf8(a.originalname || 'ficha.xlsx').slice(-200);
-      const x = await leerFicha(a.buffer);
-      const cod = x.meta?.cod_local;
-      let r;
-      if (cod && codigos.includes(cod) && !enPropuesta.has(cod)) r = { cod, errores: [{ hoja: '—', fila: null, motivo: `El local ${cod} está excluido de la propuesta por otra inversión vigente o reciente. Vuelve a incluirlo en Mi selección si corresponde.` }], avisos: [], rechazada: true, filas: { ok: 0, rechazadas: 0 } };
-      else r = procesarFicha(x, { D, C, P, codigos: new Set(codigos), proyectoId: p.id, anioDatos: p.anio_datos, hoy, archivo: nombre, filaPrevia: previas[cod] });
+      const r = validarFicha(K, await leerFicha(a.buffer), nombre);
       if (!r.rechazada) {
         if (vistos.has(r.cod)) r.avisos.unshift({ hoja: '—', fila: null, motivo: `Otra ficha del mismo local (${vistos.get(r.cod)}) se importó antes en esta carga: queda esta, que es la última.` });
-        const { censo, porNiv } = censoConNiveles(D, P, r.i);
-        const fila = { proyecto_id: p.id, cod_local: r.cod, ...r.fila, censo: porNiv ? { ...censo, _niveles: porNiv } : censo, creado_por: req.usuario.id, actualizado_en: new Date().toISOString() };
-        const { error } = await supabase.from('ioarr_expediente_inventario').upsert(fila, { onConflict: 'proyecto_id,cod_local' });
-        if (error) {
-          if (faltaMigracion(error) && !/ficha|por_nivel|adquisicion/.test(error.message || '')) return res.status(503).json({ error: AVISO_INV });
-          if (/ficha/.test(error.message || '')) return res.status(503).json({ error: AVISO_FICHA });
-          if (/por_nivel/.test(error.message || '')) return res.status(503).json({ error: AVISO_NIV });
-          if (/adquisicion/.test(error.message || '')) return res.status(503).json({ error: AVISO_ADQ });
-          throw error;
-        }
-        vistos.set(r.cod, nombre); previas[r.cod] = fila;
+        await guardarFichaInventario(K, r, req.usuario.id);
+        vistos.set(r.cod, nombre);
       }
-      const i = r.cod ? D.locs.findIndex(l => l[0] === r.cod) : -1;
-      resultados.push({ archivo: nombre, cod: r.cod || null, nom: i >= 0 ? D.locName[i] : null, estado: r.rechazada ? 'rechazada' : 'importada', filas: r.filas, errores: r.errores, avisos: r.avisos });
+      const i = r.cod ? K.D.locs.findIndex(l => l[0] === r.cod) : -1;
+      resultados.push({ archivo: nombre, cod: r.cod || null, nom: i >= 0 ? K.D.locName[i] : null, estado: r.rechazada ? 'rechazada' : 'importada', filas: r.filas, errores: r.errores, avisos: r.avisos });
     }
     res.json({ resultados, fichas: await vistaFichas(p) });
   }));
+
+  // ─── Fichas llenadas en la app (Visitas de campo) ─────────────────────────
+  // Lo que el supervisor llenó, validado con el contexto actual del proyecto
+  const validarFormulario = (K, cod, datos, origen) => validarFicha(K, fichaDesdeFormulario(datos, { proyectoId: K.p.id, cod, region: K.p.region }), origen);
+  async function fichaDigitalDe(p, cod) {
+    let f;
+    try { f = await leerFichaDigital(supabase, p.id, cod); }
+    catch (e) { if (faltaMigracion(e)) throw error503(AVISO_MIGRACION_FICHAS); throw e; }
+    if (!f) { const e = new Error('Este local no tiene ficha llenada en la app'); e.status = 404; throw e; }
+    return f;
+  }
+  const revision = r => ({ rechazada: r.rechazada, errores: r.errores, avisos: r.avisos, filas: r.filas });
+  api.get('/proyectos/:id/fichas/:cod/digital', responder(async (req, res) => {
+    const p = await proyecto(req), cod = String(req.params.cod);
+    const f = await fichaDigitalDe(p, cod);
+    const [modelo, K] = await Promise.all([fichaLocal(p, cod), contextoFichas(p)]);
+    const { por_id, ...ficha } = f;
+    res.json({ ficha, modelo, revision: revision(validarFormulario(K, cod, f.datos, origenDigital(f.por))) });
+  }));
+  api.post('/proyectos/:id/fichas/:cod/digital/aprobar', responder(async (req, res) => {
+    const p = await proyecto(req), cod = String(req.params.cod);
+    if (await sinMigracionFicha()) return res.status(503).json({ error: AVISO_FICHA });
+    const f = await fichaDigitalDe(p, cod);
+    if (f.estado !== 'enviada') return res.status(409).json({ error: f.estado === 'aprobada' ? 'La ficha ya está aprobada' : 'El supervisor aún no envía esta ficha a revisión' });
+    const K = await contextoFichas(p), r = validarFormulario(K, cod, f.datos, origenDigital(f.por));
+    if (r.rechazada || r.errores.length) return res.status(422).json({ error: 'La ficha tiene errores: devuélvela al supervisor para que la corrija.', revision: revision(r) });
+    await guardarFichaInventario(K, r, req.usuario.id);
+    await guardarFichaDigital(supabase, p.id, cod, { estado: 'aprobada', revisado_por: req.usuario.id, revisada_en: new Date().toISOString(), nota_revision: null });
+    res.json({ fichas: await vistaFichas(p) });
+  }));
+  api.post('/proyectos/:id/fichas/:cod/digital/observar', responder(async (req, res) => {
+    const p = await proyecto(req), cod = String(req.params.cod);
+    const nota = texto(req.body?.nota, 1000);
+    if (!nota) return res.status(400).json({ error: 'Escribe qué debe corregir el supervisor' });
+    const f = await fichaDigitalDe(p, cod);
+    if (f.estado !== 'enviada') return res.status(409).json({ error: f.estado === 'aprobada' ? 'La ficha ya está aprobada' : 'Solo se devuelve una ficha enviada a revisión' });
+    await guardarFichaDigital(supabase, p.id, cod, { estado: 'observada', revisado_por: req.usuario.id, revisada_en: new Date().toISOString(), nota_revision: nota });
+    res.json({ fichas: await vistaFichas(p) });
+  }));
+  // Para Visitas de campo (src/selector-ioarr/campo.js, por router.js): el proyecto ya viene validado
+  api.fichaLocal = fichaLocal;
+  api.validarFichaDigital = async (p, cod, datos, origen) => validarFormulario(await contextoFichas(p), cod, datos, origen);
 
   // ─── Documentos: Formato 07-C y memoria descriptiva ───────────────────────
   async function leerDatosDoc(p) {
