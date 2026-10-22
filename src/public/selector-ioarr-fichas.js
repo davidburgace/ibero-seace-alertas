@@ -11,6 +11,7 @@ const pct = n => NF.format(n) + ' %';
 const fechaPe = s => s ? String(s).slice(0, 10).split('-').reverse().join('/') : '';
 const norm = t => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 const PAGE = 40;
+const corto = email => String(email || '').split('@')[0] || 'supervisor';
 
 let ctx = null, vista = null, informe = null, version = 0, pag = 0, filtro = '';
 
@@ -32,7 +33,11 @@ function pintar() {
     <div class="exportar">
       <div><h3>Fichas de verificación por local</h3>
         <p>Una ficha por local, con el padrón y el censo ya cargados (la mesa, en puestos). La UGEL o la institución cuenta el mobiliario en campo, llena las celdas amarillas del Excel y te lo devuelve. Al importarlo, lo verificado reemplaza al censo en el cálculo, y el Formato 07-C indica qué porcentaje está verificado.</p></div>
-      <button class="btn btn-ghost" data-fichas-zip type="button">Todas las fichas (ZIP)</button>
+      <div class="fichas-zips">
+        <button class="btn btn-ghost" data-fichas-zip type="button">Todas las fichas (ZIP)</button>
+        ${vista.paquetes?.length ? `<span class="sub">Una carpeta por supervisor, según el reparto de Visitas de campo. O solo el paquete de:</span>
+        ${vista.paquetes.map(x => `<button class="btn btn-ghost btn-sm" data-fichas-zip="${esc(x.clave)}" type="button">${esc(x.clave === 'sin' ? 'Sin asignar' : corto(x.email))} (${ent(x.n)})</button>`).join('')}` : ''}
+      </div>
     </div>
     <div class="kpis">
       <div class="kpi destacado"><div class="v">${pct(R.pct)}</div><div class="l">de lo que se repone está verificado · ${ent(R.rep_verif)} de ${ent(R.rep)}</div></div>
@@ -70,19 +75,19 @@ function pintarInforme() {
 
 function pintarLocales() {
   const q = norm(filtro).split(/\s+/).filter(Boolean);
-  const locs = vista.locales.filter(l => !q.length || q.every(w => norm(`${l.cod} ${l.nom} ${l.dist} ${l.estado_texto}`).includes(w)));
+  const locs = vista.locales.filter(l => !q.length || q.every(w => norm(`${l.cod} ${l.nom} ${l.dist} ${l.estado_texto} ${l.supervisor || ''}`).includes(w)));
   const pags = Math.max(1, Math.ceil(locs.length / PAGE));
   if (pag >= pags) pag = pags - 1;
   const desde = pag * PAGE;
   const filas = locs.slice(desde, desde + PAGE).map(l => `<tr>
     <td class="mono">${esc(l.cod)}</td>
-    <td><span class="nm">${esc(l.nom)}</span><span class="sub">${esc(l.dist)} · ${esc(l.niveles.join(', '))}</span></td>
+    <td><span class="nm">${esc(l.nom)}</span><span class="sub">${esc(l.dist)} · ${esc(l.niveles.join(', '))}${vista.paquetes?.length ? ` · ${l.supervisor ? 'Supervisor: ' + esc(corto(l.supervisor)) : 'Sin supervisor'}` : ''}</span></td>
     <td class="num">${ent(l.aulas)}</td><td class="num">${ent(l.rep)}</td><td class="num">${ent(l.rep_verif)}</td>
     <td>${l.estado === 'verificado' ? `<span class="chip-est ok">Verificado${l.visita ? ' ' + fechaPe(l.visita) : ''}</span>` : '<span class="chip-est pend">Solo censo</span>'}
       ${l.ficha ? `<br><span class="sub" title="${esc(l.ficha.archivo)}">Ficha importada el ${fechaPe(l.ficha.importado_en)}${l.ficha.verificador ? ' · ' + esc(l.ficha.verificador) : ''}</span>` : l.estado === 'verificado' ? '<br><span class="sub">Corregido a mano</span>' : ''}</td>
     <td class="acciones"><button class="x" type="button" data-ficha-bajar="${esc(l.cod)}" data-formato="excel">Excel</button> <button class="x" type="button" data-ficha-bajar="${esc(l.cod)}" data-formato="pdf">PDF</button></td></tr>`).join('');
   return `<div class="panel-cab"><h3>Locales de la propuesta</h3>
-      <input type="search" class="buscar" data-fichas-filtro value="${esc(filtro)}" placeholder="Buscar por código, nombre o estado" aria-label="Buscar locales"></div>
+      <input type="search" class="buscar" data-fichas-filtro value="${esc(filtro)}" placeholder="Buscar por código, nombre, estado o supervisor" aria-label="Buscar locales"></div>
     <div class="tabla-wrap borde-0"><table class="tabla"><thead><tr><th>Código de local</th><th>Institución educativa</th><th class="num">Aulas</th><th class="num">A reponer</th><th class="num">Verificado</th><th>Estado</th><th>Ficha</th></tr></thead>
     <tbody>${filas || `<tr><td colspan="7" class="vacio">${vista.locales.length ? 'Ningún local coincide con la búsqueda.' : 'El proyecto no tiene locales en la propuesta.'}</td></tr>`}</tbody></table></div>
     ${vista.excluidos ? `<p class="sub pad">${vista.excluidos === 1 ? '1 local excluido' : ent(vista.excluidos) + ' locales excluidos'} por otra inversión vigente o reciente no lleva ficha.</p>` : ''}
@@ -139,7 +144,7 @@ export function enlazarFichas(el) {
     const b = e.target.closest('[data-ficha-bajar]');
     if (b) descargar(`/api/selector-ioarr/proyectos/${ctx.proyecto.id}/fichas/${encodeURIComponent(b.dataset.fichaBajar)}/${b.dataset.formato}`, b, `Ficha_${b.dataset.fichaBajar}.${b.dataset.formato === 'pdf' ? 'pdf' : 'xlsx'}`);
     const z = e.target.closest('[data-fichas-zip]');
-    if (z) descargar(`/api/selector-ioarr/proyectos/${ctx.proyecto.id}/fichas-zip`, z, 'Fichas_verificacion.zip', 'Armando el ZIP…');
+    if (z) descargar(`/api/selector-ioarr/proyectos/${ctx.proyecto.id}/fichas-zip${z.dataset.fichasZip ? '?paquete=' + encodeURIComponent(z.dataset.fichasZip) : ''}`, z, 'Fichas_verificacion.zip', 'Armando el ZIP…');
     const pg = e.target.closest('[data-fichas-pag]');
     if (pg) { pag += +pg.dataset.fichasPag; document.getElementById('fichas-locales').innerHTML = pintarLocales(); }
   });

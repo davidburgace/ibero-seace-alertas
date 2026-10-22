@@ -134,6 +134,7 @@ Ejecuta `supabase/migrations/019_ioarr_ficha_verificacion.sql` después de la 01
 **Descargas:**
 - La ficha de cada local, en Excel (para llenar) y en PDF (para imprimir y firmar).
 - Un ZIP con las de todos los locales de la propuesta. Los excluidos por otra inversión no llevan ficha.
+- **Por supervisor:** si el proyecto tiene reparto entre supervisores (Visitas de campo, migración 022), el ZIP trae una carpeta por supervisor (`Supervisor_ana/Excel`, `Supervisor_ana/PDF` y `00_LOCALES.txt` con su lista) y `Sin_asignar/` si queda alguno. `00_LEEME.txt` dice qué carpeta es de quién. Al lado de **Todas las fichas (ZIP)** hay un botón por supervisor para bajar solo su paquete (`?paquete=<id del supervisor>` o `?paquete=sin`). Cada ficha, Excel y PDF, dice en el encabezado «Supervisor asignado: …». En la tabla de locales se ve el supervisor de cada uno y se puede buscar por él. Sin reparto, el ZIP sale como antes.
 
 **Qué trae la ficha** (estructura del documento «Ficha de verificación de mobiliario escolar — IOARR de reposición»):
 - A. Datos del local, del padrón, y de la visita: fecha, verificador y acompañante.

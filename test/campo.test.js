@@ -406,3 +406,29 @@ test('campo: el worker reparte por zonas', () => {
   assert.match(js, /repartir\(\{ codigos, cuotas \}\)/);
   assert.match(js, /repartirZonas\(puntos, cuotas/);
 });
+
+// ─── Fichas de verificación por supervisor ──────────────────────────────────
+test('paquetesFichas: uno por supervisor (por correo), «Sin asignar» al final; sin reparto, uno solo', async () => {
+  const { paquetesFichas } = await import('../src/selector-ioarr/campo.js');
+  const cods = ['1', '2', '3', '4', '5'];
+  const asig = { '1': 'b', '2': 'a', '3': 'b', '5': 'c' };
+  const sups = { a: 'zoe@ibero.pe', b: 'ana.pérez@ibero.pe', c: 'ana.perez@otro.pe' };
+  const p = paquetesFichas(cods, asig, sups);
+  assert.deepEqual(p.map(x => [x.clave, x.carpeta, x.codigos]), [
+    ['b', 'Supervisor_ana_perez', ['1', '3']],
+    ['c', 'Supervisor_ana_perez_2', ['5']],
+    ['a', 'Supervisor_zoe', ['2']],
+    ['sin', 'Sin_asignar', ['4']]
+  ]);
+  assert.deepEqual(paquetesFichas(cods, null), [{ clave: 'todos', email: '', carpeta: '', codigos: cods }]);
+  assert.equal(paquetesFichas(cods, {})[0].clave, 'todos');
+  assert.equal(paquetesFichas(['1'], { '1': 'a' }, sups).length, 1);
+});
+
+test('fichas-zip: separa por supervisor y acepta ?paquete=', () => {
+  const js = leer('src/selector-ioarr/expediente.js');
+  assert.match(js, /paquetesFichas\(\[\.\.\.idxDe\.keys\(\)\], R\.asignaciones, R\.supervisores\)/);
+  assert.match(js, /req\.query\.paquete/);
+  assert.match(js, /supervisor: paq\.email/);
+  assert.match(leer('src/public/selector-ioarr-fichas.js'), /\?paquete=/);
+});

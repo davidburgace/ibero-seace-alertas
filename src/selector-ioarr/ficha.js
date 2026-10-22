@@ -68,7 +68,7 @@ const vacio = v => v == null || v === '';
  * @param D     datos de la región (prep)
  * @param C     calc(D, P): censo por aula ya en puestos (mesa) con los criterios del proyecto
  * @param i     índice del local
- * @param meta  { proyecto: { id, nombre }, anio, fecha }
+ * @param meta  { proyecto: { id, nombre }, anio, fecha, supervisor? (correo del supervisor de campo asignado) }
  */
 export function modeloFicha(D, C, i, meta = {}) {
   const l = D.locs[i], dist = D.dists[l[1]];
@@ -82,7 +82,7 @@ export function modeloFicha(D, C, i, meta = {}) {
     };
   });
   return {
-    version: VERSION_FICHA, proyecto: meta.proyecto || { id: '', nombre: '' }, anio: meta.anio || null, fecha: meta.fecha || '',
+    version: VERSION_FICHA, proyecto: meta.proyecto || { id: '', nombre: '' }, anio: meta.anio || null, fecha: meta.fecha || '', supervisor: meta.supervisor || '',
     local: { cod: l[0], nombre: D.locName[i], region: D.region, prov: D.provs[dist[2]], dist: dist[0], ubigeo: dist[1], ugel: D.ugels?.[l[2]] || '', cp: l[3] || '', rural: !!l[4], direccion: l[5] || '', lat: l[6], lon: l[7] },
     niveles: nivelesDeLocal(D, i), servicios, aulas
   };
@@ -142,7 +142,7 @@ export async function generarFichaExcel(F) {
 
   const L = F.local;
   fila(null, 24); unir(1, 12, 'Ficha de verificación de mobiliario escolar — IOARR de reposición', { bold: true, size: 15, borde: false });
-  fila(); unir(1, 12, `Local ${L.cod} · ${L.nombre} · Proyecto «${F.proyecto.nombre}» · generada el ${F.fecha} con el Padrón ESCALE y el Censo Educativo ${F.anio || ''}`, { size: 9, color: 'FF5C6270', borde: false });
+  fila(); unir(1, 12, `Local ${L.cod} · ${L.nombre} · Proyecto «${F.proyecto.nombre}» · generada el ${F.fecha} con el Padrón ESCALE y el Censo Educativo ${F.anio || ''}${F.supervisor ? ` · Supervisor asignado: ${F.supervisor}` : ''}`, { size: 9, color: 'FF5C6270', borde: false });
   parrafo('Las celdas grises las llenó la app; las amarillas se llenan en campo. Una ficha por local. Al terminar, súbela en Selector IOARR → Expediente → Fichas: las cantidades verificadas reemplazan a las del censo en el cálculo.', { italic: true, alto: 28 });
   parrafo(NOTA_SIGLAS, { italic: true, alto: 28 });
 
@@ -287,7 +287,7 @@ export function generarFichaPdf(F) {
     const G = '#EEF0F4', A = '#FFF8DC', L = F.local;
 
     texto('Ficha de verificación de mobiliario escolar — IOARR de reposición', { bold: true, size: 15, despues: 0.1 });
-    texto(`Local ${L.cod} · ${L.nombre} · Proyecto «${F.proyecto.nombre}» · generada el ${F.fecha} con el Padrón ESCALE y el Censo Educativo ${F.anio || ''}`, { size: 8, color: '#5C6270' });
+    texto(`Local ${L.cod} · ${L.nombre} · Proyecto «${F.proyecto.nombre}» · generada el ${F.fecha} con el Padrón ESCALE y el Censo Educativo ${F.anio || ''}${F.supervisor ? ` · Supervisor asignado: ${F.supervisor}` : ''}`, { size: 8, color: '#5C6270' });
     texto('Lo gris lo llenó la app; lo amarillo se llena en campo. Para cargar los datos en la app, usa el Excel de esta misma ficha.', { italic: true, size: 8, color: '#5C6270' });
 
     titulo('A. Datos del local educativo');

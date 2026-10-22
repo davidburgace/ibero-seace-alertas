@@ -234,3 +234,19 @@ test('los estudiantes verificados cambian el requerido y el faltante, no lo que 
   assert.equal(con.partidas[0].req, reqCenso + 10);
   assert.equal(con.partidas[0].rep, sin.partidas[0].rep);
 });
+
+// ─── Fichas por supervisor (reparto de Visitas de campo) ─────────────────────
+test('la ficha dice el supervisor asignado y se sigue importando igual', async () => {
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(await generarFichaExcel(modeloFicha(D, C, iU, { ...META, supervisor: 'ana@ibero.pe' })));
+  let texto = '';
+  wb.getWorksheet('Ficha').eachRow(row => row.eachCell(c => { texto += ' ' + (c.value ?? ''); }));
+  assert.match(texto, /Supervisor asignado: ana@ibero\.pe/);
+  const sin = new ExcelJS.Workbook();
+  await sin.xlsx.load(await generarFichaExcel(modeloFicha(D, C, iU, META)));
+  let t2 = ''; sin.getWorksheet('Ficha').eachRow(row => row.eachCell(c => { t2 += ' ' + (c.value ?? ''); }));
+  assert.doesNotMatch(t2, /Supervisor asignado/);
+  const r = await importar(await fichaLlena(iU, (ws, filaDe) => { conFecha(ws, filaDe); poner(ws, filaDe('ITEM|silla', 0), { 5: 0, 6: 0, 7: 1 }); }, { ...META, supervisor: 'ana@ibero.pe' }));
+  assert.equal(r.rechazada, false);
+  assert.ok((await generarFichaPdf(modeloFicha(D, C, iU, { ...META, supervisor: 'ana@ibero.pe' }))).length > 1000);
+});
