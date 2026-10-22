@@ -196,7 +196,7 @@ async function repartir() {
     const r = await w('repartir', { codigos: P.locales, cuotas });
     const asignaciones = {};
     r.zonas.forEach((z, i) => z.forEach(c => { asignaciones[c] = ids[i]; }));
-    const g = await api(`/api/campo/proyectos/${encodeURIComponent(P.id)}/asignaciones`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ asignaciones, reemplazar: true }) });
+    const g = await guardarAsig(asignaciones, true);
     P.asig = g.asignaciones; P.sups = g.supervisores;
     cuotasDelReparto(); pintarVer(); pintarReparto();
     toast('Reparto guardado: ' + ids.map((id, i) => `${corto(correoSup(id))} ${fmt(r.zonas[i].length)}`).join(' · ') + (r.sobran.length + r.fuera.length ? ` · ${fmt(r.sobran.length + r.fuera.length)} sin asignar` : '') + '.');
@@ -209,7 +209,7 @@ async function repartir() {
 async function asignarUno(cod, id, sel) {
   const P = S.proy; sel.disabled = true;
   try {
-    const g = await api(`/api/campo/proyectos/${encodeURIComponent(P.id)}/asignaciones`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ asignaciones: { [cod]: id || null } }) });
+    const g = await guardarAsig({ [cod]: id || null });
     P.asig = g.asignaciones; P.sups = g.supervisores;
     const nom = S.filas.find(f => f.cod === cod)?.nom || `Local ${cod}`;
     toast(id ? `${nom}: ahora es de ${corto(correoSup(id))}.` : `${nom}: sin asignar.`);
@@ -217,6 +217,19 @@ async function asignarUno(cod, id, sel) {
   } catch (e) { toast(`No se pudo cambiar el supervisor: ${e.message}`); sel.value = P.asig?.[cod] || ''; }
   finally { sel.disabled = false; }
 }
+// Guarda asignaciones en partes de 500 (el servidor acepta cuerpos de hasta 100 KB: ~2000 colegios).
+// Con reemplazar, solo la primera parte borra el reparto anterior. Devuelve el reparto final del servidor
+const POR_ENVIO = 500;
+async function guardarAsig(asignaciones, reemplazar = false) {
+  const P = S.proy, filas = Object.entries(asignaciones);
+  let g = null;
+  for (let i = 0; i < filas.length || i === 0; i += POR_ENVIO) {
+    g = await api(`/api/campo/proyectos/${encodeURIComponent(P.id)}/asignaciones`, { method: 'PUT', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ asignaciones: Object.fromEntries(filas.slice(i, i + POR_ENVIO)), reemplazar: reemplazar && i === 0 }) });
+  }
+  return g;
+}
+
 // ─── Asignar en bloque ──────────────────────────────────────────────────────
 // El proveedor asigna de una vez todos los colegios del listado, o los de un día de visita.
 // Para armar el grupo: «Colegios a visitar» (p. ej. 30) + un centro, o «Colegios del proyecto → Sin asignar»
@@ -239,7 +252,7 @@ async function asignarBloque(caja, boton) {
   boton.disabled = true;
   try {
     const asignaciones = Object.fromEntries(cods.map(c => [c, id]));
-    const g = await api(`/api/campo/proyectos/${encodeURIComponent(P.id)}/asignaciones`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ asignaciones }) });
+    const g = await guardarAsig(asignaciones);
     P.asig = g.asignaciones; P.sups = g.supervisores;
     toast(`${plural(cods.length, 'colegio', 'colegios')} ${id ? `asignados a ${corto(correoSup(id))}` : 'sin asignar'}.`);
     pintarLista(); pintarVer(); pintarReparto(); pintarInfoVisitas();

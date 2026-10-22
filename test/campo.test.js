@@ -443,12 +443,19 @@ test('campo: asignar en bloque los colegios del listado o de un día (sin reempl
   assert.match(js, /barraBloque\('lista', S\.filas\.map\(f => f\.cod\)/);
   assert.match(js, /barraBloque\('dia-' \+ d\.dia, d\.puntos\.map\(p => p\.cod\)/);
   const f = js.slice(js.indexOf('async function asignarBloque'), js.indexOf('// Lo que el listado muestra del reparto'));
-  assert.match(f, /JSON\.stringify\(\{ asignaciones \}\)/);
-  assert.doesNotMatch(f, /reemplazar/);
+  assert.match(f, /guardarAsig\(asignaciones\)/);
+  assert.doesNotMatch(f, /reemplazar|guardarAsig\(asignaciones, true\)/);
 });
 
 test('campo: con más de 200 colegios, se asigna todo «Colegios del proyecto» de una vez', () => {
   const js = leer('src/public/campo.js');
   assert.match(js, /barraBloque\('ver', ver,/);
   assert.match(js, /ver\.length > S\.filas\.length/);
+});
+
+test('campo: los repartos grandes se guardan en partes de 500 y solo la primera reemplaza', () => {
+  const js = leer('src/public/campo.js');
+  assert.match(js, /const POR_ENVIO = 500;/);
+  assert.match(js, /reemplazar: reemplazar && i === 0/);
+  assert.equal((js.match(/method: 'PUT'/g) || []).length, 2, 'un PUT de visitas y uno de asignaciones (guardarAsig)');
 });
