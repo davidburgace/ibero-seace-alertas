@@ -7,6 +7,8 @@
 // Reparto entre supervisores (migración 022, tabla campo_asignaciones; solo el proveedor dueño del proyecto):
 //   GET /api/campo/supervisores                  → [{ id, email }] los usuarios con rol supervisor
 //   PUT /api/campo/proyectos/:id/asignaciones    { asignaciones: { códigoLocal: supervisorId | null }, reemplazar? }
+//   GET /api/campo/proyectos/:id/fichas-zip      fichas de verificación (Excel y PDF) de los colegios del supervisor que
+//       las pide; el proveedor dueño, de todos (?paquete=<supervisorId>|sin para uno). Lo arma fichasZip (router.js)
 //       reemplazar = true: el reparto completo (borra el anterior); si no, cambia solo esos colegios (null = sin asignar)
 // Colegios visitados (migración 021, tabla campo_visitas; una fila por local):
 //   GET    /api/campo/visitas          → { códigoLocal: { fecha, por, mia } }
@@ -184,7 +186,19 @@ export async function desmarcarVisita(sb, usuario, codigo) {
   return { status: 200, body: { codigo, borrado: true } };
 }
 
-export function crearApiCampo(sb = supabase) {
+// ¿Qué paquete de fichas puede bajar este usuario? → { paquete } o { status, error }
+export async function paqueteFichasCampo(sb, usuario, proyectoId, pedido) {
+  const p = await proyectoCampo(sb, usuario, proyectoId);
+  if (!p) return { status: 404, error: 'Proyecto no encontrado' };
+  if (usuario.rol === 'supervisor') {
+    if (!p.asignaciones || !Object.values(p.asignaciones).includes(usuario.id)) return { status: 404, error: 'No tienes colegios asignados en este proyecto' };
+    return { paquete: usuario.id };
+  }
+  return { paquete: pedido ? String(pedido) : null };
+}
+
+// deps.fichasZip(res, proyectoId, paquete): arma el ZIP (src/selector-ioarr/router.js → fichasZipProyecto)
+export function crearApiCampo(sb = supabase, deps = {}) {
   const api = express.Router();
   const fallo = (res, next) => e => faltaMigracion(e) ? res.status(503).json({ error: AVISO_MIGRACION_CAMPO }) : next(e);
   api.use((req, res, next) => {
@@ -204,6 +218,15 @@ export function crearApiCampo(sb = supabase) {
     : listarSupervisores(sb).then(d => res.json(d), next));
   api.put('/proyectos/:id/asignaciones', (req, res, next) =>
     guardarAsignaciones(sb, req.usuario, req.params.id, req.body || {}).then(r => res.status(r.status).json(r.body), falloAsig(res, next)));
+
+  api.get('/proyectos/:id/fichas-zip', async (req, res, next) => {
+    try {
+      if (!deps.fichasZip) return res.status(503).json({ error: 'Las fichas no están disponibles' });
+      const r = await paqueteFichasCampo(sb, req.usuario, req.params.id, req.query.paquete);
+      if (r.error) return res.status(r.status).json({ error: r.error });
+      await deps.fichasZip(res, req.params.id, r.paquete);
+    } catch (e) { next(e); }
+  });
 
   const falloVisitas = (res, next) => e => faltaMigracion(e) ? res.status(503).json({ error: AVISO_MIGRACION_VISITAS }) : next(e);
   const enviar = res => r => res.status(r.status).json(r.body);

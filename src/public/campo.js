@@ -91,6 +91,7 @@ async function cargarProyectos() {
   try { S.proys = await api('/api/campo/proyectos'); }
   catch (e) { console.warn('Proyectos', e); S.proys = []; }
   $('cProyCampo').hidden = !S.proys.length;
+  $('cFichasCampo').hidden = true;
   $('cProy').innerHTML = '<option value="">Ninguno: toda la región</option>' + S.proys.map(p =>
     `<option value="${esc(p.id)}">${esc(p.nombre)} · ${esc(p.region)} · ${plural(p.n_locales, 'colegio', 'colegios')}</option>`).join('');
 }
@@ -119,6 +120,8 @@ const etiquetaVer = () => S.ver === 'sin' ? 'sin asignar' : S.ver === S.yo ? 'tu
 
 function pintarVer() {
   const P = S.proy, { porSup, sin } = conteoAsig();
+  // El supervisor con colegios asignados baja sus fichas de verificación
+  $('cFichasCampo').hidden = !(S.rol === 'supervisor' && porSup.has(S.yo));
   const hay = !!P?.asig && (porSup.size > 0 || S.rol === 'proveedor');
   $('cVerCampo').hidden = !hay;
   if (!hay) return;
@@ -253,6 +256,21 @@ function extraItem(f) {
   return { clase: [a.clase, b.clase].filter(Boolean).join(' '), cuerpo: (b.cuerpo || '') + (a.cuerpo || ''), acc: (a.acc || '') + (b.acc || '') };
 }
 
+// ─── Fichas de verificación del supervisor ──────────────────────────────────
+async function bajarFichas() {
+  const P = S.proy, b = $('cFichas'); if (!P) return;
+  const txt = b.textContent; b.disabled = true; b.textContent = 'Armando el ZIP… (puede tardar un minuto)';
+  try {
+    const r = await fetch(`/api/campo/proyectos/${encodeURIComponent(P.id)}/fichas-zip`);
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'error ' + r.status);
+    const blob = await r.blob(), cd = r.headers.get('Content-Disposition') || '';
+    const nombre = decodeURIComponent((cd.match(/filename\*=UTF-8''([^;]+)/) || [])[1] || 'Fichas_verificacion.zip');
+    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: nombre });
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+  } catch (e) { toast(`No se pudieron bajar las fichas: ${e.message}`); }
+  finally { b.disabled = false; b.textContent = txt; }
+}
+
 // ─── Colegios visitados ─────────────────────────────────────────────────────
 async function cargarVisitas() {
   try { S.visitas = await api('/api/campo/visitas'); }
@@ -323,7 +341,7 @@ async function elegirProyecto(id) {
 async function quitarProyecto({ rebuscar = true } = {}) {
   const habia = !!S.proy;
   S.proy = null; S.ver = 'todo'; store('proyecto', null); $('cProy').value = '';
-  $('cVerCampo').hidden = true; $('cReparto').hidden = true;
+  $('cVerCampo').hidden = true; $('cReparto').hidden = true; $('cFichasCampo').hidden = true;
   if (!habia) return;
   await w('limitar', { codigos: null });
   fijarMaxN();
@@ -493,6 +511,7 @@ function bind() {
   $('cRegion').onchange = async e => { await quitarProyecto({ rebuscar: false }); cargarRegion(e.target.value); };
   $('cProy').onchange = e => elegirProyecto(e.target.value);
   $('cVer').onchange = e => { S.ver = e.target.value; aplicarVer(); };
+  $('cFichas').onclick = bajarFichas;
   $('cRepSups').addEventListener('change', e => {
     const ch = e.target.closest('[data-sup]');
     if (ch) { if (ch.checked) S.cuotas.set(ch.dataset.sup, 0); else S.cuotas.delete(ch.dataset.sup); partesIguales(); return; }
