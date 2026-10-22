@@ -4,6 +4,7 @@ import { CRIT, DEF, ITEMS, NIVN, NIVS, NIVB, FILTRO_VACIO, limpiarParams, coordV
 import { renderExpediente, enlazarExpediente } from '/selector-ioarr-expediente.js';
 import { limitarN, MAX_PUNTOS } from '/selector-ioarr/cercania.js';
 import { crearMapa as crearMapaLocales, fmtKm } from '/selector-ioarr-mapa.js';
+import { limitarPorDia, colorDia, generarKML, AVISO_VISITAS } from '/selector-ioarr/visitas.js';
 
 const ANIO = 2025;
 const BASE_DATOS = `/data/selector-ioarr/${ANIO}/`;
@@ -54,7 +55,8 @@ const S = {
   dup: {}, sinMigDup: false,                           // otra inversión vigente o reciente por local (solo proyectos guardados)
   revSit: {}, sit: null,                               // estado situacional: advertencias explicadas y último cuadro calculado
   near: null,                                          // búsqueda por cercanía: { lat, lon, n, label }
-  pick: false, mapaOn: false, mapa: null, mapaCreando: null, ajustarMapa: false   // mapa de locales (Leaflet)
+  pick: false, mapaOn: false, mapa: null, mapaCreando: null, ajustarMapa: false,  // mapa de locales (Leaflet)
+  vis: null                                            // días de visita: { porDia, dia (0 = todos), R: resultado del worker }
 };
 const nearArg = () => S.near ? { lat: S.near.lat, lon: S.near.lon, n: S.near.n } : null;
 
@@ -174,6 +176,7 @@ async function cargarRegion(nombre, params, codigos) {
   S.params = params; S.sel = new Set(codigos);
   S.f = FILTRO_VACIO(); S.page = 0; S.open.clear(); S.detalles.clear(); S.mapas.clear();
   S.near = null; S.pick = false; S.ajustarMapa = true; S.mapa?.modoElegir(false);
+  S.vis = null; renderVisitas();
   renderCrit();
   if (S.region !== nombre || !S.meta) {
     $('count').textContent = `Cargando ${g.nombre}…`; $('tbody').innerHTML = ''; document.body.classList.add('cargando');
@@ -372,6 +375,22 @@ async function renderMapa() {
   }
   $('mapaBox').hidden = false; $('nBase').hidden = false;
   m.modoElegir(S.pick);
+  $('mapaLeyenda').hidden = !!S.vis;
+  if (S.vis) {
+    const clave = JSON.stringify(['vis', S.region, S.vis.dia, S.vis.porDia, S.vis.R.codigos.length]);
+    const ajustar = S.ajustarMapa || clave !== S.mapaClave; S.ajustarMapa = false; S.mapaClave = clave;
+    // Con todos los días a la vista, como máximo MAX_PUNTOS puntos (días completos)
+    // (con un día elegido: ese día primero y los demás en gris hasta el tope)
+    const todos = S.vis.R.dias, act = todos.find(d => d.dia === S.vis.dia);
+    const dias = act ? [act] : []; let n = act ? act.puntos.length : 0;
+    for (const d of todos) { if (d === act) continue; if (dias.length && n + d.puntos.length > MAX_PUNTOS) break; dias.push(d); n += d.puntos.length; }
+    m.pintarVisitas(dias, S.vis.dia, ajustar, todos.length);
+    const sc = S.vis.R.sinCoord.length;
+    avisoMapa(`Mapa de los días de visita${S.vis.dia ? ` · día ${S.vis.dia} resaltado` : ''}. El número es el orden de visita; la línea punteada es la ruta aproximada en línea recta.`
+      + (dias.length < todos.length ? (S.vis.dia ? ` Para no saturar el mapa, se muestran ${fmt(dias.length)} de ${fmt(todos.length)} días.` : ` Se muestran los días 1 a ${dias.length} de ${fmt(todos.length)}: elige un día en «Ver en el mapa» para ver otro.`) : '')
+      + (sc ? ` ${fmt(sc)} local${sc === 1 ? '' : 'es'} sin coordenadas no aparece${sc === 1 ? '' : 'n'}.` : ''), false);
+    return;
+  }
   const P = await w('puntos');
   // Reencuadra al abrir, al cambiar el centro o los filtros; no al seleccionar un punto
   const clave = JSON.stringify([S.region, S.f, nearArg()]);
@@ -396,12 +415,77 @@ async function renderDock() {
 async function refresh() {
   if (S.cargando || !S.meta) return;
   renderHead();
+  if (S.vis) await actualizarVisitas();
   await Promise.all([renderTable(), renderDock(), S.tab === 'sel' ? renderSel() : null, S.tab === 'exp' ? abrirExpediente() : null]);
 }
 
 async function cambioSel() {
   await w('sel', { codigos: [...S.sel] });
   persistirSel();
+}
+
+// ─── Días de visita ─────────────────────────────────────────────────────────
+async function actualizarVisitas() {
+  S.vis.R = await w('visitas', { porDia: S.vis.porDia });
+  if (S.vis.dia > S.vis.R.dias.length) S.vis.dia = 0;
+  renderVisitas();
+}
+async function agruparDias() {
+  const porDia = limitarPorDia($('vPorDia').value); $('vPorDia').value = porDia;
+  S.vis = { porDia, dia: 0, R: null };
+  await actualizarVisitas();
+  if (!S.vis.R.dias.length && !S.vis.R.sinCoord.length) { S.vis = null; renderVisitas(); toast('Primero selecciona los locales que vas a visitar.'); return; }
+  S.pick = false; S.mapaOn = true; S.ajustarMapa = true;
+  renderCerca(); await renderMapa();
+  $('visitas').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function quitarVisitas() { S.vis = null; S.ajustarMapa = true; renderVisitas(); if (S.mapaOn) renderMapa(); }
+function renderVisitas() {
+  const V = S.vis;
+  $('vRes').hidden = !V; $('vClr').hidden = !V;
+  $('vGo').textContent = V ? 'Volver a agrupar' : 'Agrupar por días de visita';
+  if (!V?.R) return;
+  const { dias, sinCoord, nExcl } = V.R, total = dias.length;
+  const nLoc = dias.reduce((a, d) => a + d.puntos.length, 0);
+  $('vAviso').innerHTML = `<b>${fmt(nLoc)}</b> local${nLoc === 1 ? '' : 'es'} en <b>${fmt(total)}</b> día${total === 1 ? '' : 's'} de hasta ${fmt(V.porDia)} locales. ${esc(AVISO_VISITAS)}`
+    + (sinCoord.length ? `<br>${fmt(sinCoord.length)} local${sinCoord.length === 1 ? '' : 'es'} sin coordenadas válidas no se agrupa${sinCoord.length === 1 ? '' : 'n'}: van al final del Excel.` : '')
+    + (nExcl ? `<br>${fmt(nExcl)} local${nExcl === 1 ? '' : 'es'} excluido${nExcl === 1 ? '' : 's'} por otra inversión no se incluye${nExcl === 1 ? '' : 'n'}.` : '')
+    + (total > 8 ? '<br>Con más de 8 días, el mapa muestra todos en gris: elige un día en «Ver en el mapa» para resaltarlo.' : '');
+  $('vDia').innerHTML = `<option value="0">Todos los días</option>` + dias.map(d => `<option value="${d.dia}">Día ${d.dia} (${d.puntos.length} locales)</option>`).join('');
+  $('vDia').value = String(V.dia);
+  $('vXls').disabled = $('vKml').disabled = !nLoc && !sinCoord.length;
+  $('vKml').disabled = !nLoc;
+  $('vLista').innerHTML = dias.map(d => {
+    const rep = d.puntos.reduce((a, p) => a + p.rep, 0);
+    return `<div class="dia ${V.dia === d.dia ? 'activo' : ''}"><button class="dia-cab" type="button" data-dia="${d.dia}" aria-pressed="${V.dia === d.dia}" style="--c:${colorDia(d.dia, total)}">
+      <span class="sw"></span><b>Día ${d.dia}</b><span class="sub">${d.puntos.length} local${d.puntos.length === 1 ? '' : 'es'} · ~${fmtKm(d.km)} km · ${fmt(rep)} a reponer</span></button>
+      <ol>${d.puntos.map(p => `<li><span class="n">${p.orden}</span><span><span class="nm">${esc(p.nom)}</span><span class="sub"><span class="mono">${esc(p.cod)}</span> · ${esc(p.dist)}${p.cp ? ' · ' + esc(p.cp) : ''}</span></span><span class="sub num" title="Bienes a reponer">${fmt(p.rep)}</span></li>`).join('')}</ol></div>`;
+  }).join('');
+}
+function verDia(dia) { S.vis.dia = dia; S.ajustarMapa = true; renderVisitas(); S.mapaOn = true; renderMapa(); }
+function descargar(blob, nombre) {
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: nombre });
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+}
+const hoy = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Lima' }).format(new Date());
+const slugNombre = s => String(s || 'Borrador').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 60) || 'Borrador';
+async function excelVisitas(btn) {
+  const txt = btn.textContent; btn.disabled = true; btn.textContent = 'Generando…';
+  try {
+    const r = await fetch('/api/selector-ioarr/visitas.xlsx', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ region: S.region, codigos: S.vis.R.codigos, criterios: S.params, porDia: S.vis.porDia, proyecto: S.proyecto?.nombre || null }) });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Error ' + r.status);
+    const cd = r.headers.get('Content-Disposition') || '';
+    descargar(await r.blob(), decodeURIComponent((cd.match(/filename\*=UTF-8''([^;]+)/) || [])[1] || 'Visitas.xlsx'));
+    toast('Excel del plan de visitas descargado.');
+  } catch (e) { toast('No se pudo generar el Excel: ' + e.message); }
+  finally { btn.disabled = false; btn.textContent = txt; }
+}
+function kmlVisitas() {
+  const kml = generarKML(S.vis.R.dias, { proyecto: S.proyecto?.nombre || 'Borrador', region: S.region, porDia: S.vis.porDia });
+  descargar(new Blob([kml], { type: 'application/vnd.google-earth.kml+xml' }), `Visitas_${slugNombre(S.proyecto?.nombre)}_${hoy()}.kml`);
+  toast('KML descargado: ábrelo en Google Earth o impórtalo en Google My Maps.');
 }
 
 // ─── Mi selección ────────────────────────────────────────────────────────────
@@ -784,6 +868,13 @@ function bind() {
   $('nClr').onclick = quitarCerca;
   $('nMap').onclick = () => { S.mapaOn = !S.mapaOn; if (S.mapaOn) S.ajustarMapa = true; else { S.pick = false; renderCerca(); } renderMapa(); };
   $('nBase').onclick = () => { if (!S.mapa) return; const b = S.mapa.alternarCapa(); $('nBase').textContent = b === 'sat' ? 'Ver calles' : 'Ver satélite'; };
+  $('vGo').onclick = agruparDias;
+  $('vPorDia').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); agruparDias(); } });
+  $('vClr').onclick = quitarVisitas;
+  $('vDia').onchange = e => verDia(+e.target.value);
+  $('vLista').addEventListener('click', e => { const b = e.target.closest('[data-dia]'); if (b) verDia(S.vis.dia === +b.dataset.dia ? 0 : +b.dataset.dia); });
+  $('vXls').onclick = e => excelVisitas(e.currentTarget);
+  $('vKml').onclick = kmlVisitas;
   $('selAll').onclick = async () => { for (const c of await w('codigosVista')) S.sel.add(c); await cambioSel(); refresh(); };
   $('unselAll').onclick = async () => { for (const c of await w('codigosVista')) S.sel.delete(c); await cambioSel(); refresh(); };
   $('pgPrev').onclick = () => { S.page = Math.max(0, S.page - 1); renderTable(); };
@@ -800,6 +891,7 @@ function bind() {
     cb.closest('tr').classList.toggle('sel', cb.checked);
     await cambioSel(); renderDock();
     const R = await w('consulta', { f: S.f, sort: S.sort, page: S.page, size: PAGE, near: nearArg() });
+    if (S.vis) await actualizarVisitas();
     if (S.mapaOn) renderMapa();
     $('count').innerHTML = `<b>${fmt(R.total)}</b> locales · ${fmt(R.est)} estudiantes · ${fmt(R.aul)} aulas en el censo · <span class="sub">${fmt(R.nsel)} ya seleccionados</span>`;
     $('unselAll').disabled = !R.nsel;

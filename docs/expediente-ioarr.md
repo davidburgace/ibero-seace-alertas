@@ -207,6 +207,33 @@ Ejecuta `supabase/migrations/019_ioarr_ficha_verificacion.sql` después de la 01
 
 **Pruebas:** `test/selector-cercania.test.js`. En Moquegua, los 20 más cercanos al distrito de Moquegua llegan hasta 1.20 km y suman 7,373 estudiantes.
 
+### Días de visita
+
+**Dónde está:** el mismo panel, debajo del mapa → **Días de visita**.
+
+**Agrupar por días de visita:** se indica cuántos locales por día (por defecto 8, de 1 a 50) y la app divide la **selección** (sin los excluidos por otra inversión) así:
+1. Toma el local sin asignar más alejado del centro de todos, y le suma los más cercanos al centro del grupo que se va formando, hasta llenar el día.
+2. Ordena cada día por vecino más cercano, empezando por el extremo del grupo.
+3. Ordena los días de la misma forma, para que días seguidos queden cerca.
+
+El resultado no depende del orden en que se eligieron los locales. Se recalcula solo al cambiar la selección.
+
+**Qué muestra:**
+- Una tarjeta por día, con sus locales en orden, el recorrido aproximado y los bienes a reponer.
+- En el mapa, puntos numerados por orden de visita y la ruta punteada de cada día.
+- Hasta 8 días, cada uno lleva su color (paleta fija). Con más de 8, todos van en gris y el día elegido en «Ver en el mapa» se resalta: así no se repiten colores.
+- Con todos los días a la vista, el mapa dibuja hasta 500 puntos y avisa si hay más.
+- Un aviso de que las distancias son en línea recta y no incluyen carreteras ni tiempos de viaje.
+- Los locales sin coordenadas no se agrupan; van al final del Excel.
+
+**Exportar:**
+- **Excel** (`POST /api/selector-ioarr/visitas.xlsx`, sirve también para borradores): hoja «Visitas» con grupo, orden, código de local, institución, distrito, centro poblado, dirección, latitud, longitud y bienes a reponer, y hoja «Resumen por día». El servidor agrupa con el mismo código que la pantalla.
+- **KML** (se arma en el navegador): una carpeta por día, con los puntos y la ruta aproximada. Se abre en Google Earth o se importa en Google My Maps.
+
+**Mejora futura: tiempos por carretera.** No está implementado. La recomendación es **OpenRouteService**, que tiene un plan gratuito con llave (del orden de 2,000 rutas y 500 matrices de distancia por día) y alcanza para planificar visitas. Para mucho volumen, conviene **OSRM** alojado por nosotros, con el mapa de Perú en un servidor de unos 10 a 20 USD al mes. Hay que confirmar los límites y precios vigentes antes de contratar.
+
+**Código:** `src/selector-ioarr/visitas.js` (agrupación, colores y KML), `src/selector-ioarr/excel-visitas.js` y la acción `visitas` del worker. **Pruebas:** `test/selector-visitas.test.js`.
+
 ## Etapa 1: costos
 
 ### Migración

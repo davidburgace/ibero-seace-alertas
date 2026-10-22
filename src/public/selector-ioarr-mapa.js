@@ -2,6 +2,7 @@
 // Leaflet se carga solo al abrir el mapa; si no carga, la página sigue funcionando sin mapa.
 import { radioPunto } from '/selector-ioarr/cercania.js';
 import { urlGoogleMaps } from '/selector-ioarr/calculo.js';
+import { colorDia, GRIS_DIA } from '/selector-ioarr/visitas.js';
 
 const RUTA = '/vendor/leaflet-1.9.4';
 const CAPAS = {
@@ -35,8 +36,8 @@ export function cargarLeaflet() {
 
 const color = (nombre, defecto) => getComputedStyle(document.documentElement).getPropertyValue(nombre).trim() || defecto;
 
-function popup(p) {
-  return `<div class="pop"><b>${esc(p.nom)}</b>
+function popup(p, dia) {
+  return `<div class="pop"><b>${esc(p.nom)}</b>${dia ? `<div class="pop-dia">Día ${dia} · parada ${p.orden}</div>` : ''}
     <div>Local <span class="mono">${esc(p.cod)}</span> · ${esc(p.dist)}</div>
     <div>${fmt(p.est)} estudiantes · ${fmt(p.rep)} bienes a reponer</div>
     ${p.km != null ? `<div>A ${fmtKm(p.km)} km del centro (en línea recta)</div>` : ''}
@@ -84,6 +85,27 @@ export async function crearMapa(box, { onPunto, onSel }) {
         L.circleMarker([centro.lat, centro.lon], { radius: 11, color: rojo, weight: 3, fillColor: rojo, fillOpacity: 0.2, dashArray: '4 3' })
           .bindTooltip('Centro de la búsqueda').addTo(grupo);
         pts.push([centro.lat, centro.lon]);
+      }
+      if (ajustar && pts.length) map.fitBounds(pts, { padding: [30, 30], maxZoom: 16 });
+    },
+    // Días de visita: puntos numerados por orden y la ruta aproximada de cada día.
+    // activo: 0 = todos los días; n = resalta el día n (los demás quedan en gris)
+    // total: cantidad de días del plan (puede ser mayor que los que se dibujan)
+    pintarVisitas(dias, activo, ajustar, total = dias.length) {
+      map.invalidateSize();
+      grupo.clearLayers();
+      const pts = [];
+      for (const d of dias) {
+        const resaltado = !activo || activo === d.dia;
+        const c = activo ? (resaltado ? (total <= 8 ? colorDia(d.dia, total) : color('--accent', '#3a63e0')) : GRIS_DIA) : colorDia(d.dia, total);
+        const ll = d.puntos.map(p => [p.lat, p.lon]);
+        if (ll.length > 1) L.polyline(ll, { color: c, weight: resaltado ? 3 : 2, opacity: resaltado ? 0.9 : 0.35, dashArray: '6 6', interactive: false }).addTo(grupo);
+        for (const p of d.puntos) {
+          const icon = L.divIcon({ className: 'pt-visita' + (resaltado ? '' : ' apagado'), html: `<span style="background:${c}">${p.orden}</span>`, iconSize: [24, 24], iconAnchor: [12, 12], popupAnchor: [0, -10] });
+          L.marker([p.lat, p.lon], { icon, keyboard: true, title: `Día ${d.dia} · parada ${p.orden}: ${p.nom}`, zIndexOffset: resaltado ? 1000 : 0 })
+            .bindPopup(popup({ ...p, sel: true, km: null }, d.dia), { maxWidth: 280 }).addTo(grupo);
+          if (resaltado) pts.push([p.lat, p.lon]);
+        }
       }
       if (ajustar && pts.length) map.fitBounds(pts, { padding: [30, 30], maxZoom: 16 });
     },

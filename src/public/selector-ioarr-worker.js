@@ -3,6 +3,7 @@
 // así Lima (32 mil aulas) no congela la pantalla.
 import { ITEMS, NIVN, NIVS, NIVB, DEF, prep, calc, totals, filtrar, lv, norm, limpiarParams, totalesPorNivel, estadoSituacional } from '/selector-ioarr/calculo.js';
 import { cercanos, centroDistrito, localConCoord, haversine, MAX_PUNTOS } from '/selector-ioarr/cercania.js';
+import { agruparVisitas, puntosVisita } from '/selector-ioarr/visitas.js';
 
 let D = null, C = null, P = { ...DEF }, sel = new Set(), view = [], codIdx = new Map();
 let excl = new Set();   // locales excluidos por otra inversión vigente o reciente: siguen seleccionados, fuera de los totales
@@ -99,6 +100,15 @@ const acciones = {
           t: [0, 1, 2, 3, 4].map(t => ({ b: A.b[t][ai], r: A.r[t][ai], m: A.m[t][ai], rep: A.rep[t][ai], fal: A.fal[t][ai] })) };
       })
     };
+  },
+
+  // Días de visita de la selección (sin los excluidos por otra inversión)
+  visitas({ porDia }) {
+    const todos = selIdx(), list = todos.filter(i => !excl.has(D.locs[i][0]));
+    const { puntos, sinCoord } = puntosVisita(D, C, list);
+    const sinI = ({ i, ...p }) => p;
+    return { dias: agruparVisitas(puntos, porDia).map(d => ({ ...d, puntos: d.puntos.map(sinI) })), sinCoord: sinCoord.map(sinI),
+      nExcl: todos.length - list.length, codigos: list.map(i => D.locs[i][0]) };
   },
 
   // Totales de la selección (barra inferior) y, con completo, el resumen de «Mi selección»

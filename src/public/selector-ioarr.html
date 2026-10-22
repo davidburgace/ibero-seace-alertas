@@ -112,7 +112,34 @@
       <div class="mapa-wrap" id="mapaWrap" hidden>
         <p class="mapa-aviso" id="mapaAviso" hidden></p>
         <div class="mapa-locales" id="mapaBox" role="region" aria-label="Mapa de los locales"></div>
-        <div class="mapa-leyenda sub"><span class="ley sel">Seleccionado</span><span class="ley libre">No seleccionado</span><span class="ley centro">Centro</span><span>El tamaño del punto crece con los bienes a reponer.</span></div>
+        <div class="mapa-leyenda sub" id="mapaLeyenda"><span class="ley sel">Seleccionado</span><span class="ley libre">No seleccionado</span><span class="ley centro">Centro</span><span>El tamaño del punto crece con los bienes a reponer.</span></div>
+      </div>
+
+      <div class="visitas" id="visitas">
+        <div class="cerca-cab">
+          <h3>Días de visita</h3>
+          <p class="sub">Divide tu selección en grupos de locales cercanos, uno por día, y ordena cada grupo en una ruta aproximada.</p>
+        </div>
+        <div class="filtros-grid visitas-grid">
+          <div class="campo"><label for="vPorDia">Locales por día</label><input id="vPorDia" type="number" min="1" max="50" step="1" value="8" inputmode="numeric"></div>
+          <div class="campo cerca-btns"><span class="lbl">&nbsp;</span>
+            <div class="acts">
+              <button class="btn btn-primary" id="vGo" type="button">Agrupar por días de visita</button>
+              <button class="btn btn-ghost" id="vClr" type="button" hidden>Quitar agrupación</button>
+            </div>
+          </div>
+        </div>
+        <div class="visitas-res" id="vRes" hidden>
+          <p class="aviso" role="note" id="vAviso"></p>
+          <div class="visitas-acc">
+            <div class="campo"><label for="vDia">Ver en el mapa</label><select id="vDia"></select></div>
+            <div class="acts">
+              <button class="btn btn-ghost btn-sm" id="vXls" type="button">Descargar Excel</button>
+              <button class="btn btn-ghost btn-sm" id="vKml" type="button">Descargar KML</button>
+            </div>
+          </div>
+          <div id="vLista" class="visitas-lista"></div>
+        </div>
       </div>
     </section>
 
