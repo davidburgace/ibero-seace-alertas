@@ -22,6 +22,22 @@ header{ padding-bottom:16px; }
 .campo-check .check{ display:flex; align-items:center; gap:8px; min-height:38px; font-size:14px; cursor:pointer; }
 .campo-check input{ width:18px; height:18px; accent-color:var(--accent); }
 
+/* Reparto entre supervisores */
+.reparto>summary{ padding:14px 16px; cursor:pointer; }
+.reparto-tit{ font-family:var(--font-display); font-weight:700; font-size:15px; }
+.reparto-cuerpo{ padding:0 16px 16px; display:flex; flex-direction:column; gap:10px; }
+.reparto-sups{ display:flex; flex-direction:column; gap:6px; }
+.rep-fila{ display:grid; grid-template-columns:minmax(0,1fr) 90px minmax(0,auto); gap:10px; align-items:center; padding:6px 0; border-bottom:1px solid var(--border); }
+.rep-fila .check{ display:flex; align-items:center; gap:8px; min-width:0; font-size:14px; cursor:pointer; overflow-wrap:anywhere; }
+.rep-fila input[type=checkbox]{ width:18px; height:18px; accent-color:var(--accent); flex:none; }
+.rep-fila input[type=number]{ width:100%; }
+.reparto-bar{ display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:8px; }
+.reparto-bar .acts{ display:flex; gap:6px; }
+#cRepSuma.err{ font-size:12px; }
+.lst-asig{ font-size:12.5px; font-weight:600; color:var(--accent); }
+.lst-item.de-otro{ opacity:.6; }
+.asig-sel select{ font:inherit; font-size:13px; padding:4px 6px; max-width:180px; }
+
 /* Colegios ya visitados */
 .lst-item.visitado{ background:var(--surface2); }
 .lst-item.visitado .lst-n{ background:var(--bueno); color:#fff; }
@@ -51,7 +67,9 @@ header{ padding-bottom:16px; }
   .campo-cuerpo{ grid-template-columns:1fr; }
   .campo-cuerpo[data-vista="lista"] .campo-mapa, .campo-cuerpo[data-vista="mapa"] .campo-lista{ display:none; }
   .campo-mapa{ position:static; }
-  .lst-acc [data-visita], .lst-acc [data-desmarcar]{ min-height:44px; }
+  .lst-acc [data-visita], .lst-acc [data-desmarcar], .asig-sel select{ min-height:44px; }
+  .rep-fila{ grid-template-columns:minmax(0,1fr) 80px; }
+  .rep-fila .rep-actual{ grid-column:1 / -1; }
   .dia-ruta .btn{ min-height:44px; display:inline-flex; align-items:center; }
   .campo-mapa .mapa-locales{ height:calc(100vh - 190px); min-height:320px; }
 }
