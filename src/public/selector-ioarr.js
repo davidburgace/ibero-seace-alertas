@@ -2,6 +2,8 @@
 // los proyectos se guardan en Supabase vía /api/selector-ioarr/* (sesión de sesion.js).
 import { CRIT, DEF, ITEMS, NIVN, NIVS, NIVB, FILTRO_VACIO, limpiarParams, coordValidas, urlGoogleMaps, urlMapaEmbed, piTexto } from '/selector-ioarr/calculo.js';
 import { renderExpediente, enlazarExpediente } from '/selector-ioarr-expediente.js';
+import { limitarN, MAX_PUNTOS } from '/selector-ioarr/cercania.js';
+import { crearMapa as crearMapaLocales, fmtKm } from '/selector-ioarr-mapa.js';
 
 const ANIO = 2025;
 const BASE_DATOS = `/data/selector-ioarr/${ANIO}/`;
@@ -50,8 +52,11 @@ const S = {
   mapas: new Set(), mapsKey: null,                     // mapas satelitales abiertos (índice de local) y llave de Maps Embed
   tab: 'elegir', seq: 0, selPage: 0,
   dup: {}, sinMigDup: false,                           // otra inversión vigente o reciente por local (solo proyectos guardados)
-  revSit: {}, sit: null                                // estado situacional: advertencias explicadas y último cuadro calculado
+  revSit: {}, sit: null,                               // estado situacional: advertencias explicadas y último cuadro calculado
+  near: null,                                          // búsqueda por cercanía: { lat, lon, n, label }
+  pick: false, mapaOn: false, mapa: null, mapaCreando: null, ajustarMapa: false   // mapa de locales (Leaflet)
 };
+const nearArg = () => S.near ? { lat: S.near.lat, lon: S.near.lon, n: S.near.n } : null;
 
 // ─── Guardado (borrador en localStorage, proyecto en Supabase) ──────────────
 const guardado = { sel: null, crit: null, enCurso: 0, error: false };
@@ -168,6 +173,7 @@ async function cargarRegion(nombre, params, codigos) {
   S.cargando = true; $('region').value = nombre;
   S.params = params; S.sel = new Set(codigos);
   S.f = FILTRO_VACIO(); S.page = 0; S.open.clear(); S.detalles.clear(); S.mapas.clear();
+  S.near = null; S.pick = false; S.ajustarMapa = true; S.mapa?.modoElegir(false);
   renderCrit();
   if (S.region !== nombre || !S.meta) {
     $('count').textContent = `Cargando ${g.nombre}…`; $('tbody').innerHTML = ''; document.body.classList.add('cargando');
@@ -192,6 +198,9 @@ function fillFilters() {
   $('fniv').innerHTML = Object.keys(NIVN).map(k => `<button type="button" class="chip" data-n="${k}" aria-pressed="${!!(S.f.niv & NIVB[k])}">${NIVS[k]}</button>`).join('');
   $('q').value = S.f.q; $('fprov').value = S.f.prov; $('fugel').value = S.f.ugel; $('farea').value = S.f.area; $('fges').value = S.f.ges;
   $('frep').value = S.f.rep || ''; $('fest').value = S.f.est || ''; $('fcenso').checked = S.f.censo;
+  const ds = M.dists.map((d, i) => [d[0], i]).sort((a, b) => a[0].localeCompare(b[0], 'es'));
+  $('nDist').innerHTML = '<option value="-1">Elegir distrito…</option>' + ds.map(([n, i]) => `<option value="${i}">${esc(n)} · ${esc(M.provs[M.dists[i][1]] || '')}</option>`).join('');
+  $('nCod').value = '';
 }
 function fillDist() {
   $('fdist').innerHTML = '<option value="-1">Todos</option>' + S.meta.dists.map((d, i) => [d, i]).filter(([d]) => S.f.prov < 0 || d[1] === S.f.prov)
@@ -202,9 +211,11 @@ function fillDist() {
 // ─── Tabla ───────────────────────────────────────────────────────────────────
 const COLS = [['', '', 0, 'ck'], ['Código de local', 'cod', 0, 'cod'], ['Instituciones', 'nom', 0, 'nom'], ['Distrito · centro poblado', 'dist', 0, 'dist'],
   ['Área', '', 0, 'area'], ['Estudiantes', 'est', 1, 'est'], ['Aulas', 'aul', 1, 'aul'], ['A reponer', 'rep', 1, 'rep'], ['% del requerido', 'pct', 1, 'pct'], ['', '', 0, 'x']];
+// Con cercanía: columna de distancia y orden fijo por distancia (los encabezados no ordenan)
+const cols = () => S.near ? [...COLS.slice(0, -1), ['Distancia (km)', '', 1, 'km'], COLS[COLS.length - 1]] : COLS;
 function renderHead() {
-  $('thead').innerHTML = COLS.map(([t, k, n]) => {
-    if (!k) return `<th class="${n ? 'num' : ''}">${t}</th>`;
+  $('thead').innerHTML = cols().map(([t, k, n]) => {
+    if (!k || S.near) return `<th class="${n ? 'num' : ''}">${t}</th>`;
     const s = S.sort.key === k ? (S.sort.dir > 0 ? 'ascending' : 'descending') : 'none';
     return `<th class="s ${n ? 'num' : ''}" data-k="${k}" aria-sort="${s}" tabindex="0">${t}</th>`;
   }).join('');
@@ -262,7 +273,7 @@ function toggleMapa(btn) {
 async function renderTable() {
   const seq = ++S.seq;
   $('tbody').classList.add('cargando-tabla');
-  const R = await w('consulta', { f: S.f, sort: S.sort, page: S.page, size: PAGE });
+  const R = await w('consulta', { f: S.f, sort: S.sort, page: S.page, size: PAGE, near: nearArg() });
   if (seq !== S.seq) return;          // llegó una consulta más nueva
   S.page = R.page;
   const det = new Map();
@@ -271,7 +282,8 @@ async function renderTable() {
   $('tbody').classList.remove('cargando-tabla');
   // Guarda los mapas abiertos antes de redibujar, para devolverlos a su fila
   for (const f of $('tbody').querySelectorAll('iframe[data-mapa]')) if (S.mapas.has(+f.dataset.mapa)) mover(reservaMapas, f);
-  if (!R.filas.length) $('tbody').innerHTML = `<tr><td colspan="10" class="vacio">Ningún local cumple los filtros. Prueba con menos condiciones.</td></tr>`;
+  const nc = cols().length;
+  if (!R.filas.length) $('tbody').innerHTML = `<tr><td colspan="${nc}" class="vacio">${S.near ? 'Ningún local con coordenadas válidas cumple los filtros. Prueba con menos condiciones.' : 'Ningún local cumple los filtros. Prueba con menos condiciones.'}</td></tr>`;
   else $('tbody').innerHTML = R.filas.map(r => {
     const sel = S.sel.has(r.cod), open = S.open.has(r.i);
     const dup = dupDe(r.cod);
@@ -287,8 +299,9 @@ async function renderTable() {
       <td class="c-aul num" data-label="Aulas">${fmt(r.aul)}</td>
       <td class="c-rep num" data-label="A reponer"><b>${fmt(r.rep)}</b></td>
       <td class="c-pct num" data-label="% del requerido">${r.pct == null ? '<span class="sub">—</span>' : `<span class="meter"><i><b style="width:${Math.min(100, r.pct * 100)}%"></b></i>${Math.round(r.pct * 100)}%</span>`}</td>
-      <td class="c-x"><button class="x" data-x="${r.i}" type="button" aria-expanded="${open}" aria-label="Ver detalle del local ${r.cod}">${open ? 'Ocultar' : 'Detalle'}</button></td></tr>`
-      + (open ? `<tr class="det"><td colspan="10">${det.get(r.i)}</td></tr>` : '');
+      ${S.near ? `<td class="c-km num" data-label="Distancia (km)">${fmtKm(r.km)}</td>` : ''}
+      <td class="c-x"><button class="x" data-near="${r.cod}" type="button" ${r.coord ? '' : 'disabled title="Sin coordenadas válidas en el padrón"'} aria-label="Ver los locales más cercanos al local ${r.cod}">Cercanos</button><button class="x" data-x="${r.i}" type="button" aria-expanded="${open}" aria-label="Ver detalle del local ${r.cod}">${open ? 'Ocultar' : 'Detalle'}</button></td></tr>`
+      + (open ? `<tr class="det"><td colspan="${nc}">${det.get(r.i)}</td></tr>` : '');
   }).join('');
   for (const cont of $('tbody').querySelectorAll('.mapa[data-mapa]:not([hidden])')) {
     const f = reservaMapas.querySelector(`iframe[data-mapa="${cont.dataset.mapa}"]`);
@@ -301,6 +314,76 @@ async function renderTable() {
   $('count').innerHTML = `<b>${fmt(R.total)}</b> locales · ${fmt(R.est)} estudiantes · ${fmt(R.aul)} aulas en el censo · <span class="sub">${fmt(R.nsel)} ya seleccionados</span>`;
   $('selAll').textContent = `Seleccionar los ${fmt(R.total)} filtrados`;
   $('selAll').disabled = !R.total; $('unselAll').disabled = !R.nsel;
+  S.cerca = R.cerca; renderCerca();
+  if (S.mapaOn) renderMapa();
+}
+
+// ─── Búsqueda por cercanía ──────────────────────────────────────────────────
+function renderCerca(c = S.cerca) {
+  $('nClr').hidden = !S.near && !S.pick;
+  $('nPick').setAttribute('aria-pressed', S.pick);
+  const el = $('nInfo');
+  if (!S.near) { el.textContent = S.pick ? 'Toca el mapa para fijar el centro de la búsqueda.' : 'Sin búsqueda por cercanía.'; return; }
+  const om = c?.omitidos ? ` · ${fmt(c.omitidos)} local${c.omitidos === 1 ? '' : 'es'} sin coordenadas válidas no se consideran` : '';
+  el.innerHTML = c?.n
+    ? `<b>${fmt(c.n)}</b> local${c.n === 1 ? '' : 'es'} más cercano${c.n === 1 ? '' : 's'} al ${esc(S.near.label)} · el más lejano a <b>${fmtKm(c.max)} km</b> en línea recta${om}`
+    : `Ningún local con coordenadas cerca del ${esc(S.near.label)} cumple los filtros${om}`;
+}
+function setNear(c) {
+  const n = limitarN($('nN').value); $('nN').value = n;
+  S.near = { lat: c.lat, lon: c.lon, n, label: c.label };
+  S.pick = false; S.mapa?.modoElegir(false);
+  S.mapaOn = true; S.ajustarMapa = true; S.page = 0;
+  refresh();
+}
+async function buscarCentro(args) {
+  const c = await w('centro', args);
+  if (c.error) { toast(c.error); return; }
+  setNear(c);
+}
+function quitarCerca() {
+  S.near = null; S.pick = false; S.mapa?.modoElegir(false); S.ajustarMapa = true; S.page = 0;
+  refresh();
+}
+
+// ─── Mapa de locales ────────────────────────────────────────────────────────
+function avisoMapa(txt, alerta) { const a = $('mapaAviso'); a.hidden = !txt; a.textContent = txt || ''; a.classList.toggle('alerta', !!alerta); }
+async function asegurarMapa() {
+  if (S.mapa) return S.mapa;
+  S.mapaCreando ||= crearMapaLocales($('mapaBox'), {
+    onPunto: (lat, lon) => setNear({ lat, lon, label: 'punto elegido en el mapa' }),
+    onSel: async cod => { S.sel.has(cod) ? S.sel.delete(cod) : S.sel.add(cod); await cambioSel(); refresh(); }
+  }).then(m => { S.mapa = m; S.ajustarMapa = true; return m; })
+    .finally(() => { S.mapaCreando = null; });
+  return S.mapaCreando;
+}
+async function renderMapa() {
+  $('mapaWrap').hidden = !S.mapaOn;
+  $('nMap').textContent = S.mapaOn ? 'Ocultar mapa' : 'Ver mapa de los filtrados';
+  $('nMap').setAttribute('aria-expanded', S.mapaOn);
+  if (!S.mapaOn) { $('nBase').hidden = true; return; }
+  let m;
+  try { m = await asegurarMapa(); }
+  catch (e) {
+    console.error('Mapa', e);
+    $('mapaBox').hidden = true; $('nBase').hidden = true;
+    avisoMapa(`No se pudo cargar el mapa (${e.message}). La lista por cercanía sigue funcionando; revisa tu conexión y vuelve a intentarlo.`, true);
+    return;
+  }
+  $('mapaBox').hidden = false; $('nBase').hidden = false;
+  m.modoElegir(S.pick);
+  const P = await w('puntos');
+  // Reencuadra al abrir, al cambiar el centro o los filtros; no al seleccionar un punto
+  const clave = JSON.stringify([S.region, S.f, nearArg()]);
+  const ajustar = S.ajustarMapa || clave !== S.mapaClave; S.ajustarMapa = false; S.mapaClave = clave;
+  m.pintar(P.puntos, P.centro, ajustar);
+  if (ajustar && !P.puntos.length && !P.centro) m.encuadrarPeru();
+  const sinC = P.total - P.conCoord;
+  avisoMapa([
+    P.recortado ? `Se muestran los primeros ${fmt(MAX_PUNTOS)} de ${fmt(P.conCoord)} locales con coordenadas. Usa los filtros o la búsqueda por cercanía para ver el resto.` : '',
+    sinC > 0 ? `${fmt(sinC)} local${sinC === 1 ? '' : 'es'} sin coordenadas válidas no aparece${sinC === 1 ? '' : 'n'} en el mapa.` : '',
+    S.pick ? 'Toca el mapa para fijar el centro de la búsqueda.' : ''
+  ].filter(Boolean).join(' '), false);
 }
 
 async function renderDock() {
@@ -681,6 +764,26 @@ function bind() {
   });
   $('fclear').onclick = () => { S.f = FILTRO_VACIO(); fillFilters(); S.page = 0; refresh(); };
 
+  $('nGo').onclick = () => {
+    const cod = $('nCod').value.trim(), di = +$('nDist').value;
+    if (cod) buscarCentro({ cod });
+    else if (di >= 0) buscarCentro({ dist: di });
+    else toast('Elige un distrito, escribe un código de local o usa «Centro en el mapa».');
+  };
+  $('nCod').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); $('nGo').click(); } });
+  $('nDist').onchange = () => { if (+$('nDist').value >= 0) $('nCod').value = ''; };
+  $('nN').onchange = () => {
+    const n = limitarN($('nN').value); $('nN').value = n;
+    if (S.near && S.near.n !== n) { S.near.n = n; S.ajustarMapa = true; S.page = 0; refresh(); }
+  };
+  $('nPick').onclick = () => {
+    S.pick = !S.pick; S.mapaOn = true;
+    if (S.pick) toast('Toca el mapa para fijar el centro de la búsqueda.');
+    renderCerca(); renderMapa();
+  };
+  $('nClr').onclick = quitarCerca;
+  $('nMap').onclick = () => { S.mapaOn = !S.mapaOn; if (S.mapaOn) S.ajustarMapa = true; else { S.pick = false; renderCerca(); } renderMapa(); };
+  $('nBase').onclick = () => { if (!S.mapa) return; const b = S.mapa.alternarCapa(); $('nBase').textContent = b === 'sat' ? 'Ver calles' : 'Ver satélite'; };
   $('selAll').onclick = async () => { for (const c of await w('codigosVista')) S.sel.add(c); await cambioSel(); refresh(); };
   $('unselAll').onclick = async () => { for (const c of await w('codigosVista')) S.sel.delete(c); await cambioSel(); refresh(); };
   $('pgPrev').onclick = () => { S.page = Math.max(0, S.page - 1); renderTable(); };
@@ -696,12 +799,15 @@ function bind() {
     cb.checked ? S.sel.add(cb.dataset.cod) : S.sel.delete(cb.dataset.cod);
     cb.closest('tr').classList.toggle('sel', cb.checked);
     await cambioSel(); renderDock();
-    const R = await w('consulta', { f: S.f, sort: S.sort, page: S.page, size: PAGE });
+    const R = await w('consulta', { f: S.f, sort: S.sort, page: S.page, size: PAGE, near: nearArg() });
+    if (S.mapaOn) renderMapa();
     $('count').innerHTML = `<b>${fmt(R.total)}</b> locales · ${fmt(R.est)} estudiantes · ${fmt(R.aul)} aulas en el censo · <span class="sub">${fmt(R.nsel)} ya seleccionados</span>`;
     $('unselAll').disabled = !R.nsel;
   });
   $('tbody').addEventListener('click', e => {
     const mb = e.target.closest('[data-mapa-btn]'); if (mb) { toggleMapa(mb); return; }
+    const nb = e.target.closest('[data-near]');
+    if (nb) { buscarCentro({ cod: nb.dataset.near }).then(() => $('cercaPanel').scrollIntoView({ behavior: 'smooth', block: 'start' })); return; }
     const x = e.target.closest('[data-x]'); if (!x) return;
     const i = +x.dataset.x;
     if (S.open.has(i)) { S.open.delete(i); S.mapas.delete(i); } else S.open.add(i);

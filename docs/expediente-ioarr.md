@@ -169,6 +169,44 @@ Ejecuta `supabase/migrations/019_ioarr_ficha_verificacion.sql` después de la 01
 - **Fuera de aulas:** se guarda como información y no entra al costo, porque está por confirmar si el proyecto lo incluye.
 - Si después se corrige a mano un tipo cargado desde la ficha, ese tipo cuenta como verificado en su totalidad.
 
+## Búsqueda por cercanía y mapa de locales
+
+**Para qué sirve:** planificar las visitas de verificación. No necesita migración.
+
+**Dónde está:** Elegir locales → panel **Buscar por cercanía**, entre los filtros y la tabla.
+
+**Centro de la búsqueda** (cuatro formas):
+- Un distrito: el centro es el promedio de las coordenadas válidas de sus locales.
+- El código de un local.
+- **Centro en el mapa**, y luego un toque en el mapa.
+- El botón **Cercanos** de cada fila de la tabla.
+
+**Qué muestra:**
+- Los N locales más cercanos al centro (por defecto 20, de 1 a 200), en orden de distancia y con la columna «Distancia (km)».
+- La distancia es en línea recta (fórmula de Haversine), no por carretera.
+- Respeta todos los filtros activos: la cercanía se aplica sobre los locales que los pasan.
+- Los locales sin coordenadas válidas (latitud de −19 a 0, longitud de −82 a −68) no entran, y se dice cuántos se omitieron.
+- «Seleccionar / Quitar los filtrados» actúan sobre esos N.
+- **Quitar cercanía** vuelve a la lista normal.
+
+**Mapa** (Leaflet 1.9.4, servido por la app en `/vendor/leaflet-1.9.4/`, sin CDN):
+- Se abre al buscar por cercanía o con **Ver mapa de los filtrados**. Muestra hasta 500 puntos; si hay más, avisa.
+- Un punto por local: el tamaño crece con los bienes a reponer, y el color distingue los seleccionados. El centro va con un círculo rojo punteado.
+- Al tocar un punto: datos del local, distancia al centro, **Abrir en Google Maps** y un botón para seleccionar o quitar el local.
+- Capas: satélite (Esri World Imagery) y calles (OpenStreetMap), con sus atribuciones.
+- Si Leaflet no carga, se muestra un aviso y la lista por cercanía sigue funcionando.
+
+**Content-Security-Policy:** solo la página `/selector-ioarr.html` la tiene (`src/selector-ioarr/csp.js`). Permite las imágenes del mapa (`server.arcgisonline.com`, `tile.openstreetmap.org`) en `img-src`; scripts solo de la app y de `cdn.jsdelivr.net` (supabase-js); sin `unsafe-eval` ni scripts en línea. Las demás páginas del radar todavía no tienen CSP.
+
+**Imágenes del mapa en producción:** Esri y OSM sirven para uso interno con poco tráfico. Para uso comercial o intensivo conviene un proveedor con llave propia, por ejemplo MapTiler, o ArcGIS Location Platform de Esri. El cambio es la URL en `src/public/selector-ioarr-mapa.js` y el origen en `ORIGENES_MAPA` de `csp.js`.
+
+**Código:**
+- `src/selector-ioarr/cercania.js`: distancia, centro del distrito y más cercanos. Lo usan el Web Worker y las pruebas.
+- `src/public/selector-ioarr-worker.js`: acciones `consulta` (con `near`), `centro` y `puntos`.
+- `src/public/selector-ioarr-mapa.js`: el mapa.
+
+**Pruebas:** `test/selector-cercania.test.js`. En Moquegua, los 20 más cercanos al distrito de Moquegua llegan hasta 1.20 km y suman 7,373 estudiantes.
+
 ## Etapa 1: costos
 
 ### Migración

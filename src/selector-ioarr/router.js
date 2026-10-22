@@ -21,6 +21,8 @@ import express from 'express';
 import compression from 'compression';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+import path from 'node:path';
 import { supabase } from '../ioarr/db.js';
 import { prep, calc, limpiarParams } from './calculo.js';
 import { generarExcel } from './excel.js';
@@ -77,6 +79,16 @@ router.get('/selector-ioarr/calculo.js', (_, res) =>
 router.get('/selector-ioarr/costos.js', (_, res) =>
   res.type('application/javascript').set('Cache-Control', 'no-cache')
     .sendFile(fileURLToPath(new URL('./costos.js', import.meta.url))));
+
+// Búsqueda por cercanía (la importa el Web Worker)
+router.get('/selector-ioarr/cercania.js', (_, res) =>
+  res.type('application/javascript').set('Cache-Control', 'no-cache')
+    .sendFile(fileURLToPath(new URL('./cercania.js', import.meta.url))));
+// Leaflet para el mapa, servido por la app (sin CDN). La versión va en la ruta: caché larga.
+export const LEAFLET_VERSION = '1.9.4';
+export const RUTA_LEAFLET = `/vendor/leaflet-${LEAFLET_VERSION}`;
+const DIR_LEAFLET = path.dirname(createRequire(import.meta.url).resolve('leaflet/dist/leaflet.js'));
+router.use(RUTA_LEAFLET, express.static(DIR_LEAFLET, { maxAge: '30d', immutable: true, index: false }));
 
 const api = express.Router();
 router.use('/api/selector-ioarr', api);
