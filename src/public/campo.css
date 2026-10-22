@@ -41,6 +41,10 @@ header{ padding-bottom:16px; }
 #cRepSuma.err{ font-size:12px; }
 .lst-asig{ font-size:12.5px; font-weight:600; color:var(--accent); }
 .lst-item.de-otro{ opacity:.6; }
+.asig-bloque{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin:0 0 10px; padding:10px 12px; background:var(--accent-soft); border:1px solid var(--border); border-radius:10px; }
+.asig-bloque label{ display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+.asig-bloque .sub{ font-size:13px; color:var(--text); }
+.asig-bloque select{ font:inherit; font-size:13px; padding:4px 6px; max-width:200px; }
 .asig-sel select{ font:inherit; font-size:13px; padding:4px 6px; max-width:180px; }
 
 /* Colegios ya visitados */
@@ -72,7 +76,7 @@ header{ padding-bottom:16px; }
   .campo-cuerpo{ grid-template-columns:1fr; }
   .campo-cuerpo[data-vista="lista"] .campo-mapa, .campo-cuerpo[data-vista="mapa"] .campo-lista{ display:none; }
   .campo-mapa{ position:static; }
-  .lst-acc [data-visita], .lst-acc [data-desmarcar], .asig-sel select{ min-height:44px; }
+  .lst-acc [data-visita], .lst-acc [data-desmarcar], .asig-sel select, .asig-bloque select, .asig-bloque .btn{ min-height:44px; }
   .rep-fila{ grid-template-columns:minmax(0,1fr) 80px; }
   .rep-fila .rep-actual{ grid-column:1 / -1; }
   .dia-ruta .btn{ min-height:44px; display:inline-flex; align-items:center; }
