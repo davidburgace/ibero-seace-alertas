@@ -48,6 +48,7 @@ Seguimiento de IOARR de mobiliario escolar en Obras por Impuestos (OxI), visto d
 
   El primer proveedor hay que crearlo así, desde Supabase, porque la sección de Admin solo la pueden usar los proveedores.
 - Nadie se puede quitar su propio acceso de proveedor desde Admin, para que no se quede afuera por error.
+- **Supervisor de campo** (rol `supervisor`, migración `020_rol_supervisor.sql`): solo entra a **Visitas de campo** (`/campo.html`), el mapa y listado de colegios por cercanía de cualquier región. No ve costos, proyectos, Admin ni Radar IOARR, y no puede cambiar nada. Se asigna en **Admin → Usuarios**. Sin la migración 020, Admin avisa que falta ejecutarla.
 
 ### Contraseñas
 
@@ -67,9 +68,10 @@ Para que el correo de recuperación funcione, en Supabase:
 
 **Qué protege cada rol:**
 
-- `/api/ioarr/*` exige sesión con cualquier rol.
+- `/api/ioarr/*` exige sesión con rol proveedor o financista. El supervisor solo llega a `/api/ioarr/me` (`bloquearSupervisor`).
 - El resto de la API (SEACE, Infra, Seguimiento y Admin) exige sesión con rol **`proveedor`** (`crearProteccionApi` en `src/ioarr/auth.js`). Solo quedan abiertas `/api/health` y `/api/ioarr/config`.
-- Las páginas Admin, Infra, Oportunidad, Seleccionadas y Seguimiento cargan `src/public/sesion.js`. Si no hay sesión mandan a `login.html`; si el usuario es financista lo mandan a Radar IOARR. Además, agregan el token a cada llamada a `/api/*`.
+- Las páginas Admin, Infra, Oportunidad, Seleccionadas, Seguimiento, el Selector IOARR y Visitas de campo cargan `src/public/sesion.js`. Si no hay sesión mandan a `login.html`. Cada página dice qué roles acepta (`data-roles`, por defecto solo proveedor); a los demás los manda a su inicio: el financista a Radar IOARR y el supervisor a Visitas de campo. Además, agregan el token a cada llamada a `/api/*`.
+- Visitas de campo acepta proveedor y supervisor. Radar IOARR y el inicio también mandan al supervisor a Visitas de campo.
 - El panel Admin ya no tiene contraseña propia: usa esta misma cuenta.
 
 - `seguimiento.html` lee `reuniones`, `procesos_seguimiento`, `visitas_comerciales` y `contactos_frecuentes` directo desde el navegador, con la sesión del usuario (el cliente sale de `sesion.js`). La migración `010_rls_seguimiento.sql` deja esas tablas solo para proveedores (`es_proveedor()`) y quita el acceso con la clave pública. El servidor usa la clave secreta, así que no le afecta.

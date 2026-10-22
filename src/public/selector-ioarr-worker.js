@@ -73,6 +73,15 @@ const acciones = {
     if (!c) return { error: 'Ese distrito no tiene locales con coordenadas válidas.' };
     return { lat: c.lat, lon: c.lon, label: `distrito de ${D.dists[dist][0]}` };
   },
+  // Listado con direcciones de la vista actual, en su orden (con cercanía: de más cerca a más lejos)
+  listado({ max = MAX_PUNTOS } = {}) {
+    return view.slice(0, max).map((i, j) => {
+      const l = D.locs[i];
+      return { n: j + 1, cod: l[0], nom: D.locName[i], dist: D.dists[l[1]][0], cp: l[3] || '', dir: l[5] || '', rural: !!l[4],
+        lat: l[6], lon: l[7], coord: localConCoord(l), est: D.locEst[i], rep: C.L.repTot[i], sel: sel.has(l[0]),
+        niv: Object.keys(NIVN).filter(n => D.locNiv[i] & NIVB[n]).map(n => NIVS[n]), km: km.has(i) ? km.get(i) : null };
+    });
+  },
   // Puntos del mapa: los primeros MAX_PUNTOS de la vista actual con coordenadas válidas
   puntos() {
     const out = [];

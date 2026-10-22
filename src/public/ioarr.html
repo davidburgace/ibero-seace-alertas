@@ -534,6 +534,8 @@ function mostrarLogin() {
 
 async function iniciarApp() {
   usuario = await api('/api/ioarr/me');
+  // El supervisor de campo no usa Radar IOARR: va a Visitas de campo
+  if (usuario.rol === 'supervisor') { location.replace('/campo.html'); return; }
   $('login-wrap').style.display = 'none';
   $('app').style.display = 'block'; $('top-right').style.display = 'flex';
   $('user-email').textContent = usuario.email;

@@ -113,6 +113,12 @@
       <p>Elige locales escolares por región y calcula la reposición de mobiliario para el estudio IOARR (Formato 07-C).</p>
       <span class="go">Abrir selector →</span>
     </a>
+    <a class="tile" href="campo.html" data-modulo="campo">
+      <div class="ico">🗺️</div>
+      <h2>Visitas de campo</h2>
+      <p>Mapa y listado de colegios por cercanía, con direcciones y cómo llegar, para planificar las visitas de verificación.</p>
+      <span class="go">Abrir mapa →</span>
+    </a>
   </div>
 
   <footer>Grupo Ibero Perú S.A.C. · Radar SEACE</footer>
@@ -125,7 +131,7 @@ if (/(^#|&)(type=recovery|error_description=)/.test(location.hash)) location.rep
 </script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script>
-// Rol "financista": solo ve el tile de Radar IOARR. Sin sesión, la página se ve
+// Rol "financista": solo ve el tile de Radar IOARR. Rol "supervisor": va directo a Visitas de campo. Sin sesión, la página se ve
 // igual que siempre (el login real de los demás módulos queda para la fase 2).
 (async () => {
   try {
@@ -135,6 +141,7 @@ if (/(^#|&)(type=recovery|error_description=)/.test(location.hash)) location.rep
     const { data } = await sb.auth.getSession();
     if (!data.session) return;
     const me = await fetch('/api/ioarr/me', { headers: { Authorization: 'Bearer ' + data.session.access_token } }).then(r => r.ok ? r.json() : null);
+    if (me?.rol === 'supervisor') { location.replace('/campo.html'); return; }
     if (me?.rol === 'financista') {
       document.querySelectorAll('.tile:not([data-modulo="ioarr"])').forEach(t => t.remove());
     }

@@ -207,6 +207,24 @@ Ejecuta `supabase/migrations/019_ioarr_ficha_verificacion.sql` después de la 01
 
 **Pruebas:** `test/selector-cercania.test.js`. En Moquegua, los 20 más cercanos al distrito de Moquegua llegan hasta 1.20 km y suman 7,373 estudiantes.
 
+### Listado con direcciones
+
+En el panel de cercanía, **Ver listado** muestra los N cercanos en el mismo orden que la tabla y el mapa. Cada local trae su número, la distancia, el nombre, la **dirección**, el centro poblado y el distrito, los niveles, los estudiantes y los bienes a reponer, más dos botones:
+- **Cómo llegar:** abre la ruta en Google Maps desde la ubicación de quien lo abre.
+- **Ver en el mapa:** centra el mapa en el local y abre su ventana.
+
+El listado se arma en `src/public/selector-ioarr-listado.js` (lo comparte la página de campo) con la acción `listado` del worker.
+
+### Visitas de campo (`/campo.html`)
+
+Página pensada para celular, para el **supervisor de campo** (rol `supervisor`, ver `docs/radar-ioarr.md`) y también para el proveedor. Es de solo lectura: usa los datos estáticos de la región y el mismo worker, no llama a la API ni guarda nada en el servidor.
+- **Centro:** **Usar mi ubicación** (GPS del celular; pide permiso la primera vez y solo funciona con https), un distrito, un código de local o **Tocar el mapa** (tocar un colegio también lo fija como centro).
+- **Colegios a visitar:** de 1 a 200. **Filtros:** nivel, área y mínimo de bienes a reponer.
+- **Listado y mapa:** lado a lado en escritorio; en celular, una pestaña para cada uno. El mapa no tiene botón de seleccionar.
+- **Días de visita:** agrupa el listado por días, que queda ordenado por día y parada, y se puede descargar en **KML**. No hay Excel.
+- Si el colegio más cercano a la ubicación está a más de 30 km, avisa que quizá la región no es la correcta.
+- Recuerda en el navegador la región, la cantidad y los colegios por día.
+
 ### Días de visita
 
 **Dónde está:** el mismo panel, debajo del mapa → **Días de visita**.

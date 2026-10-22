@@ -105,6 +105,7 @@
       <div class="filtros-bar cerca-bar">
         <div id="nInfo" aria-live="polite" class="sub">Sin búsqueda por cercanía.</div>
         <div class="acts">
+          <button class="btn btn-ghost btn-sm" id="nList" type="button" hidden aria-expanded="false" aria-controls="listaWrap">Ver listado</button>
           <button class="btn btn-ghost btn-sm" id="nBase" type="button" hidden>Ver calles</button>
           <button class="btn btn-ghost btn-sm" id="nMap" type="button" aria-expanded="false" aria-controls="mapaWrap">Ver mapa de los filtrados</button>
         </div>
@@ -113,6 +114,11 @@
         <p class="mapa-aviso" id="mapaAviso" hidden></p>
         <div class="mapa-locales" id="mapaBox" role="region" aria-label="Mapa de los locales"></div>
         <div class="mapa-leyenda sub" id="mapaLeyenda"><span class="ley sel">Seleccionado</span><span class="ley libre">No seleccionado</span><span class="ley centro">Centro</span><span>El tamaño del punto crece con los bienes a reponer.</span></div>
+      </div>
+
+      <div class="lista-wrap" id="listaWrap" hidden>
+        <p class="sub" id="listaInfo"></p>
+        <div id="listaBox" aria-live="polite"></div>
       </div>
 
       <div class="visitas" id="visitas">

@@ -4,6 +4,7 @@ import { CRIT, DEF, ITEMS, NIVN, NIVS, NIVB, FILTRO_VACIO, limpiarParams, coordV
 import { renderExpediente, enlazarExpediente } from '/selector-ioarr-expediente.js';
 import { limitarN, MAX_PUNTOS } from '/selector-ioarr/cercania.js';
 import { crearMapa as crearMapaLocales, fmtKm } from '/selector-ioarr-mapa.js';
+import { htmlListado } from '/selector-ioarr-listado.js';
 import { limitarPorDia, colorDia, generarKML, AVISO_VISITAS } from '/selector-ioarr/visitas.js';
 
 const ANIO = 2025;
@@ -56,6 +57,7 @@ const S = {
   revSit: {}, sit: null,                               // estado situacional: advertencias explicadas y último cuadro calculado
   near: null,                                          // búsqueda por cercanía: { lat, lon, n, label }
   pick: false, mapaOn: false, mapa: null, mapaCreando: null, ajustarMapa: false,  // mapa de locales (Leaflet)
+  listaOn: false,                                      // listado con direcciones de los N cercanos
   vis: null                                            // días de visita: { porDia, dia (0 = todos), R: resultado del worker }
 };
 const nearArg = () => S.near ? { lat: S.near.lat, lon: S.near.lon, n: S.near.n } : null;
@@ -318,6 +320,7 @@ async function renderTable() {
   $('selAll').textContent = `Seleccionar los ${fmt(R.total)} filtrados`;
   $('selAll').disabled = !R.total; $('unselAll').disabled = !R.nsel;
   S.cerca = R.cerca; renderCerca();
+  renderListado();
   if (S.mapaOn) renderMapa();
 }
 
@@ -331,6 +334,23 @@ function renderCerca(c = S.cerca) {
   el.innerHTML = c?.n
     ? `<b>${fmt(c.n)}</b> local${c.n === 1 ? '' : 'es'} más cercano${c.n === 1 ? '' : 's'} al ${esc(S.near.label)} · el más lejano a <b>${fmtKm(c.max)} km</b> en línea recta${om}`
     : `Ningún local con coordenadas cerca del ${esc(S.near.label)} cumple los filtros${om}`;
+}
+// Listado con direcciones de los N cercanos, en el mismo orden que la tabla y el mapa
+async function renderListado() {
+  $('nList').hidden = !S.near;
+  if (!S.near) S.listaOn = false;
+  $('listaWrap').hidden = !S.listaOn;
+  $('nList').textContent = S.listaOn ? 'Ocultar listado' : 'Ver listado';
+  $('nList').setAttribute('aria-expanded', S.listaOn);
+  if (!S.listaOn) return;
+  const filas = await w('listado');
+  $('listaInfo').textContent = `${fmt(filas.length)} local${filas.length === 1 ? '' : 'es'} de más cercano a más lejano del ${S.near.label}. Distancias en línea recta. «Cómo llegar» abre la ruta en Google Maps desde tu ubicación.`;
+  $('listaBox').innerHTML = htmlListado(filas);
+}
+async function verEnMapa(cod) {
+  if (!S.mapaOn) { S.mapaOn = true; await renderMapa(); }
+  $('mapaWrap').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  if (!S.mapa?.enfocar(cod)) toast('Ese local no está en el mapa.');
 }
 function setNear(c) {
   const n = limitarN($('nN').value); $('nN').value = n;
@@ -866,6 +886,8 @@ function bind() {
     renderCerca(); renderMapa();
   };
   $('nClr').onclick = quitarCerca;
+  $('nList').onclick = () => { S.listaOn = !S.listaOn; renderListado(); };
+  $('listaBox').addEventListener('click', e => { const b = e.target.closest('[data-vermapa]'); if (b) verEnMapa(b.dataset.vermapa); });
   $('nMap').onclick = () => { S.mapaOn = !S.mapaOn; if (S.mapaOn) S.ajustarMapa = true; else { S.pick = false; renderCerca(); } renderMapa(); };
   $('nBase').onclick = () => { if (!S.mapa) return; const b = S.mapa.alternarCapa(); $('nBase').textContent = b === 'sat' ? 'Ver calles' : 'Ver satélite'; };
   $('vGo').onclick = agruparDias;

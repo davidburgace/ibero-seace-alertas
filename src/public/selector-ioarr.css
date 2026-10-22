@@ -137,6 +137,25 @@ main{ max-width:1320px; margin:0 auto; padding:22px 32px 30px; }
 .pop-acc{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-top:8px; }
 .pop-acc a{ color:var(--accent); font-weight:600; }
 .c-km{ white-space:nowrap; }
+/* Listado por cercanía (Selector y campo) */
+.lista-wrap{ padding:0 16px 14px; }
+.lst{ list-style:none; display:flex; flex-direction:column; gap:8px; margin:0; padding:0; }
+.lst-item{ display:grid; grid-template-columns:30px minmax(0,1fr) auto; grid-template-areas:"n cuerpo km" "n acc acc"; gap:6px 12px; align-items:start;
+  background:#fff; border:1px solid var(--border); border-radius:12px; padding:12px 14px; }
+.lst-n{ grid-area:n; display:flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:50%; background:var(--accent-soft); color:var(--accent); font:600 13px/1 var(--font-mono); }
+.lst-cuerpo{ grid-area:cuerpo; min-width:0; display:flex; flex-direction:column; gap:2px; }
+.lst-nom{ font-weight:600; font-size:14px; overflow-wrap:anywhere; }
+.lst-dir{ font-size:13.5px; overflow-wrap:anywhere; }
+.lst-km{ grid-area:km; font:600 13px var(--font-mono); white-space:nowrap; color:var(--text); }
+.lst-acc{ grid-area:acc; display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+.lst-acc .btn{ display:inline-flex; align-items:center; justify-content:center; text-decoration:none; }
+.lst-item.foco{ border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
+.lst-vacio{ padding:12px 0; }
+@media (min-width:900px){
+  .lst-item{ grid-template-columns:30px minmax(0,1fr) auto auto; grid-template-areas:"n cuerpo km acc"; align-items:center; }
+  .lst-acc{ justify-content:flex-end; }
+}
+
 /* Días de visita */
 .visitas{ border-top:1px solid var(--border); }
 .visitas-grid{ grid-template-columns:minmax(140px,200px) auto; padding-top:12px; }
@@ -316,6 +335,8 @@ table.tabla{ width:100%; border-collapse:collapse; font-size:13px; }
   .cerca-btns .acts #nGo{ grid-column:1 / -1; }
   .cerca-grid .campo:first-child{ grid-column:1 / -1; }
   .mapa-wrap{ padding:0 12px 12px; }
+  .lista-wrap{ padding:0 12px 12px; }
+  .lst-acc .btn{ flex:1; justify-content:center; min-height:40px; }
   .visitas-grid{ grid-template-columns:1fr; }
   .visitas-res{ padding:0 12px 12px; }
   .visitas-acc .campo{ min-width:0; width:100%; }
