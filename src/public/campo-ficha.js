@@ -373,6 +373,7 @@ function pintarBien(a, f, i, filas) {
       ${campo(p + '.m', f.m, { label: 'Malo', num: true, ph: '0' })}
       ${mesa ? campo(p + '.puestos', f.puestos, { label: 'Puestos por mesa', num: true, ph: '1' }) : ''}
     </div>
+    ${mesa ? `<p class="sub fh-ayuda" data-equiv="${j}.${i}">${ayudaMesa(f)}</p>` : ''}
     <p class="fh-aviso" data-aviso="${j}.${i}">${avisoFila(j, f, i, filas)}</p>
     ${filas.findIndex(x => x.k === f.k) === i ? htmlSlot(`a${j}:${f.k}`, { titulo: 'Foto del mueble (sobre todo si está en mal estado)' }) : ''}
     <details class="fh-mas"${masDatos ? ' open' : ''}><summary>Antigüedad, código patrimonial, baja y observación</summary>
@@ -385,6 +386,13 @@ function pintarBien(a, f, i, filas) {
     ${extra ? `<button class="x" type="button" data-fh="quitar-mesa" data-aula="${j}" data-i="${i}">Quitar esta fila</button>` : ''}
     ${ultimaMesa ? `<button class="x" type="button" data-fh="otra-mesa" data-aula="${j}">+ Otra fila de mesa (mesas de distinto tipo)</button>` : ''}
   </div>`;
+}
+// Ayuda de «Puestos por mesa» y, con la fila completa, a cuántos puestos equivale (el censo cuenta las mesas en puestos)
+const AYUDA_PUESTOS = 'Puestos por mesa: cuántos estudiantes se sientan en cada una. 1 individual · 2 bipersonal · 4 a 6 grupal (inicial). Vacío = 1.';
+function ayudaMesa(f) {
+  const pu = vacio(f.puestos) ? 1 : entero(f.puestos);
+  if (estadoFila(f) !== 'ok' || !(pu > 1)) return AYUDA_PUESTOS;
+  return `${AYUDA_PUESTOS} <b>Cuenta como ${ent(entero(f.b) * pu)} / ${ent(entero(f.r) * pu)} / ${ent(entero(f.m) * pu)} puestos.</b>`;
 }
 function avisoFila(j, f, i, filas) {
   const e = estadoFila(f);
@@ -430,7 +438,10 @@ function pintarAvance() {
 // Después de escribir en una fila de un aula: su aviso, el chip del aula y el avance
 function refrescarAula(j) {
   const filas = F.d.aulas[j]?.filas || [];
-  filas.forEach((f, i) => { const el = document.querySelector(`[data-aviso="${j}.${i}"]`); if (el) el.textContent = avisoFila(j, f, i, filas); });
+  filas.forEach((f, i) => {
+    const el = document.querySelector(`[data-aviso="${j}.${i}"]`); if (el) el.textContent = avisoFila(j, f, i, filas);
+    const eq = document.querySelector(`[data-equiv="${j}.${i}"]`); if (eq) eq.innerHTML = ayudaMesa(f);
+  });
   const chip = document.querySelector(`[data-chip-aula="${j}"]`); if (chip) chip.innerHTML = CHIP[estadoAula(j)];
   pintarAvance(); pintarPanel();
 }
