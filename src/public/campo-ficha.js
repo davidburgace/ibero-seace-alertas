@@ -317,7 +317,8 @@ function pintar() {
     <section class="fh-sec"><h3>E. Observaciones y conformidad</h3>
       <label class="fh-campo ancho"><span>Observaciones del verificador</span><textarea data-p="obs" rows="4">${esc(d.obs)}</textarea></label>
       <p class="sub">Quienes dan conformidad de lo constatado en la fecha indicada.</p>
-      ${F.firmas ? '<p class="sub">Firma al final, con la ficha completa: quien firma da conformidad de lo que dice.</p>' : ''}
+      ${F.firmas ? '<p class="sub">Firma al final, con la ficha completa: quien firma da conformidad de lo que dice.</p>'
+        : F.editable ? `<p class="aviso">${F.sinConexion ? 'Esta copia de la ficha se guardó en el equipo sin firmas en pantalla. Ábrela con señal para firmar.' : 'La firma en pantalla no está disponible: el servidor no encuentra la tabla de firmas (migración 025). Avisa al proveedor. Mientras, firmen en papel y tómenle una foto al acta.'}</p>` : ''}
       ${F.guia.firmas.map(([k, cargo]) => `<div class="fh-card"><b>${esc(cargo)}</b><div class="fh-grid">
         ${campo(`fi.${k}.nombre`, d.firmas[k]?.nombre, { label: 'Nombres y apellidos', ancho: 'ancho' })}
         ${campo(`fi.${k}.dni`, d.firmas[k]?.dni, { label: 'DNI', num: true })}

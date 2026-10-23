@@ -418,3 +418,9 @@ test('migración 025, acta al aprobar y páginas', () => {
   assert.match(leer('src/public/campo.css'), /touch-action:none/);
   assert.match(leer('src/public/selector-ioarr-fichas.js'), /data-ficha-pdf/);
 });
+
+test('formulario: sin la tabla de firmas, la sección E lo avisa en lugar de esconder el botón', () => {
+  const js = leer('src/public/campo-ficha.js');
+  assert.match(js, /el servidor no encuentra la tabla de firmas \(migración 025\)/);
+  assert.match(js, /Esta copia de la ficha se guardó en el equipo sin firmas en pantalla/);
+});
