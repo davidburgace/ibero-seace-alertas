@@ -204,7 +204,7 @@ test('campo: abrir un proyecto trae todos sus códigos (por lotes) y respeta al 
 test('campo: la API solo lee proyectos; escribe visitas, el reparto entre supervisores y las fichas llenadas en la app', () => {
   const rutas = crearApiCampo(sbProyectos()).stack.filter(l => l.route)
     .map(l => `${Object.keys(l.route.methods).join(',')} ${l.route.path}`).sort();
-  assert.deepEqual(rutas, ['delete /proyectos/:id/fichas/:cod/firmas/:cargo', 'delete /proyectos/:id/fichas/:cod/fotos/:fotoId', 'delete /visitas/:codigo', 'get /proyectos', 'get /proyectos/:id', 'get /proyectos/:id/fichas', 'get /proyectos/:id/fichas-zip', 'get /proyectos/:id/fichas/:cod',
+  assert.deepEqual(rutas, ['delete /proyectos/:id/fichas/:cod/firmas/:cargo', 'delete /proyectos/:id/fichas/:cod/fotos/:fotoId', 'delete /visitas/:codigo', 'get /proyectos', 'get /proyectos/:id', 'get /proyectos/:id/fichas', 'get /proyectos/:id/fichas-equipo', 'get /proyectos/:id/fichas-zip', 'get /proyectos/:id/fichas/:cod',
     'get /proyectos/:id/fichas/:cod/firmas/:cargo', 'get /proyectos/:id/fichas/:cod/fotos/:fotoId', 'get /proyectos/:id/fichas/:cod/pdf', 'get /supervisores', 'get /visitas', 'post /proyectos/:id/fichas/:cod/enviar', 'post /proyectos/:id/fichas/:cod/fotos',
     'put /proyectos/:id/asignaciones', 'put /proyectos/:id/fichas/:cod', 'put /proyectos/:id/fichas/:cod/firmas/:cargo', 'put /visitas/:codigo']);
 });

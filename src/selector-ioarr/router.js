@@ -412,6 +412,10 @@ export const fichasCampo = {
     const p = await proyectoPorId(proyectoId); if (!p) throw sinProyecto();
     return expediente.fichaLocal(p, cod);
   },
+  async modelos(proyectoId, cods) {
+    const p = await proyectoPorId(proyectoId); if (!p) throw sinProyecto();
+    return expediente.fichasLocales(p, cods);
+  },
   async validar(proyectoId, cod, datos, origen) {
     const p = await proyectoPorId(proyectoId); if (!p) throw sinProyecto();
     return expediente.validarFichaDigital(p, cod, datos, origen);

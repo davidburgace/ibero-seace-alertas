@@ -4,12 +4,17 @@
 <meta charset="UTF-8">
 <!-- Sesión de Supabase: entran el proveedor y el supervisor de campo -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="/sesion.js" data-roles="proveedor,supervisor"></script>
+<script src="/sesion.js" data-roles="proveedor,supervisor" data-sin-senal></script>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="theme-color" content="#f7f8fa">
 <title>Visitas de campo — Radar Ibero</title>
 <link rel="icon" href="favicon-32.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
+<!-- Se instala como app y abre sin señal (campo-sw.js) -->
+<link rel="manifest" href="/campo.webmanifest">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Campo">
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="selector-ioarr.css">
 <link rel="stylesheet" href="campo.css">
@@ -31,6 +36,7 @@
 </header>
 
 <main>
+  <div class="senal-bar" id="cSenal" role="status" aria-live="polite" hidden></div>
   <section class="cerca-panel campo-buscar" aria-labelledby="c-tit">
     <h2 class="sr" id="c-tit">Buscar colegios cercanos</h2>
     <div class="filtros-grid campo-grid">
@@ -39,6 +45,9 @@
       <div class="campo campo-proy" id="cFichasCampo" hidden><span class="lbl">Fichas de verificación</span>
         <div class="acts"><button class="btn btn-ghost" id="cFichas" type="button">Mis fichas de verificación (ZIP)</button>
         <span class="sub">Excel y PDF para imprimir, de tus colegios. También puedes llenar la ficha aquí: «Llenar ficha» en cada colegio.</span></div></div>
+      <div class="campo campo-proy" id="cEquipoCampo" hidden><span class="lbl">Sin señal</span>
+        <div class="acts"><button class="btn btn-primary" id="cEquipo" type="button">Llevar mis fichas al equipo</button>
+        <span class="sub" id="cEquipoInfo"></span></div></div>
       <div class="campo"><label for="cRegion">Región</label><select id="cRegion"></select></div>
       <div class="campo"><label for="cN">Colegios a visitar</label><input id="cN" type="number" min="1" max="200" step="1" value="20" inputmode="numeric" title="Hasta 200 en toda la región; con un proyecto, hasta todos sus colegios"></div>
       <div class="campo campo-ubic">

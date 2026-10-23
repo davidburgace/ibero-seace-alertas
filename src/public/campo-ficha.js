@@ -8,8 +8,13 @@
 // celular, quedan en la cola del equipo y se suben solas cuando hay señal (/fichas/:cod/fotos).
 // Firmas (sección E): ✍️ abre un lienzo a pantalla completa; la firma (PNG) va por la misma cola (/fichas/:cod/firmas/:cargo).
 // «PDF» baja la ficha llena con fotos y firmas (/fichas/:cod/pdf).
-//   abrirFicha({ proyecto: { id, nombre }, cod, toast, alCambiar(cod, ficha) })
+// Sin señal (campo-equipo.js): cada ficha que se abre con señal queda guardada en el equipo (y «Llevar mis fichas»
+// las guarda todas); sin señal se abre esa copia. Lo llenado, las fotos y las firmas esperan en el equipo y
+// sincronizarEquipo() los sube al volver la señal, aunque la ficha esté cerrada. Enviar a revisión necesita señal.
+//   abrirFicha({ proyecto: { id, nombre, region }, cod, toast, alCambiar(cod, ficha) })
+//   sincronizarEquipo() → { borradores, fotos, firmas, errores }      resumenEquipo() → { borradores, fotos, firmas }
 import { prepararFoto, nuevoId, encolar, enCola, quitarDeCola, colaPersistente, seguirUbicacion, dejarUbicacion, ubicacionReciente } from '/campo-fotos.js';
+import { todaLaCola, guardarFichaEquipo, leerFichaEquipo } from '/campo-equipo.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -33,10 +38,21 @@ async function api(ruta, opts = {}) {
   if (!r.ok) throw Object.assign(new Error(b.error || `error ${r.status}`), { status: r.status, body: b });
   return b;
 }
-const ruta = (x = '') => `/api/campo/proyectos/${encodeURIComponent(F.proyecto.id)}/fichas/${encodeURIComponent(F.cod)}${x}`;
+const rutaDe = (proyectoId, cod, x = '') => `/api/campo/proyectos/${encodeURIComponent(proyectoId)}/fichas/${encodeURIComponent(cod)}${x}`;
+const ruta = (x = '') => rutaDe(F.proyecto.id, F.cod, x);
+const sinSenal = e => !e?.status;   // fetch falló sin respuesta del servidor
+const MSJ_SIN_SENAL = 'Sin señal: quedó guardado en este equipo y se sube solo cuando vuelva la señal.';
 
 // ─── Borrador en el equipo ───────────────────────────────────────────────────
 const claveLocal = () => LS + F.proyecto.id + ':' + F.cod;
+// La copia de la ficha en el equipo, al día con lo que tiene el servidor (para abrirla sin señal)
+function refrescarEquipo() {
+  if (!F?.usuario || !F.modelo) return;
+  const sinCola = ({ reg, estado, antes, error, reintentar, ...x }) => x;
+  guardarFichaEquipo(F.usuario, F.proyecto, { cod: F.cod, modelo: F.modelo, guia: F.guia, ficha: F.ficha, editable: F.editable,
+    fotos: F.fotos ? F.fotos.filter(f => f.estado === 'subida').map(sinCola) : null,
+    firmas: F.firmas ? Object.fromEntries(Object.entries(F.firmas).filter(([, x]) => x.estado === 'subida').map(([k, x]) => [k, sinCola(x)])) : null });
+}
 function leerLocal() { try { return JSON.parse(localStorage.getItem(claveLocal()) || 'null'); } catch { return null; } }
 function guardarLocal() { try { localStorage.setItem(claveLocal(), JSON.stringify({ ts: Date.now(), datos: datosEnvio() })); } catch { /* sin espacio: queda el servidor */ } }
 function borrarLocal() { try { localStorage.removeItem(claveLocal()); } catch { /* nada */ } }
@@ -249,6 +265,7 @@ function pintar() {
     <button class="btn btn-ghost btn-sm" type="button" data-fh="pdf" title="La ficha llena en PDF, con fotos y firmas"${f ? '' : ' hidden'}>PDF</button>
   </div>
   <div class="fh-cuerpo">
+    ${F.sinConexion ? `<div class="aviso" id="fhSinSenal" role="status"><b>Sin señal.</b> Trabajas con la ficha guardada en este equipo el ${esc(fechaHora(F.bajadaEn))}. Lo que llenes, las fotos y las firmas quedan en el equipo y se suben solos cuando vuelva la señal. Para enviarla a revisión necesitas señal.</div>` : ''}
     ${f?.nota && f.estado === 'observada' ? `<div class="aviso alerta" role="alert">El proveedor devolvió la ficha: ${esc(f.nota)}</div>` : ''}
     ${!F.editable ? `<div class="aviso">${f.estado === 'aprobada' ? `Aprobada el ${esc(fechaPe(f.revisada_en))}: sus cantidades ya están en el expediente.` : `Enviada a revisión el ${esc(fechaPe(f.enviada_en))}. No se puede cambiar hasta que el proveedor la apruebe o la devuelva.`}</div>` : ''}
     <div id="fhErrores"></div>
@@ -454,10 +471,12 @@ async function guardar({ silencioso = false } = {}) {
     F.ficha = r.ficha; F.sucio = false; borrarLocal(); repintarEstado();
     estadoGuardado(`Guardado a las ${hora()}`);
     F.alCambiar?.(F.cod, F.ficha);
+    if (F.sinConexion) { F.sinConexion = false; $('fhSinSenal')?.remove(); }
+    refrescarEquipo();
     return true;
   } catch (e) {
-    estadoGuardado(`No se pudo guardar en el servidor (${e.message}). Lo llenado queda en este equipo.`, 'err');
-    if (!silencioso) F.toast(`No se pudo guardar: ${e.message}`);
+    estadoGuardado(sinSenal(e) ? 'Sin señal: lo llenado está guardado en este equipo y se sube solo con señal.' : `No se pudo guardar en el servidor (${e.message}). Lo llenado queda en este equipo.`, sinSenal(e) ? 'fh-pend' : 'err');
+    if (!silencioso) F.toast(sinSenal(e) ? MSJ_SIN_SENAL : `No se pudo guardar: ${e.message}`);
     return false;
   }
 }
@@ -501,6 +520,19 @@ async function tomarFotos(files, slot, galeria) {
   subirPendientes();
 }
 
+// Sube una foto o firma de la cola (de cualquier ficha). Lanza el error de api() (sin status = sin señal).
+async function subirRegistro(proyectoId, cod, reg) {
+  if (reg.tipo === 'firma') {
+    const fd = new FormData(); fd.append('firma', reg.foto, `firma_${reg.cargo}.png`);
+    return api(rutaDe(proyectoId, cod, `/firmas/${reg.cargo}`), { method: 'PUT', body: fd });
+  }
+  const fd = new FormData();
+  fd.append('foto', reg.foto, reg.id + '.jpg'); if (reg.mini) fd.append('mini', reg.mini, reg.id + '_mini.jpg');
+  fd.append('id', reg.id);
+  for (const k of ['aula', 'bien', 'muestra', 'lat', 'lon', 'tomada_en']) fd.append(k, reg.meta[k] ?? '');
+  return api(rutaDe(proyectoId, cod, '/fotos'), { method: 'POST', body: fd });
+}
+
 let subiendo = false;
 // Sube las fotos de la cola, una por una. Sin señal se detiene y deja el resto para después.
 async function subirPendientes() {
@@ -510,12 +542,8 @@ async function subirPendientes() {
   try {
     for (const f of (yo.fotos || []).filter(x => x.estado === 'pendiente' || (x.estado === 'error' && x.reintentar))) {
       if (F !== yo) return;
-      const fd = new FormData();
-      fd.append('foto', f.reg.foto, f.id + '.jpg'); if (f.reg.mini) fd.append('mini', f.reg.mini, f.id + '_mini.jpg');
-      fd.append('id', f.id);
-      for (const k of ['aula', 'bien', 'muestra', 'lat', 'lon', 'tomada_en']) fd.append(k, f[k] ?? '');
       try {
-        await api(ruta('/fotos'), { method: 'POST', body: fd });
+        await subirRegistro(yo.proyecto.id, yo.cod, f.reg);
         f.estado = 'subida'; f.reintentar = false; delete f.error;
         await quitarDeCola(f.id); subidas.push(f);
       } catch (e) {
@@ -528,9 +556,8 @@ async function subirPendientes() {
     // Firmas
     for (const [k, x] of Object.entries(yo.firmas || {})) {
       if (F !== yo || x.estado !== 'pendiente') continue;
-      const fd = new FormData(); fd.append('firma', x.reg.foto, `firma_${k}.png`);
       try {
-        const r = await api(ruta(`/firmas/${k}`), { method: 'PUT', body: fd });
+        const r = await subirRegistro(yo.proyecto.id, yo.cod, x.reg);
         Object.assign(x, { estado: 'subida', firmada_en: r.firma.firmada_en, antes: false }); delete x.error;
         await quitarDeCola(x.reg.id); subidas.push(x);
       } catch (e) {
@@ -542,6 +569,7 @@ async function subirPendientes() {
   } finally { subiendo = false; }
   // La ficha queda creada en el servidor con la primera foto o firma: se guarda también lo llenado
   if (subidas.length && F === yo && (yo.sucio || !yo.ficha)) guardar({ silencioso: true });
+  else if (subidas.length && F === yo) refrescarEquipo();
 }
 const pendientes = () => (F?.fotos || []).filter(f => f.estado !== 'subida').length + Object.values(F?.firmas || {}).filter(x => x.estado !== 'subida').length;
 
@@ -605,8 +633,9 @@ async function enviar() {
   clearTimeout(tLocal); guardarLocal();
   try {
     const r = await api(ruta('/enviar'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ datos: datosEnvio() }) });
-    F.ficha = r.ficha; F.editable = false; F.sucio = false; borrarLocal();
+    F.ficha = r.ficha; F.editable = false; F.sucio = false; F.sinConexion = false; borrarLocal();
     F.alCambiar?.(F.cod, F.ficha);
+    refrescarEquipo();
     pintar();
     if (r.avisos?.length) pintarErrores([], r.avisos, 'Ficha enviada a revisión. Revisa estos avisos con el proveedor:');
     F.toast('Ficha enviada a revisión.');
@@ -616,7 +645,7 @@ async function enviar() {
       F.ficha = e.body.ficha || F.ficha; F.sucio = false; borrarLocal(); repintarEstado();
       estadoGuardado(`Guardado a las ${hora()}, sin enviar`);
       pintarErrores(e.body.errores || [], e.body.avisos || [], e.message);
-    } else F.toast(`No se pudo enviar: ${e.message}. Lo llenado queda en este equipo.`);
+    } else F.toast(sinSenal(e) ? 'Sin señal: para enviar a revisión necesitas señal. La ficha quedó guardada en este equipo.' : `No se pudo enviar: ${e.message}. Lo llenado queda en este equipo.`);
   }
 }
 
@@ -679,7 +708,7 @@ function enlazar() {
   // Botón «atrás» del celular: cierra la ficha en lugar de salir de la página
   addEventListener('popstate', () => { if (F && history.state?.ficha !== F.cod) cerrar({ desdeHistorial: true }); });
   // Vuelve la señal: sube las fotos de la cola
-  addEventListener('online', () => subirPendientes());
+  addEventListener('online', () => { subirPendientes(); if (F?.editable && F.sucio) guardar({ silencioso: true }); });
 }
 
 export async function abrirFicha({ proyecto, cod, toast, alCambiar }) {
@@ -689,9 +718,18 @@ export async function abrirFicha({ proyecto, cod, toast, alCambiar }) {
   el.hidden = false; document.body.classList.add('ficha-abierta');
   el.innerHTML = `<div class="fh-cab"><button class="btn btn-ghost btn-sm" type="button" data-fh="cerrar">← Volver</button><div class="fh-tit"><b>Ficha de verificación</b><span class="sub">Local ${esc(cod)} · cargando…</span></div></div>`;
   history.pushState({ ficha: cod }, '');
+  F.usuario = (await window.radarSesion?.usuario().catch(() => null))?.id || null;
   let r;
   try { r = await api(ruta()); }
-  catch (e) { el.innerHTML += `<div class="fh-cuerpo"><p class="aviso alerta">No se pudo abrir la ficha: ${esc(e.message)}</p></div>`; return; }
+  catch (e) {
+    // Sin señal: la copia guardada en el equipo
+    const copia = sinSenal(e) && F.usuario ? await leerFichaEquipo(F.usuario, proyecto.id, cod) : null;
+    if (!copia) {
+      el.innerHTML += `<div class="fh-cuerpo"><p class="aviso alerta">${sinSenal(e) ? 'Sin señal, y esta ficha no está guardada en el equipo. Con señal, ábrela una vez o usa «Llevar mis fichas al equipo» antes de salir.' : 'No se pudo abrir la ficha: ' + esc(e.message)}</p></div>`;
+      return;
+    }
+    r = copia; F.sinConexion = true; F.bajadaEn = copia.bajada_en;
+  }
   if (F?.cod !== cod) return;
   Object.assign(F, { modelo: r.modelo, ficha: r.ficha, editable: r.editable, guia: r.guia, urls: new Map(),
     fotos: r.fotos ? r.fotos.map(f => ({ ...f, estado: 'subida' })) : null,
@@ -726,8 +764,9 @@ export async function abrirFicha({ proyecto, cod, toast, alCambiar }) {
     F.sucio = true;
   } else if (loc) borrarLocal();
   pintar();
-  if (F.sucio) { estadoGuardado('Se recuperó lo que llenaste en este equipo: guárdalo cuando tengas señal.', 'err'); }
+  if (F.sucio) estadoGuardado(F.sinConexion ? 'Lo llenado está guardado en este equipo: se sube solo con señal.' : 'Se recuperó lo que llenaste en este equipo: guárdalo cuando tengas señal.', F.sinConexion ? 'fh-pend' : 'err');
   else if (r.ficha && F.editable) estadoGuardado(`Guardado el ${fechaPe(r.ficha.actualizado_en)}`);
+  if (!F.sinConexion) refrescarEquipo();
   subirPendientes();
 }
 
@@ -743,5 +782,61 @@ async function cerrar({ desdeHistorial = false } = {}) {
   for (const u of F.urls?.values() || []) URL.revokeObjectURL(u);
   F = null;
   $('cFicha').hidden = true; $('cFicha').innerHTML = ''; document.body.classList.remove('ficha-abierta');
+  dispatchEvent(new Event('campo:ficha-cerrada'));   // la página actualiza lo pendiente de subir
   if (!desdeHistorial && history.state?.ficha) history.back();
+}
+
+// ─── Sincronizar todo lo que quedó en el equipo ──────────────────────────────
+// Lo llenado (localStorage) y la cola de fotos y firmas de todas las fichas, aunque estén cerradas.
+// La ficha abierta se encarga de lo suyo. Sin señal se detiene; un error del servidor deja el registro en la cola.
+const borradores = () => {
+  const out = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (!k?.startsWith(LS)) continue;
+      const [proyecto, cod] = k.slice(LS.length).split(':');
+      if (proyecto && cod) out.push({ k, proyecto, cod });
+    }
+  } catch { /* sin almacenamiento */ }
+  return out;
+};
+const esLaAbierta = (proyecto, cod) => F && F.proyecto.id === proyecto && F.cod === cod;
+export async function resumenEquipo() {
+  const cola = await todaLaCola();
+  return { borradores: borradores().filter(b => !esLaAbierta(b.proyecto, b.cod)).length, fotos: cola.filter(r => r.tipo !== 'firma').length, firmas: cola.filter(r => r.tipo === 'firma').length };
+}
+let sincronizando = null;
+export function sincronizarEquipo() {
+  sincronizando ||= (async () => {
+    const out = { borradores: 0, fotos: 0, firmas: 0, errores: 0, sinSenal: false };
+    try {
+      for (const b of borradores()) {
+        if (esLaAbierta(b.proyecto, b.cod)) continue;
+        let d; try { d = JSON.parse(localStorage.getItem(b.k)); } catch { continue; }
+        if (!d?.datos) continue;
+        try {
+          await api(rutaDe(b.proyecto, b.cod), { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ datos: d.datos }) });
+          localStorage.removeItem(b.k); out.borradores++;
+        } catch (e) {
+          if (sinSenal(e)) { out.sinSenal = true; return out; }
+          // La ficha ya se envió o no es de este usuario: lo guardado en el equipo ya no se puede subir
+          if ([403, 404, 409].includes(e.status)) localStorage.removeItem(b.k); else out.errores++;
+        }
+      }
+      for (const reg of await todaLaCola()) {
+        const [proyecto, cod] = String(reg.clave || '').slice(LS.length).split(':');
+        if (!proyecto || !cod || esLaAbierta(proyecto, cod)) continue;
+        try {
+          await subirRegistro(proyecto, cod, reg);
+          await quitarDeCola(reg.id); out[reg.tipo === 'firma' ? 'firmas' : 'fotos']++;
+        } catch (e) {
+          if (sinSenal(e)) { out.sinSenal = true; return out; }
+          out.errores++;
+        }
+      }
+      return out;
+    } finally { sincronizando = null; }
+  })();
+  return sincronizando;
 }
