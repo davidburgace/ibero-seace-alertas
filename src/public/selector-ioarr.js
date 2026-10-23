@@ -807,6 +807,29 @@ async function borrarProyecto() {
   } catch (e) { toast('No se pudo borrar: ' + e.message); }
 }
 
+// Seleccionar por lista de códigos pegada
+async function pegarCodigos(e) {
+  e.preventDefault();
+  const txt = $('p-txt'), res = $('p-res'), btn = $('p-ok');
+  if (!/\d/.test(txt.value)) { res.textContent = 'Pega al menos un código.'; return; }
+  btn.disabled = true;
+  try {
+    const r = await w('pegarCodigos', { texto: txt.value });
+    for (const c of r.codigos) S.sel.add(c);
+    persistirSel(); refresh();
+    const partes = [`${fmt(r.codigos.length)} de ${fmt(r.leidos)} códigos encontrados; ${fmt(r.nuevos)} locales agregados a la selección`
+      + (r.nuevos < r.codigos.length ? ` (${fmt(r.codigos.length - r.nuevos)} ya estaban)` : '') + '.'];
+    if (r.porModular) partes.push(`${fmt(r.porModular)} se reconocieron por código modular y se tomó su local.`);
+    if (r.fuera) partes.push(`${fmt(r.fuera)} no están entre los filtrados ahora (otra provincia, distrito o filtro), pero igual se seleccionaron.`);
+    if (r.noEncontrados.length) {
+      partes.push(`${fmt(r.noEncontrados.length)} no están en el padrón de ${S.region}: se dejaron en el cuadro para que los revises.`);
+      txt.value = r.noEncontrados.join('\n');
+    } else txt.value = '';
+    res.textContent = partes.join(' ');
+  } catch (err) { res.textContent = 'No se pudo seleccionar: ' + err.message; }
+  finally { btn.disabled = false; }
+}
+
 // Vínculo con Radar IOARR
 let tVinc;
 async function buscarIoarr() {
@@ -897,6 +920,8 @@ function bind() {
   $('vLista').addEventListener('click', e => { const b = e.target.closest('[data-dia]'); if (b) verDia(S.vis.dia === +b.dataset.dia ? 0 : +b.dataset.dia); });
   $('vXls').onclick = e => excelVisitas(e.currentTarget);
   $('vKml').onclick = kmlVisitas;
+  $('btn-pegar').onclick = () => { $('p-res').textContent = ''; abrirModal('m-pegar'); setTimeout(() => $('p-txt').focus(), 30); };
+  $('f-pegar').onsubmit = pegarCodigos;
   $('selAll').onclick = async () => { for (const c of await w('codigosVista')) S.sel.add(c); await cambioSel(); refresh(); };
   $('unselAll').onclick = async () => { for (const c of await w('codigosVista')) S.sel.delete(c); await cambioSel(); refresh(); };
   $('pgPrev').onclick = () => { S.page = Math.max(0, S.page - 1); renderTable(); };
