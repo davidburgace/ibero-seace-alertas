@@ -79,6 +79,7 @@
       <div class="filtros-bar">
         <div id="count" aria-live="polite">Cargando…</div>
         <div class="acts">
+          <button class="btn btn-ghost btn-sm" id="btn-pegar" type="button">Seleccionar por lista de códigos</button>
           <button class="btn btn-ghost btn-sm" id="selAll" type="button">Seleccionar los filtrados</button>
           <button class="btn btn-ghost btn-sm" id="unselAll" type="button">Quitar los filtrados</button>
         </div>
@@ -207,6 +208,21 @@
       <button class="btn btn-ghost" type="button" data-cerrar>Cerrar</button>
     </div>
   </div>
+</div>
+
+<!-- Modal: seleccionar por lista de códigos -->
+<div class="modal-overlay" id="m-pegar" role="dialog" aria-modal="true" aria-labelledby="m-pegar-tit">
+  <form class="modal modal-sm" id="f-pegar">
+    <button class="cerrar" type="button" data-cerrar aria-label="Cerrar">×</button>
+    <h2 id="m-pegar-tit">Seleccionar por lista de códigos</h2>
+    <p class="sub">Pega los códigos de local o códigos modulares de los colegios que quieres atender, por ejemplo una columna copiada de Excel. Pueden ir separados por saltos de línea, comas o espacios. Se agregan a la selección actual.</p>
+    <div class="field"><label for="p-txt">Códigos</label><textarea id="p-txt" rows="9" placeholder="398118&#10;398123&#10;0540419"></textarea></div>
+    <p class="sub" id="p-res" aria-live="polite"></p>
+    <div class="modal-acts">
+      <button class="btn btn-ghost" type="button" data-cerrar>Cerrar</button>
+      <button class="btn btn-primary" type="submit" id="p-ok">Seleccionar</button>
+    </div>
+  </form>
 </div>
 
 <!-- Modal: otra inversión vigente o reciente (duplicidad) -->

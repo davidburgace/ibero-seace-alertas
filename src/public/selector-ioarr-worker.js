@@ -1,7 +1,7 @@
 // Selector IOARR — Web Worker: guarda los datos de la región, calcula y filtra.
 // La página solo recibe lo que pinta (una página de la tabla, un detalle, un resumen),
 // así Lima (32 mil aulas) no congela la pantalla.
-import { ITEMS, NIVN, NIVS, NIVB, DEF, prep, calc, totals, filtrar, lv, norm, limpiarParams, totalesPorNivel, estadoSituacional } from '/selector-ioarr/calculo.js';
+import { ITEMS, NIVN, NIVS, NIVB, DEF, prep, calc, totals, filtrar, buscarCodigos, lv, norm, limpiarParams, totalesPorNivel, estadoSituacional } from '/selector-ioarr/calculo.js';
 import { cercanos, centroDistrito, localConCoord, haversine, MAX_PUNTOS } from '/selector-ioarr/cercania.js';
 import { agruparVisitas, puntosVisita, repartirZonas } from '/selector-ioarr/visitas.js';
 
@@ -122,6 +122,16 @@ const acciones = {
     }
     const conCoord = view.reduce((a, i) => a + (localConCoord(D.locs[i]) ? 1 : 0), 0);
     return { puntos: out, total: view.length, conCoord, recortado: conCoord > out.length, centro };
+  },
+  // Lista pegada de códigos de local o modulares: los agrega a la selección.
+  // fuera = cuántos de los encontrados no están entre los filtrados ahora
+  pegarCodigos({ texto }) {
+    const r = buscarCodigos(D, texto), enVista = new Set(view);
+    const codigos = r.idx.map(i => D.locs[i][0]);
+    const nuevos = codigos.filter(c => !sel.has(c)).length;
+    for (const c of codigos) sel.add(c);
+    return { codigos, nuevos, noEncontrados: r.noEncontrados, porModular: r.porModular, leidos: r.leidos,
+      fuera: r.idx.filter(i => !enVista.has(i)).length };
   },
   // Códigos de todo lo filtrado (para «Seleccionar / Quitar los filtrados»)
   codigosVista() { return view.map(i => D.locs[i][0]); },

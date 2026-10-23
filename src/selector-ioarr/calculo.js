@@ -258,4 +258,26 @@ export function filtrar(D, C, F) {
   return out;
 }
 
+// Selección por lista pegada: busca cada número del texto como código de local (6 dígitos)
+// o código modular (7 dígitos). Si Excel borró los ceros de la izquierda, los repone.
+// Devuelve los índices de local (sin repetir), los números que no están en la región
+// y cuántos se encontraron por código modular.
+export function buscarCodigos(D, texto) {
+  if (!D.codLoc) {
+    D.codLoc = new Map(D.locs.map((l, i) => [l[0], i]));
+    D.codMod = new Map(D.svcs.map(s => [s[0], s[3]]));
+  }
+  const nums = [...new Set(String(texto || '').match(/\d+/g) || [])];
+  const idx = new Set(), noEncontrados = [];
+  let porModular = 0;
+  for (const n of nums) {
+    let i = D.codLoc.get(n);
+    if (i == null && D.codMod.has(n)) { i = D.codMod.get(n); porModular++; }
+    if (i == null && n.length < 6) i = D.codLoc.get(n.padStart(6, '0'));
+    if (i == null && n.length < 7 && D.codMod.has(n.padStart(7, '0'))) { i = D.codMod.get(n.padStart(7, '0')); porModular++; }
+    if (i == null) noEncontrados.push(n); else idx.add(i);
+  }
+  return { idx: [...idx], noEncontrados, porModular, leidos: nums.length };
+}
+
 export const FILTRO_VACIO = () => ({ q: '', prov: -1, dist: -1, ugel: -1, area: -1, ges: -1, niv: 0, rep: 0, est: 0, censo: false });
