@@ -47,6 +47,8 @@
 //     GET    /proyectos/:id/fichas/:cod/digital          lo llenado, el padrón y censo del local y la validación
 //     POST   /proyectos/:id/fichas/:cod/digital/aprobar  pasa la ficha enviada al inventario verificado (como importar el Excel)
 //     POST   /proyectos/:id/fichas/:cod/digital/observar { nota } la devuelve al supervisor para que la corrija
+//     GET    /proyectos/:id/fichas/:cod/digital/fotos/:fotoId  una foto de la ficha (?mini=1 la miniatura; migración 024).
+//            Al aprobar, las fotos se copian al sustento del local (ioarr_expediente_archivos, tipo «foto»)
 //   También devuelve api.resumen(p): avance del expediente para Radar IOARR (ficha y kanban)
 // ============================================================================
 
@@ -66,7 +68,9 @@ import { porNivel, inventarioNivel, inventarioUna, modoDe, sinNivel, nivelesDeLo
 import { modeloFicha, generarFichaExcel, generarFichaPdf, leerFicha, procesarFicha, requeridoFicha, ESTADO_VERIF } from './ficha.js';
 import archiver from 'archiver';
 import { asignacionesProyecto, paquetesFichas } from './campo.js';
-import { fichaDesdeFormulario, leerFichaDigital, estadosFichas, guardarFichaDigital, origenDigital, AVISO_MIGRACION_FICHAS } from './ficha-digital.js';
+import { fichaDesdeFormulario, leerFichaDigital, estadosFichas, guardarFichaDigital, origenDigital, AVISO_MIGRACION_FICHAS,
+  fotosFicha, leerFotos, avisosFotos, lugarFoto, esUuid as esUuidFoto, faltaMigracion as faltaMigracionFichas } from './ficha-digital.js';
+import { descargarFoto } from './campo.js';
 
 const AVISO = 'Falta ejecutar supabase/migrations/012_ioarr_expediente_costos.sql en Supabase';
 const faltaMigracion = e => e?.code === 'PGRST204' || e?.code === 'PGRST205' || e?.code === '42P01' || /schema cache|does not exist/i.test(e?.message || '');
@@ -100,6 +104,10 @@ async function borrarDelBucket(rutas) {
 export async function borrarArchivosProyecto(proyectoId) {
   const archivos = await leerArchivos(proyectoId);
   if (archivos.length) await borrarDelBucket(archivos.map(a => a.ruta));
+  // Fotos de las fichas llenadas en la app (migración 024)
+  const { data: fotos, error } = await supabase.from('campo_fichas_fotos').select('ruta, ruta_mini').eq('proyecto_id', proyectoId);
+  if (error) { if (!faltaMigracion(error)) console.error('[EXPEDIENTE] Fotos de campo del proyecto:', error.message); return; }
+  if (fotos.length) await borrarDelBucket(fotos.flatMap(f => [f.ruta, f.ruta_mini]).filter(Boolean));
 }
 const sinRuta = ({ ruta, ...a }) => a;
 
@@ -684,7 +692,11 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
 
   // ─── Fichas llenadas en la app (Visitas de campo) ─────────────────────────
   // Lo que el supervisor llenó, validado con el contexto actual del proyecto
-  const validarFormulario = (K, cod, datos, origen) => validarFicha(K, fichaDesdeFormulario(datos, { proyectoId: K.p.id, cod, region: K.p.region }), origen);
+  const validarFormulario = (K, cod, datos, origen, fotos) => {
+    const r = validarFicha(K, fichaDesdeFormulario(datos, { proyectoId: K.p.id, cod, region: K.p.region, fotos }), origen);
+    if (fotos) r.avisos = [...r.avisos, ...avisosFotos(datos, fotos)];
+    return r;
+  };
   async function fichaDigitalDe(p, cod) {
     let f;
     try { f = await leerFichaDigital(supabase, p.id, cod); }
@@ -696,20 +708,22 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
   api.get('/proyectos/:id/fichas/:cod/digital', responder(async (req, res) => {
     const p = await proyecto(req), cod = String(req.params.cod);
     const f = await fichaDigitalDe(p, cod);
-    const [modelo, K] = await Promise.all([fichaLocal(p, cod), contextoFichas(p)]);
+    const [modelo, K, fotos] = await Promise.all([fichaLocal(p, cod), contextoFichas(p), fotosFicha(supabase, p.id, cod)]);
     const { por_id, ...ficha } = f;
-    res.json({ ficha, modelo, revision: revision(validarFormulario(K, cod, f.datos, origenDigital(f.por))) });
+    res.json({ ficha, modelo, fotos, revision: revision(validarFormulario(K, cod, f.datos, origenDigital(f.por), fotos)) });
   }));
   api.post('/proyectos/:id/fichas/:cod/digital/aprobar', responder(async (req, res) => {
     const p = await proyecto(req), cod = String(req.params.cod);
     if (await sinMigracionFicha()) return res.status(503).json({ error: AVISO_FICHA });
     const f = await fichaDigitalDe(p, cod);
     if (f.estado !== 'enviada') return res.status(409).json({ error: f.estado === 'aprobada' ? 'La ficha ya está aprobada' : 'El supervisor aún no envía esta ficha a revisión' });
-    const K = await contextoFichas(p), r = validarFormulario(K, cod, f.datos, origenDigital(f.por));
+    const [K, fotos] = await Promise.all([contextoFichas(p), leerFotosOVacio(p.id, cod)]);
+    const r = validarFormulario(K, cod, f.datos, origenDigital(f.por), fotos);
     if (r.rechazada || r.errores.length) return res.status(422).json({ error: 'La ficha tiene errores: devuélvela al supervisor para que la corrija.', revision: revision(r) });
     await guardarFichaInventario(K, r, req.usuario.id);
     await guardarFichaDigital(supabase, p.id, cod, { estado: 'aprobada', revisado_por: req.usuario.id, revisada_en: new Date().toISOString(), nota_revision: null });
-    res.json({ fichas: await vistaFichas(p) });
+    const copia = await copiarFotosAlSustento(p, cod, fotos, f.datos?.a?.fecha);
+    res.json({ fichas: await vistaFichas(p), fotos: copia });
   }));
   api.post('/proyectos/:id/fichas/:cod/digital/observar', responder(async (req, res) => {
     const p = await proyecto(req), cod = String(req.params.cod);
@@ -720,9 +734,45 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     await guardarFichaDigital(supabase, p.id, cod, { estado: 'observada', revisado_por: req.usuario.id, revisada_en: new Date().toISOString(), nota_revision: nota });
     res.json({ fichas: await vistaFichas(p) });
   }));
+  async function leerFotosOVacio(proyectoId, cod) {
+    try { return await leerFotos(supabase, proyectoId, cod); }
+    catch (e) { if (faltaMigracionFichas(e)) return []; throw e; }
+  }
+  // Copia las fotos de la ficha aprobada al sustento del local (así salen en el expediente y su ZIP).
+  // Una foto que no se puede copiar no frena la aprobación: se cuenta y se informa.
+  async function copiarFotosAlSustento(p, cod, fotos, fecha) {
+    const out = { copiadas: 0, fallidas: 0 };
+    const bucket = supabase.storage.from(BUCKET_EXPEDIENTE);
+    for (const [n, f] of fotos.entries()) {
+      const ext = f.ruta.split('.').pop(), destino = `${p.id}/${nombreSeguro(cod)}/${Date.now()}_campo_${f.id}.${ext}`;
+      const { error: eCp } = await bucket.copy(f.ruta, destino);
+      if (eCp) { console.error('[EXPEDIENTE] Foto de campo no copiada:', eCp.message); out.fallidas++; continue; }
+      const lugar = lugarFoto(f), detalle = [f.aula == null ? null : f.muestra, f.tomada_en ? 'tomada el ' + String(f.tomada_en).slice(0, 10).split('-').reverse().join('/') : null,
+        f.lat != null ? `${f.lat.toFixed(5)}, ${f.lon.toFixed(5)}` : null, f.subido_por_email].filter(Boolean).join(' · ');
+      const { error } = await supabase.from('ioarr_expediente_archivos').insert({
+        proyecto_id: p.id, cod_local: cod, tipo: 'foto', nombre_archivo: `Foto ${n + 1} - ${nombreSeguro(lugar)}.${ext}`, ruta: destino, mime: f.mime, tamano: f.tamano,
+        descripcion: texto(`Ficha en la app: ${lugar}${detalle ? ' · ' + detalle : ''}`, 300), subido_por: null
+      });
+      if (error) { console.error('[EXPEDIENTE] Foto de campo no registrada:', error.message); await borrarDelBucket([destino]); out.fallidas++; continue; }
+      out.copiadas++;
+    }
+    return out;
+  }
+  // Una foto de la ficha, para la revisión
+  api.get('/proyectos/:id/fichas/:cod/digital/fotos/:fotoId', responder(async (req, res) => {
+    const p = await proyecto(req), cod = String(req.params.cod);
+    if (!esUuidFoto(req.params.fotoId)) return res.status(404).json({ error: 'Foto no encontrada' });
+    const { data: f, error } = await supabase.from('campo_fichas_fotos').select('ruta, ruta_mini').eq('id', req.params.fotoId).eq('proyecto_id', p.id).eq('codigo_local', cod).maybeSingle();
+    if (error) throw error;
+    if (!f) return res.status(404).json({ error: 'Foto no encontrada' });
+    const r = await descargarFoto(supabase, f, !!req.query.mini);
+    if (r.error) return res.status(r.status).json({ error: r.error });
+    res.set({ 'Content-Type': r.mime, 'Cache-Control': 'private, max-age=86400' }).send(r.buffer);
+  }));
+
   // Para Visitas de campo (src/selector-ioarr/campo.js, por router.js): el proyecto ya viene validado
   api.fichaLocal = fichaLocal;
-  api.validarFichaDigital = async (p, cod, datos, origen) => validarFormulario(await contextoFichas(p), cod, datos, origen);
+  api.validarFichaDigital = async (p, cod, datos, origen) => validarFicha(await contextoFichas(p), fichaDesdeFormulario(datos, { proyectoId: p.id, cod, region: p.region }), origen);
 
   // ─── Documentos: Formato 07-C y memoria descriptiva ───────────────────────
   async function leerDatosDoc(p) {

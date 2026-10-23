@@ -7,8 +7,9 @@ import ExcelJS from 'exceljs';
 import { prep, calc, filtrar, FILTRO_VACIO, DEF } from '../src/selector-ioarr/calculo.js';
 import { nivelesDeLocal } from '../src/selector-ioarr/niveles.js';
 import { modeloFicha, generarFichaExcel, leerFicha, procesarFicha } from '../src/selector-ioarr/ficha.js';
-import { limpiarFormulario, fichaDesdeFormulario, puedeEditar, origenDigital } from '../src/selector-ioarr/ficha-digital.js';
-import { accesoFicha, fichasDelUsuario, abrirFichaCampo, guardarBorradorFicha, enviarFicha, GUIA_FICHA } from '../src/selector-ioarr/campo.js';
+import { limpiarFormulario, fichaDesdeFormulario, puedeEditar, origenDigital, limpiarMetaFoto, avisosFotos, panelFotos, lugarFoto, rutaFoto } from '../src/selector-ioarr/ficha-digital.js';
+import { accesoFicha, fichasDelUsuario, abrirFichaCampo, guardarBorradorFicha, enviarFicha, GUIA_FICHA, subirFotoFicha, leerImagenFoto, borrarFotoFicha } from '../src/selector-ioarr/campo.js';
+import { politicaSelector } from '../src/selector-ioarr/csp.js';
 
 const leer = rel => readFileSync(new URL('../' + rel, import.meta.url), 'utf8');
 const D = prep(JSON.parse(leer('src/public/data/selector-ioarr/2025/moquegua.json')));
@@ -90,20 +91,27 @@ test('estados: el supervisor solo cambia un borrador o una ficha devuelta', () =
 
 // ─── API de campo con un Supabase falso ─────────────────────────────────────
 const UUID = '6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b';
-function sbFalso({ fichas = [], visitas = [], sinTabla = false } = {}) {
+function sbFalso({ fichas = [], visitas = [], fotos = [], sinTabla = false, sinFotos = false } = {}) {
   const tablas = {
     ioarr_selector_proyectos: [{ id: UUID, usuario_id: 'prov-1', nombre: 'Moquegua 2026', region: 'Moquegua' }],
     ioarr_selector_locales: [COD_U, '100002'].map(c => ({ proyecto_id: UUID, codigo_local: c })),
     perfiles: [{ id: 'sup-1', email: 'ana@ibero.pe', rol: 'supervisor' }, { id: 'sup-2', email: 'beto@ibero.pe', rol: 'supervisor' }],
     campo_asignaciones: [{ proyecto_id: UUID, codigo_local: COD_U, supervisor_id: 'sup-1' }, { proyecto_id: UUID, codigo_local: '100002', supervisor_id: 'sup-2' }],
     campo_fichas: fichas.map(f => ({ proyecto_id: UUID, ...f })),
-    campo_visitas: [...visitas]
+    campo_visitas: [...visitas],
+    campo_fichas_fotos: [...fotos]
   };
+  const archivos = new Map();   // bucket: ruta → Buffer
+  const storage = { from: () => ({
+    upload: async (ruta, buf) => { archivos.set(ruta, buf); return { error: null }; },
+    download: async ruta => archivos.has(ruta) ? { data: { arrayBuffer: async () => archivos.get(ruta) }, error: null } : { data: null, error: { message: 'not found' } },
+    remove: async rutas => { rutas.forEach(r => archivos.delete(r)); return { error: null }; }
+  }) };
   const CLAVES = { campo_fichas: ['proyecto_id', 'codigo_local'], campo_visitas: ['codigo_local'] };
   const from = tabla => {
-    const q = { eq: {}, in: null, rango: null };
+    const q = { eq: {}, in: null, rango: null, borrar: false };
     const filtrar = () => tablas[tabla].filter(f => Object.entries(q.eq).every(([k, v]) => f[k] === v) && (!q.in || q.in[1].includes(f[q.in[0]])));
-    const fallo = sinTabla && tabla === 'campo_fichas' ? { code: '42P01', message: 'relation "campo_fichas" does not exist' } : null;
+    const fallo = (sinTabla && tabla === 'campo_fichas') || (sinFotos && tabla === 'campo_fichas_fotos') ? { code: '42P01', message: `relation "${tabla}" does not exist` } : null;
     let escrita = null;
     const b = {
       select: () => b, order: () => b,
@@ -112,22 +120,26 @@ function sbFalso({ fichas = [], visitas = [], sinTabla = false } = {}) {
       range: (a, z) => { q.rango = [a, z]; return b; },
       maybeSingle: async () => fallo ? { data: null, error: fallo } : { data: filtrar()[0] || null, error: null },
       single: async () => fallo ? { data: null, error: fallo } : { data: escrita, error: null },
-      upsert: fila => {
+      upsert: (fila, o = {}) => {
         if (!fallo) {
           const ks = CLAVES[tabla], i = tablas[tabla].findIndex(f => ks.every(k => f[k] === fila[k]));
-          escrita = i >= 0 ? (tablas[tabla][i] = { ...tablas[tabla][i], ...fila }) : (tablas[tabla].push({ ...fila }), fila);
+          if (i >= 0 && o.ignoreDuplicates) escrita = tablas[tabla][i];
+          else escrita = i >= 0 ? (tablas[tabla][i] = { ...tablas[tabla][i], ...fila }) : (tablas[tabla].push({ ...fila }), fila);
         }
         return b;
       },
+      insert: async fila => { if (fallo) return { error: fallo }; tablas[tabla].push({ ...fila }); return { error: null }; },
+      delete: () => { q.borrar = true; return b; },
       then: (ok, mal) => {
         if (fallo) return Promise.resolve({ data: null, error: fallo }).then(ok, mal);
+        if (q.borrar) { const fuera = new Set(filtrar()); tablas[tabla] = tablas[tabla].filter(f => !fuera.has(f)); return Promise.resolve({ error: null }).then(ok, mal); }
         const d = filtrar();
         return Promise.resolve({ data: q.rango ? d.slice(q.rango[0], q.rango[1] + 1) : d, error: null }).then(ok, mal);
       }
     };
     return b;
   };
-  return { from, tablas };
+  return { from, tablas, storage, archivos };
 }
 const ANA = { id: 'sup-1', email: 'ana@ibero.pe', rol: 'supervisor' };
 const BETO = { id: 'sup-2', email: 'beto@ibero.pe', rol: 'supervisor' };
@@ -210,4 +222,100 @@ test('migración 023, rutas de revisión y páginas', () => {
   assert.match(leer('src/public/campo.html'), /id="cFicha"/);
   assert.match(leer('src/public/campo.js'), /import \{ abrirFicha \} from '\/campo-ficha\.js'/);
   assert.match(leer('src/public/selector-ioarr-fichas.js'), /data-ficha-aprobar/);
+});
+
+// ─── Fotos (migración 024) ──────────────────────────────────────────────────
+const JPG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(60, 1)]);
+const MINI = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(20, 2)]);
+const ID1 = '11111111-2222-4333-8444-555555555555', ID2 = '11111111-2222-4333-8444-666666666666';
+const campos = (id, x = {}) => ({ id, aula: '0', bien: 'silla', muestra: '', lat: '-16.14', lon: '-70.53', tomada_en: '2026-10-15T15:00:00Z', ...x });
+
+test('datos de la foto: aula, mueble, coordenadas en Perú y hora válida', () => {
+  const ahora = Date.parse('2026-10-22T12:00:00Z');
+  assert.deepEqual(limpiarMetaFoto(campos(ID1), ahora), { aula: 0, bien: 'silla', muestra: null, lat: -16.14, lon: -70.53, tomada_en: '2026-10-15T15:00:00.000Z' });
+  const m = limpiarMetaFoto({ aula: '', bien: 'tele', muestra: 'Fachada y letrero', lat: '40', lon: '-3', tomada_en: '2030-01-01' }, ahora);
+  assert.equal(m.aula, null); assert.equal(m.bien, null); assert.equal(m.lat, null); assert.equal(m.tomada_en, new Date(ahora).toISOString(), 'una hora futura se cambia por la de ahora');
+  assert.equal(lugarFoto({ aula: 2, bien: 'mesa' }), 'Aula 3 · Mesa del estudiante');
+  assert.equal(lugarFoto({ aula: null, muestra: 'Fachada y letrero' }), 'Fachada y letrero');
+  assert.equal(rutaFoto('p', '123', ID1, 'image/jpeg', true), `campo/p/123/${ID1}_mini.jpg`);
+});
+
+test('subir foto: crea la ficha si no existe, guarda foto y miniatura, y un reintento no la duplica', async () => {
+  const sb = sbFalso();
+  const r = await subirFotoFicha(sb, ANA, UUID, COD_U, { archivo: { buffer: JPG, size: JPG.length }, mini: { buffer: MINI }, campos: campos(ID1) });
+  assert.equal(r.status, 201); assert.equal(r.body.foto.lugar, 'Aula 1 · Silla del estudiante'); assert.equal(r.body.foto.mini, true);
+  assert.equal(sb.tablas.campo_fichas.length, 1); assert.equal(sb.tablas.campo_fichas[0].estado, 'borrador');
+  assert.deepEqual([...sb.archivos.keys()].sort(), [`campo/${UUID}/${COD_U}/${ID1}.jpg`, `campo/${UUID}/${COD_U}/${ID1}_mini.jpg`]);
+  const otra = await subirFotoFicha(sb, ANA, UUID, COD_U, { archivo: { buffer: JPG }, campos: campos(ID1) });
+  assert.equal(otra.status, 200); assert.equal(sb.tablas.campo_fichas_fotos.length, 1, 'mismo id: no se duplica');
+
+  // Con la ficha ya llenada, subir otra foto no le borra los datos
+  await guardarBorradorFicha(sb, ANA, UUID, COD_U, { datos: FORM });
+  await subirFotoFicha(sb, ANA, UUID, COD_U, { archivo: { buffer: JPG }, campos: campos(ID2, { aula: '', bien: '', muestra: 'Fachada y letrero' }) });
+  assert.equal(sb.tablas.campo_fichas[0].datos.a.verificador, FORM.a.verificador);
+  assert.equal(sb.tablas.campo_fichas_fotos.length, 2);
+
+  const img = await leerImagenFoto(sb, ANA, UUID, COD_U, ID1, true);
+  assert.deepEqual(img.buffer, MINI); assert.equal(img.mime, 'image/jpeg');
+  assert.equal((await leerImagenFoto(sb, BETO, UUID, COD_U, ID1)).status, 403, 'otro supervisor no la ve');
+  const ab = await abrirFichaCampo(sb, ANA, UUID, COD_U, DEPS);
+  assert.deepEqual(ab.body.fotos.map(f => f.id).sort(), [ID1, ID2].sort());
+});
+
+test('subir foto: rechaza lo que no es foto, ids inválidos, colegios ajenos y fichas enviadas', async () => {
+  const sb = sbFalso();
+  const pdf = Buffer.from('%PDF-1.4 xxxxxxxxxxxx');
+  assert.equal((await subirFotoFicha(sb, ANA, UUID, COD_U, { archivo: { buffer: pdf }, campos: campos(ID1) })).status, 400);
+  assert.equal((await subirFotoFicha(sb, ANA, UUID, COD_U, { archivo: { buffer: JPG }, campos: campos('no-uuid') })).status, 400);
+  assert.equal((await subirFotoFicha(sb, BETO, UUID, COD_U, { archivo: { buffer: JPG }, campos: campos(ID1) })).status, 403);
+  const env = sbFalso({ fichas: [{ codigo_local: COD_U, estado: 'enviada', datos: FORM }] });
+  assert.equal((await subirFotoFicha(env, ANA, UUID, COD_U, { archivo: { buffer: JPG }, campos: campos(ID1) })).status, 409);
+});
+
+test('borrar foto: quita la fila y los archivos; no con la ficha enviada', async () => {
+  const sb = sbFalso();
+  await subirFotoFicha(sb, ANA, UUID, COD_U, { archivo: { buffer: JPG }, mini: { buffer: MINI }, campos: campos(ID1) });
+  const r = await borrarFotoFicha(sb, ANA, UUID, COD_U, ID1);
+  assert.equal(r.status, 200); assert.equal(sb.tablas.campo_fichas_fotos.length, 0); assert.equal(sb.archivos.size, 0);
+  const env = sbFalso({ fichas: [{ codigo_local: COD_U, estado: 'enviada', datos: FORM }], fotos: [{ id: ID1, proyecto_id: UUID, codigo_local: COD_U, ruta: 'x.jpg', mime: 'image/jpeg' }] });
+  assert.equal((await borrarFotoFicha(env, ANA, UUID, COD_U, ID1)).status, 409);
+});
+
+test('sin la migración 024 la ficha funciona igual, sin fotos', async () => {
+  const r = await abrirFichaCampo(sbFalso({ sinFotos: true }), ANA, UUID, COD_U, DEPS);
+  assert.equal(r.status, 200); assert.equal(r.body.fotos, null);
+  assert.equal((await enviarFicha(sbFalso({ sinFotos: true, fichas: [{ codigo_local: COD_U, estado: 'borrador', datos: {} }] }), ANA, UUID, COD_U, { datos: FORM }, DEPS)).status, 200);
+});
+
+test('panel fotográfico: avisa la fachada y los muebles en mal estado sin foto, y pasa a la ficha', async () => {
+  const sinNada = avisosFotos(FORM, []);
+  assert.equal(sinNada.length, 2);
+  assert.match(sinNada[0].motivo, /fachada/); assert.match(sinNada[1].motivo, /aula 1 \(mesa del estudiante\), aula 1 \(silla del estudiante\)/);
+  const fotos = [{ aula: null, bien: null, muestra: 'Fachada y letrero' }, { aula: 0, bien: 'mesa' }, { aula: 0, bien: 'silla' }, { aula: 0, bien: null }];
+  assert.deepEqual(avisosFotos(FORM, fotos), []);
+  assert.deepEqual(avisosFotos(FORM, null), [], 'sin la migración, sin avisos');
+  assert.deepEqual(panelFotos(fotos).map(f => [f.n, f.ambiente, f.muestra]), [[1, 'Fachada y letrero', 'Fachada y letrero'], [2, 'Aula 1 · Mesa del estudiante', 'Detalle del mueble'], [3, 'Aula 1 · Silla del estudiante', 'Detalle del mueble'], [4, 'Aula 1', 'Vista general del aula']]);
+  const r = procesarFicha(fichaDesdeFormulario(FORM, { proyectoId: 'p-1', cod: COD_U, fotos }), CTX);
+  assert.equal(r.fila.ficha.fotos.length, 4); assert.equal(r.fila.ficha.fotos[0].ambiente, 'Fachada y letrero');
+
+  // Al enviar, los avisos de fotos salen junto con los de la validación
+  const sb = sbFalso({ fichas: [{ codigo_local: COD_U, estado: 'borrador', datos: {} }] });
+  const env = await enviarFicha(sb, ANA, UUID, COD_U, { datos: FORM }, DEPS);
+  assert.equal(env.status, 200); assert.ok(env.body.avisos.some(a => /fachada/.test(a.motivo)));
+});
+
+test('migración 024, copia al sustento al aprobar, CSP y páginas', () => {
+  const sql = leer('supabase/migrations/024_campo_fichas_fotos.sql');
+  assert.match(sql, /create table if not exists public\.campo_fichas_fotos/);
+  assert.match(sql, /references public\.campo_fichas \(proyecto_id, codigo_local\) on delete cascade/);
+  assert.match(sql, /enable row level security/); assert.doesNotMatch(sql, /create policy/);
+  const exp = leer('src/selector-ioarr/expediente.js');
+  assert.match(exp, /copiarFotosAlSustento\(p, cod, fotos/);
+  assert.match(exp, /tipo: 'foto'/);
+  assert.match(exp, /campo_fichas_fotos'\)\.select\('ruta, ruta_mini'\)\.eq\('proyecto_id', proyectoId\)/, 'al borrar el proyecto se borran sus fotos de campo');
+  assert.match(politicaSelector('https://x.supabase.co'), /img-src 'self' data: blob:/);
+  const js = leer('src/public/campo-ficha.js');
+  assert.match(js, /capture="environment"/);
+  assert.match(js, /from '\/campo-fotos\.js'/);
+  assert.match(leer('src/public/campo-fotos.js'), /indexedDB\.open/);
 });

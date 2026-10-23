@@ -4,7 +4,10 @@
 // Lo llenado se guarda en el equipo mientras se escribe (por si se cierra la página o se va la señal)
 // y en el servidor con «Guardar» o al enviar. El servidor valida igual que la importación del Excel
 // (src/selector-ioarr/ficha-digital.js y ficha.js).
+// Fotos (campo-fotos.js): 📷 en la fachada, en cada aula y en cada mueble. Se reducen y sellan en el
+// celular, quedan en la cola del equipo y se suben solas cuando hay señal (/fichas/:cod/fotos).
 //   abrirFicha({ proyecto: { id, nombre }, cod, toast, alCambiar(cod, ficha) })
+import { prepararFoto, nuevoId, encolar, enCola, quitarDeCola, colaPersistente, seguirUbicacion, dejarUbicacion, ubicacionReciente } from '/campo-fotos.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -17,7 +20,9 @@ const entero = v => /^\d+$/.test(String(v ?? '').trim()) ? Number(v) : NaN;
 const hora = () => new Date().toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' });
 const LS = 'campo:ficha:';
 
-let F = null;   // { proyecto, cod, modelo, ficha, editable, guia, d (lo llenado), sucio, toast, alCambiar }
+let F = null;   // { proyecto, cod, modelo, ficha, editable, guia, d (lo llenado), sucio, toast, alCambiar,
+                //   fotos: [{ id, aula, bien, muestra, tomada_en, lat, lon, estado: 'subida'|'pendiente'|'error', error?, reg? }] | null (sin la migración 024),
+                //   urls: Map(id → URL de la miniatura), slot (dónde va la próxima foto) }
 
 async function api(ruta, opts = {}) {
   const r = await fetch(ruta, opts);
@@ -82,6 +87,71 @@ function difiere(j, k) {
   return dif > F.guia.tolerancia ? { ver, cen } : null;
 }
 
+// ─── Fotos: dónde se toman ───────────────────────────────────────────────────
+// slot: 'fachada', 'local' (otra foto del local), 'a3' (vista general del aula 4) o 'a3:mesa' (detalle del mueble)
+function metaSlot(slot) {
+  if (slot === 'fachada') return { aula: null, bien: null, muestra: 'Fachada y letrero' };
+  if (slot === 'local') return { aula: null, bien: null, muestra: 'Otra foto del local' };
+  const [a, k] = slot.slice(1).split(':');
+  return { aula: Number(a), bien: k || null, muestra: k ? 'Detalle del mueble' : 'Vista general del aula' };
+}
+const slotDe = f => f.aula == null ? (/fachada/i.test(f.muestra || '') ? 'fachada' : 'local') : `a${f.aula}${f.bien ? ':' + f.bien : ''}`;
+const lugarSlot = slot => { const m = metaSlot(slot); return m.aula == null ? m.muestra : `Aula ${m.aula + 1}${m.bien ? ' · ' + BIEN(m.bien) : ''}`; };
+const fotosDe = slot => (F.fotos || []).filter(f => slotDe(f) === slot);
+const ICONO = { pendiente: '⏳', error: '⚠️', subida: '' };
+function htmlSlot(slot, { titulo = '' } = {}) {
+  if (!F.fotos) return '';
+  const fs = fotosDe(slot);
+  if (!F.editable && !fs.length) return '';
+  return `<div class="fh-fotos" data-slot="${slot}">
+    ${titulo ? `<span class="fh-fotos-tit">${esc(titulo)}</span>` : ''}
+    <div class="fh-minis">${fs.map(f => `<button type="button" class="fh-mini ${f.estado}" data-fh="ver-foto" data-id="${f.id}" aria-label="Ver foto: ${esc(lugarSlot(slot))}">
+      <img data-foto-id="${f.id}" alt="">${ICONO[f.estado] ? `<span class="fh-mini-est" title="${f.estado === 'error' ? esc(f.error || 'No se pudo subir') : 'Por subir'}">${ICONO[f.estado]}</span>` : ''}</button>`).join('')}
+    ${F.editable ? `<button type="button" class="btn btn-ghost btn-sm fh-cam" data-fh="foto" data-slot="${slot}">📷 Foto</button>
+      <button type="button" class="x" data-fh="galeria" data-slot="${slot}">Galería</button>` : ''}</div>
+  </div>`;
+}
+function repintarSlot(slot) {
+  const el = document.querySelector(`.fh-fotos[data-slot="${slot}"]`);
+  if (el) el.outerHTML = htmlSlot(slot, { titulo: el.querySelector('.fh-fotos-tit')?.textContent || '' });
+  if (slot.includes(':')) refrescarAula(metaSlot(slot).aula);
+  pintarPanel(); cargarMinis();
+}
+// Miniaturas: la de una foto por subir sale del equipo; las demás se piden al servidor (con la sesión) una sola vez
+async function cargarMinis() {
+  for (const img of document.querySelectorAll('#cFicha img[data-foto-id]:not([src])')) {
+    const id = img.dataset.fotoId, f = F?.fotos?.find(x => x.id === id);
+    if (!f) continue;
+    let url = F.urls.get(id);
+    if (!url && f.reg) { url = URL.createObjectURL(f.reg.mini || f.reg.foto); F.urls.set(id, url); }
+    if (!url && f.estado === 'subida') {
+      img.setAttribute('src', '');   // marca: ya se pidió
+      try {
+        const r = await fetch(ruta(`/fotos/${id}?mini=1`));
+        if (!r.ok) continue;
+        url = URL.createObjectURL(await r.blob()); F?.urls.set(id, url);
+      } catch { continue; }
+    }
+    if (url) img.src = url;
+  }
+}
+// Panel fotográfico (sección D): cuántas hay, cuántas faltan subir y lo que falta fotografiar
+function pintarPanel() {
+  const el = $('fhPanel'); if (!el) return;
+  if (!F.fotos) { el.innerHTML = '<p class="sub">Para tomar fotos en la ficha falta ejecutar la migración 024 en Supabase. Mientras, súbelas en «Corregir inventario» del local.</p>'; return; }
+  const fs = F.fotos, pend = fs.filter(f => f.estado === 'pendiente').length, err = fs.filter(f => f.estado === 'error').length;
+  const malos = [];
+  for (const [j, a] of Object.entries(F.d.aulas)) for (const k of new Set(a.filas.filter(f => entero(f.m) > 0).map(f => f.k))) if (!fotosDe(`a${j}:${k}`).length) malos.push(`aula ${Number(j) + 1} (${BIEN(k).toLowerCase()})`);
+  const aulasSin = F.modelo.aulas.filter(a => estadoAula(a.j) === 'ok' && !fotosDe('a' + a.j).length).length;
+  const item = (ok, t) => `<li class="${ok ? 'ok' : ''}">${ok ? '✓' : '○'} ${t}</li>`;
+  el.innerHTML = `<p><b>${ent(fs.length)} ${fs.length === 1 ? 'foto' : 'fotos'}</b>${pend ? ` · <span class="fh-pend">${ent(pend)} por subir (se suben solas con señal)</span>` : fs.length ? ' · todas subidas' : ''}${err ? ` · <span class="err">${ent(err)} con error: ábrela para reintentar o borrarla</span>` : ''}</p>
+    <ul class="fh-check">
+      ${item(fotosDe('fachada').length, 'Fachada con el letrero de la institución (sección A)')}
+      ${item(!aulasSin, aulasSin ? `Vista general: falta en ${ent(aulasSin)} ${aulasSin === 1 ? 'aula verificada' : 'aulas verificadas'}` : 'Vista general de las aulas verificadas')}
+      ${item(!malos.length, malos.length ? `Muebles en mal estado sin foto: ${esc(malos.slice(0, 6).join(', '))}${malos.length > 6 ? ` y ${malos.length - 6} más` : ''}` : 'Detalle de cada mueble en mal estado')}
+    </ul>`;
+}
+
 // ─── Pintar ──────────────────────────────────────────────────────────────────
 const campo = (p, valor, { label, tipo = 'text', num = false, ph = '', lista = '', ancho = '', max = '' } = {}) => `
   <label class="fh-campo ${ancho}"><span>${esc(label)}</span>
@@ -115,6 +185,7 @@ function pintar() {
           <button class="btn btn-ghost btn-sm" type="button" data-fh="gps">Usar mi GPS</button></div>
           <span class="sub">Del padrón. Corrígelas con el GPS si el local está en otro lugar.</span></div>
       </div>
+      ${htmlSlot('fachada', { titulo: 'Foto de la fachada con el letrero' })}
     </section>
 
     <section class="fh-sec"><h3>B. Servicios educativos</h3>
@@ -135,10 +206,14 @@ function pintar() {
       ${nAulas ? M.aulas.map(a => pintarAula(a)).join('') : '<p class="aviso">El censo no registra aulas en este local: anota el mobiliario en la sección D o en las observaciones.</p>'}
     </section>
 
-    <section class="fh-sec"><h3>D. Mobiliario fuera de aulas</h3>
+    <section class="fh-sec"><h3>D. Mobiliario fuera de aulas y panel fotográfico</h3>
       <p class="sub">Dirección, sala de docentes, biblioteca, laboratorio, AIP, comedor: solo si el proyecto los incluye. Es informativo, no entra al costo.</p>
       <div id="fhFuera">${pintarFuera()}</div>
       <button class="btn btn-ghost btn-sm" type="button" data-fh="mas-fuera">+ Agregar ambiente</button>
+      <h4 class="fh-sub">Panel fotográfico</h4>
+      <p class="sub">Fachada con el letrero, una vista general de cada aula y el detalle de cada mueble en mal estado. Cada foto lleva un sello con el local, el aula, la fecha y las coordenadas.</p>
+      <div id="fhPanel"></div>
+      ${htmlSlot('local', { titulo: 'Otras fotos del local (otros ambientes, mobiliario fuera de aulas)' })}
     </section>
 
     <section class="fh-sec"><h3>E. Observaciones y conformidad</h3>
@@ -152,12 +227,15 @@ function pintar() {
     </section>
     </fieldset>
   </div>
+  <input type="file" id="fhCam" accept="image/*" capture="environment" hidden>
+  <input type="file" id="fhGal" accept="image/*" multiple hidden>
+  <div class="fh-visor" id="fhVisor" hidden></div>
   ${F.editable ? `<div class="fh-pie">
     <span class="sub" id="fhGuardado" role="status"></span>
     <div class="acts"><button class="btn btn-ghost" type="button" data-fh="guardar">Guardar</button>
     <button class="btn btn-primary" type="button" data-fh="enviar">Enviar a revisión</button></div>
   </div>` : ''}`;
-  pintarAvance();
+  pintarAvance(); pintarPanel(); cargarMinis();
 }
 
 const chipEstado = (f = F.ficha) => f ? `<span class="chip-est ${f.estado === 'aprobada' ? 'ok' : f.estado === 'observada' ? 'alerta' : f.estado === 'enviada' ? 'pend' : ''}">${esc(f.estado_texto)}</span>` : '<span class="chip-est">Nueva</span>';
@@ -172,6 +250,7 @@ function pintarAula(a) {
       <span data-chip-aula="${j}">${CHIP[est]}</span></summary>
     <div class="fh-aula-cuerpo">
       ${campo(`au.${j}.est`, F.d.aulas[j]?.est, { label: 'Estudiantes verificados en el aula', num: true })}
+      ${htmlSlot('a' + j, { titulo: 'Vista general del aula' })}
       ${filas.map((f, i) => pintarBien(a, f, i, filas)).join('')}
     </div></details>`;
 }
@@ -191,6 +270,7 @@ function pintarBien(a, f, i, filas) {
       ${mesa ? campo(p + '.puestos', f.puestos, { label: 'Puestos por mesa', num: true, ph: '1' }) : ''}
     </div>
     <p class="fh-aviso" data-aviso="${j}.${i}">${avisoFila(j, f, i, filas)}</p>
+    ${filas.findIndex(x => x.k === f.k) === i ? htmlSlot(`a${j}:${f.k}`, { titulo: 'Foto del mueble (sobre todo si está en mal estado)' }) : ''}
     <details class="fh-mas"${masDatos ? ' open' : ''}><summary>Antigüedad, código patrimonial, baja y observación</summary>
       <div class="fh-grid">
         ${campo(p + '.antig', f.antig, { label: 'Antigüedad (años o rango)', lista: 'fhRangos', ph: 'Ej.: 6 o De 5 a 10' })}
@@ -210,10 +290,12 @@ function avisoFila(j, f, i, filas) {
     if (q.some(vacio)) return 'Llena los tres estados: Bueno, Regular y Malo (0 si no hay).';
     return `Puestos por mesa: de 1 a ${F.guia.max_puestos}.`;
   }
-  // El aviso del 15 % va en la última fila del bien (la suma de sus filas)
+  // El aviso del 15 % y el de la foto van en la última fila del bien (la suma de sus filas)
   if (filas.map(x => x.k).lastIndexOf(f.k) !== i) return '';
   const x = difiere(j, f.k);
-  return x ? `Contaste ${ent(x.ver)}${f.k === 'mesa' ? ' puestos' : ''} y el censo dice ${ent(x.cen)}: difiere en más de 15 %. Explica la causa en la observación.` : '';
+  const sinFoto = F.fotos && F.editable && filas.some(y => y.k === f.k && entero(y.m) > 0) && !fotosDe(`a${j}:${f.k}`).length;
+  return [x ? `Contaste ${ent(x.ver)}${f.k === 'mesa' ? ' puestos' : ''} y el censo dice ${ent(x.cen)}: difiere en más de 15 %. Explica la causa en la observación.` : '',
+    sinFoto ? 'Hay muebles en mal estado: tómales una foto.' : ''].filter(Boolean).join(' ');
 }
 
 function pintarFuera() {
@@ -246,13 +328,13 @@ function refrescarAula(j) {
   const filas = F.d.aulas[j]?.filas || [];
   filas.forEach((f, i) => { const el = document.querySelector(`[data-aviso="${j}.${i}"]`); if (el) el.textContent = avisoFila(j, f, i, filas); });
   const chip = document.querySelector(`[data-chip-aula="${j}"]`); if (chip) chip.innerHTML = CHIP[estadoAula(j)];
-  pintarAvance();
+  pintarAvance(); pintarPanel();
 }
 function rehacerAula(j) {
   const el = $('fhAula' + j); if (!el) return;
   el.outerHTML = pintarAula(F.modelo.aulas[j]);
   $('fhAula' + j).open = true;
-  pintarAvance();
+  pintarAvance(); cargarMinis();
 }
 
 function estadoGuardado(t, cls = 'sub') { const el = $('fhGuardado'); if (el) { el.className = cls; el.textContent = t; } }
@@ -308,7 +390,102 @@ function pintarErrores(errores = [], avisos = [], titulo = '') {
   el.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
+// ─── Fotos: tomar, subir, ver y borrar ───────────────────────────────────────
+const fechaHora = iso => new Date(iso).toLocaleString('es-PE', { timeZone: 'America/Lima', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+async function tomarFotos(files, slot, galeria) {
+  const cod = F.cod, meta0 = metaSlot(slot);
+  for (const file of files) {
+    if (F?.cod !== cod) return;
+    if (!/^image\//.test(file.type || 'image/')) { F.toast('Ese archivo no es una foto.'); continue; }
+    const id = nuevoId();
+    const tomada = galeria && file.lastModified ? new Date(file.lastModified) : new Date();
+    const pos = await ubicacionReciente(galeria ? 0 : 4000);
+    const meta = { ...meta0, tomada_en: tomada.toISOString(), lat: pos?.lat ?? null, lon: pos?.lon ?? null };
+    const sello = [`Local ${cod} · ${lugarSlot(slot)}`, `${fechaHora(meta.tomada_en)} · ${pos ? `${pos.lat.toFixed(5)}, ${pos.lon.toFixed(5)}` : 'sin GPS'}`];
+    let prep;
+    try { prep = await prepararFoto(file, sello); }
+    catch (e) { F.toast(`No se pudo procesar la foto: ${e.message}`); continue; }
+    if (F?.cod !== cod) return;
+    const reg = { id, clave: claveLocal(), meta, foto: prep.foto, mini: prep.mini };
+    await encolar(reg);
+    F.fotos.push({ id, ...meta, estado: 'pendiente', reg });
+    repintarSlot(slot);
+  }
+  subirPendientes();
+}
+
+let subiendo = false;
+// Sube las fotos de la cola, una por una. Sin señal se detiene y deja el resto para después.
+async function subirPendientes() {
+  if (subiendo || !F?.fotos || !F.editable) return;
+  subiendo = true;
+  const yo = F, subidas = [];
+  try {
+    for (const f of yo.fotos.filter(x => x.estado === 'pendiente' || (x.estado === 'error' && x.reintentar))) {
+      if (F !== yo) return;
+      const fd = new FormData();
+      fd.append('foto', f.reg.foto, f.id + '.jpg'); if (f.reg.mini) fd.append('mini', f.reg.mini, f.id + '_mini.jpg');
+      fd.append('id', f.id);
+      for (const k of ['aula', 'bien', 'muestra', 'lat', 'lon', 'tomada_en']) fd.append(k, f[k] ?? '');
+      try {
+        await api(ruta('/fotos'), { method: 'POST', body: fd });
+        f.estado = 'subida'; f.reintentar = false; delete f.error;
+        await quitarDeCola(f.id); subidas.push(f);
+      } catch (e) {
+        if (!e.status) break;                       // sin señal: queda en la cola
+        f.estado = 'error'; f.error = e.message; f.reintentar = false;
+        if (e.status === 503) { F.toast(e.message); break; }
+      }
+      if (F === yo) repintarSlot(slotDe(f));
+    }
+  } finally { subiendo = false; }
+  // La ficha queda creada en el servidor con la primera foto: se guarda también lo llenado
+  if (subidas.length && F === yo && (yo.sucio || !yo.ficha)) guardar({ silencioso: true });
+}
+const pendientes = () => (F?.fotos || []).filter(f => f.estado !== 'subida').length;
+
+async function verFoto(id) {
+  const f = F.fotos.find(x => x.id === id); if (!f) return;
+  const v = $('fhVisor'), slot = slotDe(f);
+  v.hidden = false;
+  v.innerHTML = `<div class="fh-visor-cab"><b>${esc(lugarSlot(slot))}</b><span class="sub">${esc(fechaHora(f.tomada_en))}${f.lat != null ? ` · ${Number(f.lat).toFixed(5)}, ${Number(f.lon).toFixed(5)}` : ''}</span></div>
+    <div class="fh-visor-img"><img alt="Foto: ${esc(lugarSlot(slot))}"></div>
+    ${f.estado === 'error' ? `<p class="err">No se pudo subir: ${esc(f.error)}</p>` : f.estado === 'pendiente' ? '<p class="fh-pend">Por subir: se sube sola cuando haya señal.</p>' : ''}
+    <div class="acts">${F.editable ? `${f.estado === 'error' ? `<button class="btn btn-ghost" type="button" data-fh="reintentar-foto" data-id="${id}">Reintentar</button>` : ''}<button class="btn btn-ghost" type="button" data-fh="borrar-foto" data-id="${id}">Borrar foto</button>` : ''}
+      <button class="btn btn-primary" type="button" data-fh="cerrar-visor">Cerrar</button></div>`;
+  const img = v.querySelector('img');
+  if (f.reg) img.src = URL.createObjectURL(f.reg.foto);
+  else {
+    img.src = F.urls.get(id) || '';     // la miniatura mientras llega la foto completa
+    try { const r = await fetch(ruta(`/fotos/${id}`)); if (r.ok && !v.hidden) img.src = URL.createObjectURL(await r.blob()); } catch { /* queda la miniatura */ }
+  }
+}
+function cerrarVisor() {
+  const v = $('fhVisor'); if (!v) return;
+  const img = v.querySelector('img'); if (img?.src.startsWith('blob:') && ![...F.urls.values()].includes(img.src)) URL.revokeObjectURL(img.src);
+  v.hidden = true; v.innerHTML = '';
+}
+async function borrarFoto(id) {
+  const f = F.fotos.find(x => x.id === id); if (!f) return;
+  if (!confirm('¿Borrar esta foto?')) return;
+  try {
+    if (f.estado === 'subida') await api(ruta(`/fotos/${id}`), { method: 'DELETE' });
+    await quitarDeCola(id);
+  } catch (e) { F.toast(`No se pudo borrar: ${e.message}`); return; }
+  F.fotos = F.fotos.filter(x => x.id !== id);
+  const u = F.urls.get(id); if (u) { URL.revokeObjectURL(u); F.urls.delete(id); }
+  cerrarVisor(); repintarSlot(slotDe(f));
+}
+
 async function enviar() {
+  // Las fotos van antes que la ficha: con fotos sin subir no se envía
+  if (pendientes()) {
+    await subirPendientes();
+    if (pendientes()) {
+      pintarErrores([{ fila: 'Panel fotográfico', motivo: `Faltan subir ${pendientes()} ${pendientes() === 1 ? 'foto' : 'fotos'}. Espera a tener señal (se suben solas) o borra las que tienen error, y vuelve a enviar.` }], [], 'La ficha no se envió.');
+      return;
+    }
+  }
   if (!confirm('¿Enviar la ficha a revisión? Ya no podrás cambiarla, salvo que el proveedor te la devuelva.')) return;
   const b = document.querySelector('[data-fh="enviar"]'); b.disabled = true; b.textContent = 'Enviando…';
   clearTimeout(tLocal); guardarLocal();
@@ -353,12 +530,20 @@ function enlazar() {
     if (j != null) refrescarAula(j);
     cambio();
   });
-  el.addEventListener('change', e => { if (e.target.tagName === 'SELECT' && e.target.dataset.p && F?.editable) { poner(e.target.dataset.p, e.target.value); cambio(); } });
+  el.addEventListener('change', e => {
+    if (e.target.tagName === 'SELECT' && e.target.dataset.p && F?.editable) { poner(e.target.dataset.p, e.target.value); cambio(); }
+    if ((e.target.id === 'fhCam' || e.target.id === 'fhGal') && F?.editable && F.slot && e.target.files.length) tomarFotos([...e.target.files], F.slot, e.target.id === 'fhGal');
+  });
   el.addEventListener('click', e => {
     const b = e.target.closest('[data-fh]'); if (!b || !F) return;
     const acc = b.dataset.fh;
     if (acc === 'cerrar') { cerrar(); return; }
+    if (acc === 'ver-foto') { verFoto(b.dataset.id); return; }
+    if (acc === 'cerrar-visor') { cerrarVisor(); return; }
     if (!F.editable) return;
+    if (acc === 'foto' || acc === 'galeria') { F.slot = b.dataset.slot; const i = $(acc === 'foto' ? 'fhCam' : 'fhGal'); i.value = ''; i.click(); return; }
+    if (acc === 'borrar-foto') { borrarFoto(b.dataset.id); return; }
+    if (acc === 'reintentar-foto') { const f = F.fotos.find(x => x.id === b.dataset.id); if (f) { f.estado = 'pendiente'; cerrarVisor(); repintarSlot(slotDe(f)); subirPendientes(); } return; }
     if (acc === 'guardar') guardar();
     else if (acc === 'enviar') enviar();
     else if (acc === 'gps') usarGps();
@@ -374,6 +559,8 @@ function enlazar() {
   });
   // Botón «atrás» del celular: cierra la ficha en lugar de salir de la página
   addEventListener('popstate', () => { if (F && history.state?.ficha !== F.cod) cerrar({ desdeHistorial: true }); });
+  // Vuelve la señal: sube las fotos de la cola
+  addEventListener('online', () => subirPendientes());
 }
 
 export async function abrirFicha({ proyecto, cod, toast, alCambiar }) {
@@ -387,13 +574,25 @@ export async function abrirFicha({ proyecto, cod, toast, alCambiar }) {
   try { r = await api(ruta()); }
   catch (e) { el.innerHTML += `<div class="fh-cuerpo"><p class="aviso alerta">No se pudo abrir la ficha: ${esc(e.message)}</p></div>`; return; }
   if (F?.cod !== cod) return;
-  Object.assign(F, { modelo: r.modelo, ficha: r.ficha, editable: r.editable, guia: r.guia });
+  Object.assign(F, { modelo: r.modelo, ficha: r.ficha, editable: r.editable, guia: r.guia, urls: new Map(),
+    fotos: r.fotos ? r.fotos.map(f => ({ ...f, estado: 'subida' })) : null });
+  if (F.fotos) {
+    // Las fotos de la cola de este equipo que aún no llegaron al servidor
+    const enServidor = new Set(F.fotos.map(f => f.id));
+    for (const reg of await enCola(claveLocal())) {
+      if (enServidor.has(reg.id)) { quitarDeCola(reg.id); continue; }
+      F.fotos.push({ id: reg.id, ...reg.meta, estado: 'pendiente', reg });
+    }
+    F.fotos.sort((a, b) => String(a.tomada_en).localeCompare(String(b.tomada_en)));
+    if (F.editable) { seguirUbicacion(); if (!(await colaPersistente())) F.toast('Este navegador no guarda fotos sin señal (¿navegación privada?): súbelas antes de cerrar la página.'); }
+  }
   F.d = { ...datosVacios(), ...(r.ficha?.datos || {}) };
   F.d.aulas = Object.fromEntries(Object.entries(F.d.aulas || {}).map(([j, a]) => [j, { est: a.est ?? null, filas: (a.filas || []).map(f => ({ ...f })) }]));
   F.d.fuera ||= []; F.d.servicios ||= {}; F.d.firmas ||= {}; F.d.a = { ...datosVacios().a, ...(r.ficha?.datos?.a || {}) };
   // Lo llenado en este equipo y aún no guardado en el servidor (se cortó la señal o se cerró la página)
   const loc = F.editable ? leerLocal() : null;
-  if (loc && loc.ts > Date.parse(r.ficha?.actualizado_en || 0)) {
+  // (una ficha creada en el servidor solo por una foto llega sin datos: manda lo del equipo)
+  if (loc && (loc.ts > Date.parse(r.ficha?.actualizado_en || 0) || !r.ficha?.datos?.a)) {
     const d = loc.datos;
     F.d = { ...F.d, ...d, a: { ...F.d.a, ...d.a }, aulas: Object.fromEntries(Object.entries(d.aulas || {}).map(([j, a]) => [j, { est: a.est ?? null, filas: a.filas || [] }])) };
     F.sucio = true;
@@ -401,6 +600,7 @@ export async function abrirFicha({ proyecto, cod, toast, alCambiar }) {
   pintar();
   if (F.sucio) { estadoGuardado('Se recuperó lo que llenaste en este equipo: guárdalo cuando tengas señal.', 'err'); }
   else if (r.ficha && F.editable) estadoGuardado(`Guardado el ${fechaPe(r.ficha.actualizado_en)}`);
+  subirPendientes();
 }
 
 async function cerrar({ desdeHistorial = false } = {}) {
@@ -410,6 +610,9 @@ async function cerrar({ desdeHistorial = false } = {}) {
     const ok = await guardar({ silencioso: true });
     if (!ok) F.toast('Sin conexión: lo llenado quedó guardado en este equipo. Ábrela de nuevo para enviarla.');
   }
+  if (pendientes()) F.toast(`${pendientes() === 1 ? 'Una foto quedó' : pendientes() + ' fotos quedaron'} en este equipo: se suben al abrir la ficha con señal.`);
+  dejarUbicacion();
+  for (const u of F.urls?.values() || []) URL.revokeObjectURL(u);
   F = null;
   $('cFicha').hidden = true; $('cFicha').innerHTML = ''; document.body.classList.remove('ficha-abierta');
   if (!desdeHistorial && history.state?.ficha) history.back();

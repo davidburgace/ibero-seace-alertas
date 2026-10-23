@@ -133,7 +133,7 @@ test('la página de campo solo usa /api/campo/* y solo escribe visitas y reparto
 test('CSP también en /campo.html', () => {
   const h = {};
   cspSelector({ path: '/campo.html' }, { set: (k, v) => { h[k] = v; } }, () => {});
-  assert.match(h['Content-Security-Policy'], /img-src 'self' data: https:\/\/server\.arcgisonline\.com/);
+  assert.match(h['Content-Security-Policy'], /img-src 'self' data: blob: https:\/\/server\.arcgisonline\.com/);
 });
 
 test('campo: ruta del día en Google Maps y sin KML', () => {
@@ -204,8 +204,9 @@ test('campo: abrir un proyecto trae todos sus códigos (por lotes) y respeta al 
 test('campo: la API solo lee proyectos; escribe visitas, el reparto entre supervisores y las fichas llenadas en la app', () => {
   const rutas = crearApiCampo(sbProyectos()).stack.filter(l => l.route)
     .map(l => `${Object.keys(l.route.methods).join(',')} ${l.route.path}`).sort();
-  assert.deepEqual(rutas, ['delete /visitas/:codigo', 'get /proyectos', 'get /proyectos/:id', 'get /proyectos/:id/fichas', 'get /proyectos/:id/fichas-zip', 'get /proyectos/:id/fichas/:cod',
-    'get /supervisores', 'get /visitas', 'post /proyectos/:id/fichas/:cod/enviar', 'put /proyectos/:id/asignaciones', 'put /proyectos/:id/fichas/:cod', 'put /visitas/:codigo']);
+  assert.deepEqual(rutas, ['delete /proyectos/:id/fichas/:cod/fotos/:fotoId', 'delete /visitas/:codigo', 'get /proyectos', 'get /proyectos/:id', 'get /proyectos/:id/fichas', 'get /proyectos/:id/fichas-zip', 'get /proyectos/:id/fichas/:cod',
+    'get /proyectos/:id/fichas/:cod/fotos/:fotoId', 'get /supervisores', 'get /visitas', 'post /proyectos/:id/fichas/:cod/enviar', 'post /proyectos/:id/fichas/:cod/fotos',
+    'put /proyectos/:id/asignaciones', 'put /proyectos/:id/fichas/:cod', 'put /visitas/:codigo']);
 });
 
 test('campo: el worker limita la búsqueda a los colegios del proyecto', () => {
