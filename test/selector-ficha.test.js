@@ -250,3 +250,17 @@ test('la ficha dice el supervisor asignado y se sigue importando igual', async (
   assert.equal(r.rechazada, false);
   assert.ok((await generarFichaPdf(modeloFicha(D, C, iU, { ...META, supervisor: 'ana@ibero.pe' }))).length > 1000);
 });
+
+test('las reglas explican «Puestos por unidad» y su fila del Excel tiene alto para el texto completo', async () => {
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(await generarFichaExcel(modeloFicha(D, C, iU, META)));
+  const ws = wb.getWorksheet('Ficha');
+  let fila = null;
+  ws.eachRow(row => { if (/^• «Puestos por unidad»/.test(String(row.getCell(1).value || ''))) fila = row; });
+  assert.ok(fila, 'la regla está en la hoja');
+  assert.match(fila.getCell(1).value, /carpeta bipersonal = 2/);
+  assert.match(fila.getCell(1).value, /Ejemplo: 12 carpetas bipersonales/);
+  assert.ok(fila.height >= 56, `alto ${fila.height}`);
+  const pdf = (await generarFichaPdf(modeloFicha(D, C, iU, META))).length;
+  assert.ok(pdf > 1000);
+});
