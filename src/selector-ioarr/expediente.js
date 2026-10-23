@@ -49,6 +49,9 @@
 //     POST   /proyectos/:id/fichas/:cod/digital/observar { nota } la devuelve al supervisor para que la corrija
 //     GET    /proyectos/:id/fichas/:cod/digital/fotos/:fotoId  una foto de la ficha (?mini=1 la miniatura; migración 024).
 //            Al aprobar, las fotos se copian al sustento del local (ioarr_expediente_archivos, tipo «foto»)
+//     GET    /proyectos/:id/fichas/:cod/digital/firmas/:cargo  una firma en pantalla (migración 025)
+//     GET    /proyectos/:id/fichas/:cod/digital/pdf      la ficha llena en PDF, con fotos y firmas. Al aprobar, este
+//            PDF queda en el sustento del local como acta de verificación (tipo «acta»)
 //   También devuelve api.resumen(p): avance del expediente para Radar IOARR (ficha y kanban)
 // ============================================================================
 
@@ -69,7 +72,8 @@ import { modeloFicha, generarFichaExcel, generarFichaPdf, leerFicha, procesarFic
 import archiver from 'archiver';
 import { asignacionesProyecto, paquetesFichas } from './campo.js';
 import { fichaDesdeFormulario, leerFichaDigital, estadosFichas, guardarFichaDigital, origenDigital, AVISO_MIGRACION_FICHAS,
-  fotosFicha, leerFotos, avisosFotos, lugarFoto, esUuid as esUuidFoto, faltaMigracion as faltaMigracionFichas } from './ficha-digital.js';
+  fotosFicha, leerFotos, avisosFotos, lugarFoto, esUuid as esUuidFoto, faltaMigracion as faltaMigracionFichas,
+  firmasFicha, leerFirmas, avisosFirmas, pdfFichaLlena, nombrePdfLlena } from './ficha-digital.js';
 import { descargarFoto } from './campo.js';
 
 const AVISO = 'Falta ejecutar supabase/migrations/012_ioarr_expediente_costos.sql en Supabase';
@@ -108,6 +112,10 @@ export async function borrarArchivosProyecto(proyectoId) {
   const { data: fotos, error } = await supabase.from('campo_fichas_fotos').select('ruta, ruta_mini').eq('proyecto_id', proyectoId);
   if (error) { if (!faltaMigracion(error)) console.error('[EXPEDIENTE] Fotos de campo del proyecto:', error.message); return; }
   if (fotos.length) await borrarDelBucket(fotos.flatMap(f => [f.ruta, f.ruta_mini]).filter(Boolean));
+  // Firmas en pantalla (migración 025)
+  const { data: firmas, error: eF } = await supabase.from('campo_fichas_firmas').select('ruta').eq('proyecto_id', proyectoId);
+  if (eF) { if (!faltaMigracion(eF)) console.error('[EXPEDIENTE] Firmas de campo del proyecto:', eF.message); return; }
+  if (firmas.length) await borrarDelBucket(firmas.map(f => f.ruta));
 }
 const sinRuta = ({ ruta, ...a }) => a;
 
@@ -692,9 +700,10 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
 
   // ─── Fichas llenadas en la app (Visitas de campo) ─────────────────────────
   // Lo que el supervisor llenó, validado con el contexto actual del proyecto
-  const validarFormulario = (K, cod, datos, origen, fotos) => {
+  const validarFormulario = (K, cod, datos, origen, fotos, firmas) => {
     const r = validarFicha(K, fichaDesdeFormulario(datos, { proyectoId: K.p.id, cod, region: K.p.region, fotos }), origen);
     if (fotos) r.avisos = [...r.avisos, ...avisosFotos(datos, fotos)];
+    if (firmas) r.avisos = [...r.avisos, ...avisosFirmas(datos, firmas, fotos)];
     return r;
   };
   async function fichaDigitalDe(p, cod) {
@@ -708,22 +717,23 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
   api.get('/proyectos/:id/fichas/:cod/digital', responder(async (req, res) => {
     const p = await proyecto(req), cod = String(req.params.cod);
     const f = await fichaDigitalDe(p, cod);
-    const [modelo, K, fotos] = await Promise.all([fichaLocal(p, cod), contextoFichas(p), fotosFicha(supabase, p.id, cod)]);
+    const [modelo, K, fotos, firmas] = await Promise.all([fichaLocal(p, cod), contextoFichas(p), fotosFicha(supabase, p.id, cod), firmasFicha(supabase, p.id, cod)]);
     const { por_id, ...ficha } = f;
-    res.json({ ficha, modelo, fotos, revision: revision(validarFormulario(K, cod, f.datos, origenDigital(f.por), fotos)) });
+    res.json({ ficha, modelo, fotos, firmas, revision: revision(validarFormulario(K, cod, f.datos, origenDigital(f.por), fotos, firmas)) });
   }));
   api.post('/proyectos/:id/fichas/:cod/digital/aprobar', responder(async (req, res) => {
     const p = await proyecto(req), cod = String(req.params.cod);
     if (await sinMigracionFicha()) return res.status(503).json({ error: AVISO_FICHA });
     const f = await fichaDigitalDe(p, cod);
     if (f.estado !== 'enviada') return res.status(409).json({ error: f.estado === 'aprobada' ? 'La ficha ya está aprobada' : 'El supervisor aún no envía esta ficha a revisión' });
-    const [K, fotos] = await Promise.all([contextoFichas(p), leerFotosOVacio(p.id, cod)]);
-    const r = validarFormulario(K, cod, f.datos, origenDigital(f.por), fotos);
+    const [K, fotos, firmas] = await Promise.all([contextoFichas(p), leerFotosOVacio(p.id, cod), firmasFicha(supabase, p.id, cod)]);
+    const r = validarFormulario(K, cod, f.datos, origenDigital(f.por), fotos, firmas);
     if (r.rechazada || r.errores.length) return res.status(422).json({ error: 'La ficha tiene errores: devuélvela al supervisor para que la corrija.', revision: revision(r) });
     await guardarFichaInventario(K, r, req.usuario.id);
     await guardarFichaDigital(supabase, p.id, cod, { estado: 'aprobada', revisado_por: req.usuario.id, revisada_en: new Date().toISOString(), nota_revision: null });
     const copia = await copiarFotosAlSustento(p, cod, fotos, f.datos?.a?.fecha);
-    res.json({ fichas: await vistaFichas(p), fotos: copia });
+    const acta = await guardarActaPdf(p, cod, { ...f, estado: 'aprobada', revisada_en: new Date().toISOString() });
+    res.json({ fichas: await vistaFichas(p), fotos: copia, acta });
   }));
   api.post('/proyectos/:id/fichas/:cod/digital/observar', responder(async (req, res) => {
     const p = await proyecto(req), cod = String(req.params.cod);
@@ -758,6 +768,37 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     }
     return out;
   }
+  // El PDF de la ficha aprobada queda en el sustento del local como acta de verificación
+  async function guardarActaPdf(p, cod, ficha) {
+    try {
+      const F = await fichaLocal(p, cod);
+      const buffer = await pdfFichaLlena(supabase, p.id, cod, F, ficha);
+      const nombre = nombrePdfLlena(F), ruta = `${p.id}/${nombreSeguro(cod)}/${Date.now()}_${nombre}`;
+      const { error: eUp } = await supabase.storage.from(BUCKET_EXPEDIENTE).upload(ruta, buffer, { contentType: 'application/pdf' });
+      if (eUp) throw eUp;
+      const { error } = await supabase.from('ioarr_expediente_archivos').insert({ proyecto_id: p.id, cod_local: cod, tipo: 'acta', nombre_archivo: nombre, ruta, mime: 'application/pdf', tamano: buffer.length,
+        descripcion: texto(`Ficha de verificación llenada en la app${ficha.por ? ' por ' + ficha.por : ''}, con fotos y firmas en pantalla`, 300), subido_por: null });
+      if (error) { await borrarDelBucket([ruta]); throw error; }
+      return true;
+    } catch (e) { console.error('[EXPEDIENTE] Acta PDF de la ficha no guardada:', e.message); return false; }
+  }
+  api.get('/proyectos/:id/fichas/:cod/digital/pdf', responder(async (req, res) => {
+    const p = await proyecto(req), cod = String(req.params.cod);
+    const f = await fichaDigitalDe(p, cod), F = await fichaLocal(p, cod);
+    const nombre = nombrePdfLlena(F);
+    res.set({ 'Content-Type': 'application/pdf', 'Cache-Control': 'no-store', 'Content-Disposition': `attachment; filename="${nombre}"` })
+      .send(await pdfFichaLlena(supabase, p.id, cod, F, f));
+  }));
+  api.get('/proyectos/:id/fichas/:cod/digital/firmas/:cargo', responder(async (req, res) => {
+    const p = await proyecto(req), cod = String(req.params.cod);
+    let firmas;
+    try { firmas = await leerFirmas(supabase, p.id, cod); } catch (e) { if (faltaMigracionFichas(e)) firmas = []; else throw e; }
+    const f = firmas.find(x => x.cargo === req.params.cargo);
+    if (!f) return res.status(404).json({ error: 'Sin firma' });
+    const r = await descargarFoto(supabase, f);
+    if (r.error) return res.status(r.status).json({ error: r.error });
+    res.set({ 'Content-Type': r.mime, 'Cache-Control': 'private, no-cache' }).send(r.buffer);
+  }));
   // Una foto de la ficha, para la revisión
   api.get('/proyectos/:id/fichas/:cod/digital/fotos/:fotoId', responder(async (req, res) => {
     const p = await proyecto(req), cod = String(req.params.cod);
