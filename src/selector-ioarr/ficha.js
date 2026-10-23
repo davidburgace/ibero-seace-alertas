@@ -44,6 +44,8 @@ export const BIENES_FICHA = [
   { k: 'mesa', n: 'Mesa del estudiante' }, { k: 'silla', n: 'Silla del estudiante' }, { k: 'esc', n: 'Escritorio docente' },
   { k: 'sdoc', n: 'Silla docente' }, { k: 'arm', n: 'Armario o estante' }];
 const NOMBRE_BIEN = Object.fromEntries(BIENES_FICHA.map(x => [x.k, x.n]));
+// Muebles de la ficha: los del modelo (los que entran a la IOARR); fichas viejas, los cinco
+export const bienesDe = F => F?.bienes?.length ? F.bienes : BIENES_FICHA;
 export const BAJA = { si: 'Sí', no: 'No', en_tramite: 'En trámite' };
 // Antigüedad por rango: años que se usan para el cálculo (marcada como estimada)
 export const RANGOS = [
@@ -85,7 +87,9 @@ export function modeloFicha(D, C, i, meta = {}) {
   return {
     version: VERSION_FICHA, proyecto: meta.proyecto || { id: '', nombre: '' }, anio: meta.anio || null, fecha: meta.fecha || '', supervisor: meta.supervisor || '',
     local: { cod: l[0], nombre: D.locName[i], region: D.region, prov: D.provs[dist[2]], dist: dist[0], ubigeo: dist[1], ugel: D.ugels?.[l[2]] || '', cp: l[3] || '', rural: !!l[4], direccion: l[5] || '', lat: l[6], lon: l[7] },
-    niveles: nivelesDeLocal(D, i), servicios, aulas
+    niveles: nivelesDeLocal(D, i), servicios, aulas,
+    // Solo los muebles que entran a la IOARR (criterios del proyecto)
+    bienes: BIENES_FICHA.filter(b => !C.incl || C.incl[TIPOS.indexOf(b.k)])
   };
 }
 const textoAula = (a, n) => `Aula ${a.j + 1} de ${n} · ${a.nombreNivel} (cód. modular ${a.modular}) · edificación ${a.edif || '___'} · piso ${a.piso === '' ? '___' : a.piso} · N.° ${a.num || '___'} · ${a.grado || 'grado ___'}${a.seccion ? ' ' + a.seccion : ''} · turno ${a.turno || '___'} · estudiantes (censo) ${a.est}`;
@@ -183,7 +187,7 @@ export async function generarFichaExcel(F) {
 
   // C. Verificación por aula
   fila(); titulo('C. Verificación del mobiliario por aula');
-  parrafo(`${F.aulas.length} ${F.aulas.length === 1 ? 'aula' : 'aulas'} en uso según el censo. Cinco filas por aula, con las cantidades del censo ya cargadas (la mesa, en puestos). Anota lo que cuentas: Bueno, Regular y Malo, la antigüedad y lo demás. ${NOTA_SIGLAS}`, { alto: 40 });
+  parrafo(`${F.aulas.length} ${F.aulas.length === 1 ? 'aula' : 'aulas'} en uso según el censo. ${bienesDe(F).length === 1 ? 'Una fila' : bienesDe(F).length + ' filas'} por aula, con las cantidades del censo ya cargadas (la mesa, en puestos). Anota lo que cuentas: Bueno, Regular y Malo, la antigüedad y lo demás. ${NOTA_SIGLAS}`, { alto: 40 });
   const entero0 = { type: 'whole', operator: 'greaterThanOrEqual', formulae: [0], allowBlank: true, showErrorMessage: true, errorStyle: 'stop', errorTitle: 'Cantidad', error: 'Número entero de 0 o más' };
   for (const a of F.aulas) {
     fila('AULA|' + a.j, 30);
@@ -192,7 +196,7 @@ export async function generarFichaExcel(F) {
     unir(12, 12, null, { fill: CAMPO });
     ws.getCell(r, 12).dataValidation = entero0;
     cab(CAB_C.map((t, j) => [j + 1, j + 1, t]));
-    for (const b of BIENES_FICHA) {
+    for (const b of bienesDe(F)) {
       const c = a.censo[b.k];
       fila('ITEM|' + b.k, 18);
       unir(1, 1, b.n + (b.k === 'mesa' ? ' (censo en puestos)' : ''), { fill: GRIS, size: 9 });
@@ -339,7 +343,7 @@ export function generarFichaPdf(F, llena = null) {
         if (doc.y + 120 > limite()) doc.addPage();
         texto(`${textoAula(a, F.aulas.length)} · estudiantes verificados: ${x.est == null || x.est === '' ? '—' : x.est}`, { bold: true, size: 8, despues: 0.15 });
         const filas = [];
-        for (const b of BIENES_FICHA) {
+        for (const b of bienesDe(F)) {
           const c = a.censo[b.k], fs = (x.filas || []).filter(f => f.k === b.k);
           if (!fs.length) { filas.push({ v: [b.n, c.b, c.r, c.m, '', '', '', b.k === 'mesa' ? '' : '—', '', '', '', 'Sin contar: sigue el censo'], fill: [G, G, G, G, A, A, A, G, A, A, A, A] }); continue; }
           fs.forEach((f, i) => filas.push({ v: [b.n + (i ? ' (otro tipo)' : b.k === 'mesa' ? ' (censo en puestos)' : ''), i ? '' : c.b, i ? '' : c.r, i ? '' : c.m, v(f.b), v(f.r), v(f.m), b.k === 'mesa' ? v(f.puestos) || '1' : '—', v(f.antig), v(f.patrimonial), v(f.baja), v(f.obs)],
@@ -352,7 +356,7 @@ export function generarFichaPdf(F, llena = null) {
     for (const a of d ? [] : F.aulas) {
       if (doc.y + 120 > limite()) doc.addPage();
       texto(`${textoAula(a, F.aulas.length)} · estudiantes verificados: ______`, { bold: true, size: 8, despues: 0.15 });
-      tabla(anchosC, CAB_C, BIENES_FICHA.map(b => {
+      tabla(anchosC, CAB_C, bienesDe(F).map(b => {
         const c = a.censo[b.k];
         return { v: [b.n + (b.k === 'mesa' ? ' (censo en puestos)' : ''), c.b, c.r, c.m, '', '', '', b.k === 'mesa' ? '' : '—', '', '', '', ''], fill: [G, G, G, G, A, A, A, b.k === 'mesa' ? A : G, A, A, A, A], minAlto: 17 };
       }), { size: 7 });

@@ -279,7 +279,7 @@ export async function generarMemoria(M) {
   c.push(titulo('5. Diagnóstico de la situación actual'));
   c.push(p(`${M.ups.length === 1 ? 'El local atiende' : 'Los locales atienden'} a ${ent(M.est)} estudiantes en ${ent(M.aulas)} aulas. Estado del mobiliario por tipo de bien${M.ups.some(u => u.verificado) ? ' (con el inventario verificado en campo donde lo hay)' : ''}. Se repone solo el estado malo; el faltante es brecha de dotación y no se repone:`));
   c.push(tabla(['Tipo de bien', 'Unidad', 'Existente', 'Bueno', 'Regular', 'Malo', 'A reponer', 'Requerido', 'Faltante (brecha de dotación, no reposición)'],
-    M.partidas.map(x => [x.n, x.u, ...[x.ex, x.b, x.r, x.m, x.rep, x.req, x.fal].map(v => ({ v: ent(v) }))]), { num: [2, 3, 4, 5, 6, 7, 8], size: 16 }));
+    M.partidas.filter(x => !x.excluido).map(x => [x.n, x.u, ...[x.ex, x.b, x.r, x.m, x.rep, x.req, x.fal].map(v => ({ v: ent(v) }))]), { num: [2, 3, 4, 5, 6, 7, 8], size: 16 }));
   const verif = M.ups.filter(u => u.verificado);
   c.push(p(verif.length
     ? `En ${verif.length} ${verif.length === 1 ? 'local' : 'locales'} el inventario del Censo Educativo 2025 se reemplazó por el verificado en campo: ${verif.map(u => `${u.cod} (visita del ${u.verificado.fecha_visita.split('-').reverse().join('/')})`).join('; ')}. En los demás se usa el Censo Educativo 2025, declarado por cada institución.`
@@ -316,7 +316,8 @@ export async function generarMemoria(M) {
 
   c.push(titulo('8. Presupuesto'));
   c.push(tabla(['Partida', 'Unidad', 'Metrado', 'Precio unitario sin IGV (S/)', 'Parcial (S/)'],
-    [...M.partidas.filter(x => x.rep > 0).map(x => [x.n, x.u, { v: ent(x.rep) }, { v: x.pu == null ? PEND : NS.format(x.pu) }, { v: NS.format(x.parcial) }]),
+    // Una línea por talla en mesa y silla (cada talla con su precio)
+    [...(M.lineas || M.partidas).filter(x => x.rep > 0).map(x => [x.n, x.u, { v: ent(x.rep) }, { v: x.pu == null ? PEND : NS.format(x.pu) }, { v: NS.format(x.parcial) }]),
       [{ v: 'Costo directo', span: 4, bold: true }, { v: NS.format(T.cd), bold: true }]], { num: [2, 3, 4] }));
   c.push(espacio());
   const R = Object.fromEntries(M.rubros.map(r => [r.clave, r]));

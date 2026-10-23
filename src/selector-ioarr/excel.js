@@ -108,7 +108,7 @@ export async function generarExcel(D, C, P, list, meta) {
     add([ROTULO_DUP + ' (sí / no / sin verificar)', `${cuenta('si')} / ${cuenta('no')} / ${cuenta('sin_verificar')}`]);
     add(['Estudiantes (padrón)', f(sumL(L_EST), T.est)], fmtN);
     add(['Aulas en uso (censo)', f(sumL(L_AUL), T.aul)], fmtN);
-    add(['Bienes a reponer (estado Malo, suma de los 5 tipos)', f(sumL(L_TOT), T.rep)], r => { fmtN(r); r.font = { bold: true }; });
+    add(['Bienes a reponer (estado Malo, suma de los muebles de la IOARR)', f(sumL(L_TOT), T.rep)], r => { fmtN(r); r.font = { bold: true }; });
     add([FALTANTE + ', solo informativo', f(sumL(L_FAL), T.fal)], fmtN);
     add([]);
     const cab = add(['Mobiliario por tipo', 'Unidad', 'Existente', 'Bueno', 'Regular', 'Malo', 'A reponer', 'Requerido', FALTANTE]);
@@ -121,6 +121,7 @@ export async function generarExcel(D, C, P, list, meta) {
     });
     add([]);
     add(['Criterios de cálculo'], sub);
+    add(['Muebles de la IOARR', ITEMS.filter(x => !P.muebles || P.muebles.includes(x.k)).map(x => x.n).join(', ') + (P.muebles && P.muebles.length < ITEMS.length ? ' (los demás quedan en 0)' : '')]);
     add(['Puestos por mesa múltiple (Inicial y Básica Especial)', P.kI]);
     add(['Puestos por mesa múltiple (Primaria y Secundaria)', P.kPS]);
     add(['Puestos por carpeta bipersonal', P.carpBip]);

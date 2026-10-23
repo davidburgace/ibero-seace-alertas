@@ -129,8 +129,10 @@ test('Excel de costos: hojas, fórmulas y total igual a la pantalla', async () =
   const m = wb.getWorksheet('Metrado y costos por local');
   assert.equal(m.rowCount, 11 + 2);  // cabecera + 11 locales + totales
   // Las cantidades de reposición del Excel suman lo mismo que la pantalla
-  const c0 = m.getRow(1).values.findIndex(v => /– reposición/.test(v || ''));
-  let suma = 0; for (let r = 2; r <= 12; r++) for (let c = c0; c < c0 + 5; c++) suma += m.getRow(r).getCell(c).value;
+  // (mesa y silla, una columna por talla)
+  const cols = m.getRow(1).values.map((v, c) => /– reposición/.test(v || '') ? c : null).filter(c => c != null);
+  assert.equal(cols.length, R.lineas.length);
+  let suma = 0; for (let r = 2; r <= 12; r++) for (const c of cols) suma += m.getRow(r).getCell(c).value;
   assert.equal(suma, R.totales.rep);
 });
 
@@ -160,7 +162,11 @@ test('Excel recalculado con LibreOffice: mismo total, y cambia al editar un par�
 
   // Cambia el precio de la mesa y la UIT en el Excel, sin tocar los resultados guardados
   const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buf);
-  const p = wb.getWorksheet('Parámetros'); p.getCell('C5').value = 200;
+  // Solo el precio general de la mesa: las tallas sin precio propio lo siguen con su fórmula
+  const p = wb.getWorksheet('Parámetros');
+  let cambiadas = 0;
+  p.eachRow(row => { if (row.getCell(1).value === 'Mesa del estudiante – precio general') { row.getCell(3).value = 200; cambiadas++; } });
+  assert.equal(cambiadas, 1);
   let filaUit; p.eachRow((row, n) => { if (row.getCell(1).value === 'Valor de la UIT (S/)') filaUit = n; });
   p.getCell(filaUit, 2).value = 500;
   const h2 = recalcular(Buffer.from(await wb.xlsx.writeBuffer()));

@@ -83,6 +83,9 @@ h1 .accent{ background:linear-gradient(90deg,var(--accent),var(--accent2)); -web
 .crit-tit{ font-family:var(--font-display); font-weight:700; font-size:14px; }
 .crit-sum{ color:var(--muted); font-size:12.5px; }
 .crit-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px 16px; padding:4px 16px 16px; align-items:end; }
+.campo-muebles{ grid-column:1 / -1; border:1px solid var(--border2); border-radius:8px; padding:6px 12px 8px; margin:0; display:flex; flex-wrap:wrap; gap:0 18px; align-items:center; }
+.campo-muebles legend{ font-size:12px; font-weight:600; padding:0 4px; }
+.campo-muebles .sub{ flex-basis:100%; }
 
 /* Pestañas */
 .tabs{ display:flex; gap:6px; border-bottom:1px solid var(--border); overflow-x:auto; }

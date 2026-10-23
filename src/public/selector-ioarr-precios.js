@@ -1,6 +1,6 @@
 // Selector IOARR — catálogo compartido de precios, UIT y factores por zona.
 // API: /api/selector-ioarr/catalogo/* (src/selector-ioarr/expediente.js)
-import { ITEMS } from '/selector-ioarr/calculo.js';
+import { ITEMS, LINEAS, TIPOS_TALLA } from '/selector-ioarr/calculo.js';
 import { FUENTES_PRECIO, LIMITE_UIT, tipoDesdeDescripcion } from '/selector-ioarr/costos.js';
 
 const NS = new Intl.NumberFormat('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -8,8 +8,12 @@ const soles = n => 'S/ ' + NS.format(Number(n) || 0);
 const $ = id => document.getElementById(id);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const fechaPe = s => s ? s.split('-').reverse().join('/') : '';
-const NOMBRE = Object.fromEntries(ITEMS.map(x => [x.k, x.n]));
-const UNIDAD = { mesa: 'puesto', silla: 'unidad', esc: 'unidad', sdoc: 'unidad', arm: 'unidad' };
+// Tipos de bien con precio: cada tipo (en mesa y silla, el precio general) y cada talla de mesa y silla
+const OPCIONES = ITEMS.flatMap(x => TIPOS_TALLA.includes(x.k)
+  ? [{ k: x.k, n: `${x.n} – general (todas las tallas)` }, ...LINEAS.filter(y => y.tipo === x.k).map(y => ({ k: y.k, n: y.n }))]
+  : [{ k: x.k, n: x.n }]);
+const NOMBRE = Object.fromEntries(OPCIONES.map(x => [x.k, x.n]));
+const UNIDAD = Object.fromEntries(OPCIONES.map(x => [x.k, x.k.startsWith('mesa') ? 'puesto' : 'unidad']));
 const AMBITO = { provincia: 'Provincia', distrito: 'Distrito', rural: 'Área rural' };
 function toast(t) { const el = $('toast'); el.textContent = t; el.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => { el.hidden = true; }, 3800); }
 
@@ -160,8 +164,8 @@ async function guardarFactor(e) {
 
 // ─── Arranque ────────────────────────────────────────────────────────────────
 async function boot() {
-  $('p-filtro').innerHTML = '<option value="">Todos los tipos</option>' + ITEMS.map(x => `<option value="${x.k}">${x.n}</option>`).join('');
-  $('f-tipo').innerHTML = ITEMS.map(x => `<option value="${x.k}">${x.n}</option>`).join('');
+  $('p-filtro').innerHTML = '<option value="">Todos los tipos</option>' + OPCIONES.map(x => `<option value="${x.k}">${x.n}</option>`).join('');
+  $('f-tipo').innerHTML = OPCIONES.map(x => `<option value="${x.k}">${x.n}</option>`).join('');
   $('f-fuente').innerHTML = Object.entries(FUENTES_PRECIO).map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
   $('p-filtro').onchange = pintarPrecios;
   $('p-nuevo').onclick = () => abrirPrecio(null);

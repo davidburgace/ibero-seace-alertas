@@ -78,7 +78,7 @@ test('Excel: hojas, fórmulas y totales iguales a la pantalla', async () => {
 
   const res = wb.getWorksheet('Resumen');
   const fila = txt => { let r = null; res.eachRow(row => { if (row.getCell(1).value === txt) r = row; }); return r; };
-  const total = fila('Bienes a reponer (estado Malo, suma de los 5 tipos)').getCell(2).value;
+  const total = fila('Bienes a reponer (estado Malo, suma de los muebles de la IOARR)').getCell(2).value;
   assert.match(total.formula, /^SUM\('Locales \(UP\)'!/);
   assert.equal(total.result, 198);
   assert.equal(fila(FALTANTE + ', solo informativo').getCell(2).value.result, 1531);

@@ -2,7 +2,7 @@
 // El cálculo lo hace el servidor (src/selector-ioarr/costos.js), el mismo que
 // arma el Excel: así la pantalla y el Excel dan lo mismo.
 import { RUBROS, BASES, FUENTES_PRECIO, LIMITE_UIT, TIPOS_ARCHIVO } from '/selector-ioarr/costos.js';
-import { ITEMS } from '/selector-ioarr/calculo.js';
+import { ITEMS, CLAVES_PRECIO } from '/selector-ioarr/calculo.js';
 import { renderDocumentos, enlazarDocumentos } from '/selector-ioarr-documentos.js';
 import { renderVerificacion, enlazarVerificacion } from '/selector-ioarr-verificacion.js';
 import { renderFichas, enlazarFichas } from '/selector-ioarr-fichas.js';
@@ -50,7 +50,7 @@ export async function renderExpediente(c) {
 }
 
 function agrupar(precios) {
-  const g = Object.fromEntries(ITEMS.map(x => [x.k, []]));
+  const g = Object.fromEntries(CLAVES_PRECIO.map(k => [k, []]));
   for (const p of precios) g[p.tipo_bien]?.push(p);
   return g;
 }
@@ -141,22 +141,34 @@ function pintarAvisos() {
 }
 
 function pintarPrecios() {
-  const filas = ITEMS.map((x, t) => {
-    const p = datos.precios[x.k], part = datos.partidas[t], lista = catalogo[x.k] || [];
+  // Una fila por mueble que entra; en mesa y silla, el precio general y debajo cada talla
+  // con reposición o faltante (una talla sin precio propio usa el general)
+  const fila = (k, nombre, cant, u, general) => {
+    const p = datos.precios[k] || { origen: null, precio: null }, lista = catalogo[k] || [];
+    const usaGeneral = general && p.origen == null;
     const origen = p.origen === 'proyecto' ? '<span class="chip-est ok">Fijado en el proyecto</span>'
-      : p.origen === 'vigente' ? '<span class="chip-est">Vigente del catálogo</span>' : '<span class="chip-est pend">Sin precio</span>';
+      : p.origen === 'vigente' ? '<span class="chip-est">Vigente del catálogo</span>'
+      : usaGeneral ? `<span class="chip-est">${general.precio == null ? 'Sin precio' : 'Usa el general'}</span>` : '<span class="chip-est pend">Sin precio</span>';
     const opciones = lista.map(c => `<option value="${c.id}" ${p.origen === 'proyecto' && p.precio_id === c.id ? 'selected' : ''}>${soles(Number(c.precio))} · ${esc(c.descripcion)} · ${esc(FUENTES_PRECIO[c.fuente])} ${fechaPe(c.fecha)}${c.vigente ? ' · vigente' : ''}</option>`).join('');
     const distinto = p.vigente_distinto ? `<div class="sub aviso-linea">El vigente del catálogo ahora es ${soles(p.vigente_distinto.precio)} (${esc(p.vigente_distinto.descripcion)}).</div>` : '';
-    return `<tr>
-      <td><b>${x.n}</b><br><span class="sub">${ent(part.rep)} ${x.u} a reponer</span></td>
-      <td class="num"><b>${soles(p.precio)}</b><br>${origen}</td>
+    const vacio = general ? 'No hay precios de esta talla en el catálogo: usa el precio general.' : 'No hay precios de este tipo en el catálogo.';
+    return `<tr${general ? ' class="fila-talla"' : ''}>
+      <td>${general ? `<span class="sangria">${esc(nombre)}</span>` : `<b>${esc(nombre)}</b>`}<br><span class="sub">${cant}</span></td>
+      <td class="num"><b>${soles(usaGeneral ? general.precio : p.precio)}</b><br>${origen}</td>
       <td>${p.descripcion ? `${esc(p.descripcion)}<br><span class="sub">${esc(FUENTES_PRECIO[p.fuente] || '')} ${fechaPe(p.fecha)}</span>` : '<span class="sub">—</span>'}${distinto}
-        <div class="precio-acc">${lista.length ? `<select data-precio="${x.k}" aria-label="Precio de ${x.n}"><option value="">${p.origen === 'proyecto' ? 'Usar el vigente del catálogo' : 'Fijar un precio del catálogo…'}</option>${opciones}</select>` : '<span class="sub">No hay precios de este tipo en el catálogo.</span>'}</div></td>
+        <div class="precio-acc">${lista.length ? `<select data-precio="${k}" aria-label="Precio de ${esc(nombre)}"><option value="">${p.origen === 'proyecto' ? 'Usar el vigente del catálogo' : 'Fijar un precio del catálogo…'}</option>${opciones}</select>` : `<span class="sub">${vacio}</span>`}</div></td>
     </tr>`;
+  };
+  const lineas = datos.lineas || [];
+  const filas = datos.partidas.filter(part => !part.excluido).map(part => {
+    const x = ITEMS.find(y => y.k === part.k), tallas = lineas.filter(y => y.tipo === x.k && y.talla);
+    const general = datos.precios[x.k] || { precio: null };
+    return fila(x.k, tallas.length ? `${x.n} – precio general` : x.n, tallas.length ? `${ent(part.rep)} ${x.u} a reponer · vale para las tallas sin precio propio` : `${ent(part.rep)} ${x.u} a reponer`, x.u, null)
+      + tallas.map(y => fila(y.k, y.n.split(' – ')[1], `${ent(y.rep)} ${y.u} a reponer`, y.u, general)).join('');
   }).join('');
   document.getElementById('exp-precios').innerHTML = `
     <div class="panel-cab"><h3>Precios unitarios (sin IGV)</h3><a class="btn btn-ghost btn-sm" href="selector-ioarr-precios.html" target="_blank" rel="noopener">Catálogo de precios ↗</a></div>
-    <p class="sub pad">Se usa el precio vigente del catálogo, salvo que fijes uno para este proyecto. Al fijarlo se guarda una copia: si el catálogo cambia, el proyecto no cambia sin aviso.</p>
+    <p class="sub pad">Se usa el precio vigente del catálogo, salvo que fijes uno para este proyecto. Al fijarlo se guarda una copia: si el catálogo cambia, el proyecto no cambia sin aviso. La mesa y la silla se costean por talla, según el grado del aula (las aulas multigrado se reparten en partes iguales entre las tallas de su nivel); una talla sin precio propio usa el precio general.</p>
     <div class="tabla-wrap borde-0"><table class="tabla"><thead><tr><th>Tipo de bien</th><th class="num">Precio</th><th>Origen</th></tr></thead><tbody>${filas}</tbody></table></div>`;
 }
 
@@ -192,8 +204,10 @@ function pintarResultados() {
   const T = datos.totales, R = Object.fromEntries(datos.rubros.map(r => [r.clave, r]));
   const lin = (txt, v, cls = '') => `<tr class="${cls}"><td>${txt}</td><td class="num">${soles(v)}</td></tr>`;
   const rub = k => lin(`<span class="sangria">${esc(R[k].nombre)}</span>`, R[k].monto);
-  const partidas = datos.partidas.map(p => `<tr><td>${p.n}</td><td>${p.u}</td><td class="num">${ent(p.rep)}</td><td class="num">${soles(p.pu)}</td><td class="num">${soles(p.parcial)}</td></tr>`).join('');
-  const falt = datos.partidas.map(p => `<tr><td>${p.n}</td><td class="num">${ent(p.fal)}</td><td class="num">${soles(p.falValor)}</td></tr>`).join('');
+  // Una línea por talla en mesa y silla
+  const lineas = datos.lineas || datos.partidas.filter(p => !p.excluido);
+  const partidas = lineas.filter(p => p.rep > 0 || !p.talla).map(p => `<tr><td>${p.n}</td><td>${p.u}</td><td class="num">${ent(p.rep)}</td><td class="num">${soles(p.pu)}</td><td class="num">${soles(p.parcial)}</td></tr>`).join('');
+  const falt = lineas.filter(p => p.fal > 0 || !p.talla).map(p => `<tr><td>${p.n}</td><td class="num">${ent(p.fal)}</td><td class="num">${soles(p.falValor)}</td></tr>`).join('');
   const dist = datos.distritos.map(d => `<tr><td>${esc(d.nom)}<br><span class="sub">${esc(d.prov)} · ${d.ubigeo}</span></td><td class="num">${ent(d.n)}</td><td class="num">${ent(d.est)}</td><td class="num">${ent(d.rep)}</td><td class="num">${soles(d.total)}</td><td class="num">${d.porEstudiante == null ? '—' : soles(d.porEstudiante)}</td><td class="num sub">${ent(d.fal)}</td></tr>`).join('');
   const q = norm(filtroLoc).trim();
   const locs = [...datos.locales].filter(l => !q || l.cod.includes(q) || norm(l.nom).includes(q) || norm(l.dist).includes(q))
@@ -421,7 +435,7 @@ async function abrirInventario(cod) {
     // Un solo nivel: bienes / adquisicion (niv = ''). Varios niveles: un bloque por nivel (por_nivel)
     const bloques = d.por_nivel ? d.niveles.map(x => ({ niv: x.nivel, titulo: x.nombre, censo: x.censo, f: v?.por_nivel?.[x.nivel] || {} }))
       : [{ niv: '', titulo: null, censo: d.censo, f: { bienes: v?.bienes, adquisicion: v?.adquisicion } }];
-    m.querySelector('#inv-tbody').innerHTML = bloques.map(B => (B.titulo ? `<tr class="fila-nivel"><td colspan="8"><b>${esc(B.titulo)}</b></td></tr>` : '') + ITEMS.map(x => {
+    m.querySelector('#inv-tbody').innerHTML = bloques.map(B => (B.titulo ? `<tr class="fila-nivel"><td colspan="8"><b>${esc(B.titulo)}</b></td></tr>` : '') + ITEMS.filter(x => !datos.muebles || datos.muebles.includes(x.k)).map(x => {
       const c = B.censo[x.k], f = B.f.bienes?.[x.k], on = !!f, val = (k) => f ? f[k] : c[k];
       const lbl = `${x.n}${B.titulo ? ' (' + B.titulo + ')' : ''}`;
       const inp = k => `<input type="number" min="0" step="1" inputmode="numeric" data-inv-k="${x.k}" data-niv="${B.niv}" data-c="${k}" value="${val(k)}" ${on ? '' : 'disabled'} required aria-label="${lbl}: ${{ b: 'bueno', r: 'regular', m: 'malo' }[k]}">`;

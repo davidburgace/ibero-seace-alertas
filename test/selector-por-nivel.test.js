@@ -128,7 +128,7 @@ test('Excel del Selector: hoja «Por nivel»', async () => {
   const x = await generarExcel(V, Cp, DEF, lp, { proyecto: 'Prueba — IOARR Primaria', fecha: '2026-10-21', ioarr: null });
   const wb2 = new ExcelJS.Workbook(); await wb2.xlsx.load(x.buffer);
   const res = wb2.getWorksheet('Resumen'); let rep = null;
-  res.eachRow(r => { if (r.getCell(1).value === 'Bienes a reponer (estado Malo, suma de los 5 tipos)') rep = r.getCell(2).value.result; });
+  res.eachRow(r => { if (r.getCell(1).value === 'Bienes a reponer (estado Malo, suma de los muebles de la IOARR)') rep = r.getCell(2).value.result; });
   assert.equal(rep, 101);
   assert.equal(wb2.getWorksheet('Locales (UP)').rowCount - 1, 4);
 });
