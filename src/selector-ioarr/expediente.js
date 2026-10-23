@@ -17,7 +17,7 @@
 //     GET    /ubigeos?region=                   provincias y distritos de una región
 //   Costos del proyecto (solo el dueño)
 //     GET    /proyectos/:id/costos              parámetros + estructura de costos calculada
-//     PATCH  /proyectos/:id/costos              { rubros?, anio_uit? }
+//     PATCH  /proyectos/:id/costos              { estructura?, anio_uit? }  (estructura: migración 027)
 //     PUT    /proyectos/:id/costos/precios/:tipo  { precio_id } fija un precio del catálogo
 //     DELETE /proyectos/:id/costos/precios/:tipo  vuelve a usar el vigente del catálogo
 //     GET    /proyectos/:id/costos/inventario/:cod  censo del local + inventario verificado en campo
@@ -33,6 +33,9 @@
 //     GET    /proyectos/:id/documentos/formato-07c  Word del borrador del Formato 07-C
 //     GET    /proyectos/:id/documentos/memoria      Word de la memoria descriptiva
 //     GET    /proyectos/:id/documentos/verificacion Word de la lista de verificación (etapa 3)
+//   Oferta (uso interno, migración 027): NO entra al 07-C, a las fichas, a los Excel ni al ZIP
+//     GET    /proyectos/:id/oferta                  entradas guardadas + costo puesto en colegio y margen
+//     PUT    /proyectos/:id/oferta                  { datos }
 //   Entrega (etapa 4)
 //     GET    /proyectos/:id/expediente-zip          ZIP con los Word, los Excel y el sustento por local
 //   Fichas de verificación por local (ficha.js, migración 019)
@@ -61,10 +64,11 @@ import { escribirZip } from './zip.js';
 import { generarExcel } from './excel.js';
 import { BUCKET_EXPEDIENTE, MAX_ARCHIVO, MAX_POR_LOCAL, TIPOS_ARCHIVO, mimeDe, nombreUtf8, nombreSeguro } from './archivos.js';
 import { supabase } from '../ioarr/db.js';
-import { calc, limpiarParams, CRIT, ITEMS } from './calculo.js';
-import { costear, limpiarRubros, limpiarInventario, limpiarAdquisicion, censoLocal, FUENTES_PRECIO, CLAVES_PRECIO } from './costos.js';
+import { calc, limpiarParams, CRIT, ITEMS, ESCENARIOS, textoEscenario } from './calculo.js';
+import { costear, limpiarEstructura, preciosEfectivos, limpiarInventario, limpiarAdquisicion, censoLocal, FUENTES_PRECIO, CLAVES_PRECIO, PRECIOS_REFERENCIA, LEYENDA_REFERENCIA, NOTA_PORCENTAJES } from './costos.js';
+import { limpiarOferta, calcularOferta } from './oferta.js';
 import { generarExcelCostos } from './excel-costos.js';
-import { armarModelo, limpiarDatosDoc, ESTADOS_ACTIVO } from './documentos.js';
+import { armarModelo, limpiarDatosDoc, ESTADOS_ACTIVO, MODALIDADES, FUENTES_FIN } from './documentos.js';
 import { generar07C, generarMemoria, generarVerificacion } from './word.js';
 import { leerDuplicidad, separarLocales, estadoDe, avisosDuplicidad } from './duplicidad.js';
 import { porNivel, inventarioNivel, inventarioUna, modoDe, sinNivel, nivelesDeLocal, vistaNivel, limpiarPorNivel, NOMBRE_NIVEL } from './niveles.js';
@@ -89,6 +93,7 @@ const okPrecio = d => {
   if (d.error?.code === '23514' && /tipo_bien/.test(d.error.message || '')) throw Object.assign(new Error(AVISO_TALLA), { status: 503 });
   return ok(d);
 };
+const AVISO_EST = 'Falta ejecutar supabase/migrations/027_ioarr_estructura_oferta.sql en Supabase para guardar la estructura de costos, el kit y la oferta';
 const AVISO_FICHA = 'Falta ejecutar supabase/migrations/019_ioarr_ficha_verificacion.sql en Supabase para importar las fichas de verificación';
 const MAX_FICHAS = 50, MAX_FICHA_MB = 10;
 const subidaFichas = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_FICHA_MB * 1024 * 1024, files: MAX_FICHAS } });
@@ -286,7 +291,7 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
       supabase.from('ioarr_expediente_costos').select('*').eq('proyecto_id', p.id).maybeSingle().then(ok),
       supabase.from('ioarr_expediente_precios').select('*').eq('proyecto_id', p.id).then(ok),
       supabase.from('ioarr_precios_catalogo').select('*').eq('vigente', true).then(ok),
-      supabase.from('ioarr_factores_zona').select('*').then(ok),
+      supabase.from('ioarr_factores_zona').select('*').then(ok),   // solo para la oferta interna (transporte por zona)
       cargarRegion(p.region),
       leerCodigos(p.id),
       leerInventario(p),
@@ -311,8 +316,11 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
       } else if (v) {
         detalle[t] = { origen: 'vigente', precio_id: v.id, precio: Number(v.precio), descripcion: v.descripcion, fuente: v.fuente, fecha: v.fecha, observacion: v.observacion };
       } else detalle[t] = { origen: null, precio: null };
-      precios[t] = detalle[t].precio;
     }
+    // Precio de mercado de cada clave: editado en el proyecto → catálogo → referencia (costos.js)
+    const estructura = limpiarEstructura(fila?.estructura);
+    const efectivos = preciosEfectivos(estructura, detalle);
+    for (const t of CLAVES_PRECIO) precios[t] = efectivos[t].precio;
 
     // Los locales con otra inversión vigente o reciente que se excluyeron no entran a la propuesta
     const { list, excluidos } = separarLocales(D, codigos, dup.mapa);
@@ -323,11 +331,21 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     const inv = Object.fromEntries(inventario.map(x => [x.cod_local, { ...x,
       req_ficha: x.ficha && idxCod.has(x.cod_local) ? requeridoFicha(x, D, P, idxCod.get(x.cod_local)) : null,
       archivos: archivos.filter(a => a.cod_local === x.cod_local).map(sinRuta) }]));
-    const comun = { precios, rubros: fila?.rubros, factores, uit: { anio: anioUit, valor: uit?.valor ?? null } };
+    const comun = { precios, estructura, uit: { anio: anioUit, valor: uit?.valor ?? null } };
 
     // Una IOARR (todos los niveles) y una por nivel: se calculan las dos para compararlas
     const G = porNivel(D, P, list), Cn = Object.fromEntries(G.map(g => [g.nivel, g.C]));
     const Runa = costear({ D, C, list, ...comun, inventario: inventarioUna(inv, D, Cn) });
+    // Los tres escenarios de cantidad lado a lado (IOARR única, con la misma estructura y precios)
+    const escenarios = ESCENARIOS.map(e => {
+      const Pe = { ...P, escenario: e.k };
+      const R = e.k === P.escenario ? Runa : (() => {
+        const Ce = calc(D, Pe), Gn = Object.fromEntries(porNivel(D, Pe, list).map(g => [g.nivel, g.C]));
+        return costear({ D, C: Ce, list, ...comun, inventario: inventarioUna(inv, D, Gn) });
+      })();
+      return { k: e.k, n: e.n, actual: e.k === P.escenario, rep: R.totales.rep, kits: R.totales.kits, cd: R.totales.cd, total: R.totales.total,
+        partidas: Object.fromEntries(R.partidas.map(x => [x.k, x.excluido ? null : x.rep])), aulas: R.totales.aul };
+    });
     const Rniv = costear({ ...comun, grupos: G.map(g => ({ clave: g.nivel, D: g.D, C: g.C, list: g.list, inventario: inventarioNivel(inv, D, g.nivel) })) });
     const modo = modoDe(p);
     // Sin locales no hay niveles: se muestra la IOARR única (vacía)
@@ -354,7 +372,7 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
       modo, uit: Runa.uit.valor ? { anio: Runa.uit.anio, valor: Runa.uit.valor, limite: Runa.uit.limite } : null,
       una: fila_(Runa), niveles: G.map(g => ({ nivel: g.nivel, nombre: g.nombre, ...fila_(Rniv.grupos[g.nivel]) })), suma: Rniv.totales.total
     };
-    return { modo, ioarrs, comparativo, Runa, P, detalle, anioUit, uit, D, C, list, inv, dup: dup.mapa, excluidos };
+    return { modo, ioarrs, comparativo, Runa, P, detalle, efectivos, estructura, escenarios, factores, anioUit, uit, D, C, list, inv, dup: dup.mapa, excluidos, sinMigracionEst: !!fila && !('estructura' in fila) };
   }
   // La IOARR pedida (?nivel=P); sin nivel o con una sola IOARR, la primera
   const elegir = (A, nivel) => A.ioarrs.find(x => x.nivel === nivel) || A.ioarrs[0];
@@ -362,9 +380,12 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
   const vista = (A, nivel) => { const x = elegir(A, nivel); return vistaDe({ ...A, R: x.R }, x, A); };
   const vistaDe = ({ R, detalle, anioUit, uit, inv }, x, A) => ({
     modo: A.modo, nivel: x.nivel, nombre_ioarr: x.nombre, ioarrs: A.ioarrs.map(y => ({ nivel: y.nivel, nombre: y.nombre, total: y.R.totales.total })), comparativo: A.comparativo,
-    anio_uit: anioUit, uit: uit || null, precios: detalle,
-    rubros: R.rubros, partidas: R.partidas, lineas: R.lineas, muebles: A.P.muebles, totales: R.totales, distritos: R.distritos, uitCalc: R.uit, avisos: R.avisos, excluidos: R.excluidos,
-    locales: R.locales.map(l => ({ cod: l.cod, nom: l.nom, dist: l.dist, prov: l.prov, rural: l.rural, est: l.est, zona: l.zona,
+    anio_uit: anioUit, uit: uit || null, precios: A.efectivos, catalogo_precios: detalle, referencia: { precios: PRECIOS_REFERENCIA, leyenda: LEYENDA_REFERENCIA, nota_porcentajes: NOTA_PORCENTAJES },
+    escenario: { k: A.P.escenario, capOcup: A.P.capOcup, capPct: A.P.capPct, texto: textoEscenario(A.P) }, escenarios: A.escenarios,
+    estructura: { ...R.estructura, guardada: A.estructura }, sin_migracion_estructura: A.sinMigracionEst,
+    metas: R.metas, lineasKit: R.lineasKit, lineasTalla: R.lineasTalla,
+    partidas: R.partidas, lineas: R.lineas, muebles: A.P.muebles, totales: R.totales, distritos: R.distritos, uitCalc: R.uit, avisos: R.avisos, excluidos: R.excluidos,
+    locales: R.locales.map(l => ({ cod: l.cod, nom: l.nom, dist: l.dist, prov: l.prov, rural: l.rural, est: l.est, kits: l.kits,
       rep: l.rep.reduce((a, b) => a + b, 0), fal: l.fal.reduce((a, b) => a + b, 0), cd: l.cd, total: l.total,
       verificado: l.verificado ? { tipos: l.verificado.tipos, fecha_visita: l.verificado.fecha_visita, ficha: !!l.verificado.ficha } : null,
       archivos: inv?.[l.cod]?.archivos.length || 0, duplicidad: l.duplicidad }))
@@ -376,14 +397,46 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
 
   api.patch('/proyectos/:id/costos', responder(async (req, res) => {
     const p = await proyecto(req), b = req.body || {}, fila = { proyecto_id: p.id };
-    if ('rubros' in b) fila.rubros = limpiarRubros(b.rubros);
+    if (b.estructura && typeof b.estructura === 'object') {
+      // Se fusiona con lo guardado; un precio en null vuelve al del catálogo o la referencia
+      const { data: actual, error: eAct } = await supabase.from('ioarr_expediente_costos').select('*').eq('proyecto_id', p.id).maybeSingle();
+      if (eAct) throw eAct;
+      if (actual && !('estructura' in actual)) return res.status(503).json({ error: AVISO_EST });
+      const g = limpiarEstructura(actual?.estructura), n = b.estructura;
+      const precios = { ...g.precios };
+      for (const [k, v] of Object.entries(n.precios || {})) { if (v === null || v === '') delete precios[k]; else precios[k] = v; }
+      fila.estructura = limpiarEstructura({ ...g, ...n, precios });
+    }
     if ('anio_uit' in b) {
       const a = Number(b.anio_uit);
       if (!Number.isInteger(a) || a < 2000 || a > 2100) return res.status(400).json({ error: 'Año de la UIT no válido' });
       fila.anio_uit = a;
     }
-    ok(await supabase.from('ioarr_expediente_costos').upsert(fila, { onConflict: 'proyecto_id' }));
+    const { error: eUp } = await supabase.from('ioarr_expediente_costos').upsert(fila, { onConflict: 'proyecto_id' });
+    if (eUp) { if (/estructura/.test(eUp.message || '')) return res.status(503).json({ error: AVISO_EST }); throw eUp; }
     res.json(vista(await armar(p), req.query.nivel));
+  }));
+
+  // ─── Oferta (uso interno) ─────────────────────────────────────────────────
+  // Tabla aparte (ioarr_expediente_oferta): ningún exportador la lee. No entra al 07-C,
+  // a las fichas, a la memoria, a los Excel ni al ZIP del expediente.
+  async function leerOferta(p) {
+    const { data, error } = await supabase.from('ioarr_expediente_oferta').select('datos').eq('proyecto_id', p.id).maybeSingle();
+    if (error) { if (faltaMigracion(error)) return { datos: limpiarOferta({}), sinMigracion: true }; throw error; }
+    return { datos: limpiarOferta(data?.datos || {}), sinMigracion: false };
+  }
+  const vistaOferta = (A, o) => ({ datos: o.datos, sin_migracion: o.sinMigracion, escenario: textoEscenario(A.P),
+    ...calcularOferta(A.Runa, o.datos, { factores: A.factores }) });
+  api.get('/proyectos/:id/oferta', responder(async (req, res) => {
+    const p = await proyecto(req);
+    const [A, o] = await Promise.all([armar(p), leerOferta(p)]);
+    res.json(vistaOferta(A, o));
+  }));
+  api.put('/proyectos/:id/oferta', responder(async (req, res) => {
+    const p = await proyecto(req), datos = limpiarOferta(req.body?.datos || {});
+    const { error } = await supabase.from('ioarr_expediente_oferta').upsert({ proyecto_id: p.id, datos, actualizado_en: new Date().toISOString() }, { onConflict: 'proyecto_id' });
+    if (error) { if (faltaMigracion(error)) return res.status(503).json({ error: AVISO_EST }); throw error; }
+    res.json(vistaOferta(await armar(p), { datos, sinMigracion: false }));
   }));
 
   api.put('/proyectos/:id/costos/precios/:tipo', responder(async (req, res) => {
@@ -849,7 +902,7 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     const dn = porNiv ? datos.por_nivel?.[x.nivel] || {} : null;
     const datosX = porNiv ? { ...datos, nombre_inversion: dn.nombre_inversion || '', cui: dn.cui || '' } : datos;
     const proyectoX = porNiv ? { ...p, nombre: `${p.nombre} — IOARR ${x.nombre}`, ioarr: p.ioarr && dn.cui && dn.cui === p.ioarr.cui ? p.ioarr : null } : p;
-    const M = armarModelo({ R: x.R, D: x.D, list: x.list, proyecto: proyectoX, datos: datosX, precios: A.detalle, inv: A.inv, fecha: hoyLima() });
+    const M = armarModelo({ R: x.R, D: x.D, list: x.list, proyecto: proyectoX, datos: datosX, precios: A.detalle, efectivos: A.efectivos, P: A.P, inv: A.inv, fecha: hoyLima() });
     return Object.assign(M, { nivel: x.nivel, nombreIoarr: x.nombre });
   }
   async function modelo(p, nivel) {
@@ -866,10 +919,12 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
   const vistaDoc = ({ M, datos, sinMigracion, A, x }, p) => ({
     modo: A.modo, nivel: x.nivel, nombre_ioarr: x.nombre, ioarrs: A.ioarrs.map(y => ({ nivel: y.nivel, nombre: y.nombre })), comparativo: A.comparativo,
     datos, sin_migracion: sinMigracion, estados: ESTADOS_ACTIVO, verificacion: M.verificacion, ioarr: p?.ioarr || null,
+    modalidades: MODALIDADES, fuentes: FUENTES_FIN, escenario: M.escenarioTexto, kit: M.kit,
     resumen: {
       nombre: M.nombre, nombre_sugerido: M.nombreSugerido, cui: M.cui, masiva: M.masiva, registro: M.registro,
       total: M.F.total, en_uit: M.uit.enUit, uit: M.uit.valor ? { anio: M.uit.anio, valor: M.uit.valor } : null,
-      ups: M.ups.length, sin_rep: M.sinRep.map(x => x.cod), ugels: M.ugels, mantenimiento_sugerido: M.D.mantenimiento,
+      ups: M.upsRegistro.length, up_por: M.upPor, locales_con_bienes: M.ups.length, sin_rep: M.sinRep.map(x => x.cod), ugels: M.ugels, mantenimiento_sugerido: M.ugels.join(', '),
+      metas: M.F.metas.map(m => ({ k: m.k, nombre: m.nombre, cantidad: m.cantidad, unidad: m.unidad })), grupos: M.A.grupos, funcion: M.A.funcion, division: M.A.division, plazo: M.F.plazo,
       tipos: M.E.activos.map(a => ({ k: a.k, nombre: a.nombre, cantidad: a.cantidad, descripcion: a.descripcion, antiguedad_inventario: a.antiguedad_inventario })),
       alineamiento: { servicio: M.A.servicio, tipologia: M.A.tipologia, indicadores: M.A.indicadores },
       inicio: M.F.inicio, fin: M.F.fin, condiciones: M.E.condiciones
@@ -923,7 +978,7 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     const fecha = hoyLima();
     const buffer = await generarExcelCostos(x.R, {
       proyecto: x.nivel ? `${p.nombre} — IOARR ${x.nombre}` : p.nombre, region: p.region, fecha, ioarr: p.ioarr, fuente: (await leerIndice()).fuente,
-      criterios: textoCriterios(A.P), precios: A.detalle, inventario: x.inv
+      criterios: textoCriterios(A.P), escenario: textoEscenario(A.P), precios: A.detalle, efectivos: A.efectivos, inventario: x.inv
     });
     const archivo = `Costos_IOARR_${slug(p.nombre)}${x.nivel ? '_' + slug(x.nombre) : ''}_${fecha}.xlsx`;
     res.set({
@@ -935,7 +990,8 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
 
   // ─── Etapa 4: ZIP del expediente ──────────────────────────────────────────
   // Se arma en flujo (archiver): los archivos del bucket se agregan de a uno, así
-  // la memoria no crece con el número de fotos.
+  // la memoria no crece con el número de fotos. La oferta (uso interno) no se lee aquí:
+  // queda fuera del ZIP a propósito.
   api.get('/proyectos/:id/expediente-zip', responder(async (req, res) => {
     const p = await proyecto(req), { A, datos, lista: todas } = await modelos(p);
     // Solo las IOARR con algo que reponer
@@ -944,25 +1000,9 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     const fecha = lista[0].M.fecha, base = `Expediente_IOARR_${slug(p.nombre)}_${fecha}`;
     const meta = { region: p.region, fecha, ioarr: p.ioarr, fuente: (await leerIndice()).fuente };
     const porNiv = A.modo === 'por_nivel';
-    // Todo lo que puede fallar se genera antes de empezar a enviar
+    // Todo lo que puede fallar se genera antes de empezar a enviar. La oferta (uso interno) no se pasa.
     const [piezas, archivos] = await Promise.all([
-      Promise.all(lista.map(async ({ x, M }, j) => {
-        const carpeta = porNiv ? `${String(j + 1).padStart(2, '0')}_IOARR_${nombreSeguro(x.nombre)}/` : '';
-        const m = { ...meta, proyecto: porNiv ? `${p.nombre} — IOARR ${x.nombre}` : p.nombre };
-        const fuera = x.nivel ? A.excluidos.filter(i => x.D.locSvc[i].length) : A.excluidos;
-        const [f07c, memoria, verificacion, costos, { buffer: seleccion }] = await Promise.all([
-          generar07C(M), generarMemoria(M), generarVerificacion(M),
-          generarExcelCostos(x.R, { ...m, criterios: textoCriterios(A.P), precios: A.detalle, inventario: x.inv }),
-          generarExcel(x.D, x.C, A.P, x.list, { ...m, duplicidad: A.dup, excluidos: fuera, revisiones: datos.situacional?.revisiones })
-        ]);
-        return [
-          { nombre: carpeta + '01_Formato_07C_borrador.docx', contenido: f07c, descripcion: 'borrador del Formato 07-C' },
-          { nombre: carpeta + '02_Memoria_descriptiva.docx', contenido: memoria },
-          { nombre: carpeta + '03_Lista_de_verificacion.docx', contenido: verificacion },
-          { nombre: carpeta + '04_Estructura_de_costos.xlsx', contenido: costos, descripcion: 'con fórmulas' },
-          { nombre: carpeta + '05_Seleccion_de_locales_y_metrado.xlsx', contenido: seleccion, descripcion: 'metrado por aula del Selector' }
-        ];
-      })).then(xs => xs.flat()),
+      piezasExpediente({ A, datos, lista, meta, nombre: p.nombre }),
       leerArchivos(p.id)
     ]);
     const nombreLocal = Object.fromEntries(A.Runa.locales.map(l => [l.cod, l.nom]));
@@ -1009,6 +1049,34 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
   return api;
 }
 
+/**
+ * Documentos del ZIP del expediente (Word y Excel), una carpeta por IOARR si son por nivel.
+ * Solo recibe lo exportable: el cálculo, los datos de Documentos y la meta. La oferta
+ * (uso interno, ioarr_expediente_oferta) no entra: este armado no la recibe ni la lee.
+ * @param A      resultado de armar() (modo, P, detalle, efectivos, excluidos, dup)
+ * @param lista  [{ x: IOARR (nivel, nombre, D, C, list, R, inv), M: modelo de armarModelo }]
+ */
+export async function piezasExpediente({ A, datos, lista, meta, nombre }) {
+  const porNiv = A.modo === 'por_nivel';
+  const xs = await Promise.all(lista.map(async ({ x, M }, j) => {
+    const carpeta = porNiv ? `${String(j + 1).padStart(2, '0')}_IOARR_${nombreSeguro(x.nombre)}/` : '';
+    const m = { ...meta, proyecto: porNiv ? `${nombre} — IOARR ${x.nombre}` : nombre };
+    const fuera = x.nivel ? (A.excluidos || []).filter(i => x.D.locSvc[i].length) : (A.excluidos || []);
+    const [f07c, memoria, verificacion, costos, { buffer: seleccion }] = await Promise.all([
+      generar07C(M), generarMemoria(M), generarVerificacion(M),
+      generarExcelCostos(x.R, { ...m, criterios: textoCriterios(A.P), escenario: textoEscenario(A.P), precios: A.detalle, efectivos: A.efectivos, inventario: x.inv }),
+      generarExcel(x.D, x.C, A.P, x.list, { ...m, duplicidad: A.dup, excluidos: fuera, revisiones: datos.situacional?.revisiones })
+    ]);
+    return [
+      { nombre: carpeta + '01_Formato_07C_borrador.docx', contenido: f07c, descripcion: 'borrador del Formato 07-C' },
+      { nombre: carpeta + '02_Memoria_descriptiva.docx', contenido: memoria },
+      { nombre: carpeta + '03_Lista_de_verificacion.docx', contenido: verificacion },
+      { nombre: carpeta + '04_Estructura_de_costos.xlsx', contenido: costos, descripcion: 'con fórmulas' },
+      { nombre: carpeta + '05_Seleccion_de_locales_y_metrado.xlsx', contenido: seleccion, descripcion: 'metrado por aula del Selector' }
+    ];
+  }));
+  return xs.flat();
+}
 const plLocal = n => `${n} ${n === 1 ? 'local' : 'locales'}`;
 const LEEME_FICHAS = (proyecto, n, fecha, paquetes = null) => [
   `Fichas de verificación de mobiliario escolar — proyecto «${proyecto}» (${plLocal(n)}), generadas el ${fecha}.`,
@@ -1043,7 +1111,7 @@ const LEEME_PAQUETE = (proyecto, paq, D, idxDe) => [
 export function textoCriterios(P) {
   const est = { b: 'Bueno', r: 'Regular', m: 'Malo' }[P.carpEstado];
   const muebles = ITEMS.filter(x => !P.muebles || P.muebles.includes(x.k)).map(x => x.n.toLowerCase()).join(', ');
-  return `Muebles de la IOARR: ${muebles} · ` + CRIT.map(([k, l]) => `${l}: ${P[k]}`).join(' · ') + ` · Estado asignado a las carpetas: ${est} · Se repone solo el estado Malo`
+  return `${textoEscenario(P)} · Muebles de la IOARR: ${muebles} · ` + CRIT.map(([k, l]) => `${l}: ${P[k]}`).join(' · ') + ` · Estado asignado a las carpetas: ${est}`
     + ' · Mesa y silla por talla según el grado del aula (multigrado: en partes iguales entre las tallas del nivel)';
 }
 

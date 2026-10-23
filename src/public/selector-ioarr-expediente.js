@@ -1,8 +1,9 @@
 // Selector IOARR — pestaña «Expediente» (Etapa 1: estructura de costos).
 // El cálculo lo hace el servidor (src/selector-ioarr/costos.js), el mismo que
 // arma el Excel: así la pantalla y el Excel dan lo mismo.
-import { RUBROS, BASES, FUENTES_PRECIO, LIMITE_UIT, TIPOS_ARCHIVO } from '/selector-ioarr/costos.js';
-import { ITEMS, CLAVES_PRECIO } from '/selector-ioarr/calculo.js';
+import { LIMITE_UIT, TIPOS_ARCHIVO } from '/selector-ioarr/costos.js';
+import { ITEMS, CLAVES_PRECIO, TALLAS, AVISO_CAPACIDAD } from '/selector-ioarr/calculo.js';
+import { renderOferta, enlazarOferta } from '/selector-ioarr-oferta.js';
 import { renderDocumentos, enlazarDocumentos } from '/selector-ioarr-documentos.js';
 import { renderVerificacion, enlazarVerificacion } from '/selector-ioarr-verificacion.js';
 import { renderFichas, enlazarFichas } from '/selector-ioarr-fichas.js';
@@ -20,7 +21,7 @@ let ctx = null;        // { el, proyecto, api, toast, guardarYa }
 let datos = null;      // respuesta de /costos
 let catalogo = null;   // precios del catálogo por tipo
 let pagLoc = 0, tGuardar = null, version = 0, filtroLoc = '';
-let vistaExp = 'costos';   // sub-pestaña: 'costos' | 'fichas' | 'docs' | 'verif'
+let vistaExp = 'costos';   // sub-pestaña: 'costos' | 'fichas' | 'docs' | 'verif' | 'oferta'
 let costosViejos = false;  // se importaron fichas: al volver a Costos se recalcula
 let nivelExp = null;       // IOARR a la vista con «Una IOARR por nivel»: 'I' | 'P' | 'S' | 'E'
 let proyectoExp = null;    // al cambiar de proyecto se vuelve a la primera IOARR
@@ -64,15 +65,18 @@ function pintar() {
       <button type="button" role="tab" data-exp-vista="fichas" aria-selected="${vistaExp === 'fichas'}">Fichas de verificación</button>
       <button type="button" role="tab" data-exp-vista="docs" aria-selected="${vistaExp === 'docs'}">Documentos: Formato 07-C y memoria</button>
       <button type="button" role="tab" data-exp-vista="verif" aria-selected="${vistaExp === 'verif'}">Verificación</button>
+      <button type="button" role="tab" data-exp-vista="oferta" aria-selected="${vistaExp === 'oferta'}" class="tab-interna">Oferta (uso interno)</button>
     </div>
+    <div id="exp-v-oferta" ${vistaExp === 'oferta' ? '' : 'hidden'}></div>
     <div id="exp-v-fichas" ${vistaExp === 'fichas' ? '' : 'hidden'}></div>
     <div id="exp-v-docs" ${vistaExp === 'docs' ? '' : 'hidden'}></div>
     <div id="exp-v-verif" ${vistaExp === 'verif' ? '' : 'hidden'}></div>
     <div id="exp-v-costos" ${vistaExp === 'costos' ? '' : 'hidden'}>
     <div id="exp-kpis"></div>
     <div id="exp-avisos"></div>
+    <div class="panel" id="exp-escenarios"></div>
     <div class="exportar">
-      <div><h3>Excel de costos</h3><p>Parámetros, partidas, metrado y costos por local, y distribución por distrito. Todo con fórmulas de Excel: si el evaluador cambia un precio o un porcentaje, el libro se recalcula.</p></div>
+      <div><h3>Excel de costos</h3><p>Parámetros, partidas, metrado y costos por local, y distribución por distrito, con el escenario elegido. Todo con fórmulas de Excel: si el evaluador cambia un precio o un porcentaje, el libro se recalcula. No incluye la oferta interna.</p></div>
       <button class="btn btn-primary" id="exp-excel" type="button">Exportar costos a Excel</button>
     </div>
     <div class="cols">
@@ -81,8 +85,9 @@ function pintar() {
     </div>
     <div id="exp-resultados"></div>
     </div>`;
-  pintarIoarr(); pintarPrecios(); pintarRubros(); pintarResultados();
+  pintarIoarr(); pintarEscenarios(); pintarPrecios(); pintarEstructura(); pintarResultados();
   if (vistaExp === 'fichas') abrirFichas();
+  if (vistaExp === 'oferta') abrirOferta();
   if (vistaExp === 'docs') abrirDocumentos();
   if (vistaExp === 'verif') abrirVerificacion();
 }
@@ -127,71 +132,111 @@ function pintarKpis() {
     : U.supera ? '<span class="chip-est alerta">Registro completo · supera 75 UIT</span>' : '<span class="chip-est ok">Registro abreviado · hasta 75 UIT</span>';
   document.getElementById('exp-kpis').innerHTML = `
     <div class="kpis kpis-montos">
-      <div class="kpi destacado"><div class="v">${soles(T.total)}</div><div class="l">total de inversión${datos.nivel ? ` · IOARR ${esc(datos.nombre_ioarr)}` : ''}</div></div>
-      <div class="kpi"><div class="v">${soles(T.cd)}</div><div class="l">costo directo · ${ent(T.rep)} bienes a reponer</div></div>
+      <div class="kpi destacado"><div class="v">${soles(T.total)}</div><div class="l">monto de inversión${datos.nivel ? ` · IOARR ${esc(datos.nombre_ioarr)}` : ''}</div></div>
+      <div class="kpi"><div class="v">${soles(T.cd)}</div><div class="l">costo directo · ${datos.estructura?.kit ? `${ent(T.kits)} kits` : `${ent(T.rep)} bienes a reponer`}</div></div>
       <div class="kpi"><div class="v">${T.porEstudiante == null ? '—' : soles(T.porEstudiante)}</div><div class="l">por estudiante · ${ent(T.est)} estudiantes</div></div>
       <div class="kpi"><div class="v">${U.enUit == null ? '—' : dec(U.enUit) + ' UIT'}</div><div class="l">${reg}</div></div>
     </div>`;
 }
 
 function pintarAvisos() {
-  const clase = { uit75: 'aviso alerta', precio: 'aviso', faltante: 'aviso', uit: 'aviso', rubros: 'aviso', inventario: 'aviso', sustento: 'aviso' };
+  const clase = { uit75: 'aviso alerta', precio: 'aviso', faltante: 'aviso', uit: 'aviso', inventario: 'aviso', sustento: 'aviso', escenario: 'aviso', kit: 'aviso' };
   document.getElementById('exp-avisos').innerHTML = datos.avisos.length
     ? `<div class="avisos">${datos.avisos.map(a => `<div class="${a.alerta ? 'aviso alerta' : clase[a.tipo] || 'aviso'}" role="${a.tipo === 'uit75' || a.alerta ? 'alert' : 'note'}">${esc(a.texto)}</div>`).join('')}</div>` : '';
 }
 
-function pintarPrecios() {
-  // Una fila por mueble que entra; en mesa y silla, el precio general y debajo cada talla
-  // con reposición o faltante (una talla sin precio propio usa el general)
-  const fila = (k, nombre, cant, u, general) => {
-    const p = datos.precios[k] || { origen: null, precio: null }, lista = catalogo[k] || [];
-    const usaGeneral = general && p.origen == null;
-    const origen = p.origen === 'proyecto' ? '<span class="chip-est ok">Fijado en el proyecto</span>'
-      : p.origen === 'vigente' ? '<span class="chip-est">Vigente del catálogo</span>'
-      : usaGeneral ? `<span class="chip-est">${general.precio == null ? 'Sin precio' : 'Usa el general'}</span>` : '<span class="chip-est pend">Sin precio</span>';
-    const opciones = lista.map(c => `<option value="${c.id}" ${p.origen === 'proyecto' && p.precio_id === c.id ? 'selected' : ''}>${soles(Number(c.precio))} · ${esc(c.descripcion)} · ${esc(FUENTES_PRECIO[c.fuente])} ${fechaPe(c.fecha)}${c.vigente ? ' · vigente' : ''}</option>`).join('');
-    const distinto = p.vigente_distinto ? `<div class="sub aviso-linea">El vigente del catálogo ahora es ${soles(p.vigente_distinto.precio)} (${esc(p.vigente_distinto.descripcion)}).</div>` : '';
-    const vacio = general ? 'No hay precios de esta talla en el catálogo: usa el precio general.' : 'No hay precios de este tipo en el catálogo.';
-    return `<tr${general ? ' class="fila-talla"' : ''}>
-      <td>${general ? `<span class="sangria">${esc(nombre)}</span>` : `<b>${esc(nombre)}</b>`}<br><span class="sub">${cant}</span></td>
-      <td class="num"><b>${soles(usaGeneral ? general.precio : p.precio)}</b><br>${origen}</td>
-      <td>${p.descripcion ? `${esc(p.descripcion)}<br><span class="sub">${esc(FUENTES_PRECIO[p.fuente] || '')} ${fechaPe(p.fecha)}</span>` : '<span class="sub">—</span>'}${distinto}
-        <div class="precio-acc">${lista.length ? `<select data-precio="${k}" aria-label="Precio de ${esc(nombre)}"><option value="">${p.origen === 'proyecto' ? 'Usar el vigente del catálogo' : 'Fijar un precio del catálogo…'}</option>${opciones}</select>` : `<span class="sub">${vacio}</span>`}</div></td>
-    </tr>`;
-  };
-  const lineas = datos.lineas || [];
-  const filas = datos.partidas.filter(part => !part.excluido).map(part => {
-    const x = ITEMS.find(y => y.k === part.k), tallas = lineas.filter(y => y.tipo === x.k && y.talla);
-    const general = datos.precios[x.k] || { precio: null };
-    return fila(x.k, tallas.length ? `${x.n} – precio general` : x.n, tallas.length ? `${ent(part.rep)} ${x.u} a reponer · vale para las tallas sin precio propio` : `${ent(part.rep)} ${x.u} a reponer`, x.u, null)
-      + tallas.map(y => fila(y.k, y.n.split(' – ')[1], `${ent(y.rep)} ${y.u} a reponer`, y.u, general)).join('');
-  }).join('');
-  document.getElementById('exp-precios').innerHTML = `
-    <div class="panel-cab"><h3>Precios unitarios (sin IGV)</h3><a class="btn btn-ghost btn-sm" href="selector-ioarr-precios.html" target="_blank" rel="noopener">Catálogo de precios ↗</a></div>
-    <p class="sub pad">Se usa el precio vigente del catálogo, salvo que fijes uno para este proyecto. Al fijarlo se guarda una copia: si el catálogo cambia, el proyecto no cambia sin aviso. La mesa y la silla se costean por talla, según el grado del aula (las aulas multigrado se reparten en partes iguales entre las tallas de su nivel); una talla sin precio propio usa el precio general.</p>
-    <div class="tabla-wrap borde-0"><table class="tabla"><thead><tr><th>Tipo de bien</th><th class="num">Precio</th><th>Origen</th></tr></thead><tbody>${filas}</tbody></table></div>`;
+// ─── Escenarios de cantidad, lado a lado ────────────────────────────────────
+const ESC_AYUDA = {
+  malo: 'Lo Malo del censo, por tipo de bien. Escenario base.',
+  malo_regular: 'Cota superior sustentada con el censo.',
+  capacidad: `Aulas × ocupación × %. ${AVISO_CAPACIDAD}`
+};
+function pintarEscenarios() {
+  const E = datos.escenarios || [], act = datos.escenario || { k: 'malo' };
+  const base = E.find(x => x.k === 'malo') || E[0];
+  const tipos = ITEMS.filter(x => !datos.muebles || datos.muebles.includes(x.k));
+  const dif = (v, b) => { if (v == null || b == null) return ''; const d = v - b; return d ? `<span class="sub">${d > 0 ? '+' : '−'}${ent(Math.abs(d))}</span>` : '<span class="sub">=</span>'; };
+  const difS = (v, b) => { const d = v - b; return d ? `<span class="sub">${d > 0 ? '+' : '−'}${soles(Math.abs(d))}</span>` : '<span class="sub">=</span>'; };
+  const celda = (x, v, b, fmt = ent, fd = dif) => `<td class="num${x.actual ? ' activa' : ''}">${fmt(v)}${x.k !== 'malo' ? '<br>' + fd(v, b) : ''}</td>`;
+  const filas = tipos.map(t => `<tr><td>${esc(t.n)}<br><span class="sub">${t.u}</span></td>${E.map(x => celda(x, x.partidas[t.k], base.partidas[t.k])).join('')}</tr>`).join('')
+    + `<tr><td>Kits (mesa + silla)<br><span class="sub">mayor entre mesas y sillas, por aula</span></td>${E.map(x => celda(x, x.kits, base.kits)).join('')}</tr>`
+    + `<tr class="fuerte"><td><b>Monto de inversión</b><br><span class="sub">con los precios y la estructura de abajo</span></td>${E.map(x => celda(x, x.total, base.total, soles, difS)).join('')}</tr>`;
+  document.getElementById('exp-escenarios').innerHTML = `
+    <div class="panel-cab"><h3>Escenario de cantidad</h3><span class="guardado" id="esc-guardado"></span></div>
+    <div class="pad esc-opciones" role="radiogroup" aria-label="Escenario de cantidad">
+      ${E.map(x => `<label class="chk esc-op${x.k === 'capacidad' ? ' esc-cap' : ''}"><input type="radio" name="exp-esc" value="${x.k}" ${x.k === act.k ? 'checked' : ''}> <b>${esc(x.n)}</b><br><span class="sub">${esc(ESC_AYUDA[x.k])}</span></label>`).join('')}
+    </div>
+    <div class="form-grid pad">
+      <div class="campo"><label for="esc-ocup">Ocupación (estudiantes por aula)</label><input id="esc-ocup" type="number" min="1" max="60" step="1" value="${act.capOcup ?? 30}"></div>
+      <div class="campo"><label for="esc-pct">Porcentaje (%)</label><input id="esc-pct" type="number" min="1" max="100" step="1" value="${act.capPct ?? 80}"></div>
+      <div class="campo ancho"><span class="sub">Parámetros del escenario «Por capacidad». ${esc(AVISO_CAPACIDAD)}</span></div>
+    </div>
+    <div class="tabla-wrap borde-0"><table class="tabla tabla-esc"><thead><tr><th>Cantidad a reponer</th>${E.map(x => `<th class="num${x.actual ? ' activa' : ''}">${esc(x.n)}${x.actual ? '<br><span class="chip-est ok">Elegido</span>' : ''}${x.k === 'capacidad' ? '<br><span class="chip-est alerta">Solo para comparar</span>' : ''}</th>`).join('')}</tr></thead>
+      <tbody>${filas}</tbody></table></div>
+    <p class="sub pad">Debajo de cada cifra, la diferencia con «Solo Malo». El faltante (brecha de dotación) es informativo y no entra en ningún escenario. Los documentos (07-C, memoria, fichas y Excel) usan el escenario elegido y lo declaran en una línea.</p>`;
 }
 
-function pintarRubros() {
-  const filas = datos.rubros.map(r => {
-    const def = RUBROS.find(x => x.clave === r.clave);
-    const base = def.bases.length > 1
-      ? `<select data-rubro="${r.clave}" data-campo="base" aria-label="Base de ${def.nombre}">${def.bases.map(b => `<option value="${b}" ${r.base === b ? 'selected' : ''}>${esc(BASES[b])}</option>`).join('')}</select>`
-      : `<span class="sub">${esc(BASES[def.bases[0]])}</span>`;
-    return `<tr>
-      <td><b>${def.nombre}</b>${def.zona ? `<br><span class="sub">+ factor por zona (${def.zona === 'flete' ? 'flete' : 'instalación'})</span>` : ''}</td>
-      <td><div class="rubro-val">
-        <select data-rubro="${r.clave}" data-campo="modo" aria-label="Modo de ${def.nombre}"><option value="pct" ${r.modo === 'pct' ? 'selected' : ''}>%</option><option value="monto" ${r.modo === 'monto' ? 'selected' : ''}>S/</option></select>
-        <input data-rubro="${r.clave}" data-campo="valor" type="number" inputmode="decimal" min="0" step="0.01" value="${r.valor}" aria-label="Valor de ${def.nombre}">
-      </div></td>
-      <td>${base}</td>
-      <td class="num" data-monto="${r.clave}">${soles(r.monto)}</td>
+// ─── Precios unitarios de mercado (tabla editable) ──────────────────────────
+const ORIGEN = { editado: '<span class="chip-est ok">Editado</span>', catalogo: '<span class="chip-est">Catálogo</span>', referencia: '<span class="chip-est pend">Referencia Loreto 2026</span>' };
+function pintarPrecios() {
+  const lt = datos.lineasTalla || [], kit = datos.estructura?.kit, tallasKit = (datos.lineasKit || []).map(x => x.talla);
+  const fila = (k, nombre, cant, general) => {
+    const p = datos.precios[k] || { precio: null, origen: null };
+    const usaGeneral = general && p.precio == null;
+    const origen = p.origen ? ORIGEN[p.origen] : usaGeneral ? `<span class="chip-est">${general.precio == null ? 'Sin precio' : 'Usa el general'}</span>` : '<span class="chip-est alerta">Sin precio</span>';
+    return `<tr${general ? ' class="fila-talla"' : ''}>
+      <td>${general ? `<span class="sangria">${esc(nombre)}</span>` : `<b>${esc(nombre)}</b>`}${cant ? `<br><span class="sub">${cant}</span>` : ''}</td>
+      <td class="num"><input class="precio-in" data-precio-k="${k}" type="number" min="0" step="0.01" inputmode="decimal" value="${p.origen === 'editado' ? p.precio : ''}" placeholder="${usaGeneral ? (general.precio ?? '') : (p.precio ?? '')}" aria-label="Precio de ${esc(nombre)}"></td>
+      <td>${origen}${p.origen === 'editado' ? ` <button class="x" type="button" data-precio-reset="${k}">Restablecer</button>` : ''}</td>
     </tr>`;
+  };
+  const filas = datos.partidas.filter(part => !part.excluido).map(part => {
+    const x = ITEMS.find(y => y.k === part.k), conTalla = x.k === 'mesa' || x.k === 'silla';
+    if (!conTalla) return fila(x.k, x.n, `${ent(part.rep)} ${x.u} a reponer`);
+    // Tallas con algo que reponer o que entran a un kit (aunque no tengan fila de diagnóstico)
+    const ks = [...new Set([...lt.filter(y => y.tipo === x.k && y.talla && y.rep > 0).map(y => y.talla), ...(kit ? tallasKit : [])])]
+      .sort((a, b) => TALLAS.findIndex(z => z.k === a) - TALLAS.findIndex(z => z.k === b));
+    const general = datos.precios[x.k] || { precio: null };
+    return fila(x.k, `${x.n} – precio general`, ks.length ? 'vale para las tallas sin precio propio' : `${ent(part.rep)} ${x.u} a reponer`)
+      + ks.map(z => {
+        const y = lt.find(v => v.k === `${x.k}_${z}`), kz = (datos.lineasKit || []).find(v => v.talla === z);
+        const cant = kit ? (kz ? `${ent(kz.rep)} kits` : '') : y?.rep ? `${ent(y.rep)} ${x.u} a reponer` : '';
+        return fila(`${x.k}_${z}`, TALLAS.find(t => t.k === z).n, cant, general);
+      }).join('');
   }).join('');
+  const kits = kit ? `<p class="sub pad">Precio del kit = mesa + silla de su talla.</p>` : '';
+  document.getElementById('exp-precios').innerHTML = `
+    <div class="panel-cab"><h3>Precios unitarios de mercado (sin IGV)</h3><a class="btn btn-ghost btn-sm" href="selector-ioarr-precios.html" target="_blank" rel="noopener">Catálogo de precios ↗</a></div>
+    <p class="sub pad"><b>${esc(datos.referencia.leyenda)}.</b> Escribe tu precio en la casilla: se guarda en el proyecto. Vacía = el precio del catálogo (fijado en el proyecto o vigente) o, si no hay, la referencia. Una talla sin precio usa el precio general de su tipo.</p>
+    <div class="tabla-wrap borde-0"><table class="tabla"><thead><tr><th>Bien</th><th class="num">Precio (S/)</th><th>Origen</th></tr></thead><tbody>${filas}</tbody></table></div>${kits}`;
+}
+
+// ─── Estructura de costos del 07-C (sin utilidad) y kit ─────────────────────
+function pintarEstructura() {
+  const S = datos.estructura, g = S.guardada || S.params, prim = (datos.lineasKit || []).some(x => ['p12', 'p34', 'p56'].includes(x.talla)) || (datos.lineasTalla || []).some(x => ['p12', 'p34', 'p56'].includes(x.talla));
+  const sumaDist = (g.kit_dist || [1, 1, 1]).reduce((a, b) => a + b, 0) || 1;
+  const pctDist = (g.kit_dist || [1, 1, 1]).map(v => Math.round(v / sumaDist * 10000) / 100);
+  const num = (id, etiqueta, valor, o = {}) => `<div class="campo"><label for="${id}">${etiqueta}</label><input id="${id}" data-est="${o.k}" type="number" min="0" ${o.max ? `max="${o.max}"` : ''} step="${o.step || 0.01}" inputmode="decimal" value="${valor}"></div>`;
+  const kitsPorGrupo = (datos.lineasKit || []).filter(x => ['p12', 'p34', 'p56'].includes(x.talla));
   document.getElementById('exp-rubros').innerHTML = `
-    <div class="panel-cab"><h3>Rubros</h3><span class="guardado" id="exp-guardado"></span></div>
-    <p class="sub pad">Cada rubro va en % (sobre la base de cada local) o como monto fijo (se reparte entre los locales según su base). Carga tú cada valor: el sistema no propone porcentajes.</p>
-    <div class="tabla-wrap borde-0"><table class="tabla tabla-rubros"><thead><tr><th>Rubro</th><th>Valor</th><th>Base</th><th class="num">Monto</th></tr></thead><tbody>${filas}</tbody></table></div>
+    <div class="panel-cab"><h3>Estructura de costos (07-C)</h3><span class="guardado" id="exp-guardado"></span></div>
+    ${datos.sin_migracion_estructura ? '<div class="avisos pad"><div class="aviso alerta" role="alert">Falta ejecutar supabase/migrations/027_ioarr_estructura_oferta.sql en Supabase: se usan los valores por defecto y los cambios no se guardan.</div></div>' : ''}
+    <p class="sub pad">Estructura referencial de adquisición de bienes, sin gastos generales ni utilidad. ${esc(datos.referencia.nota_porcentajes)}</p>
+    <div class="form-grid pad">
+      ${num('est-tp', 'Transporte por pieza (S/)', g.transporte_pieza, { k: 'transporte_pieza' })}
+      ${num('est-igv', 'IGV (%)', g.igv, { k: 'igv', max: 100 })}
+      ${num('est-doc', 'Documento equivalente (% del costo directo sin IGV)', g.doc_pct, { k: 'doc_pct', max: 100 })}
+      ${num('est-sup', 'Supervisión (% del costo directo sin IGV)', g.sup_pct, { k: 'sup_pct', max: 100 })}
+      ${num('est-liq', 'Liquidación (S/, monto fijo)', g.liquidacion, { k: 'liquidacion' })}
+    </div>
+    <div class="pad">
+      <label class="chk"><input type="checkbox" id="est-kit" ${g.kit ? 'checked' : ''}> <b>Presentar como kit (mesa + silla del estudiante)</b></label>
+      <p class="sub">Kits por aula = el mayor entre mesas y sillas a reponer; el local suma sus aulas (no se toma el mayor de los totales). En el 07-C sale una línea «MOBILIARIO DE AULA», unidad «Kit de mobiliario»; escritorio, silla docente y armario siguen aparte si entran a la IOARR.</p>
+      ${g.kit && prim ? `<div class="form-grid kit-dist">
+        ${['1.° y 2.°', '3.° y 4.°', '5.° y 6.°'].map((t, j) => `<div class="campo"><label for="est-kd${j}">Primaria ${t} (%)</label><input id="est-kd${j}" data-kit-dist="${j}" type="number" min="0" max="100" step="0.01" value="${pctDist[j]}"><span class="sub">${ent(kitsPorGrupo.find(x => x.talla === ['p12', 'p34', 'p56'][j])?.rep || 0)} kits</span></div>`).join('')}
+        <div class="campo"><span class="lbl">&nbsp;</span><button class="btn btn-ghost btn-sm" id="est-kd-iguales" type="button">Partes iguales</button></div>
+      </div><p class="sub">Distribución de los kits de Primaria por grupo de grado (por defecto, partes iguales). Los demás niveles se reparten según el grado de cada aula.</p>` : ''}
+    </div>
     <div class="uit-fila">
       <div class="campo"><label for="exp-anio">Año de la UIT</label><input id="exp-anio" type="number" min="2000" max="2100" step="1" value="${datos.anio_uit}"></div>
       <div class="sub">${datos.uit ? `UIT ${datos.uit.anio}: <b>${soles(Number(datos.uit.valor))}</b>${datos.uit.fuente ? ' · ' + esc(datos.uit.fuente) : ''} · límite de ${LIMITE_UIT} UIT = ${soles(datos.uitCalc.limite)}` : `No hay UIT cargada para ${datos.anio_uit}. Cárgala en el <a href="selector-ioarr-precios.html#uit" target="_blank" rel="noopener">catálogo</a>.`}</div>
@@ -200,47 +245,42 @@ function pintarRubros() {
 
 function pintarResultados() {
   pintarKpis(); pintarAvisos();
-  for (const r of datos.rubros) { const td = document.querySelector(`[data-monto="${r.clave}"]`); if (td) td.textContent = soles(r.monto); }
-  const T = datos.totales, R = Object.fromEntries(datos.rubros.map(r => [r.clave, r]));
-  const lin = (txt, v, cls = '') => `<tr class="${cls}"><td>${txt}</td><td class="num">${soles(v)}</td></tr>`;
-  const rub = k => lin(`<span class="sangria">${esc(R[k].nombre)}</span>`, R[k].monto);
-  // Una línea por talla en mesa y silla
-  const lineas = datos.lineas || datos.partidas.filter(p => !p.excluido);
-  const partidas = lineas.filter(p => p.rep > 0 || !p.talla).map(p => `<tr><td>${p.n}</td><td>${p.u}</td><td class="num">${ent(p.rep)}</td><td class="num">${soles(p.pu)}</td><td class="num">${soles(p.parcial)}</td></tr>`).join('');
-  const falt = lineas.filter(p => p.fal > 0 || !p.talla).map(p => `<tr><td>${p.n}</td><td class="num">${ent(p.fal)}</td><td class="num">${soles(p.falValor)}</td></tr>`).join('');
-  const dist = datos.distritos.map(d => `<tr><td>${esc(d.nom)}<br><span class="sub">${esc(d.prov)} · ${d.ubigeo}</span></td><td class="num">${ent(d.n)}</td><td class="num">${ent(d.est)}</td><td class="num">${ent(d.rep)}</td><td class="num">${soles(d.total)}</td><td class="num">${d.porEstudiante == null ? '—' : soles(d.porEstudiante)}</td><td class="num sub">${ent(d.fal)}</td></tr>`).join('');
+  const T = datos.totales, S = datos.estructura;
+  const lineas = datos.lineas || [];
+  const partidas = lineas.filter(p => p.rep > 0).map(p => `<tr><td>${esc(p.n)}</td><td>${p.u}</td><td class="num">${ent(p.rep)}</td><td class="num">${soles(p.pu)}</td><td class="num">${soles(p.parcial)}</td></tr>`).join('')
+    + `<tr><td>Transporte</td><td>piezas</td><td class="num">${ent(T.piezas)}</td><td class="num">${soles(S.params.transporte_pieza)}</td><td class="num">${soles(T.transporte)}</td></tr>`;
+  const estructura = S.filas.map(f => `<tr class="${f.total ? 'total' : f.fuerte ? 'fuerte' : ''}"><td>${f.fuerte || f.total ? `<b>${esc(f.nombre)}</b>` : `<span class="sangria">${esc(f.nombre)}</span>`}</td><td class="num">${soles(f.monto)}</td></tr>`).join('');
+  const lf = (datos.lineasTalla || []);
+  const falt = lf.filter(p => p.fal > 0 || !p.talla).map(p => `<tr><td>${esc(p.n)}</td><td class="num">${ent(p.fal)}</td><td class="num">${soles(p.falValor)}</td></tr>`).join('');
+  const dist = datos.distritos.map(d => `<tr><td>${esc(d.nom)}<br><span class="sub">${esc(d.prov)} · ${d.ubigeo}</span></td><td class="num">${ent(d.n)}</td><td class="num">${ent(d.est)}</td><td class="num">${ent(S.kit ? d.kits : d.rep)}</td><td class="num">${soles(d.total)}</td><td class="num">${d.porEstudiante == null ? '—' : soles(d.porEstudiante)}</td><td class="num sub">${ent(d.fal)}</td></tr>`).join('');
   const q = norm(filtroLoc).trim();
   const locs = [...datos.locales].filter(l => !q || l.cod.includes(q) || norm(l.nom).includes(q) || norm(l.dist).includes(q))
     .sort((a, b) => b.total - a.total || a.cod.localeCompare(b.cod));
   const pags = Math.max(1, Math.ceil(locs.length / PAGE)); pagLoc = Math.min(pagLoc, pags - 1);
   const desde = pagLoc * PAGE;
-  const lrows = locs.slice(desde, desde + PAGE).map(l => `<tr><td class="mono">${l.cod}</td><td><span class="nm">${esc(l.nom)}</span><span class="sub">${esc(l.dist)}${l.rural ? ' · rural' : ''}</span>${l.duplicidad?.estado === 'si' ? `<br><span class="chip-est alerta" title="Otra inversión vigente o reciente: riesgo de duplicidad">Otra inversión${l.duplicidad.codigo ? ' ' + esc(l.duplicidad.codigo) : ''}</span>` : ''}</td><td class="num">${ent(l.est)}</td><td class="num">${ent(l.rep)}</td><td class="num">${ent(l.fal)}</td><td class="num">${l.zona.flete || l.zona.instalacion ? `+${dec(l.zona.flete * 100)} % / +${dec(l.zona.instalacion * 100)} %` : '<span class="sub">—</span>'}</td><td class="num">${soles(l.cd)}</td><td class="num"><b>${soles(l.total)}</b></td>
+  const lrows = locs.slice(desde, desde + PAGE).map(l => `<tr><td class="mono">${l.cod}</td><td><span class="nm">${esc(l.nom)}</span><span class="sub">${esc(l.dist)}${l.rural ? ' · rural' : ''}</span>${l.duplicidad?.estado === 'si' ? `<br><span class="chip-est alerta" title="Otra inversión vigente o reciente: riesgo de duplicidad">Otra inversión${l.duplicidad.codigo ? ' ' + esc(l.duplicidad.codigo) : ''}</span>` : ''}</td><td class="num">${ent(l.est)}</td><td class="num">${ent(l.rep)}</td><td class="num">${ent(l.kits)}</td><td class="num">${ent(l.fal)}</td><td class="num">${soles(l.cd)}</td><td class="num"><b>${soles(l.total)}</b></td>
     <td>${l.verificado ? `<span class="chip-est ok">Verificado ${fechaPe(l.verificado.fecha_visita)}</span><br>${l.verificado.ficha ? '<span class="sub">con ficha</span><br>' : ''}${l.archivos ? `<span class="sub">${l.archivos} archivo${l.archivos === 1 ? '' : 's'}</span><br>` : '<span class="chip-est pend">Sin sustento</span><br>'}` : ''}<button class="x" data-inv="${esc(l.cod)}" type="button">${l.verificado ? 'Editar' : 'Corregir inventario'}</button></td></tr>`).join('');
 
   document.getElementById('exp-resultados').innerHTML = `
     <div class="cols">
       <div class="panel"><div class="panel-cab"><h3>Estructura de costos</h3></div>
+        <p class="sub pad">${esc(datos.escenario.texto)}${S.kit ? ' Mesas y sillas como kit.' : ''}</p>
         <div class="tabla-wrap borde-0"><table class="tabla"><thead><tr><th>Partida</th><th>Unidad</th><th class="num">Metrado</th><th class="num">P. unitario</th><th class="num">Parcial</th></tr></thead><tbody>${partidas}</tbody>
-        <tfoot><tr><td colspan="2">Costo directo</td><td class="num">${ent(T.rep)}</td><td></td><td class="num">${soles(T.cd)}</td></tr></tfoot></table></div>
-        <div class="tabla-wrap borde-0"><table class="tabla tabla-estructura"><tbody>
-          ${lin('<b>Costo directo</b>', T.cd, 'fuerte')}${rub('transporte')}${rub('instalacion')}${rub('embalaje')}
-          ${lin('<b>Subtotal</b>', T.subtotal, 'fuerte')}${rub('gg')}${rub('utilidad')}
-          ${lin('<b>Subtotal + GG + utilidad</b>', T.neto, 'fuerte')}${rub('igv')}
-          ${lin('<b>Costo de los bienes (con IGV)</b>', T.bienes, 'fuerte')}${rub('supervision')}${rub('expediente')}${rub('gestion')}${rub('imprevistos')}
-          ${lin('<b>TOTAL DE INVERSIÓN</b>', T.total, 'total')}
-        </tbody></table></div></div>
+        <tfoot><tr><td colspan="4">Costo directo</td><td class="num">${soles(T.cd)}</td></tr></tfoot></table></div>
+        <div class="tabla-wrap borde-0"><table class="tabla tabla-estructura"><tbody>${estructura}</tbody></table></div>
+        <p class="sub pad">Sin gastos generales, utilidad, gestión ni imprevistos. ${esc(datos.referencia.nota_porcentajes)}</p></div>
       <div class="panel"><div class="panel-cab"><h3>Faltante (brecha de dotación, no reposición)</h3></div>
-        <p class="sub pad">Lo que falta para llegar a lo requerido. No suma a lo que se repone, al costo ni al Formato 07-C. Amplía la capacidad de la UP: no se sustentan como reposición (Lineamientos IOARR del MEF, 2.4.C). Se valorizan con los mismos precios, solo como referencia para evaluarlos como ampliación marginal.</p>
+        <p class="sub pad">Lo que falta para llegar a lo requerido. No suma a lo que se repone, al costo ni al Formato 07-C, en ningún escenario. Amplía la capacidad de la UP: no se sustenta como reposición (Lineamientos IOARR del MEF, 2.4.C). Se valoriza con los mismos precios, solo como referencia.</p>
         <div class="tabla-wrap borde-0"><table class="tabla"><thead><tr><th>Tipo</th><th class="num">Faltante</th><th class="num">Valor referencial</th></tr></thead><tbody>${falt}</tbody>
         <tfoot><tr><td>Total</td><td class="num">${ent(T.fal)}</td><td class="num">${soles(T.falValor)}</td></tr></tfoot></table></div>
       </div>
     </div>
     <div class="panel"><div class="panel-cab"><h3>Por distrito</h3></div>
-      <div class="tabla-wrap borde-0"><table class="tabla"><thead><tr><th>Distrito</th><th class="num">Locales</th><th class="num">Estudiantes</th><th class="num">Bienes a reponer</th><th class="num">Total</th><th class="num">Por estudiante</th><th class="num" title="Faltante (brecha de dotación, no reposición): no suma al total">Faltante (no reposición)</th></tr></thead><tbody>${dist}</tbody>
-      <tfoot><tr><td>Total</td><td class="num">${ent(T.locales)}</td><td class="num">${ent(T.est)}</td><td class="num">${ent(T.rep)}</td><td class="num">${soles(T.total)}</td><td class="num">${T.porEstudiante == null ? '—' : soles(T.porEstudiante)}</td><td class="num sub">${ent(T.fal)}</td></tr></tfoot></table></div></div>
-    <div class="panel"><div class="panel-cab"><h3>Por local</h3><span class="sub">Ordenados por total</span></div>
+      <div class="tabla-wrap borde-0"><table class="tabla"><thead><tr><th>Distrito</th><th class="num">Locales</th><th class="num">Estudiantes</th><th class="num">${S.kit ? 'Kits' : 'Bienes a reponer'}</th><th class="num">Monto</th><th class="num">Por estudiante</th><th class="num" title="Faltante (brecha de dotación, no reposición): no suma al total">Faltante (no reposición)</th></tr></thead><tbody>${dist}</tbody>
+      <tfoot><tr><td>Total</td><td class="num">${ent(T.locales)}</td><td class="num">${ent(T.est)}</td><td class="num">${ent(S.kit ? T.kits : T.rep)}</td><td class="num">${soles(T.total)}</td><td class="num">${T.porEstudiante == null ? '—' : soles(T.porEstudiante)}</td><td class="num sub">${ent(T.fal)}</td></tr></tfoot></table></div></div>
+    <div class="panel"><div class="panel-cab"><h3>Por local</h3><span class="sub">Ordenados por monto</span></div>
       <div class="pad"><input id="exp-buscar" type="search" placeholder="Buscar por código de local, nombre o distrito" value="${esc(filtroLoc)}" autocomplete="off" aria-label="Buscar local"></div>
-      <div class="tabla-wrap borde-0"><table class="tabla"><thead><tr><th>Código de local</th><th>Instituciones</th><th class="num">Estudiantes</th><th class="num">Reposición</th><th class="num" title="Faltante (brecha de dotación, no reposición): no suma al total">Faltante (no reposición)</th><th class="num">Zona (flete / instal.)</th><th class="num">Costo directo</th><th class="num">Total</th><th>Inventario</th></tr></thead><tbody>${lrows || '<tr><td colspan="9" class="vacio">Ningún local coincide con la búsqueda.</td></tr>'}</tbody></table></div>
+      <div class="tabla-wrap borde-0"><table class="tabla"><thead><tr><th>Código de local</th><th>Instituciones</th><th class="num">Estudiantes</th><th class="num">A reponer</th><th class="num" title="Mayor entre mesas y sillas, por aula">Kits</th><th class="num" title="Faltante (brecha de dotación, no reposición): no suma al total">Faltante (no reposición)</th><th class="num">Costo directo</th><th class="num">Monto</th><th>Inventario</th></tr></thead><tbody>${lrows || '<tr><td colspan="9" class="vacio">Ningún local coincide con la búsqueda.</td></tr>'}</tbody></table></div>
       ${datos.excluidos?.length ? `<p class="sub pad">Excluidos por otra inversión vigente o reciente (no entran al costo ni a los documentos): ${datos.excluidos.map(x => `<span class="mono">${esc(x.cod)}</span>${x.codigo ? ` (${esc(x.codigo)})` : ''}`).join(', ')}. Se cambia en «Mi selección».</p>` : ''}
       ${pags > 1 ? `<div class="paginacion pad-pag"><span class="sub">${ent(desde + 1)}–${ent(Math.min(locs.length, desde + PAGE))} de ${ent(locs.length)}</span><div class="pg-btns"><button class="btn btn-ghost btn-sm" data-exp-pag="-1" type="button" ${pagLoc === 0 ? 'disabled' : ''}>Anterior</button><span class="mono">${pagLoc + 1} / ${pags}</span><button class="btn btn-ghost btn-sm" data-exp-pag="1" type="button" ${pagLoc >= pags - 1 ? 'disabled' : ''}>Siguiente</button></div></div>` : ''}</div>`;
 }
@@ -253,6 +293,10 @@ function abrirVerificacion() {
   return renderVerificacion({ ...ctx, el: document.getElementById('exp-v-verif') });
 }
 // Fichas: son por local (no por IOARR); al importar, los costos quedan por recalcular
+// Oferta (uso interno): no se exporta
+function abrirOferta() {
+  return renderOferta({ ...ctx, el: document.getElementById('exp-v-oferta') });
+}
 function abrirFichas() {
   return renderFichas({ ...ctx, el: document.getElementById('exp-v-fichas'), alCambiarInventario: () => { costosViejos = true; } });
 }
@@ -263,7 +307,9 @@ function cambiarVista(v) {
   document.getElementById('exp-v-docs').hidden = v !== 'docs';
   document.getElementById('exp-v-verif').hidden = v !== 'verif';
   document.getElementById('exp-v-fichas').hidden = v !== 'fichas';
+  document.getElementById('exp-v-oferta').hidden = v !== 'oferta';
   if (v === 'costos' && costosViejos) { costosViejos = false; renderExpediente(ctx); return; }
+  if (v === 'oferta') abrirOferta();
   if (v === 'fichas') abrirFichas();
   if (v === 'docs') abrirDocumentos();
   if (v === 'verif') abrirVerificacion();
@@ -272,12 +318,13 @@ function cambiarVista(v) {
 // ─── Cambios ────────────────────────────────────────────────────────────────
 function estado(t, cls = '') { const s = document.getElementById('exp-guardado'); if (s) { s.className = 'guardado ' + cls; s.textContent = t; } }
 
-function leerRubros() {
-  return datos.rubros.map(r => {
-    const q = c => document.querySelector(`[data-rubro="${r.clave}"][data-campo="${c}"]`);
-    const v = parseFloat(q('valor')?.value);
-    return { clave: r.clave, modo: q('modo')?.value || r.modo, valor: Number.isFinite(v) && v >= 0 ? v : 0, base: q('base')?.value || r.base };
-  });
+// Repinta todo lo de Costos sin perder el foco ni la posición del cursor
+function repintar() {
+  const act = document.activeElement, id = act?.id, pk = act?.dataset?.precioK, kd = act?.dataset?.kitDist;
+  const pos = act && 'selectionStart' in act ? (() => { try { return act.selectionStart; } catch { return null; } })() : null;
+  pintarIoarr(); pintarEscenarios(); pintarPrecios(); pintarEstructura(); pintarResultados();
+  const e = id ? document.getElementById(id) : pk ? document.querySelector(`[data-precio-k="${pk}"]`) : kd != null ? document.querySelector(`[data-kit-dist="${kd}"]`) : null;
+  if (e && e !== document.body) { e.focus(); if (pos != null) try { e.setSelectionRange(pos, pos); } catch { /* sin selección */ } }
 }
 
 async function guardar(body) {
@@ -286,23 +333,23 @@ async function guardar(body) {
   try {
     const d = await ctx.api(`/proyectos/${ctx.proyecto.id}/costos${qn()}`, { method: 'PATCH', body });
     if (mio !== version) return;
-    const cambioAnio = d.anio_uit !== datos.anio_uit || (d.uit?.valor ?? null) !== (datos.uit?.valor ?? null);
     datos = d;
-    pintarIoarr(); pintarResultados();
-    if (cambioAnio) pintarRubros();
+    repintar();
     estado('Guardado', 'ok');
   } catch (e) { if (mio === version) estado('No se pudo guardar: ' + e.message, 'error'); }
 }
+const guardarEstructura = (cambios, ms = 700) => { clearTimeout(tGuardar); estado('Cambios sin guardar', 'pend'); tGuardar = setTimeout(() => guardar({ estructura: cambios }), ms); };
+// Distribución de kits de Primaria (en %, se guardan como pesos)
+const leerDist = () => [0, 1, 2].map(j => { const v = parseFloat(document.querySelector(`[data-kit-dist="${j}"]`)?.value); return Number.isFinite(v) && v >= 0 ? v : 0; });
 
-async function cambiarPrecio(tipo, precioId) {
-  const mio = ++version;
+// Escenario y parámetros de capacidad: son criterios del proyecto (los guarda el Selector)
+let tEsc = null;
+async function cambiarEscenario(cambios) {
+  const s = document.getElementById('esc-guardado'); if (s) { s.className = 'guardado pend'; s.textContent = 'Guardando…'; }
   try {
-    const ruta = `/proyectos/${ctx.proyecto.id}/costos/precios/${tipo}${qn()}`;
-    const d = precioId ? await ctx.api(ruta, { method: 'PUT', body: { precio_id: precioId } }) : await ctx.api(ruta, { method: 'DELETE' });
-    if (mio !== version) return;
-    datos = d; pintarIoarr(); pintarPrecios(); pintarResultados();
-    ctx.toast(precioId ? 'Precio fijado en el proyecto.' : 'Se usa el precio vigente del catálogo.');
-  } catch (e) { ctx.toast('No se pudo cambiar el precio: ' + e.message); }
+    await ctx.cambiarCriterios(cambios);
+    await renderExpediente(ctx);
+  } catch (e) { if (s) { s.className = 'guardado error'; s.textContent = 'No se pudo guardar: ' + e.message; } }
 }
 
 async function exportar(btn) {
@@ -329,7 +376,15 @@ export function enlazarExpediente(el, abrirNuevo) {
       const b = document.getElementById('exp-buscar'); b.focus(); b.setSelectionRange(pos, pos);
       return;
     }
-    if (e.target.dataset.campo === 'valor') { clearTimeout(tGuardar); estado('Cambios sin guardar', 'pend'); tGuardar = setTimeout(() => guardar({ rubros: leerRubros() }), 700); }
+    if (e.target.dataset.est) { const v = parseFloat(e.target.value); if (Number.isFinite(v) && v >= 0) guardarEstructura({ [e.target.dataset.est]: v }); return; }
+    if (e.target.dataset.precioK) { const v = e.target.value === '' ? null : parseFloat(e.target.value); if (v === null || (Number.isFinite(v) && v >= 0)) guardarEstructura({ precios: { [e.target.dataset.precioK]: v } }, 900); return; }
+    if (e.target.dataset.kitDist != null) { const d = leerDist(); if (d.some(v => v > 0)) guardarEstructura({ kit_dist: d }, 900); return; }
+    if (e.target.id === 'esc-ocup' || e.target.id === 'esc-pct') {
+      clearTimeout(tEsc);
+      const o = Number(document.getElementById('esc-ocup').value), p = Number(document.getElementById('esc-pct').value);
+      if (o >= 1 && o <= 60 && p >= 1 && p <= 100) tEsc = setTimeout(() => cambiarEscenario({ capOcup: o, capPct: p }), 900);
+      return;
+    }
     if (e.target.id === 'exp-anio') {
       clearTimeout(tGuardar);
       const a = Number(e.target.value);
@@ -338,11 +393,11 @@ export function enlazarExpediente(el, abrirNuevo) {
   });
   el.addEventListener('change', e => {
     if (e.target.name === 'exp-modo') { cambiarModo(e.target.value); return; }
-    const c = e.target.dataset.campo;
-    if (c === 'modo' || c === 'base') { clearTimeout(tGuardar); guardar({ rubros: leerRubros() }); }
-    if (e.target.dataset.precio) cambiarPrecio(e.target.dataset.precio, e.target.value || null);
+    if (e.target.name === 'exp-esc') { cambiarEscenario({ escenario: e.target.value }); return; }
+    if (e.target.id === 'est-kit') { clearTimeout(tGuardar); guardar({ estructura: { kit: e.target.checked } }); }
   });
   enlazarDocumentos(el);
+  enlazarOferta(el);
   enlazarVerificacion(el);
   enlazarFichas(el);
   el.addEventListener('click', e => {
@@ -351,6 +406,9 @@ export function enlazarExpediente(el, abrirNuevo) {
     const nv = e.target.closest('[data-exp-nivel]');
     if (nv) cambiarNivel(nv.dataset.expNivel);
     if (e.target.id === 'exp-excel') exportar(e.target);
+    const pr = e.target.closest('[data-precio-reset]');
+    if (pr) { clearTimeout(tGuardar); guardar({ estructura: { precios: { [pr.dataset.precioReset]: null } } }); }
+    if (e.target.id === 'est-kd-iguales') { clearTimeout(tGuardar); guardar({ estructura: { kit_dist: [1, 1, 1] } }); }
     if (e.target.closest('[data-exp-nuevo]')) abrirNuevo();
     const pg = e.target.closest('[data-exp-pag]');
     if (pg) { pagLoc += +pg.dataset.expPag; pintarResultados(); }
@@ -474,7 +532,7 @@ async function guardarInventario(e) {
   try {
     datos = await ctx.api(`/proyectos/${ctx.proyecto.id}/costos/inventario/${encodeURIComponent(invCod)}${qn()}`, { method: 'PUT', body: {
       bienes, adquisicion, por_nivel, fecha_visita: m.querySelector('#inv-fecha').value, responsable: m.querySelector('#inv-resp').value, observacion: m.querySelector('#inv-obs').value } });
-    pintarIoarr(); pintarPrecios(); pintarResultados();
+    repintar();
     m.querySelector('#inv-quitar').hidden = false;
     const primera = !invGuardado; invGuardado = true; pintarSustento();
     ctx.toast(primera ? 'Inventario guardado. Ahora adjunta el acta y las fotos.' : 'Inventario verificado guardado.');
@@ -488,7 +546,7 @@ async function quitarInventario() {
   try {
     datos = await ctx.api(`/proyectos/${ctx.proyecto.id}/costos/inventario/${encodeURIComponent(invCod)}${qn()}`, { method: 'DELETE' });
     m.classList.remove('open');
-    pintarIoarr(); pintarPrecios(); pintarResultados();
+    repintar();
     ctx.toast('Se usa otra vez el censo.');
   } catch (x) { ctx.toast('No se pudo quitar: ' + x.message); }
 }
@@ -575,5 +633,5 @@ async function borrarArchivo(id) {
 
 // Vuelve a pedir los costos (los avisos y el conteo de archivos por local)
 async function refrescarCostos() {
-  try { datos = await ctx.api(`/proyectos/${ctx.proyecto.id}/costos${qn()}`); pintarIoarr(); pintarResultados(); } catch { /* se verá al recargar */ }
+  try { datos = await ctx.api(`/proyectos/${ctx.proyecto.id}/costos${qn()}`); repintar(); } catch { /* se verá al recargar */ }
 }

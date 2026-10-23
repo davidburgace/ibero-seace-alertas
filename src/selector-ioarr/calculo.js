@@ -63,7 +63,28 @@ export const CLAVES_PRECIO = [...ITEMS.map(x => x.k), ...LINEAS.filter(x => x.ta
 export const NIVN = { I: 'Inicial', P: 'Primaria', S: 'Secundaria', E: 'Básica Especial' };
 export const NIVS = { I: 'Inicial', P: 'Primaria', S: 'Secundaria', E: 'Especial' };
 export const NIVB = { I: 1, P: 2, S: 4, E: 8 };
-export const DEF = { kI: 4, kPS: 2, carpBip: 2, carpEstado: 'r', mesaEst: 1, sillaEst: 1, esc: 1, sdoc: 1, arm: 1, muebles: ITEMS.map(x => x.k) };
+export const DEF = { kI: 4, kPS: 2, carpBip: 2, carpEstado: 'r', mesaEst: 1, sillaEst: 1, esc: 1, sdoc: 1, arm: 1, muebles: ITEMS.map(x => x.k),
+  escenario: 'malo', capOcup: 30, capPct: 80 };
+// Escenarios de cantidad a reponer (se guardan en los criterios del proyecto):
+//   malo          lo Malo del censo, por tipo de bien (base)
+//   malo_regular  Malo + Regular: cota superior sustentada con el censo
+//   capacidad     aulas × ocupación × %: método de algunas convocatorias. Solo para
+//                 comparar con una convocatoria ya publicada; no es sustento de reposición.
+//                 Mesa y silla = round(ocupación × % / 100) por aula; escritorio, silla
+//                 docente y armario = lo requerido por aula (no usa el estado del mobiliario).
+export const ESCENARIOS = [
+  { k: 'malo', n: 'Solo Malo', corto: 'Solo Malo' },
+  { k: 'malo_regular', n: 'Malo + Regular', corto: 'Malo + Regular' },
+  { k: 'capacidad', n: 'Por capacidad (método de convocatoria)', corto: 'Por capacidad' }];
+export const AVISO_CAPACIDAD = 'Solo para comparar con una convocatoria ya publicada; no es sustento de reposición.';
+export const LIM_CAP = { capOcup: [1, 60], capPct: [1, 100] };
+// Una línea que declara el escenario en los documentos
+export function textoEscenario(P) {
+  const e = P?.escenario || 'malo';
+  if (e === 'malo_regular') return 'Escenario de cantidad: Malo + Regular (cota superior sustentada con el Censo Educativo 2025).';
+  if (e === 'capacidad') return `Escenario de cantidad: Por capacidad (método de convocatoria): aulas × ${P.capOcup} estudiantes × ${P.capPct} %. ${AVISO_CAPACIDAD}`;
+  return 'Escenario de cantidad: Solo Malo (mobiliario en estado malo del Censo Educativo 2025).';
+}
 // [clave, etiqueta, mín, máx, paso]
 export const CRIT = [['kI', 'Puestos por mesa múltiple (Inicial y Especial)', 1, 12, 1], ['kPS', 'Puestos por mesa múltiple (Primaria y Secundaria)', 1, 12, 1],
   ['carpBip', 'Puestos por carpeta bipersonal', 1, 4, 1],
@@ -94,6 +115,11 @@ export function limpiarParams(p) {
       P[k] = Math.min(mx, Math.max(mn, v));
     }
     if (['b', 'r', 'm'].includes(p.carpEstado)) P.carpEstado = p.carpEstado;
+    if (ESCENARIOS.some(x => x.k === p.escenario)) P.escenario = p.escenario;
+    for (const [k, [mn, mx]] of Object.entries(LIM_CAP)) {
+      const v = Number(p[k]);
+      if (p[k] !== '' && p[k] != null && Number.isFinite(v)) P[k] = Math.min(mx, Math.max(mn, v));
+    }
     // Muebles que entran a la IOARR (al menos uno, en el orden de ITEMS)
     if (Array.isArray(p.muebles)) {
       const m = ITEMS.map(x => x.k).filter(k => p.muebles.includes(k));
@@ -127,6 +153,8 @@ export function prep(D) {
 // Mobiliario por aula (A) y acumulado por local (L), según los criterios P.
 // Con nivel (I, P, S o E), solo cuentan las aulas de los servicios de ese nivel.
 // Los muebles que no entran a la IOARR (P.muebles) quedan en 0. incl[t] dice si el tipo t entra.
+// A reponer según P.escenario (ver ESCENARIOS): Malo, Malo + Regular o por capacidad.
+// El faltante (Requerido − Existente) es siempre informativo y no entra a lo que se repone.
 export function calc(D, P, nivel = null) {
   const nA = D.aulas.length, nL = D.locs.length;
   const incl = ITEMS.map(x => !P.muebles || P.muebles.includes(x.k));
@@ -134,6 +162,7 @@ export function calc(D, P, nivel = null) {
     fal: new Float64Array(5 * nL), rep: new Float64Array(5 * nL), repTot: new Float64Array(nL), falTot: new Float64Array(nL), reqTot: new Float64Array(nL) };
   const A = { b: [], r: [], m: [], req: [], fal: [], rep: [] };
   for (const k in A) for (let t = 0; t < 5; t++) A[k].push(new Int32Array(nA));
+  const esc = P.escenario || 'malo', cap = Math.round((P.capOcup ?? DEF.capOcup) * (P.capPct ?? DEF.capPct) / 100);
   for (let i = 0; i < nA; i++) {
     if (nivel && D.svcs[D.aulas[i][1]][2] !== nivel) continue;
     const a = D.aulas[i], niv = D.svcs[a[1]][2], k = (niv === 'I' || niv === 'E') ? P.kI : P.kPS, f = j => a[11 + j], loc = a[0];
@@ -144,13 +173,19 @@ export function calc(D, P, nivel = null) {
     const req = [Math.round(a[8] * P.mesaEst), Math.round(a[8] * P.sillaEst), P.esc, P.sdoc, P.arm];
     for (let t = 0; t < 5; t++) {
       if (!incl[t]) continue;
-      const [b, r, m] = trip[t], ex = b + r + m, fal = Math.max(0, req[t] - ex), rep = m;
+      const [b, r, m] = trip[t], ex = b + r + m, fal = Math.max(0, req[t] - ex), rep = repDe(esc, t, b, r, m, req[t], cap);
       A.b[t][i] = b; A.r[t][i] = r; A.m[t][i] = m; A.req[t][i] = req[t]; A.fal[t][i] = fal; A.rep[t][i] = rep;
       const o = t * nL + loc; L.b[o] += b; L.r[o] += r; L.m[o] += m; L.req[o] += req[t]; L.fal[o] += fal; L.rep[o] += rep;
       L.repTot[loc] += rep; L.falTot[loc] += fal; L.reqTot[loc] += req[t];
     }
   }
-  return { A, L, nL, incl };
+  return { A, L, nL, incl, escenario: esc, capOcup: P.capOcup ?? DEF.capOcup, capPct: P.capPct ?? DEF.capPct };
+}
+// A reponer en un aula, según el escenario (t: 0 mesa, 1 silla, 2-4 docente y armario)
+function repDe(esc, t, b, r, m, req, cap) {
+  if (esc === 'malo_regular') return m + r;
+  if (esc === 'capacidad') return t < 2 ? cap : req;
+  return m;
 }
 
 export const lv = (C, m, t, i) => C.L[m][t * C.nL + i];

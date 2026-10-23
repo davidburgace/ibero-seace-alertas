@@ -34,7 +34,7 @@
 
 import ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
-import { NIVN } from './calculo.js';
+import { NIVN, textoEscenario } from './calculo.js';
 import { TIPOS, tipoDesdeDescripcion } from './costos.js';
 
 export const VERSION_FICHA = 1;
@@ -88,6 +88,7 @@ export function modeloFicha(D, C, i, meta = {}) {
     version: VERSION_FICHA, proyecto: meta.proyecto || { id: '', nombre: '' }, anio: meta.anio || null, fecha: meta.fecha || '', supervisor: meta.supervisor || '',
     local: { cod: l[0], nombre: D.locName[i], region: D.region, prov: D.provs[dist[2]], dist: dist[0], ubigeo: dist[1], ugel: D.ugels?.[l[2]] || '', cp: l[3] || '', rural: !!l[4], direccion: l[5] || '', lat: l[6], lon: l[7] },
     niveles: nivelesDeLocal(D, i), servicios, aulas,
+    escenario: C.escenario || 'malo', escenarioTexto: textoEscenario({ escenario: C.escenario || 'malo', capOcup: C.capOcup, capPct: C.capPct }),
     // Solo los muebles que entran a la IOARR (criterios del proyecto)
     bienes: BIENES_FICHA.filter(b => !C.incl || C.incl[TIPOS.indexOf(b.k)])
   };
@@ -103,6 +104,12 @@ export const CRITERIOS = [
   ['Bueno', 'Se usa sin reparación; estructura firme y superficie íntegra', 'No'],
   ['Regular', 'Se usa con desgaste o un desperfecto menor reparable (tablero rayado, tornillo flojo)', 'No; se informa como diagnóstico (la propuesta repone solo lo Malo)'],
   ['Malo', 'No se puede usar, o es un riesgo para el estudiante (estructura rota, tablero partido) y no conviene repararlo', 'Sí']];
+// «Entra a reponer» según el escenario de cantidad del proyecto
+export function criteriosDe(escenario) {
+  if (escenario === 'malo_regular') return CRITERIOS.map(([e, c, r]) => [e, c, e === 'Regular' ? 'Sí (escenario Malo + Regular)' : r]);
+  if (escenario === 'capacidad') return CRITERIOS.map(([e, c]) => [e, c, 'No aplica: el escenario «Por capacidad» no usa el estado; se verifica como diagnóstico']);
+  return CRITERIOS;
+}
 export const REGLAS = [
   'Se cuenta por unidad física: cada mueble que hay en el aula, uno por uno.',
   '«Puestos por unidad» (solo mesas): cuántos estudiantes se sientan en cada mesa. Mesa individual = 1; carpeta bipersonal = 2; mesa grupal de inicial = de 4 a 6 (de 1 a 12; vacío = 1). El censo cuenta las mesas en puestos, así que la app multiplica las mesas por sus puestos para compararlas con el censo y calcular lo que se repone. Ejemplo: 12 carpetas bipersonales (10 buenas, 1 regular y 1 mala) se anotan Bueno 10, Regular 1, Malo 1 y Puestos por unidad 2; cuentan como 20, 2 y 2 puestos. Si no anotas los puestos de una carpeta bipersonal, se cuenta como individual y lo contado saldrá muy por debajo del censo.',
@@ -187,7 +194,7 @@ export async function generarFichaExcel(F) {
 
   // C. Verificación por aula
   fila(); titulo('C. Verificación del mobiliario por aula');
-  parrafo(`${F.aulas.length} ${F.aulas.length === 1 ? 'aula' : 'aulas'} en uso según el censo. ${bienesDe(F).length === 1 ? 'Una fila' : bienesDe(F).length + ' filas'} por aula, con las cantidades del censo ya cargadas (la mesa, en puestos). Anota lo que cuentas: Bueno, Regular y Malo, la antigüedad y lo demás. ${NOTA_SIGLAS}`, { alto: 40 });
+  parrafo(`${F.aulas.length} ${F.aulas.length === 1 ? 'aula' : 'aulas'} en uso según el censo. ${bienesDe(F).length === 1 ? 'Una fila' : bienesDe(F).length + ' filas'} por aula, con las cantidades del censo ya cargadas (la mesa, en puestos). Anota lo que cuentas: Bueno, Regular y Malo, la antigüedad y lo demás. ${NOTA_SIGLAS} ${F.escenarioTexto || ''}`, { alto: 52 });
   const entero0 = { type: 'whole', operator: 'greaterThanOrEqual', formulae: [0], allowBlank: true, showErrorMessage: true, errorStyle: 'stop', errorTitle: 'Cantidad', error: 'Número entero de 0 o más' };
   for (const a of F.aulas) {
     fila('AULA|' + a.j, 30);
@@ -240,7 +247,7 @@ export async function generarFichaExcel(F) {
   // Criterios
   fila(); titulo('Criterios de estado y reglas de llenado');
   cab([[1, 1, 'Estado'], [2, 8, 'Cuándo se marca'], [9, 12, 'Entra a reponer']]);
-  for (const [e, cuando, rep] of CRITERIOS) { fila(null, 30); unir(1, 1, e, { fill: GRIS, bold: true }); unir(2, 8, cuando, { fill: GRIS, size: 9 }); unir(9, 12, rep, { fill: GRIS, size: 9 }); }
+  for (const [e, cuando, rep] of criteriosDe(F.escenario)) { fila(null, 30); unir(1, 1, e, { fill: GRIS, bold: true }); unir(2, 8, cuando, { fill: GRIS, size: 9 }); unir(9, 12, rep, { fill: GRIS, size: 9 }); }
   // Alto según el largo del texto (unas 170 letras por línea), para que no se corte
   for (const t of REGLAS) parrafo('• ' + t, { alto: Math.max(26, Math.ceil((t.length + 2) / 170) * 13 + 4) });
 
@@ -333,7 +340,7 @@ export function generarFichaPdf(F, llena = null) {
       F.servicios.map(s => ({ v: [s.modular, s.nombre, s.nombreNivel, s.turno, s.secciones, s.est, v(d?.servicios?.[s.modular]?.est), v(d?.servicios?.[s.modular]?.obs)], fill: [G, G, G, G, G, G, A, A] })), { minAlto: d ? 14 : 18 });
 
     titulo('C. Verificación del mobiliario por aula');
-    texto(`${F.aulas.length} ${F.aulas.length === 1 ? 'aula' : 'aulas'} en uso según el censo, con sus cantidades ya cargadas (la mesa, en puestos). ${NOTA_SIGLAS}`, { size: 8, color: '#5C6270' });
+    texto(`${F.aulas.length} ${F.aulas.length === 1 ? 'aula' : 'aulas'} en uso según el censo, con sus cantidades ya cargadas (la mesa, en puestos). ${NOTA_SIGLAS} ${F.escenarioTexto || ''}`, { size: 8, color: '#5C6270' });
     const anchosC = [0.13, 0.06, 0.06, 0.06, 0.07, 0.07, 0.07, 0.07, 0.08, 0.09, 0.09, 0.15];
     if (d) {
       // Ficha llena: las aulas con datos, con lo contado; las demás en una línea (siguen con el censo)
@@ -422,7 +429,7 @@ export function generarFichaPdf(F, llena = null) {
       FIRMAS.map(([, cargo]) => ({ v: [cargo, '', '', '', ''], fill: [G, A, A, A, A], minAlto: 40 })));
 
     titulo('Criterios de estado y reglas de llenado');
-    tabla([0.12, 0.5, 0.38], ['Estado', 'Cuándo se marca', 'Entra a reponer'], CRITERIOS.map(v => ({ v, fill: G })));
+    tabla([0.12, 0.5, 0.38], ['Estado', 'Cuándo se marca', 'Entra a reponer'], criteriosDe(F.escenario).map(v => ({ v, fill: G })));
     for (const t of llena ? REGLAS.filter(r => !/celdas grises/.test(r)) : REGLAS) texto('• ' + t, { size: 8, despues: 0.15 });
 
     const n = doc.bufferedPageRange().count;

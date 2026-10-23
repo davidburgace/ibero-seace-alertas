@@ -7,7 +7,7 @@ Arma, sobre un proyecto del Selector IOARR, la documentación de una IOARR de re
 3. **Verificación** (lista): lista de verificación, archivos de sustento y antigüedad del mobiliario.
 4. **Entrega** (lista): ZIP del expediente y vínculos con Radar IOARR y su kanban.
 
-## Regla de cálculo: se repone solo lo Malo
+## Regla de cálculo: se repone solo lo Malo (escenario base)
 
 Desde la revisión normativa de octubre de 2026 (y el expediente del Gobierno Regional de Huánuco, 2023):
 
@@ -29,6 +29,40 @@ Caso de control (Moquegua, búsqueda «mariscal», «Seleccionar los filtrados»
 El Excel del Selector trae la hoja nueva **Por distrito** (con SUMIF sobre «Locales (UP)») y, en cada hoja, las columnas en ese orden. En «Aulas», «Locales (UP)» y «Reposición masiva», «A reponer» es una fórmula que apunta a la celda de Malo.
 
 `docs/selector-ioarr/prototipo.html` aplica la misma regla. Las pruebas comparan con él el cálculo completo, por aula y por local.
+
+## Escenarios, kit, estructura sin utilidad y oferta interna (migración 027)
+
+Ejecuta `supabase/migrations/027_ioarr_estructura_oferta.sql` después de la 026. Agrega `estructura` a `ioarr_expediente_costos` y crea `ioarr_expediente_oferta` (RLS del dueño). Sin la migración, la estructura usa los valores por defecto y no se guarda, y la oferta no se guarda.
+
+**Escenarios de cantidad** (en los criterios del proyecto, `criterios.escenario`; se eligen en Expediente → Costos o en los criterios del Selector):
+- «Solo Malo» (por defecto): lo Malo del censo, por tipo de bien.
+- «Malo + Regular»: cota superior sustentada con el censo.
+- «Por capacidad (método de convocatoria)»: mesa y silla = aulas × ocupación × % (30 y 80 % por defecto, redondeado por aula); escritorio, silla docente y armario = lo requerido por aula. Solo para comparar con una convocatoria ya publicada; no es sustento de reposición.
+- El faltante es siempre informativo. Expediente → Costos muestra los tres escenarios lado a lado (cantidades, kits y monto) con la diferencia frente a «Solo Malo». El 07-C, la memoria, la lista de verificación, las fichas y los dos Excel usan el escenario elegido y lo declaran en una línea; el sustento del 07-C declara el método de cuantificación.
+
+**Kit (mesa + silla del estudiante):** kits por aula = mayor entre mesas y sillas a reponer; el local suma sus aulas (con inventario verificado, que es por local, el mayor del local). En Primaria los kits se reparten entre 1.°-2.°, 3.°-4.° y 5.°-6.° con una distribución editable (por defecto, partes iguales) y se asignan a cada local en enteros. En el 07-C sale una línea «MOBILIARIO DE AULA», unidad «Kit de mobiliario»; escritorio, silla docente y armario van aparte si entran.
+
+**Estructura de costos (reemplaza GG, utilidad, gestión e imprevistos):**
+
+```
+Bienes             = Σ cantidad × precio de mercado sin IGV (por tipo y talla)
+Transporte         = piezas × transporte por pieza (19.50; kit = 2 piezas)
+Costo directo      = bienes + transporte
+IGV                = 18 % del costo directo
+Doc. equivalente   = 3 % del costo directo sin IGV
+Supervisión        = 5 % del costo directo sin IGV
+Liquidación        = monto fijo (15,000)
+Monto de inversión = (costo directo + IGV) + documento equivalente + supervisión + liquidación
+```
+
+- Precios: tabla editable por proyecto. Orden: editado → catálogo (fijado o vigente) → referencia Loreto 2026 (mesa 385 / 393 / 398 y silla 188 / 193 / 198 en Primaria 1.°-2.° / 3.°-4.° / 5.°-6.°) → sin precio.
+- Los porcentajes dependen de la entidad convocante (aviso en pantalla, Excel y Word; punto manual en la lista de verificación).
+- Caso de control: 6,168 kits (2,056 por grupo) con los precios de referencia → costo directo 3,848,832.00; IGV 692,789.76; documento equivalente 115,464.96; supervisión 192,441.60; liquidación 15,000.00; **monto S/ 4,864,528.32** (`test/selector-escenarios-kit.test.js`, también recalculado con LibreOffice).
+- Los factores por zona del catálogo ya no entran al 07-C; solo los usa la oferta interna (opcional).
+
+**07-C:** descripción técnica según nivel y grupo de grado (ya no copia la descripción del catálogo en mesa, silla y kit), con «El material debe respetar la ficha técnica aplicable; la entidad convocante puede exigir madera» y el campo «Referencia técnica aplicable» (vacío por defecto). Códigos 22 Educación, 047 Educación Básica y 0104 Educación Primaria; indicador y unidad editables («verifícalo contra el PMI»); contribución a la brecha vacía. UP por código de local o por código modular (lista todas, aunque el local no reponga). Campos sin valores por defecto: modalidad de ejecución, fuente de financiamiento, entidad del mantenimiento (nombre y código), plazo en meses o días (cronograma mensual). Mantenimiento por meta, puede ser 0. La liquidación pasó de Documentos a la estructura de costos.
+
+**Oferta (uso interno):** Expediente → «Oferta (uso interno)». Costo de fabricación por tipo, embalaje, transporte puesto en colegio (base, por distrito y, si se marca, × factor de flete por zona), gastos generales propios e instalación. Muestra el costo por colegio y total frente al monto de inversión, el costo directo (con o sin IGV) o un monto referencial escrito a mano; margen = precio − costo, por kit y total, con alerta si el costo lo supera. Se guarda aparte (`ioarr_expediente_oferta`) y ningún exportador la lee: no entra al 07-C, las fichas, la memoria, los Excel ni el ZIP (lo comprueba una prueba).
 
 ## Otra inversión vigente o reciente (duplicidad, migración 017)
 

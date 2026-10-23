@@ -20,7 +20,7 @@ const COD_U = D.locs[iU][0];
 const CODIGOS = new Set(LISTA.map(i => D.locs[i][0]));
 const META = { proyecto: { id: 'p-1', nombre: 'mariscal' }, anio: 2025, fecha: '2026-10-21' };
 const CTX = { D, C, P: DEF, codigos: CODIGOS, proyectoId: 'p-1', anioDatos: 2025, hoy: '2026-10-21', archivo: 'ficha.xlsx' };
-const BASE = { precios: { mesa: 180, silla: 90, esc: 400, sdoc: 120, arm: 650 }, factores: [], uit: { anio: 2026, valor: 5500 }, rubros: [{ clave: 'igv', valor: 18 }] };
+const BASE = { precios: { mesa: 180, silla: 90, esc: 400, sdoc: 120, arm: 650 }, uit: { anio: 2026, valor: 5500 } };
 
 // Genera la ficha de un local y la llena: llenar(ws, filaDe) escribe en el libro
 async function fichaLlena(i, llenar, meta = META) {

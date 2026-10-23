@@ -20,22 +20,22 @@ const cerca = (a, b, msg) => assert.ok(Math.abs(a - b) < 0.011, `${msg}: ${a} �
 // Valores de PRUEBA (no son reales)
 const PRECIOS = { mesa: 180, silla: 90, esc: 400, sdoc: 120, arm: 650 };
 const DESC = Object.fromEntries(Object.keys(PRECIOS).map(k => [k, { descripcion: 'Descripción de prueba de ' + k }]));
-const RUB = [{ clave: 'transporte', valor: 5 }, { clave: 'instalacion', valor: 2 }, { clave: 'gg', valor: 10 }, { clave: 'utilidad', valor: 8 }, { clave: 'igv', valor: 18 },
-  { clave: 'expediente', modo: 'monto', valor: 5000 }, { clave: 'supervision', valor: 3 }, { clave: 'gestion', valor: 1 }, { clave: 'imprevistos', valor: 1 }];
+const EST = { transporte_pieza: 15, igv: 18, doc_pct: 3, sup_pct: 5, liquidacion: 15000 };
 const COMPLETOS = { uf: 'UF de prueba', uei: 'UEI de prueba', opmi: 'OPMI de prueba', fecha_inicio: '2027-03', meses: 5, en_uso: 'si', inventario_registrado: 'si',
-  servicio_brecha: 'S', tipologia: 'T', indicador_brecha: 'I', ue_mantenimiento: 'UGEL de prueba',
+  servicio_brecha: 'S', tipologia: 'T', indicador_brecha: 'I', ue_mantenimiento: 'UGEL de prueba', ue_mantenimiento_codigo: '0123',
+  modalidad: 'Administración indirecta – Obras por Impuestos', fuente_financiamiento: 'Recursos Determinados', ref_tecnica: 'Ficha técnica de prueba',
   vida_util: { mesa: 10, silla: 10, esc: 10, sdoc: 10, arm: 12 }, mant_nuevo: { mesa: 2000, silla: 800, esc: 300, sdoc: 100, arm: 500 },
   antiguedad: { mesa: 15, silla: 15, esc: 15, sdoc: 15, arm: 15 }, estado_actual: { mesa: 'MALO', silla: 'MALO', esc: 'MALO', sdoc: 'MALO', arm: 'MALO' } };
 
 function chiclayo(uit = 5500, datos = {}) {
   const D = region('lambayeque'), C = calc(D, DEF), list = [D.locs.findIndex(l => l[0] === '276008')];
   const inv = { '276008': { bienes: { mesa: { b: 0, r: 0, m: 569 } }, fecha_visita: '2026-10-20', observacion: 'Acta', archivos: [{ tipo: 'acta', nombre_archivo: 'acta.pdf' }] } };
-  const R = costear({ D, C, list, precios: PRECIOS, rubros: RUB, factores: [], uit: { anio: 2026, valor: uit }, inventario: inv });
+  const R = costear({ D, C, list, precios: PRECIOS, estructura: EST, uit: { anio: 2026, valor: uit }, inventario: inv });
   return { R, M: armarModelo({ R, D, list, proyecto: { nombre: 'Chiclayo', region: 'Lambayeque' }, datos: limpiarDatosDoc(datos), precios: DESC, inv, fecha: '2026-10-21' }) };
 }
 function mariscal(uit = 500, datos = COMPLETOS) {
   const D = region('moquegua'), C = calc(D, DEF), list = filtrar(D, C, { ...FILTRO_VACIO(), q: 'mariscal' });
-  const R = costear({ D, C, list, precios: PRECIOS, rubros: RUB, factores: [], uit: { anio: 2026, valor: uit } });
+  const R = costear({ D, C, list, precios: PRECIOS, estructura: EST, uit: { anio: 2026, valor: uit } });
   return { R, M: armarModelo({ R, D, list, proyecto: { nombre: 'Mariscal', region: 'Moquegua' }, datos: limpiarDatosDoc(datos), precios: DESC, fecha: '2026-10-21' }) };
 }
 async function textoDocx(buf) {
@@ -58,9 +58,10 @@ test('Chiclayo 11124: IOARR individual, registro abreviado, el costo del 07-C cu
   assert.match(M.nombre, /^ADQUISICIÓN DE MOBILIARIO DE AULA; EN EL\(LA\) IE 11124 NUESTRA SEÑORA DE LA PAZ .*DISTRITO DE CHICLAYO/);
   assert.deepEqual(M.F.metas.map(m => [m.k, m.cantidad]), [['mesa', 569], ['silla', 189]]);
   cerca(M.F.total, R.totales.total, 'total del 07-C = total de la estructura');
-  cerca(M.F.subtotalActivos + M.F.expediente + M.F.supervision, R.totales.total, 'activos + expediente + supervisión');
+  cerca(M.F.subtotalActivos + M.F.expediente + M.F.supervision + M.F.liquidacion, R.totales.total, 'activos + documento equivalente + supervisión + liquidación');
+  cerca(M.F.metas.reduce((a, m) => a + m.costo, 0), R.totales.cdIgv, 'las metas suman el costo directo + IGV');
   // Sin los datos del usuario, se listan como pendientes y no se inventan
-  for (const t of [/Institucionalidad/, /inicio y plazo/, /mantenimiento y vida útil/, /inventario de la entidad/]) assert.ok(M.faltan.some(x => t.test(x)), t);
+  for (const t of [/Institucionalidad/, /inicio y plazo/, /mantenimiento .*vida útil/, /inventario de la entidad/, /Modalidad de ejecución/, /Referencia técnica/]) assert.ok(M.faltan.some(x => t.test(x)), t);
   assert.equal(M.F.cronograma, null);
   assert.equal(M.E.condiciones.find(c => /acta/.test(c.texto)).estado, 'cumple');
 });
@@ -123,10 +124,10 @@ test('los Word abren en LibreOffice Writer', { skip: !writer && 'LibreOffice Wri
 // Moquegua «mariscal» con año de adquisición en dos locales
 function mariscalAnios({ datos = {} } = {}) {
   const D = region('moquegua'), C = calc(D, DEF), list = filtrar(D, C, { ...FILTRO_VACIO(), q: 'mariscal' });
-  const base = costear({ D, C, list, precios: PRECIOS, rubros: RUB, factores: [], uit: { anio: 2026, valor: 500 } });
+  const base = costear({ D, C, list, precios: PRECIOS, estructura: EST, uit: { anio: 2026, valor: 500 } });
   const ups = base.locales.filter(l => l.rep[4] > 0).slice(0, 2);   // dos locales con armarios a reponer
   const inv = Object.fromEntries(ups.map((l, j) => [l.cod, { bienes: {}, adquisicion: { arm: j === 0 ? 2006 : 2016 }, fecha_visita: '2026-10-20', observacion: 'Visita', archivos: j === 0 ? [{ tipo: 'acta', nombre_archivo: 'a.pdf' }, { tipo: 'foto', nombre_archivo: 'f.jpg' }] : [] }]));
-  const R = costear({ D, C, list, precios: PRECIOS, rubros: RUB, factores: [], uit: { anio: 2026, valor: 500 }, inventario: inv });
+  const R = costear({ D, C, list, precios: PRECIOS, estructura: EST, uit: { anio: 2026, valor: 500 }, inventario: inv });
   const M = armarModelo({ R, D, list, proyecto: { nombre: 'Mariscal', region: 'Moquegua' }, datos: limpiarDatosDoc({ ...COMPLETOS, antiguedad: {}, ...datos }), precios: DESC, inv, fecha: '2026-10-21' });
   return { base, R, M, ups };
 }
@@ -193,7 +194,7 @@ test('Word de la lista de verificación y antigüedad en el 07-C y la memoria', 
   assert.ok(m.includes('Año de adquisición por local')); assert.ok(m.includes('2006 (20 años)'));
   const D = region('lambayeque'), C = calc(D, DEF), i = D.locs.findIndex(l => l[0] === '276008');
   const inv = { '276008': { bienes: { mesa: { b: 0, r: 0, m: 569 } }, adquisicion: { mesa: 2010 }, fecha_visita: '2026-10-20', observacion: 'Acta', archivos: [] } };
-  const R = costear({ D, C, list: [i], precios: PRECIOS, rubros: RUB, factores: [], uit: { anio: 2026, valor: 1000 }, inventario: inv });
+  const R = costear({ D, C, list: [i], precios: PRECIOS, estructura: EST, uit: { anio: 2026, valor: 1000 }, inventario: inv });
   const M2 = armarModelo({ R, D, list: [i], proyecto: { nombre: 'Chiclayo', region: 'Lambayeque' }, datos: limpiarDatosDoc({}), precios: DESC, inv, fecha: '2026-10-21' });
   const f = await textoDocx(await generar07C(M2));
   assert.match(f, /16 \(promedio según el año de adquisición en 1 de 1 locales\)/);
@@ -202,7 +203,7 @@ test('Word de la lista de verificación y antigüedad en el 07-C y la memoria', 
 test('Excel: la hoja «Inventario verificado» trae año de adquisición y antigüedad, también sin corregir cantidades', async () => {
   const D = region('lambayeque'), C = calc(D, DEF), i = D.locs.findIndex(l => l[0] === '276008');
   const fila = { cod_local: '276008', bienes: {}, adquisicion: { silla: 2012 }, censo: censoLocal(C, i), fecha_visita: '2026-10-20', observacion: 'Visita', archivos: [] };
-  const R = costear({ D, C, list: [i], precios: PRECIOS, rubros: RUB, factores: [], uit: { anio: 2026, valor: 1000 }, inventario: { '276008': fila } });
+  const R = costear({ D, C, list: [i], precios: PRECIOS, estructura: EST, uit: { anio: 2026, valor: 1000 }, inventario: { '276008': fila } });
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(await generarExcelCostos(R, { proyecto: 'P', region: 'Lambayeque', fecha: '2026-10-21', criterios: '', precios: {}, inventario: { '276008': fila } }));
   const row = wb.getWorksheet('Inventario verificado').getRow(4);
@@ -250,7 +251,7 @@ test('ZIP: documentos, sustento por local, nombres repetidos, fallos e índice',
 
 test('monto del CUI en Radar IOARR: coherente hasta 1 %, si no queda pendiente', () => {
   const D = region('lambayeque'), C = calc(D, DEF), list = [D.locs.findIndex(l => l[0] === '276008')];
-  const R = costear({ D, C, list, precios: PRECIOS, rubros: RUB, factores: [], uit: { anio: 2026, valor: 5500 } });
+  const R = costear({ D, C, list, precios: PRECIOS, estructura: EST, uit: { anio: 2026, valor: 5500 } });
   const item = monto => armarModelo({ R, D, list, proyecto: { nombre: 'C', region: 'Lambayeque', ioarr: { id: 'x', cui: '2512345', monto_inversion: monto } }, datos: limpiarDatosDoc({}), precios: DESC, fecha: '2026-10-21' })
     .verificacion.secciones[0].items.find(x => /CUI 2512345/.test(x.texto));
   assert.equal(item(R.totales.total * 1.005).estado, 'ok');
