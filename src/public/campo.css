@@ -180,3 +180,5 @@ body.ficha-abierta{ overflow:hidden; }
 .senal-bar{ border:1px solid var(--border2); background:var(--surface); border-radius:12px; padding:10px 14px; font-size:13.5px; display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
 .senal-bar.sin{ border-color:rgba(224,150,43,.5); background:rgba(224,150,43,.1); color:#7a4a08; }
 .senal-bar.ok{ border-color:rgba(46,158,91,.4); background:rgba(46,158,91,.08); color:#1f7a44; }
+.fh-ayuda{ margin:0; font-size:12.5px; line-height:1.4; }
+.fh-ayuda b{ color:var(--text); }

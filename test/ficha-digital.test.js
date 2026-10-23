@@ -418,3 +418,10 @@ test('migración 025, acta al aprobar y páginas', () => {
   assert.match(leer('src/public/campo.css'), /touch-action:none/);
   assert.match(leer('src/public/selector-ioarr-fichas.js'), /data-ficha-pdf/);
 });
+
+test('formulario: ayuda de «Puestos por mesa» con la equivalencia en puestos', () => {
+  const js = leer('src/public/campo-ficha.js');
+  assert.match(js, /1 individual · 2 bipersonal · 4 a 6 grupal \(inicial\)\. Vacío = 1\./);
+  assert.match(js, /Cuenta como \$\{ent\(entero\(f\.b\) \* pu\)\}/);
+  assert.match(js, /data-equiv="\$\{j\}\.\$\{i\}"/, 'se actualiza al escribir');
+});
