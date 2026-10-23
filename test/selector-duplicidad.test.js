@@ -85,7 +85,7 @@ test('Excel del Selector: columnas de duplicidad y hoja de excluidos', async () 
 // Igual que armar() de expediente.js: separa, costea y marca cada local
 function modelo(mapa) {
   const { list, excluidos } = separarLocales(D, CODS, mapa);
-  const R = costear({ D, C, list, precios: { mesa: 180, silla: 90, esc: 400, sdoc: 120, arm: 650 }, rubros: [], factores: [], uit: { anio: 2026, valor: 5500 } });
+  const R = costear({ D, C, list, precios: { mesa: 180, silla: 90, esc: 400, sdoc: 120, arm: 650 }, uit: { anio: 2026, valor: 5500 } });
   for (const l of R.locales) l.duplicidad = estadoDe(mapa, l.cod);
   R.excluidos = excluidos.map(i => ({ cod: D.locs[i][0], ...estadoDe(mapa, D.locs[i][0]) }));
   return armarModelo({ R, D, list, proyecto: { nombre: 'Mariscal', region: 'Moquegua' }, datos: limpiarDatosDoc({}), precios: {}, fecha: '2026-10-21' });

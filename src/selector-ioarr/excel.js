@@ -11,7 +11,8 @@
 //   Locales (UP):       Existente = B+R+M · A reponer = M · totales = suma de los 5 tipos
 //   Reposición masiva:  Existente = B+R+M · A reponer = M
 //   Resumen y Por distrito: SUM y SUMIF de las otras hojas
-// Se repone solo lo Malo. El faltante es brecha de dotación, no reposición: va
+// «A reponer» sigue el escenario del proyecto: Malo (= M), Malo + Regular (= R + M) o
+// por capacidad (valor: aulas × ocupación × %, no sale del estado). El faltante es brecha de dotación, no reposición: va
 // aparte y no suma a lo que se repone. Por local es suma por aula (no sale de
 // los totales del local), por eso en Locales y Reposición masiva va como valor.
 // Se escribe con el writer en streaming: Lima entera son ~1,6 millones de celdas.
@@ -19,7 +20,7 @@
 
 import ExcelJS from 'exceljs';
 import { PassThrough } from 'node:stream';
-import { ITEMS, NIVN, NIVB, lv, totals, coordValidas, urlGoogleMaps, totalesPorNivel, estadoSituacional, piTexto } from './calculo.js';
+import { ITEMS, NIVN, NIVB, lv, totals, coordValidas, urlGoogleMaps, totalesPorNivel, estadoSituacional, piTexto, textoEscenario } from './calculo.js';
 import { ROTULO_DUP, ESTADOS_DUP, estadoDe } from './duplicidad.js';
 
 const ESTADO = { b: 'Bueno', r: 'Regular', m: 'Malo' };
@@ -27,6 +28,11 @@ const AZUL = 'FF3A63E0';
 const ENTERO = '#,##0';
 export const FALTANTE = 'Faltante (brecha de dotación, no reposición)';
 
+// Fórmula de «A reponer» según el escenario: con las celdas de Regular y Malo, o el valor (por capacidad)
+const repF = (P, R, M, valor) => P.escenario === 'capacidad' ? valor : { formula: P.escenario === 'malo_regular' ? `${R}+${M}` : M, result: valor };
+const REP_TXT = { malo: 'Malo. Se repone solo el mobiliario en estado malo; Bueno y Regular se muestran como diagnóstico.',
+  malo_regular: 'Malo + Regular (cota superior sustentada con el censo). Bueno se muestra como diagnóstico.',
+  capacidad: 'Por capacidad: aulas × ocupación × %, para mesa y silla; lo requerido por aula para escritorio, silla docente y armario. No usa el estado del mobiliario: solo para comparar con una convocatoria ya publicada; no es sustento de reposición.' };
 const letra = n => { let s = ''; while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; };
 const f = (formula, result) => ({ formula, result });
 // Cede el turno cada 2000 filas: con Lima entera el Excel tarda segundos y el servidor debe seguir atendiendo
@@ -101,6 +107,7 @@ export async function generarExcel(D, C, P, list, meta) {
     add(['Región', D.region]);
     if (meta.ioarr) add(['Vinculado a Radar IOARR', `CUI ${meta.ioarr.cui} — ${meta.ioarr.nombre}`]);
     add(['Fecha de exportación', meta.fecha]);
+    add([textoEscenario(P)], r => { r.font = { bold: true }; });
     const fmtN = r => { r.getCell(2).numFmt = ENTERO; r.getCell(2).alignment = { horizontal: 'left' }; };
     add(['Locales seleccionados', f(`COUNTA(${HL}!${letra(L_COD)}2:${letra(L_COD)}${ultL})`, T.n)], fmtN);
     if (meta.excluidos?.length) add(['Locales excluidos por otra inversión vigente o reciente', meta.excluidos.length, 'Ver la hoja «Excluidos por duplicidad»'], fmtN);
@@ -108,7 +115,7 @@ export async function generarExcel(D, C, P, list, meta) {
     add([ROTULO_DUP + ' (sí / no / sin verificar)', `${cuenta('si')} / ${cuenta('no')} / ${cuenta('sin_verificar')}`]);
     add(['Estudiantes (padrón)', f(sumL(L_EST), T.est)], fmtN);
     add(['Aulas en uso (censo)', f(sumL(L_AUL), T.aul)], fmtN);
-    add(['Bienes a reponer (estado Malo, suma de los muebles de la IOARR)', f(sumL(L_TOT), T.rep)], r => { fmtN(r); r.font = { bold: true }; });
+    add([`Bienes a reponer (${{ malo: 'estado Malo', malo_regular: 'estados Malo y Regular', capacidad: 'por capacidad' }[P.escenario] || 'estado Malo'}, suma de los muebles de la IOARR)`, f(sumL(L_TOT), T.rep)], r => { fmtN(r); r.font = { bold: true }; });
     add([FALTANTE + ', solo informativo', f(sumL(L_FAL), T.fal)], fmtN);
     add([]);
     const cab = add(['Mobiliario por tipo', 'Unidad', 'Existente', 'Bueno', 'Regular', 'Malo', 'A reponer', 'Requerido', FALTANTE]);
@@ -116,7 +123,7 @@ export async function generarExcel(D, C, P, list, meta) {
     ITEMS.forEach((x, t) => {
       const o = T.t[t], n = cab.number + 1 + t;
       add([x.n, x.u, f(`D${n}+E${n}+F${n}`, o.b + o.r + o.m), f(sumL(lCol(t, 'Bueno')), o.b), f(sumL(lCol(t, 'Regular')), o.r),
-        f(sumL(lCol(t, 'Malo')), o.m), f(`F${n}`, o.rep), f(sumL(lCol(t, 'Requerido')), o.req),
+        f(sumL(lCol(t, 'Malo')), o.m), P.escenario === 'capacidad' ? f(sumL(lCol(t, 'A reponer')), o.rep) : repF(P, `E${n}`, `F${n}`, o.rep), f(sumL(lCol(t, 'Requerido')), o.req),
         f(sumL(lCol(t, 'Faltante')), o.fal)], r => { for (let c = 3; c <= 9; c++) r.getCell(c).numFmt = ENTERO; r.getCell(7).font = { bold: true }; r.getCell(9).font = { italic: true }; });
     });
     add([]);
@@ -132,7 +139,7 @@ export async function generarExcel(D, C, P, list, meta) {
     add(['Sillas docentes por aula', P.sdoc]);
     add(['Armarios o estantes por aula', P.arm]);
     add(['Existente', 'Bueno + Regular + Malo']);
-    add(['A reponer', 'Malo. Se repone solo el mobiliario en estado malo; Bueno y Regular se muestran como diagnóstico.']);
+    add(['A reponer', REP_TXT[P.escenario] || REP_TXT.malo]);
     add([FALTANTE, 'Requerido menos Existente, mínimo 0 por aula. No suma a lo que se repone, al costo ni al Formato 07-C: ampliar la dotación no es reposición (Lineamientos IOARR, 2.4.C).']);
     add(['Requerido', 'Mesa y silla: estudiantes del aula × criterio. Escritorio, silla docente y armario: por aula.']);
     add(['Mesa del estudiante', 'Se cuenta en puestos: mesa unipersonal = 1; mesa múltiple y carpetas según los criterios.']);
@@ -169,7 +176,7 @@ export async function generarExcel(D, C, P, list, meta) {
       r.push(ESTADOS_DUP[dup.estado], dup.codigo || '');
       for (let t = 0; t < 5; t++) {
         const [B, Rg, M] = ['Bueno', 'Regular', 'Malo'].map(k => letra(lCol(t, k)) + n), b = lv(C, 'b', t, i), rg = lv(C, 'r', t, i), m = lv(C, 'm', t, i);
-        r.push(f(`${B}+${Rg}+${M}`, b + rg + m), b, rg, m, f(M, lv(C, 'rep', t, i)), lv(C, 'req', t, i), lv(C, 'fal', t, i));
+        r.push(f(`${B}+${Rg}+${M}`, b + rg + m), b, rg, m, repF(P, Rg, M, lv(C, 'rep', t, i)), lv(C, 'req', t, i), lv(C, 'fal', t, i));
       }
       r.push(f(repCols.map(c => c + n).join('+'), C.L.repTot[i]), f(falCols.map(c => c + n).join('+'), C.L.falTot[i]));
       const row = ws.addRow(r);
@@ -184,7 +191,7 @@ export async function generarExcel(D, C, P, list, meta) {
 
   // ── Por distrito (SUMIF sobre Locales por ubigeo) ─────────────────────────
   {
-    const ws = hoja(wb, 'Por distrito', ['Ubigeo', 'Provincia', 'Distrito', 'Locales', 'Estudiantes (padrón)', 'Aulas en uso (censo)', 'Bienes a reponer (Malo)', 'TOTAL ' + FALTANTE],
+    const ws = hoja(wb, 'Por distrito', ['Ubigeo', 'Provincia', 'Distrito', 'Locales', 'Estudiantes (padrón)', 'Aulas en uso (censo)', 'Bienes a reponer', 'TOTAL ' + FALTANTE],
       [9, 16, 24, 10, 12, 12, 14, 22]);
     const porD = new Map();
     for (const i of list) { const d = D.locs[i][1]; if (!porD.has(d)) porD.set(d, []); porD.get(d).push(i); }
@@ -206,7 +213,7 @@ export async function generarExcel(D, C, P, list, meta) {
 
   // ── Por nivel (valores: un local con varios niveles cuenta en cada uno) ────
   {
-    const ws = hoja(wb, 'Por nivel', ['Nivel', 'Locales', 'Estudiantes (padrón)', 'Aulas en uso (censo)', 'Bueno', 'Regular', 'Malo', 'A reponer (Malo)', 'Requerido', FALTANTE],
+    const ws = hoja(wb, 'Por nivel', ['Nivel', 'Locales', 'Estudiantes (padrón)', 'Aulas en uso (censo)', 'Bueno', 'Regular', 'Malo', 'A reponer', 'Requerido', FALTANTE],
       [18, 10, 12, 12, 11, 11, 11, 14, 12, 22]);
     const filas = totalesPorNivel(D, C, list);
     for (const o of filas) ws.addRow([o.nombre, o.n, o.est, o.aul, o.b, o.r, o.m, o.rep, o.req, o.fal]).commit();
@@ -310,7 +317,7 @@ export async function generarExcel(D, C, P, list, meta) {
       for (let t = 0; t < 5; t++) {
         const c0 = base.length + 1 + t * nE, [EX, B, R, M, , RQ] = [0, 1, 2, 3, 4, 5].map(k => letra(c0 + k) + n);
         const b = A.b[t][ai], rg = A.r[t][ai], m = A.m[t][ai];
-        r.push(f(`${B}+${R}+${M}`, b + rg + m), b, rg, m, f(M, A.rep[t][ai]), A.req[t][ai], f(`MAX(0,${RQ}-${EX})`, A.fal[t][ai]));
+        r.push(f(`${B}+${R}+${M}`, b + rg + m), b, rg, m, repF(P, R, M, A.rep[t][ai]), A.req[t][ai], f(`MAX(0,${RQ}-${EX})`, A.fal[t][ai]));
       }
       const ob = [];
       // Prototipo corregido: miraba a[22] (escritorios en buen estado) en vez de las mesas múltiples
@@ -334,7 +341,7 @@ export async function generarExcel(D, C, P, list, meta) {
       n++; await respirar(n);
       const b = lv(C, 'b', t, i), rg = lv(C, 'r', t, i), m = lv(C, 'm', t, i);
       const row = ws.addRow([D.locs[i][0], D.locName[i], D.dists[D.locs[i][1]][0], ITEMS[t].n, ITEMS[t].u,
-        f(`G${n}+H${n}+I${n}`, b + rg + m), b, rg, m, f(`I${n}`, rep), lv(C, 'req', t, i), lv(C, 'fal', t, i)]);
+        f(`G${n}+H${n}+I${n}`, b + rg + m), b, rg, m, repF(P, `H${n}`, `I${n}`, rep), lv(C, 'req', t, i), lv(C, 'fal', t, i)]);
       row.getCell(10).font = { bold: true }; row.getCell(12).font = { italic: true };
       row.commit();
     }

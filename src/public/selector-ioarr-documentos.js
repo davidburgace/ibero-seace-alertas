@@ -31,7 +31,7 @@ const campo = (k, etiqueta, { tipo = 'text', ph = '', ancho, max = 300, ayuda, .
     ? `<textarea data-doc="${k}" maxlength="${o.maxlength || 4000}" rows="${o.rows || 3}" placeholder="${esc(ph)}">${esc(v)}</textarea>`
     : tipo === 'select'
       ? `<select data-doc="${k}">${o.opciones.map(([val, txt]) => `<option value="${val}" ${String(v) === val ? 'selected' : ''}>${txt}</option>`).join('')}</select>`
-      : `<input data-doc="${k}" type="${tipo}" value="${esc(v)}" placeholder="${esc(ph)}" ${tipo === 'number' ? `min="${o.min ?? 0}" max="${o.max ?? ''}" step="${o.step ?? 1}" inputmode="decimal"` : `maxlength="${max}"`}>`;
+      : `<input data-doc="${k}" type="${tipo}" value="${esc(v)}" placeholder="${esc(ph)}" ${tipo === 'number' ? `min="${o.min ?? 0}" max="${o.max ?? ''}" step="${o.step ?? 1}" inputmode="decimal"` : `maxlength="${max}"`}${o.lista ? ` list="${o.lista}"` : ''}>`;
   return `<div class="campo${ancho ? ' ancho' : ''}"><label>${etiqueta}</label>${ctrl}${ayuda ? `<span class="sub">${ayuda}</span>` : ''}</div>`;
 };
 const SINO = [['', 'Sin indicar'], ['si', 'Sí'], ['no', 'No']];
@@ -48,14 +48,18 @@ function pintar() {
   const reg = R.registro === 'completo' ? '<span class="chip-est alerta">Registro completo · secciones D, E y F</span>'
     : R.registro === 'abreviado' ? '<span class="chip-est ok">Registro abreviado · sección G</span>' : '<span class="chip-est pend">Falta la UIT</span>';
   const est = { cumple: '<span class="chip-est ok">Cumple</span>', no: '<span class="chip-est alerta">No cumple</span>', pendiente: '<span class="chip-est pend">Pendiente</span>' };
+  // Mobiliario nuevo: vida útil y mantenimiento anual por meta (con kit, el kit; el costo puede ser 0)
+  const metas = R.metas.map(m => `<tr>
+      <td><b>${esc(m.nombre)}</b><br><span class="sub">${NF.format(m.cantidad)} · ${esc(m.unidad)}</span></td>
+      <td><input data-doc-t="vida_util" data-k="${m.k}" type="number" min="1" max="30" step="1" value="${d.vida_util[m.k] ?? ''}" aria-label="Vida útil del nuevo: ${esc(m.nombre)}"></td>
+      <td><input data-doc-t="mant_nuevo" data-k="${m.k}" type="number" min="0" step="0.01" value="${d.mant_nuevo[m.k] ?? ''}" placeholder="0" aria-label="Mantenimiento del nuevo: ${esc(m.nombre)}"></td>
+    </tr>`).join('');
   const tipos = R.tipos.map(t => `<tr>
       <td><b>${esc(t.nombre)}</b><br><span class="sub">${NF.format(t.cantidad)} a reponer</span></td>
       <td><input data-doc-t="antiguedad" data-k="${t.k}" type="number" min="0" max="100" step="1" value="${d.antiguedad[t.k] ?? ''}" placeholder="${t.antiguedad_inventario ? Math.round(t.antiguedad_inventario.promedio) : ''}" aria-label="Antigüedad de ${esc(t.nombre)}">${t.antiguedad_inventario ? `<span class="sub">Inventario: ${NS.format(t.antiguedad_inventario.promedio)} años (${t.antiguedad_inventario.con} de ${t.antiguedad_inventario.de} locales)</span>` : ''}</td>
       <td><input data-doc-t="vida_util_estimada" data-k="${t.k}" type="number" min="1" max="50" step="1" value="${d.vida_util_estimada?.[t.k] ?? ''}" aria-label="Vida útil estimada de ${esc(t.nombre)}"></td>
       <td><select data-doc-t="estado_actual" data-k="${t.k}" aria-label="Estado de ${esc(t.nombre)}"><option value=""></option>${vista.estados.map(x => `<option ${d.estado_actual[t.k] === x ? 'selected' : ''}>${x}</option>`).join('')}</select></td>
       <td><input data-doc-t="mant_actual" data-k="${t.k}" type="number" min="0" step="0.01" value="${d.mant_actual[t.k] ?? ''}" aria-label="Mantenimiento actual de ${esc(t.nombre)}"></td>
-      <td><input data-doc-t="vida_util" data-k="${t.k}" type="number" min="1" max="30" step="1" value="${d.vida_util[t.k] ?? ''}" aria-label="Vida útil del nuevo: ${esc(t.nombre)}"></td>
-      <td><input data-doc-t="mant_nuevo" data-k="${t.k}" type="number" min="0" step="0.01" value="${d.mant_nuevo[t.k] ?? ''}" aria-label="Mantenimiento del nuevo: ${esc(t.nombre)}"></td>
     </tr>`).join('');
 
   ctx.el.innerHTML = `
@@ -66,6 +70,7 @@ function pintar() {
       <div class="kpi"><div class="v">${R.en_uit == null ? '—' : NS.format(R.en_uit) + ' UIT'}</div><div class="l">${reg}</div></div>
       <div class="kpi"><div class="v">${vista.faltan.length}</div><div class="l">${vista.faltan.length === 1 ? 'dato pendiente' : 'datos pendientes'}</div></div>
     </div>
+    <div class="avisos"><div class="aviso">${esc(vista.escenario)}${vista.kit ? ' Mesas y sillas presentadas como kit.' : ''} Se cambia en Costos.</div></div>
     ${R.sin_rep.length ? `<div class="avisos"><div class="aviso">No se incluyen como UP ${R.sin_rep.length === 1 ? 'el local' : 'los locales'} sin bienes a reponer: ${R.sin_rep.map(esc).join(', ')}.</div></div>` : ''}
     <div class="exportar">
       <div><h3>Documentos en Word</h3><p>Borrador del Formato 07-C para preparar el registro en el Banco de Inversiones, y memoria descriptiva. Lo que falte sale marcado «PENDIENTE» en amarillo.</p></div>
@@ -87,11 +92,29 @@ function pintar() {
           : campo('cui', 'Código único de inversión (CUI)', { ph: R.cui || 'Se asigna al registrar', max: 8 })}
       </div>
       <h3>A. Alineamiento a la brecha</h3>
-      <p class="sub">Vacío = se propone por nivel educativo. Verifícalo contra el PMI de la entidad.</p>
+      <p class="sub">Función ${esc(R.funcion)} · división ${esc(R.division)} · grupo ${esc(R.grupos.join('; '))}. Vacío = se propone por nivel educativo. Verifícalo contra el PMI de la entidad.</p>
       <div class="form-grid">
         ${campo('servicio_brecha', 'Servicio público con brecha', { ancho: true, ph: R.alineamiento.servicio })}
         ${campo('tipologia', 'Tipología de proyecto', { ancho: true, ph: R.alineamiento.tipologia })}
-        ${campo('indicador_brecha', 'Indicador de brecha', { ancho: true, max: 500, ph: R.alineamiento.indicadores.map(x => x.nombre).join(' / ') })}
+        ${campo('indicador_brecha', 'Indicador de brecha', { ancho: true, max: 500, ph: R.alineamiento.indicadores.map(x => x.nombre).join(' / '), ayuda: 'Verifícalo contra el PMI.' })}
+        ${campo('unidad_indicador', 'Unidad de medida del indicador', { ph: 'Ej.: LOCAL EDUCATIVO', ayuda: 'Verifícala contra el PMI.' })}
+        ${campo('contribucion_brecha', 'Contribución a la brecha', { tipo: 'number', min: 0, step: 1, ayuda: 'Vacía por defecto: escríbela cuando la confirmes con el PMI.' })}
+      </div>
+      <h3>Unidades productoras</h3>
+      <div class="form-grid">
+        ${campo('up_por', 'Listar las UP por', { tipo: 'select', opciones: [['local', 'Código de local (solo los locales con bienes a reponer)'], ['modular', 'Código modular (todos los servicios, aunque el local no reponga)']], ayuda: `${R.ups} UP en el 07-C · ${R.locales_con_bienes} locales con bienes a reponer.` })}
+      </div>
+      <h3>Descripción técnica</h3>
+      <p class="sub">Sale según el nivel y el grupo de grado de lo que se repone, e incluye: «El material debe respetar la ficha técnica aplicable; la entidad convocante puede exigir madera».</p>
+      <div class="form-grid">
+        ${campo('ref_tecnica', 'Referencia técnica aplicable', { ancho: true, max: 500, ph: 'Ej.: la ficha técnica o norma que exige la entidad convocante', ayuda: 'Vacía por defecto. El sistema no propone normas.' })}
+      </div>
+      <h3>Ejecución</h3>
+      <datalist id="doc-modalidades">${vista.modalidades.map(x => `<option value="${esc(x)}">`).join('')}</datalist>
+      <datalist id="doc-fuentes">${vista.fuentes.map(x => `<option value="${esc(x)}">`).join('')}</datalist>
+      <div class="form-grid">
+        ${campo('modalidad', 'Modalidad de ejecución', { lista: 'doc-modalidades', max: 200, ph: 'Ej.: Administración indirecta – Obras por Impuestos' })}
+        ${campo('fuente_financiamiento', 'Fuente de financiamiento', { lista: 'doc-fuentes', max: 200 })}
       </div>
       <h3>B. Institucionalidad</h3>
       <div class="form-grid">
@@ -106,21 +129,24 @@ function pintar() {
         ${campo('inventario_registrado', '¿Está registrado en el inventario de la entidad?', { tipo: 'select', opciones: SINO })}
         ${campo('codigo_inventario', 'Código del inventario o documento', { ph: 'Ej.: inventario patrimonial UGEL 2025' })}
         ${campo('en_uso', '¿El mobiliario a reponer está en uso?', { tipo: 'select', opciones: SINO, ayuda: R.masiva ? 'En una reposición masiva, el mobiliario debe estar en uso (2.5.c).' : 'Si lleva más de un año sin usarse, no procede como reposición (2.4.C.d).' })}
-        ${campo('ue_mantenimiento', 'Unidad ejecutora del mantenimiento', { ph: R.mantenimiento_sugerido || 'Ej.: UGEL …' })}
+        ${campo('ue_mantenimiento', 'Entidad responsable del mantenimiento (nombre)', { ph: R.mantenimiento_sugerido ? 'Ej.: ' + R.mantenimiento_sugerido : 'Ej.: UGEL …' })}
+        ${campo('ue_mantenimiento_codigo', 'Código de la entidad (unidad ejecutora)', { max: 50 })}
       </div>
       <h3>Por tipo de bien</h3>
       <p class="sub">Antigüedad, vida útil estimada, estado y mantenimiento del mobiliario a reponer (E.3 y 2.4.C.b), y vida útil y mantenimiento anual del nuevo (F.4 o G.3). La antigüedad vacía se toma del año de adquisición registrado en cada local.</p>
-      <div class="tabla-wrap"><table class="tabla tabla-doc"><thead><tr><th>Tipo de bien</th><th>Antigüedad (años)</th><th>Vida útil estimada (años)</th><th>Estado actual</th><th>Mant. anual actual (S/)</th><th>Vida útil del nuevo (años)</th><th>Mant. anual del nuevo (S/)</th></tr></thead><tbody>${tipos || '<tr><td colspan="7" class="vacio">No hay bienes a reponer.</td></tr>'}</tbody></table></div>
+      <div class="tabla-wrap"><table class="tabla tabla-doc"><thead><tr><th>Tipo de bien</th><th>Antigüedad (años)</th><th>Vida útil estimada (años)</th><th>Estado actual</th><th>Mant. anual actual (S/)</th></tr></thead><tbody>${tipos || '<tr><td colspan="5" class="vacio">No hay bienes a reponer.</td></tr>'}</tbody></table></div>
+      <p class="sub">Mobiliario nuevo, por meta del 07-C: vida útil y costo anual de mantenimiento (puede ser 0).</p>
+      <div class="tabla-wrap"><table class="tabla tabla-doc"><thead><tr><th>Meta</th><th>Vida útil del nuevo (años)</th><th>Mant. anual del nuevo (S/)</th></tr></thead><tbody>${metas || '<tr><td colspan="3" class="vacio">No hay metas.</td></tr>'}</tbody></table></div>
       <div class="form-grid">
         ${campo('informe_vida_util', 'Informe técnico de vida útil estimada', { ancho: true, ph: 'Ej.: Informe N° …-2026-UGEL…/APP, control patrimonial', ayuda: 'Recomendable. Vacío = la antigüedad sale del año de adquisición registrado en cada local, si lo cargaste.' })}
       </div>
       <h3>Plazo de ejecución</h3>
       <div class="form-grid">
         ${campo('fecha_inicio', 'Mes de inicio', { tipo: 'month', ph: 'AAAA-MM' })}
-        ${campo('meses', 'Plazo (meses)', { tipo: 'number', min: 1, max: 36 })}
-        ${campo('liquidacion', 'Liquidación (S/)', { tipo: 'number', min: 0, step: 0.01, ayuda: 'Opcional. Se suma al total del 07-C.' })}
+        ${campo('plazo_unidad', 'Plazo en', { tipo: 'select', opciones: [['meses', 'Meses'], ['dias', 'Días']] })}
+        ${d.plazo_unidad === 'dias' ? campo('dias', 'Plazo (días)', { tipo: 'number', min: 1, max: 1095 }) : campo('meses', 'Plazo (meses)', { tipo: 'number', min: 1, max: 36 })}
       </div>
-      ${R.inicio ? `<p class="sub">Ejecución del ${R.inicio} al ${R.fin}. El cronograma reparte el costo y las metas por igual entre los meses.</p>` : ''}
+      <p class="sub">La liquidación es parte de la estructura de costos (pestaña Costos).${R.inicio ? ` Ejecución del ${R.inicio} al ${R.fin}. El cronograma es mensual: reparte el costo y las metas por igual entre los meses${d.plazo_unidad === 'dias' ? ' (meses de 30 días)' : ''}.` : ''}</p>
       <h3>Textos</h3>
       <div class="form-grid">
         ${campo('sustento', 'Sustento adicional de la reposición', { tipo: 'area', ancho: true, rows: 4, ph: 'Se agrega al texto que arma el sistema. Ej.: el mobiliario tiene 15 años de uso; informe técnico N° … de la UGEL.' })}

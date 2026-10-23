@@ -88,6 +88,8 @@ function documento(M, nombre, children, { horizontal } = {}) {
 }
 const aviso = M => [
   p('BORRADOR DE TRABAJO. No reemplaza el registro en el aplicativo del Banco de Inversiones del MEF: sirve para preparar, revisar y sustentar lo que se va a registrar. Lo marcado como «PENDIENTE» (en amarillo) falta completar.', { italics: true, color: TENUE, size: 17, plano: true }),
+  // El escenario de cantidad usado, en una línea
+  p(M.escenarioTexto + (M.kit ? ' Mesas y sillas presentadas como kit (mesa + silla del estudiante).' : ''), { bold: true, size: 18, plano: true }),
   ...(M.faltan.length ? [p('Datos pendientes:', { bold: true, size: 18 }), ...M.faltan.map(vinieta)] : [])
 ];
 
@@ -95,12 +97,20 @@ const aviso = M => [
 const notaSinRep = M => M.sinRep.length ? [nota(`No se incluyen como UP ${M.sinRep.length === 1 ? 'el local' : 'los ' + M.sinRep.length + ' locales'} del proyecto sin bienes a reponer: ${M.sinRep.map(x => x.cod + (x.fal ? ` (${ent(x.fal)} faltantes)` : '')).join(', ')}.`)] : []
 const notaExcluidos = M => M.excluidos?.length ? [nota(`Se excluyen ${M.excluidos.length === 1 ? 'el local' : 'los ' + M.excluidos.length + ' locales'} con otra inversión vigente o reciente, para evitar duplicidad: ${M.excluidos.map(x => x.cod + (x.codigo ? ` (inversión ${x.codigo})` : '')).join(', ')}.`)] : [];
 
-const tablaUPs = M => tabla(['Código de local (UP)', 'Institución educativa (códigos modulares)', 'Ubicación', 'Coordenadas', 'Estudiantes'],
-  M.ups.map(u => [u.cod, `${u.nombre}\n${u.modulares.join(', ')}`, `${u.cp}, ${u.dist}, ${u.prov}, ${u.dpto}`.toLocaleUpperCase('es-PE') + (u.direccion ? '\n' + u.direccion : ''),
-    u.lat != null ? `Lat. ${u.lat}\nLong. ${u.lon}` : '', ent(u.est)]), { num: [4], anchos: [12, 33, 30, 14, 11], size: 16 });
+// Lista de UP: por código de local (los que reponen) o por código modular (todas, con o sin bienes a reponer)
+const tablaUPs = M => M.upPor === 'modular'
+  ? tabla(['Código modular (UP)', 'Institución educativa (código de local)', 'Ubicación', 'Coordenadas', 'Estudiantes', 'Bienes a reponer en el local'],
+    (M.upsRegistro || M.ups).map(u => [u.cod, `${u.nombre}\nlocal ${u.cod_local}`, `${u.cp}, ${u.dist}, ${u.prov}, ${u.dpto}`.toLocaleUpperCase('es-PE') + (u.direccion ? '\n' + u.direccion : ''),
+      u.lat != null ? `Lat. ${u.lat}\nLong. ${u.lon}` : '', ent(u.est), u.sinBienes ? 'No' : 'Sí']), { num: [4], anchos: [12, 30, 28, 13, 9, 8], size: 16 })
+  : tabla(['Código de local (UP)', 'Institución educativa (códigos modulares)', 'Ubicación', 'Coordenadas', 'Estudiantes'],
+    M.ups.map(u => [u.cod, `${u.nombre}\n${u.modulares.join(', ')}`, `${u.cp}, ${u.dist}, ${u.prov}, ${u.dpto}`.toLocaleUpperCase('es-PE') + (u.direccion ? '\n' + u.direccion : ''),
+      u.lat != null ? `Lat. ${u.lat}\nLong. ${u.lon}` : '', ent(u.est)]), { num: [4], anchos: [12, 33, 30, 14, 11], size: 16 });
+const notaUPs = M => M.upPor === 'modular' ? [nota(`UP listadas por código modular: ${ent((M.upsRegistro || []).length)} servicios educativos, incluidos los de locales sin bienes a reponer.`)] : [];
+// Activo de una meta: con kit, «MOBILIARIO DE AULA» en una línea
+const activoMeta = m => m.k === 'kit' ? m.activo : `${m.activo}\n(${m.nombre.toLowerCase()})`;
 
 const tablaMetas = M => tabla(['Tipo de IOARR', 'Acción', 'Activo', 'Tipo de factor productivo', 'Unidad de medida', 'Cantidad', 'Costo de inversión (S/)', 'Inicio', 'Término'], [
-  ...M.F.metas.map(m => ['REPOSICIÓN', 'ADQUISICIÓN', `${m.activo}\n(${m.nombre.toLowerCase()})`, 'MOBILIARIO', m.unidad, { v: ent(m.cantidad) }, { v: NS.format(m.costo) }, M.F.inicio || PEND, M.F.fin || PEND]),
+  ...M.F.metas.map(m => ['REPOSICIÓN', 'ADQUISICIÓN', activoMeta(m), 'MOBILIARIO', m.unidad, { v: ent(m.cantidad) }, { v: NS.format(m.costo) }, M.F.inicio || PEND, M.F.fin || PEND]),
   [{ v: 'EXPEDIENTE TÉCNICO O DOCUMENTO EQUIVALENTE', span: 6, gris: true }, { v: NS.format(M.F.expediente), gris: true }, { v: '', gris: true }, { v: '', gris: true }],
   [{ v: 'SUPERVISIÓN', span: 6, gris: true }, { v: NS.format(M.F.supervision), gris: true }, { v: '', gris: true }, { v: '', gris: true }],
   [{ v: 'LIQUIDACIÓN', span: 6, gris: true }, { v: NS.format(M.F.liquidacion), gris: true }, { v: '', gris: true }, { v: '', gris: true }],
@@ -110,13 +120,13 @@ const tablaMetas = M => tabla(['Tipo de IOARR', 'Acción', 'Activo', 'Tipo de fa
 function cronogramas(M) {
   const C = M.F.cronograma;
   if (!C) return [p('PENDIENTE: fecha prevista de inicio y plazo de ejecución (meses).')];
-  const out = [kv([['Fecha prevista de inicio de ejecución', M.F.inicio], ['Tipo de período', 'Mensual'], ['Número de períodos', String(M.F.meses)]]), espacio()];
+  const out = [kv([['Fecha prevista de inicio de ejecución', M.F.inicio], ['Plazo de ejecución', M.F.plazo], ['Tipo de período', 'Mensual'], ['Número de períodos', String(M.F.meses)]]), espacio()];
   for (const [i, per] of trozos(C.periodos, 6)) {
     const col = xs => xs.slice(i, i + per.length).map(v => NS.format(v));
     const ultimo = i + per.length >= C.periodos.length;
     out.push(tabla(['Acción sobre el activo', ...per.map((x, j) => `${i + j + 1}. ${x}`), ...(ultimo ? ['Total (S/)'] : [])], [
       ...C.activos.map(a => [`ADQUISICIÓN DE MOBILIARIO DE AULA (${a.nombre.toLowerCase()})`, ...col(a.valores), ...(ultimo ? [NS.format(a.total)] : [])]),
-      ['Expediente técnico', ...col(C.expediente.valores), ...(ultimo ? [NS.format(C.expediente.total)] : [])],
+      ['Documento equivalente', ...col(C.expediente.valores), ...(ultimo ? [NS.format(C.expediente.total)] : [])],
       ['Supervisión', ...col(C.supervision.valores), ...(ultimo ? [NS.format(C.supervision.total)] : [])],
       ['Liquidación', ...col(C.liquidacion.valores), ...(ultimo ? [NS.format(C.liquidacion.total)] : [])],
       ...(ultimo ? [[{ v: 'TOTAL', bold: true }, ...per.map(() => ''), { v: NS.format(M.F.total), bold: true }]] : [])
@@ -153,6 +163,9 @@ function mantenimiento(M, conInicio = true) {
   return out;
 }
 
+// Cómo se arma el costo de las metas (estructura referencial de adquisición de bienes)
+const NOTA_ESTRUCTURA = 'Estructura referencial de adquisición de bienes: el costo de cada activo es su costo directo (bienes + transporte) más IGV. El documento equivalente y la supervisión son un porcentaje del costo directo sin IGV y la liquidación es un monto fijo; esos porcentajes dependen de la entidad convocante. Ver la estructura de costos en Excel.';
+
 // ─── Formato 07-C ───────────────────────────────────────────────────────────
 export async function generar07C(M) {
   const c = [];
@@ -164,17 +177,17 @@ export async function generar07C(M) {
     ['Código único de la inversión', M.cui || 'Se asigna al registrar'],
     ['¿Es una inversión en el marco de un Decreto Supremo?', 'No'],
     ['Tipo de registro', M.masiva ? 'Inversión masiva de reposición (varias UP, activo homogéneo: mobiliario de aula)' : 'IOARR de reposición'],
-    ['Monto total y registro', M.registro === 'pendiente' ? 'PENDIENTE: falta la UIT' : `${soles(M.F.total)} = ${NS.format(M.uit.enUit)} UIT (UIT ${M.uit.anio}: ${soles(M.uit.valor)}) → registro ${M.registro === 'completo' ? 'completo, secciones D, E y F' : 'abreviado, sección G'}`]
+    ['Monto de inversión y registro', M.registro === 'pendiente' ? `${soles(M.F.total)} · PENDIENTE: falta la UIT` : `${soles(M.F.total)} = ${NS.format(M.uit.enUit)} UIT (UIT ${M.uit.anio}: ${soles(M.uit.valor)}) → registro ${M.registro === 'completo' ? 'completo, secciones D, E y F' : 'abreviado, sección G'}`]
   ]));
 
   c.push(titulo('A. Alineamiento a una brecha prioritaria'));
   c.push(kv([['Función', M.A.funcion], ['División funcional', M.A.division], ['Grupo funcional', M.A.grupos.join('; ')], ['Sector responsable', M.A.sector],
     ['Servicios públicos con brecha identificada y priorizada', M.A.servicio], ['Tipología de proyecto asociada', M.A.tipologia]]));
   c.push(espacio());
-  c.push(tabla(['Tipo', 'Indicador de brecha', 'Unidad de medida', 'Contribución a la brecha del PMI'], M.A.indicadores.map(x => [x.tipo, x.nombre, x.unidad, { v: ent(x.valor) }]), { num: [3], anchos: [12, 52, 18, 18] }));
+  c.push(tabla(['Tipo', 'Indicador de brecha', 'Unidad de medida', 'Contribución a la brecha del PMI'], M.A.indicadores.map(x => [x.tipo, x.nombre, x.unidad || PEND, { v: x.valor == null ? '' : ent(x.valor) }]), { num: [3], anchos: [12, 52, 18, 18] }));
   c.push(espacio());
   c.push(kv([['Espacio geográfico de la brecha', M.A.espacio]]));
-  if (M.A.propuesto) c.push(nota('Servicio, tipología e indicadores propuestos según los niveles educativos de los locales. Verifícalos contra el PMI de la entidad y el catálogo de indicadores de brecha del sector Educación.'));
+  c.push(nota(`Indicador de brecha y unidad de medida: verifícalos contra el PMI de la entidad.${M.A.propuesto ? ' Servicio, tipología e indicador propuestos según los niveles educativos de los locales.' : ''} La contribución a la brecha queda vacía hasta confirmarla con el PMI.${M.A.sinCodigo.length ? ` Código del grupo funcional de ${M.A.sinCodigo.join(', ').toLowerCase()}: verifícalo contra el PMI.` : ''}`));
 
   c.push(titulo('B. Institucionalidad'));
   c.push(kv([['OPMI', M.B.opmi], ['Unidad Formuladora (UF)', M.B.uf], ['Responsable de la UF', M.B.uf_responsable], ['Unidad Ejecutora de Inversiones (UEI)', M.B.uei], ['Responsable de la UEI', M.B.uei_responsable]]));
@@ -182,7 +195,8 @@ export async function generar07C(M) {
   c.push(titulo('C. Datos generales'));
   c.push(titulo('C.1 Datos de la inversión', 2));
   if (M.masiva) {
-    c.push(kv([['Nombre genérico de la UP', M.niveles.map(x => 'INSTITUCIÓN EDUCATIVA DE NIVEL ' + x).join('; ')], ['Ámbito geográfico', M.ambito], ['Número de UP', ent(M.ups.length)]]));
+    c.push(kv([['Nombre genérico de la UP', M.niveles.map(x => 'INSTITUCIÓN EDUCATIVA DE NIVEL ' + x).join('; ')], ['Ámbito geográfico', M.ambito], ['Número de UP', ent((M.upsRegistro || M.ups).length)],
+      ['Las UP se identifican por', M.upPor === 'modular' ? 'Código modular' : 'Código de local']]));
     c.push(nota('La lista de UP con su código, coordenadas y ubicación va en la sección E.5.'));
   } else {
     const u = M.ups[0];
@@ -190,6 +204,7 @@ export async function generar07C(M) {
       ['Departamento / Provincia / Distrito', `${u.dpto} / ${u.prov} / ${u.dist}`.toLocaleUpperCase('es-PE')], ['Centro poblado', u.cp], ['Dirección', u.direccion],
       ['Coordenadas', u.lat != null ? `Latitud ${u.lat}, Longitud ${u.lon}` : null]]));
   }
+  c.push(kv([['Modalidad de ejecución', M.ejecucion.modalidad], ['Fuente de financiamiento', M.ejecucion.fuente], ['Plazo de ejecución', M.ejecucion.plazo]]));
   c.push(titulo('C.2 Tipo de inversión', 2));
   c.push(tabla(['¿Mayor a 75 UIT?', 'Tipo de IOARR', 'Acción', 'Activo', 'Tipo de factor productivo'], [[M.supera == null ? PEND : M.supera ? 'Sí' : 'No', 'REPOSICIÓN', 'ADQUISICIÓN', 'MOBILIARIO DE AULA', 'MOBILIARIO']]));
   c.push(nota('El activo se elige del catálogo del aplicativo. Según los Lineamientos IOARR (2.5, recuadro 14), las mesas y sillas nuevas se clasifican como «mobiliario de aula».'));
@@ -201,19 +216,19 @@ export async function generar07C(M) {
       c.push(kv([['Activo', 'MOBILIARIO DE AULA'], ['¿El activo está registrado en el inventario de la entidad pública?', siNo(M.D.inventario)], ['Código del inventario', M.D.codigo_inventario]]));
     }
     c.push(titulo('D.2 Responsable del mantenimiento de los activos', 2));
-    c.push(kv([['Unidad Ejecutora Presupuestal que asumirá el financiamiento del mantenimiento', M.D.mantenimiento]]));
+    c.push(kv([['Entidad responsable del mantenimiento', M.D.mantenimiento], ['Código de la entidad (unidad ejecutora presupuestal)', M.D.mantenimiento_codigo]]));
 
     c.push(titulo('E. Descripción específica (IOARR mayores a 75 UIT)'));
     c.push(titulo(M.masiva ? 'E.5 Reposición masiva' : 'E.3 Inversiones de reposición', 2));
     c.push(p(M.masiva ? 'Sustento de la necesidad de la reposición masiva:' : 'Sustento de la necesidad de la reposición:', { bold: true }));
     for (const x of M.E.sustento) c.push(p(x));
     c.push(p('La intervención – activos:', { bold: true }));
-    c.push(tabla(['Activo a adquirir', 'Descripción técnica'], M.E.activos.map(a => [`MOBILIARIO DE AULA (${a.nombre.toLowerCase()})`, a.descripcion || PEND]), { anchos: [30, 70] }));
+    c.push(tabla(['Activo a adquirir', 'Descripción técnica'], M.E.intervencion.map(a => [`MOBILIARIO DE AULA (${a.nombre.toLowerCase()})`, a.descripcion]), { anchos: [30, 70] }));
     if (M.masiva) {
       c.push(espacio());
       c.push(kv([['Nombre genérico de la UP', M.niveles.map(x => 'INSTITUCIÓN EDUCATIVA DE NIVEL ' + x).join('; ')], ['Ámbito geográfico', M.ambito]]));
       c.push(p('Las UP y los activos a reponer:', { bold: true, before: 120 }));
-      c.push(tablaUPs(M), ...notaSinRep(M), ...notaExcluidos(M));
+      c.push(tablaUPs(M), ...notaUPs(M), ...notaSinRep(M), ...notaExcluidos(M));
     } else {
       for (const a of M.E.activos) {
         c.push(p(a.nombre, { bold: true, before: 120 }));
@@ -226,7 +241,7 @@ export async function generar07C(M) {
     c.push(titulo('F. Costos y cronogramas (IOARR mayores a 75 UIT)'));
     c.push(titulo('F.1 Metas físicas, costo y plazo', 2));
     c.push(tablaMetas(M), ...notaCantidades(M));
-    c.push(nota('El costo de cada tipo de bien incluye su parte de transporte, instalación, embalaje, gastos generales, utilidad, IGV, gestión e imprevistos, repartidos en cada local según su costo directo. Ver la estructura de costos en Excel.'));
+    c.push(nota(NOTA_ESTRUCTURA));
     c.push(titulo('F.2 Cronograma de inversión (S/)', 2));
     c.push(...cronogramas(M));
     c.push(nota('Distribución mensual uniforme, propuesta. Ajústala al plan de adquisición y entrega. Adjuntar la estructura referencial de costos.'));
@@ -242,9 +257,10 @@ export async function generar07C(M) {
     c.push(p(M.nombre));
     c.push(titulo('G.2 Registro abreviado', 2));
     c.push(tablaMetas(M), ...notaCantidades(M));
+    c.push(nota(NOTA_ESTRUCTURA));
     c.push(p('Cronograma de ejecución (S/):', { bold: true, before: 120 }));
     c.push(...cronogramas(M));
-    if (M.masiva) { c.push(p('Las UP y los activos a reponer:', { bold: true, before: 120 })); c.push(tablaUPs(M), ...notaSinRep(M), ...notaExcluidos(M)); }
+    if (M.masiva) { c.push(p('Las UP y los activos a reponer:', { bold: true, before: 120 })); c.push(tablaUPs(M), ...notaUPs(M), ...notaSinRep(M), ...notaExcluidos(M)); }
     c.push(titulo('G.3 Costo de mantenimiento (S/)', 2));
     c.push(...mantenimiento(M, false));
   }
@@ -263,7 +279,9 @@ export async function generarMemoria(M) {
     ['Tipo de inversión', M.masiva ? 'IOARR de reposición, inversión masiva para varias UP' : 'IOARR de reposición'],
     ['Unidad Formuladora', M.B.uf], ['Unidad Ejecutora de Inversiones', M.B.uei], ['Ámbito', `${M.ambito.toLowerCase()} · ${M.A.espacio}`],
     ['Locales educativos (UP)', ent(M.ups.length)], ['Estudiantes beneficiarios', ent(M.est)], ['Monto de inversión', soles(M.F.total)],
-    ['Plazo de ejecución', M.F.meses ? `${M.F.meses} meses (${M.F.inicio} al ${M.F.fin})` : null]]));
+    ['Escenario de cantidad', M.escenarioTexto.replace(/^Escenario de cantidad: /, '')],
+    ['Modalidad de ejecución', M.ejecucion.modalidad], ['Fuente de financiamiento', M.ejecucion.fuente],
+    ['Plazo de ejecución', M.F.plazo ? `${M.F.plazo}${M.F.inicio ? ` (${M.F.inicio} al ${M.F.fin})` : ''}` : null]]));
 
   c.push(titulo('2. Antecedentes'));
   if (M.memoria.antecedentes) for (const x of M.memoria.antecedentes.split(/\n+/)) c.push(p(x));
@@ -274,10 +292,10 @@ export async function generarMemoria(M) {
 
   c.push(titulo('4. Ubicación y unidades productoras'));
   c.push(p(`La intervención comprende ${M.ups.length === 1 ? 'un local educativo' : M.ups.length + ' locales educativos'} de nivel ${M.niveles.join(', ').toLowerCase()} de la región ${M.region}${M.ugels.length ? ', bajo ' + (M.ugels.length === 1 ? 'la ' + M.ugels[0] : 'las ' + M.ugels.join(', ')) : ''}.`));
-  c.push(tablaUPs(M), ...notaSinRep(M), ...notaExcluidos(M));
+  c.push(tablaUPs(M), ...notaUPs(M), ...notaSinRep(M), ...notaExcluidos(M));
 
   c.push(titulo('5. Diagnóstico de la situación actual'));
-  c.push(p(`${M.ups.length === 1 ? 'El local atiende' : 'Los locales atienden'} a ${ent(M.est)} estudiantes en ${ent(M.aulas)} aulas. Estado del mobiliario por tipo de bien${M.ups.some(u => u.verificado) ? ' (con el inventario verificado en campo donde lo hay)' : ''}. Se repone solo el estado malo; el faltante es brecha de dotación y no se repone:`));
+  c.push(p(`${M.ups.length === 1 ? 'El local atiende' : 'Los locales atienden'} a ${ent(M.est)} estudiantes en ${ent(M.aulas)} aulas. Estado del mobiliario por tipo de bien${M.ups.some(u => u.verificado) ? ' (con el inventario verificado en campo donde lo hay)' : ''}. ${{ malo: 'Se repone solo el estado malo', malo_regular: 'Se repone el estado malo y el regular (cota superior)', capacidad: 'Las cantidades a adquirir se calculan por capacidad, no por el estado' }[M.escenario] || 'Se repone solo el estado malo'}; el faltante es brecha de dotación y no se repone:`));
   c.push(tabla(['Tipo de bien', 'Unidad', 'Existente', 'Bueno', 'Regular', 'Malo', 'A reponer', 'Requerido', 'Faltante (brecha de dotación, no reposición)'],
     M.partidas.filter(x => !x.excluido).map(x => [x.n, x.u, ...[x.ex, x.b, x.r, x.m, x.rep, x.req, x.fal].map(v => ({ v: ent(v) }))]), { num: [2, 3, 4, 5, 6, 7, 8], size: 16 }));
   const verif = M.ups.filter(u => u.verificado);
@@ -306,36 +324,32 @@ export async function generarMemoria(M) {
   }
 
   c.push(titulo('7. Descripción de la intervención'));
-  c.push(p(`Adquisición, transporte, instalación y entrega de ${M.F.metas.map(m => `${ent(m.cantidad)} ${m.plural}`).join(', ')}, para reemplazar el mobiliario en mal estado. El mobiliario reemplazado se dará de baja conforme a los procedimientos de control patrimonial de la entidad.`));
+  c.push(p(`Adquisición, transporte y entrega de ${M.F.metas.map(m => `${ent(m.cantidad)} ${m.plural}`).join(', ')}${M.escenario === 'capacidad' ? '' : ', para reemplazar el mobiliario ' + (M.escenario === 'malo_regular' ? 'en estado malo y regular' : 'en mal estado')}. El mobiliario reemplazado se dará de baja conforme a los procedimientos de control patrimonial de la entidad.`));
   c.push(titulo('7.1 Especificaciones técnicas', 2));
-  c.push(tabla(['Tipo de bien', 'Descripción técnica'], M.E.activos.map(a => [a.nombre, a.descripcion || PEND]), { anchos: [28, 72] }));
+  c.push(tabla(['Bien', 'Descripción técnica'], M.E.intervencion.map(a => [a.nombre, a.descripcion]), { anchos: [28, 72] }));
   c.push(titulo('7.2 Metas por local', 2));
+  const cantLocal = (u, m) => m.k === 'kit' ? u.kits : u.rep[M.partidas.findIndex(x => x.k === m.k)];
   c.push(tabla(['Código de local', 'Institución educativa', ...M.F.metas.map(m => m.nombre), 'Total (S/)'],
-    M.ups.map(u => [u.cod, u.nombre, ...M.F.metas.map(m => ({ v: ent(u.rep[M.partidas.findIndex(x => x.k === m.k)]) })), { v: NS.format(u.total) }]),
+    M.ups.map(u => [u.cod, u.nombre, ...M.F.metas.map(m => ({ v: ent(cantLocal(u, m)) })), { v: NS.format(u.total) }]),
     { num: Array.from({ length: M.F.metas.length + 1 }, (_, j) => j + 2), size: 15 }));
 
   c.push(titulo('8. Presupuesto'));
+  const tp = M.estructura?.params?.transporte_pieza ?? 0;
   c.push(tabla(['Partida', 'Unidad', 'Metrado', 'Precio unitario sin IGV (S/)', 'Parcial (S/)'],
-    // Una línea por talla en mesa y silla (cada talla con su precio)
+    // Kits por talla (con kit) o mesa y silla por talla, y los demás; después el transporte por pieza
     [...(M.lineas || M.partidas).filter(x => x.rep > 0).map(x => [x.n, x.u, { v: ent(x.rep) }, { v: x.pu == null ? PEND : NS.format(x.pu) }, { v: NS.format(x.parcial) }]),
+      ['Transporte', 'piezas', { v: ent(T.piezas) }, { v: NS.format(tp) }, { v: NS.format(T.transporte) }],
       [{ v: 'Costo directo', span: 4, bold: true }, { v: NS.format(T.cd), bold: true }]], { num: [2, 3, 4] }));
   c.push(espacio());
-  const R = Object.fromEntries(M.rubros.map(r => [r.clave, r]));
-  const lin = (t, v, bold) => [{ v: t, bold }, { v: NS.format(v), bold }];
-  c.push(tabla(['Estructura de costos', 'Monto (S/)'], [
-    lin('Costo directo', T.cd, true), ...['transporte', 'instalacion', 'embalaje'].map(k => lin('   ' + R[k].nombre, R[k].monto)),
-    lin('Subtotal', T.subtotal, true), ...['gg', 'utilidad'].map(k => lin('   ' + R[k].nombre, R[k].monto)),
-    lin('Subtotal + gastos generales + utilidad', T.neto, true), lin('   IGV', R.igv.monto),
-    lin('Costo de los bienes (con IGV)', T.bienes, true), ...['supervision', 'expediente', 'gestion', 'imprevistos'].map(k => lin('   ' + R[k].nombre, R[k].monto)),
-    lin('TOTAL DE INVERSIÓN', T.total, true)
-  ], { num: [1], anchos: [70, 30] }));
+  c.push(tabla(['Estructura de costos', 'Monto (S/)'], (M.estructura?.filas || []).map(f => [{ v: (f.fuerte || f.total ? '' : '   ') + f.nombre, bold: f.fuerte || f.total }, { v: NS.format(f.monto), bold: f.fuerte || f.total }]), { num: [1], anchos: [70, 30] }));
+  c.push(nota(NOTA_ESTRUCTURA));
   if (M.faltante.cantidad > 0) c.push(nota(`No se incluyen ${ent(M.faltante.cantidad)} bienes faltantes, valorizados como referencia en ${soles(M.faltante.valor)}: corresponde evaluarlos como ampliación marginal (Lineamientos IOARR 2.4.C.c).`));
 
   c.push(titulo('9. Cronograma de ejecución'));
   c.push(...cronogramas(M));
 
   c.push(titulo('10. Operación y mantenimiento'));
-  c.push(p(`El mantenimiento del mobiliario nuevo estará a cargo de ${M.D.mantenimiento || 'PENDIENTE: unidad ejecutora responsable del mantenimiento'}.`));
+  c.push(p(`El mantenimiento del mobiliario nuevo estará a cargo de ${M.D.mantenimiento ? M.D.mantenimiento + (M.D.mantenimiento_codigo ? ` (código ${M.D.mantenimiento_codigo})` : ' (PENDIENTE: código)') : 'PENDIENTE: entidad responsable del mantenimiento (nombre y código)'}.`));
   c.push(...mantenimiento(M));
 
   c.push(titulo('11. Anexos'));
@@ -346,7 +360,7 @@ export async function generarMemoria(M) {
     c.push(p('Sustento de la verificación en campo:', { bold: true, before: 120 }));
     c.push(tabla(['Código de local', 'Tipo', 'Archivo', 'Descripción'], archivos.map(a => [a.cod, { acta: 'Acta de verificación', foto: 'Foto', inventario_patrimonial: 'Inventario patrimonial', baja: 'Baja', otro: 'Otro' }[a.tipo] || a.tipo, a.nombre_archivo, a.descripcion || '']), { anchos: [14, 20, 36, 30], size: 15 }));
   } else c.push(vinieta('PENDIENTE: acta de verificación, fotos, inventario patrimonial y sustento de baja de cada local.'));
-  c.push(nota('Fuentes: Padrón de ESCALE y Censo Educativo 2025 (Minedu), datos declarados por cada colegio; Lineamientos IOARR del MEF (9.ª versión, junio 2025). Los precios, porcentajes y la UIT los cargó el equipo.'));
+  c.push(nota('Fuentes: Padrón de ESCALE y Censo Educativo 2025 (Minedu), datos declarados por cada colegio; Lineamientos IOARR del MEF (9.ª versión, junio 2025). Los precios, los porcentajes y la UIT se revisan en la estructura de costos; los porcentajes dependen de la entidad convocante.'));
   return Packer.toBuffer(documento(M, 'Memoria descriptiva', c));
 }
 
@@ -356,7 +370,7 @@ export async function generarVerificacion(M) {
   const ESTADO = { ok: 'Listo', pendiente: PEND, no: 'No cumple' };
   c.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 60 }, children: [run('LISTA DE VERIFICACIÓN DEL EXPEDIENTE IOARR', { bold: true, size: 28 })] }));
   c.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 200 }, children: [run(M.nombre, { bold: true, size: 20 })] }));
-  c.push(kv([['Proyecto', M.proyecto], ['Tipo', M.masiva ? `Inversión masiva de reposición · ${M.ups.length} UP` : 'IOARR de reposición · 1 UP'],
+  c.push(kv([['Proyecto', M.proyecto], ['Tipo', M.masiva ? `Inversión masiva de reposición · ${(M.upsRegistro || M.ups).length} UP` : 'IOARR de reposición · 1 UP'], ['Escenario de cantidad', M.escenarioTexto.replace(/^Escenario de cantidad: /, '')],
     ['Registro', M.registro === 'pendiente' ? null : M.registro === 'completo' ? 'Completo (más de 75 UIT)' : 'Abreviado (hasta 75 UIT)'], ['Monto', soles(M.F.total)],
     ['Avance', `${V.hechos} de ${V.total} puntos listos${V.bloqueos ? ` · ${V.bloqueos} no cumple${V.bloqueos === 1 ? '' : 'n'}` : ''}`], ['Fecha', M.fecha]]));
   for (const sec of V.secciones) {

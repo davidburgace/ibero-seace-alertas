@@ -19,8 +19,8 @@ const LISTA = filtrar(D, C, { ...FILTRO_VACIO(), q: 'mariscal' });
 const ICHUNA = '398420', iI = D.locs.findIndex(l => l[0] === ICHUNA);   // Inicial, Primaria y Secundaria
 const cerca = (a, b, msg) => assert.ok(Math.abs(a - b) < 0.011, `${msg}: ${a} ≠ ${b}`);
 const BASE = {
-  precios: { mesa: 180, silla: 90, esc: 400, sdoc: 120, arm: 650 }, factores: [], uit: { anio: 2026, valor: 5500 },
-  rubros: [{ clave: 'transporte', valor: 5 }, { clave: 'gg', valor: 10 }, { clave: 'igv', valor: 18 }, { clave: 'expediente', modo: 'monto', valor: 9000 }, { clave: 'supervision', modo: 'monto', valor: 3000, base: 'cd' }]
+  precios: { mesa: 180, silla: 90, esc: 400, sdoc: 120, arm: 650 }, uit: { anio: 2026, valor: 5500 },
+  estructura: { transporte_pieza: 10, igv: 18, doc_pct: 3, sup_pct: 5, liquidacion: 9000 }
 };
 
 test('por defecto el proyecto es una IOARR por nivel', () => {
@@ -44,20 +44,16 @@ test('caso de control por nivel: Inicial, Primaria y Secundaria suman lo mismo q
   assert.deepEqual(totalesPorNivel(D, C, LISTA).map(o => [o.nivel, o.n, o.est, o.aul, o.rep, o.fal]), G.map((g, j) => [g.nivel, g.list.length, T[j].est, T[j].aul, T[j].rep, T[j].fal]));
 });
 
-test('costos por nivel: cada IOARR con su total; los montos fijos se reparten y la suma es el total único', () => {
+test('costos por nivel: cada IOARR con su total; la liquidación se reparte y la suma es el total único', () => {
   const G = porNivel(D, DEF, LISTA);
   const U = costear({ D, C, list: LISTA, ...BASE });
   const N = costear({ ...BASE, grupos: G.map(g => ({ clave: g.nivel, D: g.D, C: g.C, list: g.list })) });
   cerca(N.totales.total, U.totales.total, 'suma de las IOARR = IOARR única');
   const tot = ['I', 'P', 'S'].map(n => N.grupos[n].totales.total);
   cerca(tot.reduce((a, b) => a + b, 0), U.totales.total, 'suma de los grupos');
-  for (const clave of ['expediente', 'supervision']) {
-    const partes = ['I', 'P', 'S'].map(n => N.grupos[n].rubros.find(r => r.clave === clave));
-    cerca(partes.reduce((a, r) => a + r.valor, 0), clave === 'expediente' ? 9000 : 3000, `${clave}: las partes suman el monto fijo`);
-    assert.ok(partes.every(r => r.valor_proyecto === (clave === 'expediente' ? 9000 : 3000)));
-  }
-  // Rubros en % no cambian de valor
-  assert.equal(N.grupos.P.rubros.find(r => r.clave === 'igv').valor, 18);
+  // La liquidación (monto fijo) se reparte según el costo directo; los % no cambian
+  cerca(['I', 'P', 'S'].reduce((a, n) => a + N.grupos[n].totales.liq, 0), 9000, 'las partes suman la liquidación');
+  assert.equal(N.grupos.P.estructura.params.igv, 18);
   // Cada IOARR evalúa su propio límite de 75 UIT
   assert.ok(['I', 'P', 'S'].every(n => N.grupos[n].uit.limite === 75 * 5500));
   assert.deepEqual(['I', 'P', 'S'].map(n => N.grupos[n].totales.rep), [17, 101, 80]);

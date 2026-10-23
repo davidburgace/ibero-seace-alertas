@@ -56,7 +56,7 @@ test('repartir: enteros que suman el total, por mayor resto', () => {
 
 test('multigrado se reparte en partes iguales entre las tallas de su nivel', () => {
   const D = mini(), C = calc(D, DEF);
-  const R = costear({ D, C, list: [0], precios: PRECIOS, rubros: [], factores: [], uit: null });
+  const R = costear({ D, C, list: [0], precios: PRECIOS, estructura: { transporte_pieza: 0 }, uit: null });
   const rep = k => R.lineas.find(x => x.k === k)?.rep ?? 0;
   // Sillas: 4 de 3.° + 1 de la multigrado en p34; 1 en p12 y p56; 5 en s5
   assert.deepEqual(['silla_p12', 'silla_p34', 'silla_p56', 'silla_s12', 'silla_s34', 'silla_s5'].map(rep), [1, 5, 1, 0, 0, 5]);
@@ -70,7 +70,7 @@ test('multigrado se reparte en partes iguales entre las tallas de su nivel', () 
 
 test('cada talla con su precio; sin precio propio usa el de su tipo', () => {
   const D = mini(), C = calc(D, DEF);
-  const R = costear({ D, C, list: [0], precios: { ...PRECIOS, silla_s5: 70 }, rubros: [], factores: [], uit: null });
+  const R = costear({ D, C, list: [0], precios: { ...PRECIOS, silla_s5: 70 }, estructura: { transporte_pieza: 0 }, uit: null });
   const l = k => R.lineas.find(x => x.k === k);
   assert.equal(l('silla_s5').pu, 70); assert.equal(l('silla_s5').pu_propio, true);
   assert.equal(l('silla_p34').pu, 50); assert.equal(l('silla_p34').pu_propio, false);
@@ -82,7 +82,7 @@ test('cada talla con su precio; sin precio propio usa el de su tipo', () => {
   assert.equal(R.totales.cd, R.locales[0].cd);
 
   // Solo precios por talla, sin precio general: avisa las tallas que faltan
-  const R2 = costear({ D, C, list: [0], precios: { mesa: 100, esc: 300, arm: 400, silla_p34: 60 }, rubros: [], factores: [], uit: null });
+  const R2 = costear({ D, C, list: [0], precios: { mesa: 100, esc: 300, arm: 400, silla_p34: 60 }, estructura: { transporte_pieza: 0 }, uit: null });
   const aviso = R2.avisos.find(a => a.tipo === 'precio').texto;
   assert.match(aviso, /Silla del estudiante – Primaria 1\.° y 2\.°/);
   assert.match(aviso, /Silla del estudiante – Secundaria 5\.°/);
@@ -98,11 +98,11 @@ test('muebles de la IOARR: los que no entran quedan en 0 en el cálculo, el cost
   const D = moquegua(), P = limpiarParams({ muebles: ['mesa', 'silla'] });
   const Ct = calc(D, DEF), C = calc(D, P);
   const list = filtrar(D, Ct, { ...FILTRO_VACIO(), q: 'mariscal' });
-  const Rt = costear({ D, C: Ct, list, precios: PRECIOS, rubros: [], factores: [], uit: null });
+  const Rt = costear({ D, C: Ct, list, precios: PRECIOS, estructura: { transporte_pieza: 0 }, uit: null });
   // Inventario verificado con armarios: no vuelve a meterlos
   const cod = D.locs[list[0]][0];
   const inventario = { [cod]: { bienes: { arm: { b: 0, r: 0, m: 9 } }, fecha_visita: '2026-10-01', observacion: 'visita' } };
-  const R = costear({ D, C, list, precios: PRECIOS, rubros: [], factores: [], uit: null, inventario });
+  const R = costear({ D, C, list, precios: PRECIOS, estructura: { transporte_pieza: 0 }, uit: null, inventario });
   for (const k of ['esc', 'sdoc', 'arm']) {
     const p = R.partidas.find(x => x.k === k);
     assert.equal(p.excluido, true); assert.equal(p.rep + p.fal + p.ex + p.parcial, 0);
@@ -116,7 +116,7 @@ test('muebles de la IOARR: los que no entran quedan en 0 en el cálculo, el cost
   await wb.xlsx.load(await generarExcelCostos(R, { proyecto: 'Prueba', region: 'Moquegua', fecha: '2026-10-23', precios: {} }));
   const cab = wb.getWorksheet('Metrado y costos por local').getRow(1).values.filter(Boolean);
   assert.ok(!cab.some(v => /Escritorio|Armario|Silla docente/.test(v)));
-  assert.ok(cab.some(v => /Silla del estudiante – Secundaria 5\.° – reposición/.test(v)));
+  assert.ok(cab.some(v => /Silla del estudiante – Secundaria 5\.° – cantidad/.test(v)));
 
   // La ficha de verificación solo lista los muebles que entran
   assert.deepEqual(modeloFicha(D, C, list[0]).bienes.map(b => b.k), ['mesa', 'silla']);
@@ -126,7 +126,7 @@ test('muebles de la IOARR: los que no entran quedan en 0 en el cálculo, el cost
 test('Moquegua «mariscal»: el reparto por talla no cambia los totales', () => {
   const D = moquegua(), C = calc(D, DEF);
   const list = filtrar(D, C, { ...FILTRO_VACIO(), q: 'mariscal' });
-  const R = costear({ D, C, list, precios: PRECIOS, rubros: [], factores: [], uit: null });
+  const R = costear({ D, C, list, precios: PRECIOS, estructura: { transporte_pieza: 0 }, uit: null });
   assert.equal(R.totales.rep, 198);
   for (const p of R.partidas) {
     const ls = R.lineas.filter(x => x.tipo === p.k);

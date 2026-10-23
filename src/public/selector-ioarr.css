@@ -473,3 +473,15 @@ table.tabla{ width:100%; border-collapse:collapse; font-size:13px; }
 .rev-firmas{ display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:10px; margin:6px 0; }
 .rev-firma{ display:flex; flex-direction:column; gap:3px; border:1px solid var(--border); border-radius:10px; padding:8px 10px; font-size:13px; }
 .rev-firma img{ max-width:100%; max-height:80px; object-fit:contain; align-self:flex-start; background:#fff; }
+/* Escenarios de cantidad, kit y oferta interna */
+.esc-opciones{ display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:8px; }
+.esc-op{ align-items:flex-start; border:1px solid var(--border2); border-radius:10px; padding:8px 10px; }
+.esc-op.esc-cap{ border-style:dashed; }
+.tabla-esc th.activa, .tabla-esc td.activa{ background:var(--accent-soft); }
+.tabla-esc tr.fuerte td{ font-weight:600; }
+.precio-in{ max-width:120px; text-align:right; }
+.kit-dist{ margin-top:6px; }
+.subtabs .tab-interna{ border-style:dashed; }
+.aviso.interno{ font-weight:500; }
+.kpi.kpi-alerta .v{ color:var(--malo); }
+tr.fila-alerta td{ background:rgba(214,69,58,0.06); }

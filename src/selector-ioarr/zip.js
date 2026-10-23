@@ -55,8 +55,9 @@ export async function escribirZip(salida, { base, piezas, archivos, nombreLocal 
     return [
       ...(varias ? [`IOARR ${(M.nombreIoarr || '').toUpperCase()}`] : []), M.nombre,
       M.cui ? `CUI: ${M.cui}` : 'CUI: se asigna al registrar',
-      `Tipo: ${M.masiva ? `inversión masiva de reposición, ${M.ups.length} UP` : 'IOARR de reposición, 1 UP'}`,
-      `Monto total: ${S2(M.F.total)} · Registro: ${M.registro}`,
+      `Tipo: ${M.masiva ? `inversión masiva de reposición, ${(M.upsRegistro || M.ups).length} UP` : 'IOARR de reposición, 1 UP'}`,
+      M.escenarioTexto || '',
+      `Monto de inversión: ${S2(M.F.total)} · Registro: ${M.registro}`,
       `Verificación: ${V.hechos} de ${V.total} puntos listos${V.bloqueos ? ` · ${V.bloqueos} no cumple(n)` : ''}`,
       ...(M.faltan.length ? ['DATOS PENDIENTES', ...M.faltan.map(x => '- ' + x)] : []), ''
     ];
