@@ -7,8 +7,9 @@
 // para que el evaluador pueda auditar cada cifra:
 //   - Parámetros: precios unitarios, rubros (modo, valor, base) y UIT. Si se
 //     cambia un precio, un % o la UIT ahí, todo el libro se recalcula.
-//   - Metrado y costos por local: una fila por local con la reposición por tipo
-//     de bien, el costo directo y cada rubro; la última fila suma.
+//   - Metrado y costos por local: una fila por local con la reposición por línea
+//     (mesa y silla por talla; los demás por tipo), el costo directo y cada rubro;
+//     la última fila suma.
 //   - Partidas, Resumen y Por distrito leen esas sumas.
 // El metrado (cantidades) va como valor: sale del cálculo por aula del Selector
 // (su Excel trae la hoja Aulas con esas fórmulas).
@@ -57,6 +58,8 @@ export async function generarExcelCostos(R, meta) {
   const wsI = verificados.length ? wb.addWorksheet('Inventario verificado', { views: [{ state: 'frozen', ySplit: 3 }] }) : null;
 
   const T = R.totales, L = R.locales, n = L.length;
+  // Líneas de costo: solo los muebles que entran; mesa y silla, por talla
+  const LS = R.lineas, nLS = LS.length;
 
   // ── Parámetros ──────────────────────────────────────────────────────────────
   const celPU = [], celRub = {};
@@ -67,17 +70,30 @@ export async function generarExcelCostos(R, meta) {
     ws.getCell('A1').value = 'Parámetros de costos'; ws.getCell('A1').font = { bold: true, size: 14 };
     ws.getCell('A2').value = 'Cambia un valor de la columna C y el libro se recalcula. Las celdas amarillas están sin cargar.';
     ws.getCell('A2').font = { italic: true, color: { argb: 'FF5C6270' } };
-    ws.getRow(4).values = ['Tipo de bien', 'Unidad', 'Precio unitario sin IGV (S/)', 'Descripción', 'Fuente', 'Fecha', 'Observación'];
+    ws.getRow(4).values = ['Bien (talla)', 'Unidad', 'Precio unitario sin IGV (S/)', 'Descripción', 'Fuente', 'Fecha', 'Observación'];
     cabecera(ws, 4, 7);
-    ITEMS.forEach((x, t) => {
-      const fila = 5 + t, p = R.partidas[t], m = meta.precios?.[x.k] || {};
-      ws.getRow(fila).values = [x.n, x.u, p.pu ?? 0, m.descripcion || '', FUENTES_PRECIO[m.fuente] || m.fuente || '', m.fecha || '', m.observacion || ''];
+    // Mesa y silla: primero el precio general del tipo y debajo cada talla. Una talla sin
+    // precio propio apunta al general con una fórmula: si se cambia el general, cambia la talla.
+    let fila = 5;
+    const filaGeneral = {};
+    const precioFila = (nombre, u, pu, m, valor, obsExtra) => {
+      ws.getRow(fila).values = [nombre, u, valor, m.descripcion || '', FUENTES_PRECIO[m.fuente] || m.fuente || '', m.fecha || '', [obsExtra, m.observacion].filter(Boolean).join(' · ')];
       const c = ws.getCell(fila, 3); c.numFmt = SOLES;
-      if (p.pu == null) { resaltar(c, AMARILLO); ws.getCell(fila, 7).value = 'PENDIENTE: sin precio cargado'; }
-      celPU.push(`${HP}!$C$${fila}`);
+      if (pu == null) { resaltar(c, AMARILLO); ws.getCell(fila, 7).value = 'PENDIENTE: sin precio cargado'; }
+      return fila++;
+    };
+    LS.forEach(x => {
+      if (x.talla && filaGeneral[x.tipo] == null) {
+        const p = R.partidas.find(y => y.k === x.tipo), pu = p.pu_general ?? null;
+        filaGeneral[x.tipo] = precioFila(`${p.n} – precio general`, x.u, pu, meta.precios?.[x.tipo] || {}, pu ?? 0, 'Vale para las tallas sin precio propio');
+      }
+      const general = x.talla && !x.pu_propio;
+      const r = precioFila(x.n, x.u, x.pu, meta.precios?.[general ? x.tipo : x.k] || {},
+        general ? f(`C${filaGeneral[x.tipo]}`, x.pu ?? 0) : x.pu ?? 0, general ? 'Usa el precio general' : '');
+      celPU.push(`${HP}!$C$${r}`);
     });
 
-    const f0 = 12;
+    const f0 = fila + 2;
     ws.getRow(f0).values = ['Rubro', 'Modo', 'Valor', 'Base de cálculo', 'Factor por zona'];
     cabecera(ws, f0, 5);
     R.rubros.forEach((x, j) => {
@@ -110,8 +126,8 @@ export async function generarExcelCostos(R, meta) {
   col('area', 'Área', 9); col('est', 'Estudiantes (padrón)', 12); col('aul', 'Aulas en uso (censo)', 11);
   col('inv', 'Inventario', 16);
   col('zf', 'Factor de zona: flete', 11); col('zi', 'Factor de zona: instalación', 12);
-  ITEMS.forEach((x, t) => col('q' + t, `${x.n} – reposición (${x.u})`, 13));
-  ITEMS.forEach((x, t) => col('cd' + t, `${x.n} – costo directo (S/)`, 15));
+  LS.forEach((x, j) => col('q' + j, `${x.n} – reposición (${x.u})`, 13));
+  LS.forEach((x, j) => col('cd' + j, `${x.n} – costo directo (S/)`, 15));
   col('cd', 'Costo directo (S/)', 16);
   const rub = k => R.rubros.find(r => r.clave === k);
   for (const k of ['transporte', 'instalacion', 'embalaje']) col(k, rub(k).nombre + ' (S/)', 15);
@@ -122,7 +138,7 @@ export async function generarExcelCostos(R, meta) {
   col('bienes', 'Costo de los bienes con IGV (S/)', 17);
   for (const k of ['supervision', 'expediente', 'gestion', 'imprevistos']) col(k, rub(k).nombre + ' (S/)', 15);
   col('total', 'TOTAL INVERSIÓN (S/)', 18);
-  ITEMS.forEach((x, t) => col('fq' + t, `${x.n} – ${FALTANTE_MIN} (${x.u}), no incluido`, 15));
+  LS.forEach((x, j) => col('fq' + j, `${x.n} – ${FALTANTE_MIN} (${x.u}), no incluido`, 15));
   col('fv', 'Faltante valorizado, referencial (S/)', 17);
 
   const ws = wsM;
@@ -146,8 +162,8 @@ export async function generarExcelCostos(R, meta) {
     v[C.cod] = l.cod; v[C.nom] = l.nom; v[C.ubigeo] = l.ubigeo; v[C.prov] = l.prov; v[C.dist] = l.dist;
     v[C.inv] = l.verificado ? `Verificado en campo ${fechaPe(l.verificado.fecha_visita)}` : 'Censo Educativo';
     v[C.area] = l.rural ? 'Rural' : 'Urbana'; v[C.est] = l.est; v[C.aul] = l.aul; v[C.zf] = l.zona.flete; v[C.zi] = l.zona.instalacion;
-    ITEMS.forEach((_, t) => { v[C['q' + t]] = l.rep[t]; v[C['cd' + t]] = f(`${A('q' + t, r)}*${celPU[t]}`, l.cdTipo[t]); });
-    v[C.cd] = f(`SUM(${A('cd0', r)}:${A('cd4', r)})`, l.cd);
+    LS.forEach((x, j) => { v[C['q' + j]] = l.lin.rep[x.ix]; v[C['cd' + j]] = f(`${A('q' + j, r)}*${celPU[j]}`, l.cdLinea[x.ix]); });
+    v[C.cd] = f(nLS ? `SUM(${A('cd0', r)}:${A('cd' + (nLS - 1), r)})` : '0', l.cd);
     v[C.transporte] = f(fRubro('transporte', r, 'zf'), l.r.transporte);
     v[C.instalacion] = f(fRubro('instalacion', r, 'zi'), l.r.instalacion);
     v[C.embalaje] = f(fRubro('embalaje', r), l.r.embalaje);
@@ -159,8 +175,8 @@ export async function generarExcelCostos(R, meta) {
     v[C.bienes] = f(`${A('neto', r)}+${A('igv', r)}`, l.bienes);
     for (const k of ['supervision', 'expediente', 'gestion', 'imprevistos']) v[C[k]] = f(fRubro(k, r), l.r[k]);
     v[C.total] = f(`${A('bienes', r)}+${A('supervision', r)}+${A('expediente', r)}+${A('gestion', r)}+${A('imprevistos', r)}`, l.total);
-    ITEMS.forEach((_, t) => { v[C['fq' + t]] = l.fal[t]; });
-    v[C.fv] = f(ITEMS.map((_, t) => `${A('fq' + t, r)}*${celPU[t]}`).join('+'), l.falValor);
+    LS.forEach((x, j) => { v[C['fq' + j]] = l.lin.fal[x.ix]; });
+    v[C.fv] = f(nLS ? LS.map((_, j) => `${A('fq' + j, r)}*${celPU[j]}`).join('+') : '0', l.falValor);
     ws.getRow(r).values = v;
   });
 
@@ -171,7 +187,7 @@ export async function generarExcelCostos(R, meta) {
     const resultado = {
       est: T.est, aul: T.aul, cd: T.cd, subtotal: T.subtotal, neto: T.neto, bienes: T.bienes, total: T.total, fv: T.falValor,
       ...Object.fromEntries(R.rubros.map(x => [x.clave, x.monto])),
-      ...Object.fromEntries(ITEMS.flatMap((_, t) => [['q' + t, R.partidas[t].rep], ['cd' + t, R.partidas[t].parcial], ['fq' + t, R.partidas[t].fal]]))
+      ...Object.fromEntries(LS.flatMap((x, j) => [['q' + j, x.rep], ['cd' + j, x.parcial], ['fq' + j, x.fal]]))
     };
     for (const k of sumables) v[C[k]] = f(`SUM(${A(k, ini)}:${A(k, fin)})`, resultado[k]);
     const row = ws.getRow(TOT); row.values = v; row.font = { bold: true };
@@ -180,9 +196,9 @@ export async function generarExcelCostos(R, meta) {
   // Formatos por columna
   for (let r = ini; r <= TOT; r++) {
     const row = ws.getRow(r);
-    for (const k of ['est', 'aul', ...ITEMS.flatMap((_, t) => ['q' + t, 'fq' + t])]) row.getCell(C[k]).numFmt = ENTERO;
+    for (const k of ['est', 'aul', ...LS.flatMap((_, j) => ['q' + j, 'fq' + j])]) row.getCell(C[k]).numFmt = ENTERO;
     for (const k of ['zf', 'zi']) row.getCell(C[k]).numFmt = PCT;
-    for (let c = C.cd0; c <= C.total; c++) row.getCell(c).numFmt = SOLES;
+    for (let c = C.cd0 ?? C.cd; c <= C.total; c++) row.getCell(c).numFmt = SOLES;
     row.getCell(C.fv).numFmt = SOLES;
     row.getCell(C.total).font = { bold: true };
   }
@@ -196,14 +212,14 @@ export async function generarExcelCostos(R, meta) {
     ws.columns = [32, 12, 16, 20, 20, 4, 16, 22].map(width => ({ width }));
     ws.getRow(1).values = ['Partida', 'Unidad', 'Metrado (reposición)', 'Precio unitario sin IGV (S/)', 'Parcial (S/)', '', FALTANTE + ', no incluido', 'Faltante valorizado, referencial (S/)'];
     cabecera(ws, 1, 8);
-    R.partidas.forEach((p, t) => {
+    LS.forEach((p, t) => {
       const r = 2 + t;
       ws.getRow(r).values = [p.n, p.u, f(MT('q' + t), p.rep), f(celPU[t], p.pu ?? 0), f(`C${r}*D${r}`, p.parcial), '', f(MT('fq' + t), p.fal), f(`G${r}*D${r}`, p.falValor)];
       for (const c of [3, 7]) ws.getCell(r, c).numFmt = ENTERO;
       for (const c of [4, 5, 8]) ws.getCell(r, c).numFmt = SOLES;
       if (p.pu == null) resaltar(ws.getCell(r, 4), AMARILLO);
     });
-    const r = 2 + ITEMS.length;
+    const r = 2 + nLS;
     ws.getRow(r).values = ['Costo directo', '', f(`SUM(C2:C${r - 1})`, T.rep), '', f(`SUM(E2:E${r - 1})`, T.cd), '', f(`SUM(G2:G${r - 1})`, T.fal), f(`SUM(H2:H${r - 1})`, T.falValor)];
     ws.getRow(r).font = { bold: true };
     for (const c of [3, 7]) ws.getCell(r, c).numFmt = ENTERO;
@@ -229,7 +245,7 @@ export async function generarExcelCostos(R, meta) {
     add(['Fecha de exportación', meta.fecha]);
     const filaLoc = add(['Locales (unidades productoras)', f(`COUNTA(${HM}!$A$${ini}:$A$${fin})`, T.locales)], r => { r.getCell(2).numFmt = ENTERO; }).number;
     const filaEst = add(['Estudiantes (padrón)', f(MT('est'), T.est)], r => { r.getCell(2).numFmt = ENTERO; }).number;
-    add(['Bienes a reponer (reposición, 5 tipos)', f(`SUM(${HPa}!C2:C${1 + ITEMS.length})`, T.rep)], r => { r.getCell(2).numFmt = ENTERO; });
+    add(['Bienes a reponer (reposición)', f(nLS ? `SUM(${HPa}!C2:C${1 + nLS})` : '0', T.rep)], r => { r.getCell(2).numFmt = ENTERO; });
     add([]);
     const c = add(['Estructura de costos', 'Monto (S/)', 'Cómo se calcula']); cabecera(ws, c.number, 3);
     const minus = s => s[0].toLowerCase() + s.slice(1);
@@ -284,9 +300,9 @@ export async function generarExcelCostos(R, meta) {
       const r = 2 + j;
       ws.getRow(r).values = [d.ubigeo, d.prov, d.nom,
         f(`COUNTIF(${crit},A${r})`, d.n), f(`SUMIF(${crit},A${r},${rango('est')})`, d.est),
-        f(ITEMS.map((_, t) => `SUMIF(${crit},A${r},${rango('q' + t)})`).join('+'), d.rep),
+        f(nLS ? LS.map((_, j) => `SUMIF(${crit},A${r},${rango('q' + j)})`).join('+') : '0', d.rep),
         f(`SUMIF(${crit},A${r},${rango('cd')})`, d.cd), f(`SUMIF(${crit},A${r},${rango('total')})`, d.total),
-        f(`IFERROR(H${r}/E${r},0)`, d.porEstudiante ?? 0), f(ITEMS.map((_, t) => `SUMIF(${crit},A${r},${rango('fq' + t)})`).join('+'), d.fal)];
+        f(`IFERROR(H${r}/E${r},0)`, d.porEstudiante ?? 0), f(nLS ? LS.map((_, j) => `SUMIF(${crit},A${r},${rango('fq' + j)})`).join('+') : '0', d.fal)];
     });
     const r = 2 + R.distritos.length;
     ws.getRow(r).values = ['TOTAL', '', '', f(`SUM(D2:D${r - 1})`, T.locales), f(`SUM(E2:E${r - 1})`, T.est), f(`SUM(F2:F${r - 1})`, T.rep),

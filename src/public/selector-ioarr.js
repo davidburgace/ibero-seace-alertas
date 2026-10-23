@@ -231,11 +231,11 @@ async function detalleHTML(i) {
   const d = S.detalles.get(i);
   const sv = d.servicios.map(s => `<tr><td class="mono">${esc(s.mod)}</td><td>${s.niv}</td><td>${esc(s.nom)}</td><td>${s.conv ? 'Convenio' : 'Directa'}</td><td class="num">${fmt(s.est)}</td><td class="num">${fmt(s.sec)}</td><td class="num">${fmt(s.aulas)}</td><td>${esc(s.tur)}</td></tr>`).join('');
   const au = d.aulas.map(a => `<tr><td>${esc(a.aula)}</td><td>${esc(a.edif)} · piso ${a.piso}</td><td>${esc(a.grado)}${a.secc ? ' ' + esc(a.secc) : ''}</td><td>${esc(a.tur)}${a.comp ? ' (compartida)' : ''}</td><td class="num">${a.est}</td>` +
-    a.t.map(o => `<td class="num"><span title="Bueno / Regular / Malo">${fmt(o.b)} / ${fmt(o.r)} / <b>${fmt(o.m)}</b></span>${o.fal ? `<br><span class="sub" title="${FALTANTE}">faltan ${fmt(o.fal)}</span>` : ''}</td>`).join('') + '</tr>').join('');
+    a.t.filter((_, t) => incluido(t)).map(o => `<td class="num"><span title="Bueno / Regular / Malo">${fmt(o.b)} / ${fmt(o.r)} / <b>${fmt(o.m)}</b></span>${o.fal ? `<br><span class="sub" title="${FALTANTE}">faltan ${fmt(o.fal)}</span>` : ''}</td>`).join('') + '</tr>').join('');
   return `<div class="detalle">
     ${ubicacionHTML(i, d)}
     <div><h4>Servicios educativos del local</h4><div class="tabla-wrap"><table class="tabla"><thead><tr><th>Cód. modular</th><th>Nivel</th><th>Institución</th><th>Gestión</th><th class="num">Estudiantes</th><th class="num">Secciones</th><th class="num">Aulas (censo)</th><th>Turno</th></tr></thead><tbody>${sv}</tbody></table></div></div>
-    <div><h4>Aulas en uso (bueno / regular / <b>malo = a reponer</b>)</h4><p class="sub">«Faltan» es el faltante: brecha de dotación, no reposición.</p>${au ? `<div class="tabla-wrap"><table class="tabla"><thead><tr><th>Aula</th><th>Ubicación</th><th>Grado y sección</th><th>Turno</th><th class="num">Estud.</th>${ITEMS.map(x => `<th class="num">${x.n}</th>`).join('')}</tr></thead><tbody>${au}</tbody></table></div>` : '<p class="sub">El censo no registra aulas en uso para este local.</p>'}</div>
+    <div><h4>Aulas en uso (bueno / regular / <b>malo = a reponer</b>)</h4><p class="sub">«Faltan» es el faltante: brecha de dotación, no reposición.</p>${au ? `<div class="tabla-wrap"><table class="tabla"><thead><tr><th>Aula</th><th>Ubicación</th><th>Grado y sección</th><th>Turno</th><th class="num">Estud.</th>${ITEMS.filter((_, t) => incluido(t)).map(x => `<th class="num">${x.n}</th>`).join('')}</tr></thead><tbody>${au}</tbody></table></div>` : '<p class="sub">El censo no registra aulas en uso para este local.</p>'}</div>
   </div>`;
 }
 
@@ -520,19 +520,19 @@ async function renderSel() {
     el.innerHTML = `<div class="panel vacio"><h3 style="color:var(--text);margin-bottom:6px;font-family:var(--font-display)">Aún no hay locales seleccionados</h3><p style="margin:0 0 14px">Vuelve a «Elegir locales» y marca los locales que intervendrás.</p><button class="btn btn-primary" data-ir="elegir" type="button">Elegir locales</button></div>`;
     return;
   }
-  const trows = T.tipos.map(o => `<tr><td>${o.n}<br><span class="sub">${o.u}</span>${stackBar(o)}</td><td class="num">${fmt(o.b + o.r + o.m)}</td><td class="num">${fmt(o.b)}</td><td class="num">${fmt(o.r)}</td><td class="num">${fmt(o.m)}</td><td class="num"><b>${fmt(o.rep)}</b></td><td class="num">${fmt(o.req)}</td><td class="num col-fal">${fmt(o.fal)}</td></tr>`).join('');
+  const trows = T.tipos.filter((_, t) => incluido(t)).map(o => `<tr><td>${o.n}<br><span class="sub">${o.u}</span>${stackBar(o)}</td><td class="num">${fmt(o.b + o.r + o.m)}</td><td class="num">${fmt(o.b)}</td><td class="num">${fmt(o.r)}</td><td class="num">${fmt(o.m)}</td><td class="num"><b>${fmt(o.rep)}</b></td><td class="num">${fmt(o.req)}</td><td class="num col-fal">${fmt(o.fal)}</td></tr>`).join('');
   const drows = T.distritos.map(r => `<tr><td>${esc(r.nom)}</td><td class="num">${fmt(r.n)}</td><td class="num">${fmt(r.est)}</td><td class="num">${fmt(r.aul)}</td><td class="num"><b>${fmt(r.rep)}</b></td><td class="num col-fal">${fmt(r.fal)}</td></tr>`).join('');
   const pags = Math.max(1, Math.ceil(T.locales.length / PAGE));
   S.selPage = Math.min(S.selPage || 0, pags - 1);
   const desde = S.selPage * PAGE;
-  const lrows = T.locales.slice(desde, desde + PAGE).map(r => `<tr class="${r.excl ? 'excluido' : ''}"><td class="mono">${r.cod}</td><td><span class="nm">${esc(r.nom)}</span></td><td>${esc(r.dist)}</td><td class="c-dup">${celdaDup(r.cod)}</td><td class="num">${fmt(r.est)}</td><td class="num">${fmt(r.aul)}</td>${r.t.map(v => `<td class="num">${fmt(v)}</td>`).join('')}<td class="num"><b>${fmt(r.rep)}</b></td><td class="num col-fal">${fmt(r.fal)}</td><td>${coordValidas(r.lat, r.lon) ? `<a class="x" href="${urlGoogleMaps(r.lat, r.lon)}" target="_blank" rel="noopener" aria-label="Ver el local ${r.cod} en Google Maps">Mapa</a>` : '<span class="sub">—</span>'}</td><td><button class="x" data-rm="${r.cod}" type="button" aria-label="Quitar el local ${r.cod}">Quitar</button></td></tr>`).join('');
+  const lrows = T.locales.slice(desde, desde + PAGE).map(r => `<tr class="${r.excl ? 'excluido' : ''}"><td class="mono">${r.cod}</td><td><span class="nm">${esc(r.nom)}</span></td><td>${esc(r.dist)}</td><td class="c-dup">${celdaDup(r.cod)}</td><td class="num">${fmt(r.est)}</td><td class="num">${fmt(r.aul)}</td>${r.t.filter((_, t) => incluido(t)).map(v => `<td class="num">${fmt(v)}</td>`).join('')}<td class="num"><b>${fmt(r.rep)}</b></td><td class="num col-fal">${fmt(r.fal)}</td><td>${coordValidas(r.lat, r.lon) ? `<a class="x" href="${urlGoogleMaps(r.lat, r.lon)}" target="_blank" rel="noopener" aria-label="Ver el local ${r.cod} en Google Maps">Mapa</a>` : '<span class="sub">—</span>'}</td><td><button class="x" data-rm="${r.cod}" type="button" aria-label="Quitar el local ${r.cod}">Quitar</button></td></tr>`).join('');
   const sum = k => fmt(T.tipos.reduce((a, o) => a + o[k], 0));
   el.innerHTML = `
     <div class="kpis">
       <div class="kpi"><div class="v">${fmt(T.n)}</div><div class="l">locales en la propuesta${T.nExcl ? ` · ${fmt(T.nExcl)} excluido${T.nExcl === 1 ? '' : 's'} por otra inversión` : ''}</div></div>
       <div class="kpi"><div class="v">${fmt(T.est)}</div><div class="l">estudiantes (padrón)</div></div>
       <div class="kpi"><div class="v">${fmt(T.aul)}</div><div class="l">aulas en uso (censo)</div></div>
-      <div class="kpi destacado"><div class="v">${fmt(T.rep)}</div><div class="l">bienes a reponer (estado malo, suma de los 5 tipos)</div></div>
+      <div class="kpi destacado"><div class="v">${fmt(T.rep)}</div><div class="l">bienes a reponer (estado malo, suma de los muebles elegidos)</div></div>
       <div class="kpi"><div class="v">${fmt(T.fal)}</div><div class="l">${FALTANTE}, solo informativo</div></div>
     </div>
     <div class="exportar">
@@ -553,7 +553,7 @@ async function renderSel() {
     ${panelSituacional(T.situacional)}
     <div class="panel"><div class="panel-cab"><h3>Locales seleccionados</h3><div class="acc-cab">${botonesDup(T)}<button class="btn btn-ghost btn-sm btn-peligro" id="clrSel" type="button">Quitar todos</button></div></div>
       ${avisoDup(T)}
-      <div class="tabla-wrap"><table class="tabla"><thead><tr><th>Código de local</th><th>Instituciones</th><th>Distrito</th><th>${DUP}</th><th class="num">Estudiantes</th><th class="num">Aulas</th>${ITEMS.map(x => `<th class="num">${x.n}</th>`).join('')}<th class="num">A reponer</th><th class="num col-fal" title="${FALTANTE}">Faltante (no reposición)</th><th>Ubicación</th><th></th></tr></thead><tbody>${lrows}</tbody></table></div>
+      <div class="tabla-wrap"><table class="tabla"><thead><tr><th>Código de local</th><th>Instituciones</th><th>Distrito</th><th>${DUP}</th><th class="num">Estudiantes</th><th class="num">Aulas</th>${ITEMS.filter((_, t) => incluido(t)).map(x => `<th class="num">${x.n}</th>`).join('')}<th class="num">A reponer</th><th class="num col-fal" title="${FALTANTE}">Faltante (no reposición)</th><th>Ubicación</th><th></th></tr></thead><tbody>${lrows}</tbody></table></div>
       ${pags > 1 ? `<div class="paginacion pad-pag"><span class="sub">Mostrando ${fmt(desde + 1)}–${fmt(Math.min(T.locales.length, desde + PAGE))} de ${fmt(T.locales.length)} · ordenados por bienes a reponer</span><div class="pg-btns"><button class="btn btn-ghost btn-sm" data-selpag="-1" type="button" ${S.selPage === 0 ? 'disabled' : ''}>Anterior</button><span class="mono">${S.selPage + 1} / ${pags}</span><button class="btn btn-ghost btn-sm" data-selpag="1" type="button" ${S.selPage >= pags - 1 ? 'disabled' : ''}>Siguiente</button></div></div>` : ''}</div>`;
 }
 
@@ -574,7 +574,7 @@ function panelSituacional(E) {
     <tbody>${L.filas.map(x => `<tr><td class="mono">${esc(x.cod)}</td><td>${esc(x.inst)}<br><span class="sub mono">${esc(x.modular)}</span></td><td class="num">${fmt(x.est)}</td><td>${x.nombreNivel}</td><td>${esc(x.cp)}</td><td>${esc(x.dist)}</td><td>${esc(x.ugel)}</td></tr>`).join('')}</tbody></table></div></details>`).join('');
   return `<div class="panel"><div class="panel-cab"><h3>Estado situacional por UGEL y nivel</h3><span class="sub">Formato del expediente de Huánuco (2023)</span></div>
     <div class="tabla-wrap"><table class="tabla tabla-sit"><thead><tr><th>Nivel</th><th>UGEL</th><th class="num">Locales</th><th class="num">Población de estudiantes</th><th class="num">N.° de aulas</th><th class="num">Mobiliario Bueno</th><th class="num">Mobiliario Regular</th><th class="num">Mobiliario Malo</th><th>Cuenta con proyecto de inversión</th></tr></thead><tbody>${cuerpo}</tbody></table></div>
-    <p class="sub pad">Población: matrícula del padrón. Mobiliario: Censo Educativo, los cinco tipos (mesa en puestos). Un local con varios niveles cuenta en cada nivel. «Cuenta con proyecto de inversión» sale de la columna «${DUP}» de cada local.</p>
+    <p class="sub pad">Población: matrícula del padrón. Mobiliario: Censo Educativo, los muebles elegidos en los criterios (mesa en puestos). Un local con varios niveles cuenta en cada nivel. «Cuenta con proyecto de inversión» sale de la columna «${DUP}» de cada local.</p>
     <div class="pad">${adv ? `<div class="avisos">${adv}</div>` : '<p class="sub">Comprobado: los totales por UGEL suman los totales por nivel y no hay dos UGEL con cifras idénticas.</p>'}</div>
     <div class="pad"><h4>Locales por UGEL</h4>${listas}</div></div>`;
 }
@@ -726,9 +726,12 @@ function abrirExpediente() {
 }
 
 // ─── Criterios ───────────────────────────────────────────────────────────────
+// Muebles que entran a la IOARR (los demás no se muestran ni se cuentan)
+const incluido = t => !S.params.muebles || S.params.muebles.includes(ITEMS[t].k);
 function renderCrit() {
   const P = S.params;
-  $('critGrid').innerHTML = CRIT.map(([k, l, mn, mx, st]) => `<div class="campo"><label for="c_${k}">${l}</label><input id="c_${k}" type="number" inputmode="decimal" min="${mn}" max="${mx}" step="${st}" value="${P[k]}"></div>`).join('') +
+  $('critGrid').innerHTML = `<fieldset class="campo-muebles"><legend>Muebles de la IOARR</legend>${ITEMS.map(x => `<label class="chk"><input type="checkbox" id="c_mueble_${x.k}" ${P.muebles.includes(x.k) ? 'checked' : ''}> ${x.n}</label>`).join('')}
+      <span class="sub">Mesa y silla se costean por talla según el grado del aula.</span></fieldset>` + CRIT.filter(([k]) => !['esc', 'sdoc', 'arm'].includes(k) || P.muebles.includes(k)).map(([k, l, mn, mx, st]) => `<div class="campo"><label for="c_${k}">${l}</label><input id="c_${k}" type="number" inputmode="decimal" min="${mn}" max="${mx}" step="${st}" value="${P[k]}"></div>`).join('') +
     `<div class="campo"><label for="c_carpEstado">Estado de las carpetas (vienen sin estado)</label><select id="c_carpEstado"><option value="b">Bueno</option><option value="r">Regular</option><option value="m">Malo</option></select></div>
      <div class="campo"><span class="lbl">&nbsp;</span><button class="btn btn-ghost" id="critReset" type="button">Restablecer criterios</button></div>`;
   $('c_carpEstado').value = P.carpEstado;
@@ -736,16 +739,22 @@ function renderCrit() {
 }
 function critSum() {
   const P = S.params;
-  $('critSum').textContent = `Mesa múltiple = ${P.kI} puestos (Inicial) o ${P.kPS} (Primaria y Secundaria) · carpeta bipersonal = ${P.carpBip} · carpetas como ${{ b: 'Bueno', r: 'Regular', m: 'Malo' }[P.carpEstado]} · a reponer = Malo (el faltante va aparte, no se repone)`;
+  const muebles = P.muebles.length === ITEMS.length ? 'todos los muebles' : ITEMS.filter(x => P.muebles.includes(x.k)).map(x => x.n.toLowerCase()).join(', ');
+  $('critSum').textContent = `Muebles: ${muebles} · Mesa múltiple = ${P.kI} puestos (Inicial) o ${P.kPS} (Primaria y Secundaria) · carpeta bipersonal = ${P.carpBip} · carpetas como ${{ b: 'Bueno', r: 'Regular', m: 'Malo' }[P.carpEstado]} · a reponer = Malo (el faltante va aparte, no se repone)`;
 }
 let tCrit;
 function onCrit(e) {
   const id = e.target.id || ''; if (!id.startsWith('c_')) return;
   const k = id.slice(2), P = { ...S.params };
   if (k === 'carpEstado') P.carpEstado = e.target.value;
-  else { let v = parseFloat(e.target.value); if (!isFinite(v) || v < 0) return; P[k] = v; }
+  else if (k.startsWith('mueble_')) {
+    const m = k.slice(7), resto = P.muebles.filter(x => x !== m);
+    if (!e.target.checked && !resto.length) { e.target.checked = true; toast('Deja al menos un mueble en la IOARR'); return; }
+    P.muebles = e.target.checked ? [...P.muebles, m] : resto;
+  } else { let v = parseFloat(e.target.value); if (!isFinite(v) || v < 0) return; P[k] = v; }
   S.params = limpiarParams(P);
-  critSum();
+  // Al cambiar los muebles se muestran u ocultan sus criterios por aula
+  if (k.startsWith('mueble_')) renderCrit(); else critSum();
   clearTimeout(tCrit);
   tCrit = setTimeout(async () => { S.detalles.clear(); await w('params', { params: S.params }); persistirCrit(); refresh(); }, 150);
 }

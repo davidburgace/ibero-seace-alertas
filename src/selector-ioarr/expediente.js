@@ -61,8 +61,8 @@ import { escribirZip } from './zip.js';
 import { generarExcel } from './excel.js';
 import { BUCKET_EXPEDIENTE, MAX_ARCHIVO, MAX_POR_LOCAL, TIPOS_ARCHIVO, mimeDe, nombreUtf8, nombreSeguro } from './archivos.js';
 import { supabase } from '../ioarr/db.js';
-import { calc, limpiarParams, CRIT } from './calculo.js';
-import { costear, limpiarRubros, limpiarInventario, limpiarAdquisicion, censoLocal, TIPOS, FUENTES_PRECIO } from './costos.js';
+import { calc, limpiarParams, CRIT, ITEMS } from './calculo.js';
+import { costear, limpiarRubros, limpiarInventario, limpiarAdquisicion, censoLocal, FUENTES_PRECIO, CLAVES_PRECIO } from './costos.js';
 import { generarExcelCostos } from './excel-costos.js';
 import { armarModelo, limpiarDatosDoc, ESTADOS_ACTIVO } from './documentos.js';
 import { generar07C, generarMemoria, generarVerificacion } from './word.js';
@@ -83,6 +83,12 @@ const AVISO_ADQ = 'Falta ejecutar supabase/migrations/016_ioarr_inventario_antig
 const AVISO_DOC = 'Falta ejecutar supabase/migrations/015_ioarr_expediente_documentos.sql en Supabase';
 const AVISO_NIV = 'Falta ejecutar supabase/migrations/018_ioarr_por_nivel.sql en Supabase para cargar el inventario por nivel';
 const AVISO_ARCH = 'Falta ejecutar supabase/migrations/014_ioarr_expediente_archivos.sql en Supabase';
+const AVISO_TALLA = 'Falta ejecutar supabase/migrations/026_ioarr_precios_por_talla.sql en Supabase para guardar precios por talla';
+// Como ok(), pero si la base aún no acepta tallas en tipo_bien (sin la 026) avisa qué migración falta
+const okPrecio = d => {
+  if (d.error?.code === '23514' && /tipo_bien/.test(d.error.message || '')) throw Object.assign(new Error(AVISO_TALLA), { status: 503 });
+  return ok(d);
+};
 const AVISO_FICHA = 'Falta ejecutar supabase/migrations/019_ioarr_ficha_verificacion.sql en Supabase para importar las fichas de verificación';
 const MAX_FICHAS = 50, MAX_FICHA_MB = 10;
 const subidaFichas = multer({ storage: multer.memoryStorage(), limits: { fileSize: MAX_FICHA_MB * 1024 * 1024, files: MAX_FICHAS } });
@@ -131,7 +137,8 @@ const ok = d => { if (d.error) throw d.error; return d.data; };
 function limpiarPrecio(b, parcial) {
   const out = {}, err = m => { const e = new Error(m); e.status = 400; throw e; };
   const tiene = k => !parcial || k in b;
-  if (tiene('tipo_bien')) { if (!TIPOS.includes(b.tipo_bien)) err('Tipo de bien no válido'); out.tipo_bien = b.tipo_bien; }
+  // tipo_bien: el tipo (precio general) o una talla de mesa o silla ('mesa_p12'…, migración 026)
+  if (tiene('tipo_bien')) { if (!CLAVES_PRECIO.includes(b.tipo_bien)) err('Tipo de bien no válido'); out.tipo_bien = b.tipo_bien; }
   if (tiene('descripcion')) { out.descripcion = texto(b.descripcion); if (!out.descripcion) err('Escribe una descripción'); }
   if (tiene('precio')) {
     const p = Number(b.precio);
@@ -178,7 +185,7 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
 
   api.post('/catalogo/precios', responder(async (req, res) => {
     const fila = limpiarPrecio(req.body || {}, false);
-    const data = ok(await supabase.from('ioarr_precios_catalogo').insert({ ...fila, moneda: 'PEN', vigente: false, creado_por: req.usuario.id }).select('*').single());
+    const data = okPrecio(await supabase.from('ioarr_precios_catalogo').insert({ ...fila, moneda: 'PEN', vigente: false, creado_por: req.usuario.id }).select('*').single());
     if (req.body?.vigente) await marcarVigente(data.id, data.tipo_bien);
     res.status(201).json({ ...data, vigente: !!req.body?.vigente });
   }));
@@ -192,7 +199,7 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     // Si cambia de tipo, deja de ser el vigente del tipo anterior
     if (cambios.tipo_bien && cambios.tipo_bien !== actual.tipo_bien) cambios.vigente = false;
     if (req.body?.vigente === false) cambios.vigente = false;
-    if (Object.keys(cambios).length) ok(await supabase.from('ioarr_precios_catalogo').update(cambios).eq('id', actual.id));
+    if (Object.keys(cambios).length) okPrecio(await supabase.from('ioarr_precios_catalogo').update(cambios).eq('id', actual.id));
     if (req.body?.vigente === true) await marcarVigente(actual.id, tipo);
     res.json(ok(await supabase.from('ioarr_precios_catalogo').select('*').eq('id', actual.id).single()));
   }));
@@ -290,11 +297,12 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     const anioUit = fila?.anio_uit || anioLima();
     const uit = ok(await supabase.from('ioarr_uit').select('*').eq('anio', anioUit).maybeSingle());
 
-    // Precio de cada tipo: el fijado en el proyecto o, si no hay, el vigente del catálogo
+    // Precio de cada tipo y de cada talla de mesa y silla: el fijado en el proyecto o, si no
+    // hay, el vigente del catálogo. Una talla sin precio usa el de su tipo (costos.js).
     const vig = Object.fromEntries(vigentes.map(v => [v.tipo_bien, v]));
     const fij = Object.fromEntries(fijados.map(v => [v.tipo_bien, v]));
     const precios = {}, detalle = {};
-    for (const t of TIPOS) {
+    for (const t of CLAVES_PRECIO) {
       const f = fij[t], v = vig[t];
       if (f) {
         detalle[t] = { origen: 'proyecto', precio_id: f.precio_id, precio: Number(f.precio_unitario), descripcion: f.descripcion, fuente: f.fuente, fecha: f.fecha,
@@ -355,7 +363,7 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
   const vistaDe = ({ R, detalle, anioUit, uit, inv }, x, A) => ({
     modo: A.modo, nivel: x.nivel, nombre_ioarr: x.nombre, ioarrs: A.ioarrs.map(y => ({ nivel: y.nivel, nombre: y.nombre, total: y.R.totales.total })), comparativo: A.comparativo,
     anio_uit: anioUit, uit: uit || null, precios: detalle,
-    rubros: R.rubros, partidas: R.partidas, totales: R.totales, distritos: R.distritos, uitCalc: R.uit, avisos: R.avisos, excluidos: R.excluidos,
+    rubros: R.rubros, partidas: R.partidas, lineas: R.lineas, muebles: A.P.muebles, totales: R.totales, distritos: R.distritos, uitCalc: R.uit, avisos: R.avisos, excluidos: R.excluidos,
     locales: R.locales.map(l => ({ cod: l.cod, nom: l.nom, dist: l.dist, prov: l.prov, rural: l.rural, est: l.est, zona: l.zona,
       rep: l.rep.reduce((a, b) => a + b, 0), fal: l.fal.reduce((a, b) => a + b, 0), cd: l.cd, total: l.total,
       verificado: l.verificado ? { tipos: l.verificado.tipos, fecha_visita: l.verificado.fecha_visita, ficha: !!l.verificado.ficha } : null,
@@ -380,11 +388,11 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
 
   api.put('/proyectos/:id/costos/precios/:tipo', responder(async (req, res) => {
     const p = await proyecto(req), tipo = req.params.tipo;
-    if (!TIPOS.includes(tipo)) return res.status(400).json({ error: 'Tipo de bien no válido' });
+    if (!CLAVES_PRECIO.includes(tipo)) return res.status(400).json({ error: 'Tipo de bien no válido' });
     if (!esUuid(req.body?.precio_id)) return res.status(400).json({ error: 'Elige un precio del catálogo' });
     const c = ok(await supabase.from('ioarr_precios_catalogo').select('*').eq('id', req.body.precio_id).maybeSingle());
     if (!c || c.tipo_bien !== tipo) return res.status(400).json({ error: 'Ese precio no es de este tipo de bien' });
-    ok(await supabase.from('ioarr_expediente_precios').upsert({
+    okPrecio(await supabase.from('ioarr_expediente_precios').upsert({
       proyecto_id: p.id, tipo_bien: tipo, precio_id: c.id, precio_unitario: c.precio, descripcion: c.descripcion, fuente: c.fuente, fecha: c.fecha,
       actualizado_en: new Date().toISOString()
     }, { onConflict: 'proyecto_id,tipo_bien' }));
@@ -1034,6 +1042,8 @@ const LEEME_PAQUETE = (proyecto, paq, D, idxDe) => [
 
 export function textoCriterios(P) {
   const est = { b: 'Bueno', r: 'Regular', m: 'Malo' }[P.carpEstado];
-  return CRIT.map(([k, l]) => `${l}: ${P[k]}`).join(' · ') + ` · Estado asignado a las carpetas: ${est} · Se repone solo el estado Malo`;
+  const muebles = ITEMS.filter(x => !P.muebles || P.muebles.includes(x.k)).map(x => x.n.toLowerCase()).join(', ');
+  return `Muebles de la IOARR: ${muebles} · ` + CRIT.map(([k, l]) => `${l}: ${P[k]}`).join(' · ') + ` · Estado asignado a las carpetas: ${est} · Se repone solo el estado Malo`
+    + ' · Mesa y silla por talla según el grado del aula (multigrado: en partes iguales entre las tallas del nivel)';
 }
 

@@ -11,8 +11,15 @@
 // de la UP, y los Lineamientos IOARR del MEF (2.4.C) no admiten sustentar una
 // reposición en eso: se valoriza aparte, como referencia, y no suma al total.
 //
+// Tallas (TALLAS en calculo.js): mesa y silla se costean por talla. Cada aula toma
+// la talla de su grado; un aula multigrado reparte en partes iguales entre las
+// tallas de su nivel. Con inventario verificado (por local, no por aula), lo
+// verificado se reparte entre las tallas en proporción al censo del local
+// (o a sus estudiantes, o en partes iguales). Los repartos van en enteros y
+// suman lo del tipo. Cada talla usa su precio; sin precio propio, el de su tipo.
+//
 // Cálculo por local (después se suma):
-//   CD        = Σ reposición × precio unitario (sin IGV)
+//   CD        = Σ reposición × precio unitario (sin IGV), por línea (talla)
 //   Bienes    transporte, instalación, embalaje: sobre el CD; transporte e
 //             instalación × (1 + factor por zona del local)
 //   Subtotal  = CD + transporte + instalación + embalaje
@@ -27,7 +34,8 @@
 // locales en proporción a su base (en partes iguales si la base suma 0).
 // ============================================================================
 
-import { ITEMS } from './calculo.js';
+import { ITEMS, TALLAS, TIPOS_TALLA, LINEAS, CLAVES_PRECIO, tallasDeAula } from './calculo.js';
+export { TALLAS, LINEAS, CLAVES_PRECIO };
 
 export const TIPOS = ITEMS.map(x => x.k);                       // ['mesa', 'silla', 'esc', 'sdoc', 'arm']
 export const FUENTES_PRECIO = { cotizacion: 'Cotización', seace: 'SEACE', historico: 'Histórico propio' };
@@ -97,6 +105,47 @@ export function indiceFactores(factores) {
   return idx;
 }
 
+// Reparte un entero (total) según pesos, en enteros que suman total (mayor resto).
+// Sin pesos (todos 0) devuelve todo 0; quien llama decide otro reparto.
+export function repartir(total, pesos) {
+  const s = pesos.reduce((a, b) => a + b, 0), out = pesos.map(() => 0);
+  const T = Math.round(total);
+  if (!s || !T) return out;
+  const ex = pesos.map(w => T * w / s);
+  let resto = T;
+  ex.forEach((v, j) => { out[j] = Math.floor(v); resto -= out[j]; });
+  const orden = ex.map((v, j) => [v - Math.floor(v), j]).sort((a, b) => b[0] - a[0] || a[1] - b[1]);
+  for (let q = 0; q < resto; q++) out[orden[q % orden.length][1]]++;
+  return out;
+}
+
+// Pesos por talla de mesa (0) y silla (1) en el local i, sumando sus aulas del censo:
+// { b, r, m, req, fal, est, aul } → arreglos del largo de TALLAS. Un aula multigrado
+// suma en partes iguales a las tallas de su nivel. 'niv' marca las tallas de los
+// niveles del local (último recurso para repartir).
+export function pesosTalla(D, C, i) {
+  const nT = TALLAS.length, vacio = () => new Array(nT).fill(0);
+  const W = [0, 1].map(() => ({ b: vacio(), r: vacio(), m: vacio(), req: vacio(), fal: vacio(), est: vacio(), aul: vacio(), niv: vacio() }));
+  for (const si of D.locSvc[i]) for (const w of W) TALLAS.forEach((z, j) => { if (z.nivel === D.svcs[si][2]) w.niv[j] = 1; });
+  for (const ai of D.locAul[i]) {
+    const a = D.aulas[ai], js = tallasDeAula(D.svcs[a[1]][2], a[5]), parte = 1 / js.length;
+    for (const t of [0, 1]) {
+      const w = W[t];
+      for (const j of js) {
+        w.b[j] += C.A.b[t][ai] * parte; w.r[j] += C.A.r[t][ai] * parte; w.m[j] += C.A.m[t][ai] * parte;
+        w.req[j] += C.A.req[t][ai] * parte; w.fal[j] += C.A.fal[t][ai] * parte;
+        w.est[j] += a[8] * parte; w.aul[j] += parte;
+      }
+    }
+  }
+  return W;
+}
+// Reparte total con el primer peso que no sea todo 0
+const repartirCon = (total, ...pesos) => {
+  for (const w of pesos) if (w.some(x => x > 0)) return repartir(total, w);
+  return repartir(total, pesos[pesos.length - 1].map(() => 1));
+};
+
 // Mobiliario que el censo reporta en el local i: { mesa: { b, r, m, req }, ... }
 export function censoLocal(C, i) {
   return Object.fromEntries(TIPOS.map((k, t) => { const o = t * C.nL + i; return [k, { b: C.L.b[o], r: C.L.r[o], m: C.L.m[o], req: C.L.req[o] }]; }));
@@ -155,7 +204,11 @@ export function limpiarAdquisicion(obj, anioMax) {
  */
 export function costear({ D, C, list, precios, rubros, factores, uit, inventario, grupos }) {
   const R = limpiarRubros(rubros);
-  const pu = TIPOS.map(k => Number(precios?.[k]) >= 0 && precios?.[k] != null ? Number(precios[k]) : null);
+  const val = k => precios?.[k] != null && Number(precios[k]) >= 0 ? Number(precios[k]) : null;
+  // Precio por línea: el de la talla o, si no tiene, el de su tipo
+  const pu = LINEAS.map(x => (x.talla ? val(x.k) : null) ?? val(x.tipo));
+  const puGeneral = TIPOS.map(val);
+  const propio = LINEAS.map(x => !!x.talla && val(x.k) != null);   // la talla tiene precio propio
   const idx = indiceFactores(factores);
   const fuentes = grupos || [{ clave: null, D, C, list, inventario }];
 
@@ -189,13 +242,15 @@ export function costear({ D, C, list, precios, rubros, factores, uit, inventario
   aplicar('otros', elegir);
   for (const loc of locales) loc.total = loc.bienes + sumaR(loc, 'otros');
 
-  const res = resumir(locales, R, pu, uit, false);
-  if (grupos) res.grupos = Object.fromEntries(grupos.map(g => [g.clave, resumir(locales.filter(l => l.grupo === g.clave), R, pu, uit, true)]));
+  const incl = fuentes[0]?.C?.incl || TIPOS.map(() => true);
+  const P = { pu, puGeneral, propio, incl };
+  const res = resumir(locales, R, P, uit, false);
+  if (grupos) res.grupos = Object.fromEntries(grupos.map(g => [g.clave, resumir(locales.filter(l => l.grupo === g.clave), R, P, uit, true)]));
   return res;
 }
 
 function localDe(g, i, pu, idx) {
-  const { D, C, inventario } = g, nL = C.nL;
+  const { D, C, inventario } = g, nL = C.nL, incl = C.incl || TIPOS.map(() => true);
   const l = D.locs[i], d = D.dists[l[1]];
   const rep = TIPOS.map((_, t) => C.L.rep[t * nL + i]);
   const fal = TIPOS.map((_, t) => C.L.fal[t * nL + i]);
@@ -208,6 +263,7 @@ function localDe(g, i, pu, idx) {
   if (inv) {
     const tipos = [];
     TIPOS.forEach((k, t) => {
+      if (!incl[t]) return;   // mueble que no entra a la IOARR
       const x = inv.bienes?.[k];
       // Requerido con los estudiantes verificados en la ficha (solo mesas y sillas; cambia el faltante)
       const req = inv.req?.[k] ?? null;
@@ -227,17 +283,36 @@ function localDe(g, i, pu, idx) {
     verificado = { tipos, adquisicion: inv.adquisicion || {}, adq_estimada: inv.adq_estimada || [], fecha_visita: inv.fecha_visita, responsable: inv.responsable || null, observacion: inv.observacion,
       ficha: inv.ficha ? { archivo: inv.ficha.archivo, importado_en: inv.ficha.importado_en, verificador: inv.ficha.verificador } : null };
   }
-  const cdTipo = rep.map((q, t) => q * (pu[t] ?? 0));
+  // Por línea (talla): mesa y silla repartidas según las aulas del censo
+  const W = pesosTalla(D, C, i);
+  const lin = { rep: [], fal: [], b: [], r: [], m: [], req: [] };
+  const porTalla = {};
+  TIPOS_TALLA.forEach(k => {
+    const t = TIPOS.indexOf(k), w = W[t], dg = diag[t];
+    porTalla[k] = {
+      rep: repartirCon(rep[t], w.m, w.est, w.aul, w.niv), fal: repartirCon(fal[t], w.fal, w.req, w.est, w.aul, w.niv),
+      b: repartirCon(dg.b, w.b, w.est, w.aul, w.niv), r: repartirCon(dg.r, w.r, w.est, w.aul, w.niv), m: repartirCon(dg.m, w.m, w.est, w.aul, w.niv),
+      req: repartirCon(dg.req, w.req, w.est, w.aul, w.niv)
+    };
+  });
+  for (const x of LINEAS) {
+    const pt = x.talla ? porTalla[x.tipo] : null;
+    for (const c of ['rep', 'fal']) lin[c].push(pt ? pt[c][x.j] : (c === 'rep' ? rep : fal)[x.t]);
+    for (const c of ['b', 'r', 'm', 'req']) lin[c].push(pt ? pt[c][x.j] : diag[x.t][c]);
+  }
+  const cdLinea = lin.rep.map((q, j) => q * (pu[j] ?? 0));
+  const cdTipo = TIPOS.map((_, t) => LINEAS.reduce((a, x, j) => a + (x.t === t ? cdLinea[j] : 0), 0));
   const z = factorZona(d[1], l[4], idx);
   return {
     i, grupo: g.clave, cod: l[0], nom: D.locName[i], dist: d[0], prov: D.provs[d[2]], ubigeo: d[1], rural: !!l[4],
     est: D.locEst[i], aul: D.locAul[i].length, zona: z, rep, repVerif, fal, diag, cdTipo, verificado,
-    cd: cdTipo.reduce((a, b) => a + b, 0), falValor: fal.reduce((a, q, t) => a + q * (pu[t] ?? 0), 0), r: {}, rf: {}
+    lin, cdLinea,
+    cd: cdTipo.reduce((a, b) => a + b, 0), falValor: lin.fal.reduce((a, q, j) => a + q * (pu[j] ?? 0), 0), r: {}, rf: {}
   };
 }
 
 // Totales, partidas, rubros, distritos, UIT y avisos de un conjunto de locales ya costeados
-function resumir(locales, R, pu, uit, esGrupo) {
+function resumir(locales, R, { pu, puGeneral, propio, incl }, uit, esGrupo) {
   const n = locales.length;
   const sum = f => locales.reduce((a, loc) => a + f(loc), 0);
   const T = {
@@ -247,10 +322,25 @@ function resumir(locales, R, pu, uit, esGrupo) {
   };
   T.porEstudiante = T.est ? T.total / T.est : null;
 
+  // Líneas de costo (una por talla en mesa y silla): solo de los muebles que entran,
+  // y de las tallas, solo las que tienen algo
+  const lineas = LINEAS.map((x, j) => {
+    const [rep, fal, b, r, m, req] = ['rep', 'fal', 'b', 'r', 'm', 'req'].map(c => sum(l => l.lin[c][j]));
+    return { k: x.k, ix: j, tipo: x.tipo, t: x.t, talla: x.talla, n: x.n, u: x.u, b, r, m, ex: b + r + m, req, rep, fal,
+      pu: pu[j], pu_propio: propio[j], parcial: sum(l => l.cdLinea[j]), falValor: fal * (pu[j] ?? 0) };
+  }).filter(x => incl[x.t] && (!x.talla || x.rep || x.fal || x.ex || x.req));
+  // Partidas por tipo de bien (suma de sus tallas). pu: null si a alguna talla que se repone
+  // le falta precio; si las tallas tienen precios distintos, el promedio (pu_varia)
   const partidas = ITEMS.map((x, t) => {
     const rep = sum(l => l.rep[t]), fal = sum(l => l.fal[t]), repVerif = sum(l => l.repVerif[t]);
     const [b, r, m, req] = ['b', 'r', 'm', 'req'].map(k => sum(l => l.diag[t][k]));
-    return { k: x.k, n: x.n, u: x.u, b, r, m, ex: b + r + m, req, rep, repVerif, fal, pu: pu[t], parcial: rep * (pu[t] ?? 0), falValor: fal * (pu[t] ?? 0) };
+    const ls = lineas.filter(y => y.t === t), conRep = ls.filter(y => y.rep > 0);
+    const parcial = ls.reduce((a, y) => a + y.parcial, 0), falValor = ls.reduce((a, y) => a + y.falValor, 0);
+    const precios = [...new Set(conRep.map(y => y.pu))];
+    const p = !conRep.length ? (ls.length === 1 && !ls[0].talla ? ls[0].pu : puGeneral[t])
+      : precios.includes(null) ? null : precios.length === 1 ? precios[0] : parcial / rep;
+    return { k: x.k, n: x.n, u: x.u, b, r, m, ex: b + r + m, req, rep, repVerif, fal, pu: p, pu_varia: precios.length > 1 && !precios.includes(null), pu_general: puGeneral[t],
+      parcial, falValor, excluido: !incl[t], tallas: ls.filter(y => y.talla) };
   });
   const rubrosOut = R.map(x => ({
     ...x, nombre: RUBRO[x.clave].nombre, grupo: RUBRO[x.clave].grupo, monto: sum(l => l.r[x.clave]),
@@ -274,7 +364,11 @@ function resumir(locales, R, pu, uit, esGrupo) {
   U.enUit = valorUit ? T.total / valorUit : null;
 
   const avisos = [];
-  const sinPrecio = partidas.filter(p => p.pu == null && (p.rep > 0 || p.fal > 0)).map(p => p.n);
+  // Sin precio: el tipo entero si a todas sus líneas les falta; si no, las tallas que faltan
+  const sinPrecio = partidas.filter(p => !p.excluido).flatMap(p => {
+    const ls = lineas.filter(y => y.tipo === p.k && (y.rep > 0 || y.fal > 0)), faltan = ls.filter(y => y.pu == null);
+    return !faltan.length ? [] : faltan.length === ls.length || !p.tallas.length ? [p.n] : faltan.map(y => y.n);
+  });
   if (sinPrecio.length) avisos.push({ tipo: 'precio', texto: `Falta el precio unitario de: ${sinPrecio.join(', ')}. Se calcula con 0 hasta que lo cargues.` });
   if (T.fal > 0) avisos.push({ tipo: 'faltante', texto: 'El faltante (brecha de dotación, no reposición) es lo que falta para llegar a lo requerido. No entra a lo que se repone, al costo de inversión ni al Formato 07-C: amplía la capacidad de la UP y una IOARR de reposición no se puede sustentar en eso (Lineamientos IOARR del MEF, 2.4.C). Se muestra valorizado aparte, como referencia; corresponde evaluarlo como ampliación marginal.' });
   if (!valorUit) avisos.push({ tipo: 'uit', texto: `Carga el valor de la UIT${U.anio ? ' de ' + U.anio : ''} para saber si el registro del Formato 07-C es abreviado o completo.` });
@@ -283,5 +377,5 @@ function resumir(locales, R, pu, uit, esGrupo) {
   if (verif.length) avisos.push({ tipo: 'inventario', texto: `${verif.length === 1 ? '1 local usa' : verif.length + ' locales usan'} inventario verificado en campo en lugar del Censo Educativo (${verif.map(l => l.cod).join(', ')}). Adjunta al expediente el sustento de la visita (acta, fotos, firma del director).` });
   if (R.every(r => r.valor === 0)) avisos.push({ tipo: 'rubros', texto: 'Todos los rubros están en 0. Ingresa los porcentajes o montos de transporte, gastos generales, utilidad, IGV y demás.' });
 
-  return { partidas, rubros: rubrosOut, totales: T, locales, distritos, uit: U, avisos };
+  return { partidas, lineas, rubros: rubrosOut, totales: T, locales, distritos, uit: U, avisos };
 }

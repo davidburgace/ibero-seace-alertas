@@ -13,6 +13,9 @@
 //               Se muestra aparte y no suma a lo que se repone, al costo ni al Formato 07-C
 //               (Lineamientos IOARR 2.4.C: la reposición no puede ampliar la capacidad de la UP).
 //   Requerido: mesa y silla por estudiante; escritorio, silla docente y armario por aula.
+//   Muebles: P.muebles dice qué tipos entran a la IOARR (por ejemplo, solo mesa y silla);
+//            los demás quedan en 0 en todo el cálculo.
+//   Tallas: mesa y silla se costean por talla según el grado del aula (TALLAS, en costos.js).
 //   Mesa múltiple = kI puestos (Inicial y Especial) o kPS (Primaria y Secundaria);
 //   carpeta bipersonal = carpBip puestos; las carpetas no traen estado (carpEstado).
 //
@@ -29,10 +32,38 @@ export const ITEMS = [
   { k: 'mesa', n: 'Mesa del estudiante', u: 'puestos' }, { k: 'silla', n: 'Silla del estudiante', u: 'unidades' },
   { k: 'esc', n: 'Escritorio docente', u: 'unidades' }, { k: 'sdoc', n: 'Silla docente', u: 'unidades' },
   { k: 'arm', n: 'Armario / estante', u: 'unidades' }];
+// Tallas de mesa y silla del estudiante: cada aula toma la de su nivel y grado.
+// Un aula multigrado (o sin grado) reparte su mobiliario en partes iguales entre
+// las tallas de su nivel. Escritorio, silla docente y armario no tienen talla.
+export const TIPOS_TALLA = ['mesa', 'silla'];
+export const TALLAS = [
+  { k: 'i', nivel: 'I', n: 'Inicial', grados: [] },
+  { k: 'p12', nivel: 'P', n: 'Primaria 1.° y 2.°', grados: [1, 2] },
+  { k: 'p34', nivel: 'P', n: 'Primaria 3.° y 4.°', grados: [3, 4] },
+  { k: 'p56', nivel: 'P', n: 'Primaria 5.° y 6.°', grados: [5, 6] },
+  { k: 's12', nivel: 'S', n: 'Secundaria 1.° y 2.°', grados: [1, 2] },
+  { k: 's34', nivel: 'S', n: 'Secundaria 3.° y 4.°', grados: [3, 4] },
+  { k: 's5', nivel: 'S', n: 'Secundaria 5.°', grados: [5] },
+  { k: 'e', nivel: 'E', n: 'Básica Especial', grados: [] }];
+// Índices (en TALLAS) de la talla de un aula, según el nivel y el grado del censo
+// («3° Primaria», «Multigrado», «Inicial 4 años»…). Varias si es multigrado.
+export function tallasDeAula(nivel, grado) {
+  const delNivel = TALLAS.map((x, j) => j).filter(j => TALLAS[j].nivel === nivel);
+  const g = /^(\d)\s*°/.exec(String(grado || ''));
+  if (g) { const j = delNivel.find(j => TALLAS[j].grados.includes(Number(g[1]))); if (j != null) return [j]; }
+  return delNivel;
+}
+// Líneas de costo: mesa y silla por talla; los demás, una línea por tipo.
+// k = clave del precio (tipo_bien): 'mesa_p12', 'silla_s5', 'esc'…
+export const LINEAS = ITEMS.flatMap((x, t) => TIPOS_TALLA.includes(x.k)
+  ? TALLAS.map((z, j) => ({ k: `${x.k}_${z.k}`, tipo: x.k, t, talla: z.k, j, n: `${x.n} – ${z.n}`, u: x.u }))
+  : [{ k: x.k, tipo: x.k, t, talla: null, j: null, n: x.n, u: x.u }]);
+export const CLAVES_PRECIO = [...ITEMS.map(x => x.k), ...LINEAS.filter(x => x.talla).map(x => x.k)];
+
 export const NIVN = { I: 'Inicial', P: 'Primaria', S: 'Secundaria', E: 'Básica Especial' };
 export const NIVS = { I: 'Inicial', P: 'Primaria', S: 'Secundaria', E: 'Especial' };
 export const NIVB = { I: 1, P: 2, S: 4, E: 8 };
-export const DEF = { kI: 4, kPS: 2, carpBip: 2, carpEstado: 'r', mesaEst: 1, sillaEst: 1, esc: 1, sdoc: 1, arm: 1 };
+export const DEF = { kI: 4, kPS: 2, carpBip: 2, carpEstado: 'r', mesaEst: 1, sillaEst: 1, esc: 1, sdoc: 1, arm: 1, muebles: ITEMS.map(x => x.k) };
 // [clave, etiqueta, mín, máx, paso]
 export const CRIT = [['kI', 'Puestos por mesa múltiple (Inicial y Especial)', 1, 12, 1], ['kPS', 'Puestos por mesa múltiple (Primaria y Secundaria)', 1, 12, 1],
   ['carpBip', 'Puestos por carpeta bipersonal', 1, 4, 1],
@@ -63,7 +94,13 @@ export function limpiarParams(p) {
       P[k] = Math.min(mx, Math.max(mn, v));
     }
     if (['b', 'r', 'm'].includes(p.carpEstado)) P.carpEstado = p.carpEstado;
+    // Muebles que entran a la IOARR (al menos uno, en el orden de ITEMS)
+    if (Array.isArray(p.muebles)) {
+      const m = ITEMS.map(x => x.k).filter(k => p.muebles.includes(k));
+      if (m.length) P.muebles = m;
+    }
   }
+  P.muebles = [...P.muebles];
   return P;
 }
 
@@ -89,8 +126,10 @@ export function prep(D) {
 
 // Mobiliario por aula (A) y acumulado por local (L), según los criterios P.
 // Con nivel (I, P, S o E), solo cuentan las aulas de los servicios de ese nivel.
+// Los muebles que no entran a la IOARR (P.muebles) quedan en 0. incl[t] dice si el tipo t entra.
 export function calc(D, P, nivel = null) {
   const nA = D.aulas.length, nL = D.locs.length;
+  const incl = ITEMS.map(x => !P.muebles || P.muebles.includes(x.k));
   const L = { b: new Float64Array(5 * nL), r: new Float64Array(5 * nL), m: new Float64Array(5 * nL), req: new Float64Array(5 * nL),
     fal: new Float64Array(5 * nL), rep: new Float64Array(5 * nL), repTot: new Float64Array(nL), falTot: new Float64Array(nL), reqTot: new Float64Array(nL) };
   const A = { b: [], r: [], m: [], req: [], fal: [], rep: [] };
@@ -104,13 +143,14 @@ export function calc(D, P, nivel = null) {
     const trip = [[mb, mr, mm], [sb, sr, sm], [f(11), f(12), f(13)], [f(14), f(15), f(16)], [f(17), f(18), f(19)]];
     const req = [Math.round(a[8] * P.mesaEst), Math.round(a[8] * P.sillaEst), P.esc, P.sdoc, P.arm];
     for (let t = 0; t < 5; t++) {
+      if (!incl[t]) continue;
       const [b, r, m] = trip[t], ex = b + r + m, fal = Math.max(0, req[t] - ex), rep = m;
       A.b[t][i] = b; A.r[t][i] = r; A.m[t][i] = m; A.req[t][i] = req[t]; A.fal[t][i] = fal; A.rep[t][i] = rep;
       const o = t * nL + loc; L.b[o] += b; L.r[o] += r; L.m[o] += m; L.req[o] += req[t]; L.fal[o] += fal; L.rep[o] += rep;
       L.repTot[loc] += rep; L.falTot[loc] += fal; L.reqTot[loc] += req[t];
     }
   }
-  return { A, L, nL };
+  return { A, L, nL, incl };
 }
 
 export const lv = (C, m, t, i) => C.L[m][t * C.nL + i];

@@ -62,7 +62,7 @@ test('Excel del Selector: columnas de duplicidad y hoja de excluidos', async () 
 
   const res = wb.getWorksheet('Resumen');
   const fila = txt => { let r = null; res.eachRow(row => { if (row.getCell(1).value === txt) r = row; }); return r; };
-  assert.equal(fila('Bienes a reponer (estado Malo, suma de los 5 tipos)').getCell(2).value.result, 65);
+  assert.equal(fila('Bienes a reponer (estado Malo, suma de los muebles de la IOARR)').getCell(2).value.result, 65);
   assert.equal(fila('Locales excluidos por otra inversión vigente o reciente').getCell(2).value, 1);
   assert.equal(fila(ROTULO_DUP + ' (sí / no / sin verificar)').getCell(2).value, '0 / 1 / 9');
 

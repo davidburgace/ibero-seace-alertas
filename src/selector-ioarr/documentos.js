@@ -20,6 +20,15 @@
 import { ITEMS } from './calculo.js';
 import { TIPOS, LIMITE_UIT } from './costos.js';
 
+// Descripción técnica de un tipo de bien: la de su precio general o, si la mesa o la
+// silla solo tiene precios por talla, las de las tallas que se reponen
+function descripcionTipo(precios, k, lineas) {
+  if (precios?.[k]?.descripcion) return precios[k].descripcion;
+  const ls = (lineas || []).filter(y => y.tipo === k && y.talla && y.rep > 0);
+  if (!ls.length || ls.some(y => !precios?.[y.k]?.descripcion)) return '';
+  return ls.map(y => `${y.n.split(' – ')[1]}: ${precios[y.k].descripcion}`).join('. ');
+}
+
 // ─── Datos que carga el usuario ─────────────────────────────────────────────
 export const ESTADOS_ACTIVO = ['REGULAR', 'MALO', 'MUY MALO', 'IRRECUPERABLE'];
 const UNIDAD_META = { mesa: 'Número de mobiliario (puestos)', silla: 'Número de mobiliario', esc: 'Número de mobiliario', sdoc: 'Número de mobiliario', arm: 'Número de mobiliario' };
@@ -232,7 +241,7 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, inv = {}, fe
 
   // ── E. Activos: descripción técnica (del catálogo de precios) y estado ──
   const activos = tiposRep.map(x => ({
-    k: x.k, nombre: x.n, descripcion: precios?.[x.k]?.descripcion || '',
+    k: x.k, nombre: x.n, descripcion: descripcionTipo(precios, x.k, R.lineas),
     antiguedad: d.antiguedad[x.k] ?? (antInv[x.k] ? Math.round(antInv[x.k].promedio) : null),
     antiguedad_origen: d.antiguedad[x.k] != null ? 'usuario' : antInv[x.k] ? 'inventario' : null, antiguedad_inventario: antInv[x.k],
     vida_estimada: d.vida_util_estimada[x.k] ?? null,
@@ -290,7 +299,7 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, inv = {}, fe
   falta(!d.inventario_registrado, 'Si el mobiliario a reponer está registrado en el inventario de la entidad (Lineamientos 2.4.C.e).');
   falta(!d.en_uso, 'Si el mobiliario a reponer está en uso.');
   if (supera && !masiva) falta(activos.some(a => a.antiguedad == null || !a.estado), 'E.3. Antigüedad y estado actual del mobiliario a reponer, por tipo.');
-  falta(tiposRep.some(x => !precios?.[x.k]?.descripcion), 'Descripción técnica de algún tipo de bien (se toma del precio del catálogo).');
+  falta(activos.some(a => !a.descripcion), 'Descripción técnica de algún tipo de bien (se toma del precio del catálogo).');
   falta(A.propuesto, 'A. Alineamiento a la brecha: se propuso por nivel; verifícalo contra el PMI.');
 
   return {
@@ -305,7 +314,7 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, inv = {}, fe
     E: { sustento: [...sustentoAuto, ...(d.sustento ? d.sustento.split(/\n+/) : [])], activos, condiciones },
     F: { metas, subtotalActivos, expediente: r2(expediente), supervision: r2(supervision), liquidacion, total,
       inicio: inicio && fechaPe(inicio), fin: fin && fechaPe(fin), meses: d.meses, cronograma, mantenimiento },
-    totales: T, rubros: R.rubros, partidas: R.partidas, distritos: R.distritos, excluidos: R.excluidos || [],
+    totales: T, rubros: R.rubros, partidas: R.partidas, lineas: R.lineas || R.partidas, distritos: R.distritos, excluidos: R.excluidos || [],
     faltante: { cantidad: T.fal, valor: T.falValor, partidas: R.partidas.filter(p => p.fal > 0).map(p => ({ nombre: p.n, cantidad: p.fal, valor: p.falValor })) },
     memoria: { antecedentes: d.antecedentes, objetivo: d.objetivo || `Reponer el mobiliario de aula en mal estado ${masiva ? `de ${n} locales educativos` : 'del local educativo'} de nivel ${nomNiveles.toLowerCase()}, para mantener el nivel y la calidad del servicio educativo que reciben ${est.toLocaleString('es-PE')} estudiantes.` },
     anioRef, informe_vida_util: d.informe_vida_util, cantidades,

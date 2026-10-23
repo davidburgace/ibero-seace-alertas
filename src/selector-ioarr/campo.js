@@ -48,6 +48,8 @@ import { BUCKET_EXPEDIENTE, mimeDe } from './archivos.js';
 import { BIENES_FICHA, RANGOS, FIRMAS, CRITERIOS, MAX_PUESTOS, TOLERANCIA } from './ficha.js';
 
 // Lo que el formulario necesita saber de la ficha (src/public/campo-ficha.js)
+// La guía lleva solo los muebles que entran a la IOARR (los del modelo de la ficha)
+export const guiaDe = modelo => modelo?.bienes?.length ? { ...GUIA_FICHA, bienes: modelo.bienes } : GUIA_FICHA;
 export const GUIA_FICHA = { bienes: BIENES_FICHA, rangos: RANGOS.map(r => r.texto), firmas: FIRMAS, criterios: CRITERIOS, max_puestos: MAX_PUESTOS, tolerancia: TOLERANCIA };
 
 const LOTE = 1000;
@@ -257,7 +259,7 @@ export async function abrirFichaCampo(sb, usuario, proyectoId, cod, deps) {
   const ficha = await leerFichaDigital(sb, acc.p.id, cod);
   const [modelo, fotos, firmas] = await Promise.all([deps.modelo(acc.p.id, cod), fotosFicha(sb, acc.p.id, cod), firmasFicha(sb, acc.p.id, cod)]);
   // fotos / firmas: null = falta la migración 024 / 025 (la ficha funciona sin ellas)
-  return { status: 200, body: { modelo, ficha, editable: puedeEditar(ficha?.estado), guia: GUIA_FICHA, fotos, firmas } };
+  return { status: 200, body: { modelo, ficha, editable: puedeEditar(ficha?.estado), guia: guiaDe(modelo), fotos, firmas } };
 }
 
 const quien = usuario => ({ editado_por: usuario.id, editado_por_email: usuario.email || null });
@@ -447,7 +449,7 @@ export async function fichasParaEquipo(sb, usuario, proyectoId, pedido, deps) {
   };
   const lista = cods.filter(c => modelos[c]), fichas = [];
   for (let i = 0; i < lista.length; i += 5) fichas.push(...await Promise.all(lista.slice(i, i + 5).map(una)));
-  return { status: 200, body: { guia: GUIA_FICHA, proyecto: { id: p.id, nombre: p.nombre, region: p.region }, bajada_en: new Date().toISOString(), fichas } };
+  return { status: 200, body: { guia: guiaDe(modelos[lista[0]]), proyecto: { id: p.id, nombre: p.nombre, region: p.region }, bajada_en: new Date().toISOString(), fichas } };
 }
 
 // deps.fichasZip(res, proyectoId, paquete): arma el ZIP (src/selector-ioarr/router.js → fichasZipProyecto)
