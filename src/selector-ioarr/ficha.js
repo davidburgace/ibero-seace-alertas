@@ -12,7 +12,8 @@
 //
 //   modeloFicha(D, C, i, meta)  datos de la ficha de un local (padrón y censo)
 //   generarFichaExcel(F)        Excel para llenar en campo (lleva claves ocultas)
-//   generarFichaPdf(F)          PDF imprimible (pdfkit)
+//   generarFichaPdf(F, llena?)  PDF imprimible (pdfkit); con llena, la ficha llenada en la app:
+//                               lo verificado, el panel fotográfico con las fotos y las firmas en pantalla
 //   leerFicha(buffer)           lee el Excel que devuelve la UGEL
 //   procesarFicha(...)          valida y arma lo que se guarda en el inventario
 //
@@ -244,7 +245,26 @@ export async function generarFichaExcel(F) {
 }
 
 // ─── PDF (pdfkit) ───────────────────────────────────────────────────────────
-export function generarFichaPdf(F) {
+// Números de aula en tramos: [1,2,3,5] → «1 a 3, 5»
+const tramos = ns => {
+  const out = [];
+  for (const n of ns) { const t = out.at(-1); if (t && n === t[1] + 1) t[1] = n; else out.push([n, n]); }
+  return out.map(([a, b]) => a === b ? `${a}` : b === a + 1 ? `${a}, ${b}` : `${a} a ${b}`).join(', ');
+};
+const fechaHoraPe = iso => iso ? new Date(iso).toLocaleString('es-PE', { timeZone: 'America/Lima', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+const fechaPe = f => f ? String(f).slice(0, 10).split('-').reverse().join('/') : '';
+// Fecha en Perú de un instante (un ISO en UTC puede caer en el día siguiente)
+const fechaLima = iso => iso ? new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Lima' }).format(new Date(iso)) : '';
+const v = x => x == null ? '' : String(x);
+
+/**
+ * @param F      modeloFicha del local
+ * @param llena  (opcional) la ficha llenada en la app:
+ *   { datos (limpiarFormulario), estado, por, enviada_en, revisada_en,
+ *     fotos: [{ n, lugar, muestra, tomada_en, lat, lon, buffer? }],
+ *     firmas: { director|ugel|registradora: { buffer, firmada_en } } }
+ */
+export function generarFichaPdf(F, llena = null) {
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({ size: 'A4', layout: 'landscape', margins: { top: 30, bottom: 36, left: 28, right: 28 }, bufferPages: true,
       info: { Title: `Ficha de verificación — local ${F.local.cod}`, Author: 'Radar Ibero — Selector IOARR' } });
@@ -285,27 +305,48 @@ export function generarFichaPdf(F) {
       doc.moveDown(0.4);
     };
     const G = '#EEF0F4', A = '#FFF8DC', L = F.local;
+    const d = llena?.datos || null, da = d?.a || {};
+    const ESTADO = { borrador: 'borrador, aún sin enviar', enviada: 'enviada a revisión', observada: 'devuelta para corregir', aprobada: 'aprobada' };
 
     texto('Ficha de verificación de mobiliario escolar — IOARR de reposición', { bold: true, size: 15, despues: 0.1 });
     texto(`Local ${L.cod} · ${L.nombre} · Proyecto «${F.proyecto.nombre}» · generada el ${F.fecha} con el Padrón ESCALE y el Censo Educativo ${F.anio || ''}${F.supervisor ? ` · Supervisor asignado: ${F.supervisor}` : ''}`, { size: 8, color: '#5C6270' });
-    texto('Lo gris lo llenó la app; lo amarillo se llena en campo. Para cargar los datos en la app, usa el Excel de esta misma ficha.', { italic: true, size: 8, color: '#5C6270' });
+    if (llena) texto(`Ficha llenada en la app${llena.por ? ' por ' + llena.por : ''} · ${ESTADO[llena.estado] || llena.estado || ''}${llena.enviada_en ? ' · enviada el ' + fechaHoraPe(llena.enviada_en) : ''}${llena.estado === 'aprobada' && llena.revisada_en ? ' · aprobada el ' + fechaHoraPe(llena.revisada_en) : ''}. Lo gris viene del padrón y del censo; lo amarillo se llenó en campo.`, { italic: true, size: 8, color: '#5C6270' });
+    else texto('Lo gris lo llenó la app; lo amarillo se llena en campo. Para cargar los datos en la app, usa el Excel de esta misma ficha.', { italic: true, size: 8, color: '#5C6270' });
 
     titulo('A. Datos del local educativo');
     tabla([0.3, 0.45, 0.25], ['Campo', 'Valor', 'Origen'], [
       ['Código de local', L.cod, 'Padrón (app)'], ['Región / provincia / distrito', `${L.region} / ${L.prov} / ${L.dist}`, 'Padrón (app)'], ['UGEL', L.ugel, 'Padrón (app)'],
       ['Centro poblado y área', `${L.cp} · ${L.rural ? 'rural' : 'urbana'}`, 'Padrón (app)'], ['Dirección', L.direccion, 'Padrón (app)'],
-      ['Coordenadas (latitud, longitud)', L.lat != null ? `${L.lat}, ${L.lon}` : '', 'Padrón (app); se corrigen con GPS si difieren'],
-    ].map(v => ({ v, fill: [G, G, G] })).concat([['Fecha de la verificación', '', 'Campo'], ['Verificador: nombre, cargo y DNI', '', 'Campo'], ['Persona de la IE que acompañó: nombre y cargo', '', 'Campo']]
-      .map(v => ({ v, fill: [G, A, G], minAlto: 20 }))), { minAlto: 14 });
+      ['Coordenadas (latitud, longitud)', d?.a?.coord || (L.lat != null ? `${L.lat}, ${L.lon}` : ''), d && da.coord && da.coord !== `${L.lat}, ${L.lon}` ? 'Campo (GPS)' : 'Padrón (app); se corrigen con GPS si difieren'],
+    ].map(v => ({ v, fill: [G, G, G] })).concat([['Fecha de la verificación', fechaPe(da.fecha), 'Campo'], ['Verificador: nombre, cargo y DNI', v(da.verificador), 'Campo'], ['Persona de la IE que acompañó: nombre y cargo', v(da.acompanante), 'Campo']]
+      .map(v => ({ v, fill: [G, A, G], minAlto: d ? 14 : 20 }))), { minAlto: 14 });
 
     titulo('B. Servicios educativos del local');
     tabla([0.1, 0.3, 0.11, 0.09, 0.1, 0.1, 0.1, 0.1], ['Código modular', 'Institución', 'Nivel', 'Turno', 'Secciones (padrón)', 'Estudiantes (padrón)', 'Estudiantes verificados', 'Observación'],
-      F.servicios.map(s => ({ v: [s.modular, s.nombre, s.nombreNivel, s.turno, s.secciones, s.est, '', ''], fill: [G, G, G, G, G, G, A, A] })), { minAlto: 18 });
+      F.servicios.map(s => ({ v: [s.modular, s.nombre, s.nombreNivel, s.turno, s.secciones, s.est, v(d?.servicios?.[s.modular]?.est), v(d?.servicios?.[s.modular]?.obs)], fill: [G, G, G, G, G, G, A, A] })), { minAlto: d ? 14 : 18 });
 
     titulo('C. Verificación del mobiliario por aula');
     texto(`${F.aulas.length} ${F.aulas.length === 1 ? 'aula' : 'aulas'} en uso según el censo, con sus cantidades ya cargadas (la mesa, en puestos). ${NOTA_SIGLAS}`, { size: 8, color: '#5C6270' });
     const anchosC = [0.13, 0.06, 0.06, 0.06, 0.07, 0.07, 0.07, 0.07, 0.08, 0.09, 0.09, 0.15];
-    for (const a of F.aulas) {
+    if (d) {
+      // Ficha llena: las aulas con datos, con lo contado; las demás en una línea (siguen con el censo)
+      const conDatos = F.aulas.filter(a => d.aulas?.[a.j]), sin = F.aulas.filter(a => !d.aulas?.[a.j]).map(a => a.j + 1);
+      for (const a of conDatos) {
+        const x = d.aulas[a.j];
+        if (doc.y + 120 > limite()) doc.addPage();
+        texto(`${textoAula(a, F.aulas.length)} · estudiantes verificados: ${x.est == null || x.est === '' ? '—' : x.est}`, { bold: true, size: 8, despues: 0.15 });
+        const filas = [];
+        for (const b of BIENES_FICHA) {
+          const c = a.censo[b.k], fs = (x.filas || []).filter(f => f.k === b.k);
+          if (!fs.length) { filas.push({ v: [b.n, c.b, c.r, c.m, '', '', '', b.k === 'mesa' ? '' : '—', '', '', '', 'Sin contar: sigue el censo'], fill: [G, G, G, G, A, A, A, G, A, A, A, A] }); continue; }
+          fs.forEach((f, i) => filas.push({ v: [b.n + (i ? ' (otro tipo)' : b.k === 'mesa' ? ' (censo en puestos)' : ''), i ? '' : c.b, i ? '' : c.r, i ? '' : c.m, v(f.b), v(f.r), v(f.m), b.k === 'mesa' ? v(f.puestos) || '1' : '—', v(f.antig), v(f.patrimonial), v(f.baja), v(f.obs)],
+            fill: [G, G, G, G, A, A, A, b.k === 'mesa' ? A : G, A, A, A, A] }));
+        }
+        tabla(anchosC, CAB_C, filas, { size: 7 });
+      }
+      if (sin.length) texto(`${sin.length === F.aulas.length ? 'Ninguna aula verificada' : `Aulas sin verificar: ${tramos(sin)}`}. Siguen con las cantidades del censo.`, { size: 8, color: '#5C6270' });
+    }
+    for (const a of d ? [] : F.aulas) {
       if (doc.y + 120 > limite()) doc.addPage();
       texto(`${textoAula(a, F.aulas.length)} · estudiantes verificados: ______`, { bold: true, size: 8, despues: 0.15 });
       tabla(anchosC, CAB_C, BIENES_FICHA.map(b => {
@@ -317,28 +358,72 @@ export function generarFichaPdf(F) {
 
     titulo('D. Mobiliario fuera de aulas y panel fotográfico');
     texto('El censo solo cubre las aulas. Estos ambientes (dirección, sala de docentes, biblioteca, laboratorio, AIP, comedor) se anotan solo si el proyecto los incluye.', { size: 8, color: '#5C6270' });
-    tabla([0.16, 0.16, 0.08, 0.08, 0.08, 0.12, 0.32], ['Ambiente', 'Bien', 'Bueno', 'Regular', 'Malo', 'Antigüedad (años o rango)', 'Observación'],
-      Array.from({ length: 5 }, () => ({ v: Array(7).fill(''), fill: A, minAlto: 18 })));
+    const fuera = d ? (d.fuera || []).map(f => ({ v: [v(f.ambiente), v(f.bien), v(f.b), v(f.r), v(f.m), v(f.antig), v(f.obs)], fill: A })) : Array.from({ length: 5 }, () => ({ v: Array(7).fill(''), fill: A, minAlto: 18 }));
+    if (d && !fuera.length) texto('Sin mobiliario fuera de aulas anotado.', { size: 8 });
+    else tabla([0.16, 0.16, 0.08, 0.08, 0.08, 0.12, 0.32], ['Ambiente', 'Bien', 'Bueno', 'Regular', 'Malo', 'Antigüedad (años o rango)', 'Observación'], fuera);
     texto('Panel fotográfico mínimo: fachada con el letrero, una vista general de cada tipo de aula y un detalle de cada tipo de mueble en mal estado. Cada foto lleva fecha, código de local y aula.', { size: 8, color: '#5C6270' });
-    tabla([0.06, 0.3, 0.34, 0.3], ['N.°', 'Ambiente o aula', 'Qué muestra', 'Archivo'],
+    if (d) {
+      const fotos = llena.fotos || [];
+      if (!fotos.length) texto('Sin fotos tomadas en la app.', { size: 8 });
+      else {
+        tabla([0.06, 0.3, 0.3, 0.34], ['N.°', 'Ambiente o aula', 'Qué muestra', 'Fecha y coordenadas'],
+          fotos.map(f => ({ v: [f.n, f.lugar, v(f.muestra), `${fechaHoraPe(f.tomada_en)}${f.lat != null ? ` · ${Number(f.lat).toFixed(5)}, ${Number(f.lon).toFixed(5)}` : ''}`], fill: [G, A, A, A] })));
+        // Las fotos, de a tres por fila
+        const COL = 3, GAP = 10, w = (ANCHO - GAP * (COL - 1)) / COL, h = w * 0.75, pie = 12;
+        for (let i = 0; i < fotos.length; i += COL) {
+          if (doc.y + h + pie > limite()) doc.addPage();
+          const y = doc.y;
+          fotos.slice(i, i + COL).forEach((f, c) => {
+            const x = X0 + c * (w + GAP);
+            doc.rect(x, y, w, h).fill('#EEF0F4');
+            if (f.buffer) { try { doc.image(f.buffer, x, y, { fit: [w, h], align: 'center', valign: 'center' }); } catch { /* formato que pdfkit no lee */ } }
+            doc.font('Helvetica').fontSize(7).fillColor('#5C6270').text(`Foto ${f.n} · ${f.lugar}`, x, y + h + 2, { width: w, lineBreak: false, ellipsis: true });
+          });
+          doc.x = X0; doc.y = y + h + pie + 6;
+        }
+      }
+    } else tabla([0.06, 0.3, 0.34, 0.3], ['N.°', 'Ambiente o aula', 'Qué muestra', 'Archivo'],
       Array.from({ length: 6 }, (_, k) => ({ v: [k + 1, k ? '' : 'Fachada', k ? '' : 'Local y letrero', ''], fill: [G, A, A, A], minAlto: 16 })));
 
     titulo('E. Observaciones y conformidad');
-    tabla([1], null, [{ v: ['Observaciones del verificador:'], fill: A, minAlto: 70 }]);
+    tabla([1], null, [{ v: ['Observaciones del verificador:' + (d?.obs ? ' ' + d.obs : '')], fill: A, minAlto: d ? 30 : 70 }]);
     texto('Declaración: las cantidades, estados y antigüedades de esta ficha corresponden a lo constatado en el local en la fecha indicada.', { size: 8 });
-    tabla([0.28, 0.28, 0.12, 0.2, 0.12], ['Cargo', 'Nombres y apellidos', 'DNI', 'Firma y sello', 'Fecha'],
+    if (d) {
+      // Firmas en pantalla: la imagen va en su celda, con la fecha y hora en que se firmó
+      const anchos = [0.24, 0.26, 0.1, 0.28, 0.12].map(a => a * ANCHO), H = 58;
+      tabla([0.24, 0.26, 0.1, 0.28, 0.12], ['Cargo', 'Nombres y apellidos', 'DNI', 'Firma', 'Fecha'], []);
+      doc.moveUp(0.4);
+      for (const [k, cargo] of FIRMAS) {
+        const f = d.firmas?.[k] || {}, img = llena.firmas?.[k];
+        if (doc.y + H > limite()) doc.addPage();
+        const y = doc.y; let x = X0;
+        const celdas = [cargo, v(f.nombre), v(f.dni), '', fechaPe(f.fecha) || (img ? fechaPe(fechaLima(img.firmada_en)) : '')];
+        celdas.forEach((t, j) => {
+          doc.rect(x, y, anchos[j], H).fill(j ? A : G);
+          doc.rect(x, y, anchos[j], H).lineWidth(0.5).strokeColor('#C9CED8').stroke();
+          doc.font('Helvetica').fontSize(8).fillColor('#16181D').text(t, x + 3, y + 3, { width: anchos[j] - 6 });
+          if (j === 3) {
+            if (img?.buffer) { try { doc.image(img.buffer, x + 4, y + 3, { fit: [anchos[j] - 8, H - 16], align: 'center', valign: 'center' }); } catch { /* imagen no válida */ } }
+            doc.font('Helvetica').fontSize(6).fillColor('#5C6270').text(img ? `Firmado en pantalla el ${fechaHoraPe(img.firmada_en)}` : 'Sin firma en pantalla', x + 3, y + H - 10, { width: anchos[j] - 6, lineBreak: false });
+          }
+          x += anchos[j];
+        });
+        doc.x = X0; doc.y = y + H;
+      }
+      doc.moveDown(0.4);
+    } else tabla([0.28, 0.28, 0.12, 0.2, 0.12], ['Cargo', 'Nombres y apellidos', 'DNI', 'Firma y sello', 'Fecha'],
       FIRMAS.map(([, cargo]) => ({ v: [cargo, '', '', '', ''], fill: [G, A, A, A, A], minAlto: 40 })));
 
     titulo('Criterios de estado y reglas de llenado');
     tabla([0.12, 0.5, 0.38], ['Estado', 'Cuándo se marca', 'Entra a reponer'], CRITERIOS.map(v => ({ v, fill: G })));
-    for (const t of REGLAS) texto('• ' + t, { size: 8, despues: 0.15 });
+    for (const t of llena ? REGLAS.filter(r => !/celdas grises/.test(r)) : REGLAS) texto('• ' + t, { size: 8, despues: 0.15 });
 
     const n = doc.bufferedPageRange().count;
     for (let k = 0; k < n; k++) {
       doc.switchToPage(k);
       const y = doc.page.height - 24, mb = doc.page.margins.bottom;
       doc.page.margins.bottom = 0;
-      doc.font('Helvetica').fontSize(7).fillColor('#5C6270').text(`Local ${L.cod} · Ficha de verificación · Página ${k + 1} de ${n}`, X0, y, { width: ANCHO, align: 'right', lineBreak: false });
+      doc.font('Helvetica').fontSize(7).fillColor('#5C6270').text(`Local ${L.cod} · Ficha de verificación${llena ? ' llenada en la app' : ''} · Página ${k + 1} de ${n}`, X0, y, { width: ANCHO, align: 'right', lineBreak: false });
       doc.page.margins.bottom = mb;
     }
     doc.end();

@@ -112,7 +112,7 @@ function pintarRevision() {
   const cab = t => `<div class="panel-cab"><h3>${t}</h3><button class="btn btn-ghost btn-sm" type="button" data-ficha-revision-cerrar>Cerrar</button></div>`;
   if (rev.cargando) return `<div class="panel">${cab('Ficha llenada en la app · local ' + esc(rev.cod))}<p class="pad sub">Cargando…</p></div>`;
   if (rev.error) return `<div class="panel">${cab('Ficha llenada en la app · local ' + esc(rev.cod))}<p class="pad err">${esc(rev.error)}</p></div>`;
-  const { ficha: f, modelo: M, revision: R, fotos } = rev.d, d = f.datos || {}, a = d.a || {};
+  const { ficha: f, modelo: M, revision: R, fotos, firmas: fir } = rev.d, d = f.datos || {}, a = d.a || {};
   const linea = (x, tipo) => `<li class="inf-linea">${tipo === 'e' ? '<span class="chip-est alerta">Error</span>' : '<span class="chip-est pend">Aviso</span>'} ${x.fila ? `<span class="sub">${esc(x.fila)}</span> ` : ''}${esc(x.motivo)}</li>`;
   const servicios = M.servicios.map(s => ({ s, x: d.servicios?.[s.modular] })).filter(o => o.x);
   const aulas = M.aulas.filter(au => d.aulas?.[au.j]);
@@ -148,7 +148,11 @@ function pintarRevision() {
           <img data-rev-mini="${esc(x.id)}" alt="${esc(x.lugar)}"><span>${esc(x.lugar)}</span></button>`).join('')}</div>` : '<p class="sub">El supervisor no tomó fotos.</p>'}` : ''}
       <h4>E. Observaciones y conformidad</h4>
       <p>${v(d.obs)}</p>
-      ${firmas.length ? `<p class="sub">${firmas.map(([k, x]) => `${esc(FIRMA[k] || k)}: ${v(x.nombre)}${x.dni ? ', DNI ' + esc(x.dni) : ''}`).join(' · ')}</p>` : ''}
+      ${fir ? `<div class="rev-firmas">${Object.keys(FIRMA).map(k => { const x = d.firmas?.[k] || {}, im = fir[k]; return x.nombre || x.dni || im ? `<div class="rev-firma">
+          <span class="lbl">${esc(FIRMA[k])}</span>${im ? `<img data-rev-firma="${k}" alt="Firma">` : '<span class="sub">Sin firma en pantalla</span>'}
+          <span>${v(x.nombre)}${x.dni ? ', DNI ' + esc(x.dni) : ''}</span>${im ? `<span class="sub">Firmado el ${esc(new Date(im.firmada_en).toLocaleString('es-PE', { timeZone: 'America/Lima' }))}</span>` : ''}</div>` : ''; }).join('')}</div>`
+        : firmas.length ? `<p class="sub">${firmas.map(([k, x]) => `${esc(FIRMA[k] || k)}: ${v(x.nombre)}${x.dni ? ', DNI ' + esc(x.dni) : ''}`).join(' · ')}</p>` : ''}
+      <p><button class="btn btn-ghost btn-sm" type="button" data-ficha-pdf="${esc(M.local.cod)}">Bajar la ficha llena en PDF</button> <span class="sub">Con lo verificado, las fotos y las firmas.${f.estado === 'enviada' ? ' Al aprobarla, queda en el sustento del local como acta de verificación.' : ''}</span></p>
       ${f.estado === 'enviada' ? `<div class="revision-acc">
         <label class="field"><span class="lbl">Si la devuelves, qué debe corregir el supervisor</span><textarea data-ficha-nota rows="2" maxlength="1000" placeholder="Ej.: el aula 3 tiene sillas de más; vuelve a contarlas."></textarea></label>
         <div class="acts"><button class="btn btn-ghost" type="button" data-ficha-observar="${esc(M.local.cod)}">Devolver al supervisor</button>
@@ -168,6 +172,10 @@ async function blobUrl(url) {
 async function cargarMinisRev() {
   if (!rev?.d) return;
   const cod = rev.cod;
+  for (const img of ctx.el.querySelectorAll('img[data-rev-firma]:not([src])')) {
+    img.setAttribute('src', '');
+    try { img.src = await blobUrl(`/api/selector-ioarr/proyectos/${ctx.proyecto.id}/fichas/${encodeURIComponent(cod)}/digital/firmas/${img.dataset.revFirma}`); } catch { /* sin firma */ }
+  }
   for (const img of ctx.el.querySelectorAll('img[data-rev-mini]:not([src])')) {
     img.setAttribute('src', '');
     try { img.src = await blobUrl(rutaFoto(cod, img.dataset.revMini, true)); } catch { /* sin miniatura */ }
@@ -204,7 +212,7 @@ async function decidir(cod, accion, btn) {
     vista = d.fichas; rev = null; pintar();
     if (accion === 'aprobar') ctx.alCambiarInventario?.();
     const fo = d.fotos;
-    ctx.toast(accion === 'aprobar' ? `Ficha aprobada: el local queda verificado.${fo?.copiadas ? ` ${fo.copiadas} ${fo.copiadas === 1 ? 'foto pasó' : 'fotos pasaron'} al sustento del local.` : ''}${fo?.fallidas ? ` ${fo.fallidas} no se pudieron copiar: súbelas en «Corregir inventario».` : ''}` : 'Ficha devuelta al supervisor.');
+    ctx.toast(accion === 'aprobar' ? `Ficha aprobada: el local queda verificado.${d.acta ? ' El PDF quedó como acta en el sustento.' : ''}${fo?.copiadas ? ` ${fo.copiadas} ${fo.copiadas === 1 ? 'foto pasó' : 'fotos pasaron'} al sustento del local.` : ''}${fo?.fallidas ? ` ${fo.fallidas} no se pudieron copiar: súbelas en «Corregir inventario».` : ''}` : 'Ficha devuelta al supervisor.');
   } catch (e) { ctx.toast(`No se pudo ${accion === 'aprobar' ? 'aprobar' : 'devolver'}: ${e.message}`); btn.disabled = false; repintarRevision(); }
 }
 
@@ -259,6 +267,8 @@ export function enlazarFichas(el) {
     if (b) descargar(`/api/selector-ioarr/proyectos/${ctx.proyecto.id}/fichas/${encodeURIComponent(b.dataset.fichaBajar)}/${b.dataset.formato}`, b, `Ficha_${b.dataset.fichaBajar}.${b.dataset.formato === 'pdf' ? 'pdf' : 'xlsx'}`);
     const z = e.target.closest('[data-fichas-zip]');
     if (z) descargar(`/api/selector-ioarr/proyectos/${ctx.proyecto.id}/fichas-zip${z.dataset.fichasZip ? '?paquete=' + encodeURIComponent(z.dataset.fichasZip) : ''}`, z, 'Fichas_verificacion.zip', 'Armando el ZIP…');
+    const pdf = e.target.closest('[data-ficha-pdf]');
+    if (pdf) { descargar(`/api/selector-ioarr/proyectos/${ctx.proyecto.id}/fichas/${encodeURIComponent(pdf.dataset.fichaPdf)}/digital/pdf`, pdf, `Ficha_verificacion_llena_${pdf.dataset.fichaPdf}.pdf`, 'Armando el PDF…'); return; }
     const fr = e.target.closest('[data-rev-foto]');
     if (fr) { verFotoRev(fr.dataset.revFoto); return; }
     const rv = e.target.closest('[data-ficha-revisar]');

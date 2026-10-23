@@ -10,6 +10,10 @@ import { modeloFicha, generarFichaExcel, leerFicha, procesarFicha } from '../src
 import { limpiarFormulario, fichaDesdeFormulario, puedeEditar, origenDigital, limpiarMetaFoto, avisosFotos, panelFotos, lugarFoto, rutaFoto } from '../src/selector-ioarr/ficha-digital.js';
 import { accesoFicha, fichasDelUsuario, abrirFichaCampo, guardarBorradorFicha, enviarFicha, GUIA_FICHA, subirFotoFicha, leerImagenFoto, borrarFotoFicha } from '../src/selector-ioarr/campo.js';
 import { politicaSelector } from '../src/selector-ioarr/csp.js';
+import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
+import { generarFichaPdf } from '../src/selector-ioarr/ficha.js';
+import { avisosFirmas, pdfFichaLlena, rutaFirma } from '../src/selector-ioarr/ficha-digital.js';
+import { subirFirmaFicha, borrarFirmaFicha, leerImagenFirma, pdfFichaCampo } from '../src/selector-ioarr/campo.js';
 
 const leer = rel => readFileSync(new URL('../' + rel, import.meta.url), 'utf8');
 const D = prep(JSON.parse(leer('src/public/data/selector-ioarr/2025/moquegua.json')));
@@ -91,7 +95,7 @@ test('estados: el supervisor solo cambia un borrador o una ficha devuelta', () =
 
 // ─── API de campo con un Supabase falso ─────────────────────────────────────
 const UUID = '6f1c2a3b-4d5e-4f60-8a7b-9c0d1e2f3a4b';
-function sbFalso({ fichas = [], visitas = [], fotos = [], sinTabla = false, sinFotos = false } = {}) {
+function sbFalso({ fichas = [], visitas = [], fotos = [], firmas = [], sinTabla = false, sinFotos = false, sinFirmas = false } = {}) {
   const tablas = {
     ioarr_selector_proyectos: [{ id: UUID, usuario_id: 'prov-1', nombre: 'Moquegua 2026', region: 'Moquegua' }],
     ioarr_selector_locales: [COD_U, '100002'].map(c => ({ proyecto_id: UUID, codigo_local: c })),
@@ -99,7 +103,8 @@ function sbFalso({ fichas = [], visitas = [], fotos = [], sinTabla = false, sinF
     campo_asignaciones: [{ proyecto_id: UUID, codigo_local: COD_U, supervisor_id: 'sup-1' }, { proyecto_id: UUID, codigo_local: '100002', supervisor_id: 'sup-2' }],
     campo_fichas: fichas.map(f => ({ proyecto_id: UUID, ...f })),
     campo_visitas: [...visitas],
-    campo_fichas_fotos: [...fotos]
+    campo_fichas_fotos: [...fotos],
+    campo_fichas_firmas: [...firmas]
   };
   const archivos = new Map();   // bucket: ruta → Buffer
   const storage = { from: () => ({
@@ -107,11 +112,11 @@ function sbFalso({ fichas = [], visitas = [], fotos = [], sinTabla = false, sinF
     download: async ruta => archivos.has(ruta) ? { data: { arrayBuffer: async () => archivos.get(ruta) }, error: null } : { data: null, error: { message: 'not found' } },
     remove: async rutas => { rutas.forEach(r => archivos.delete(r)); return { error: null }; }
   }) };
-  const CLAVES = { campo_fichas: ['proyecto_id', 'codigo_local'], campo_visitas: ['codigo_local'] };
+  const CLAVES = { campo_fichas: ['proyecto_id', 'codigo_local'], campo_visitas: ['codigo_local'], campo_fichas_firmas: ['proyecto_id', 'codigo_local', 'cargo'] };
   const from = tabla => {
     const q = { eq: {}, in: null, rango: null, borrar: false };
     const filtrar = () => tablas[tabla].filter(f => Object.entries(q.eq).every(([k, v]) => f[k] === v) && (!q.in || q.in[1].includes(f[q.in[0]])));
-    const fallo = (sinTabla && tabla === 'campo_fichas') || (sinFotos && tabla === 'campo_fichas_fotos') ? { code: '42P01', message: `relation "${tabla}" does not exist` } : null;
+    const fallo = (sinTabla && tabla === 'campo_fichas') || (sinFotos && tabla === 'campo_fichas_fotos') || (sinFirmas && tabla === 'campo_fichas_firmas') ? { code: '42P01', message: `relation "${tabla}" does not exist` } : null;
     let escrita = null;
     const b = {
       select: () => b, order: () => b,
@@ -318,4 +323,98 @@ test('migración 024, copia al sustento al aprobar, CSP y páginas', () => {
   assert.match(js, /capture="environment"/);
   assert.match(js, /from '\/campo-fotos\.js'/);
   assert.match(leer('src/public/campo-fotos.js'), /indexedDB\.open/);
+});
+
+// ─── Firmas en pantalla y PDF de la ficha llena (migración 025) ─────────────
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', 'base64');
+// Texto del PDF con pdf.js actual (el de pdf-parse, de 2018, no lee algunos PDF válidos de pdfkit)
+async function textoPdf(buf) {
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(buf), verbosity: 0 }).promise;
+  let t = '';
+  for (let p = 1; p <= doc.numPages; p++) t += (await (await doc.getPage(p)).getTextContent()).items.map(x => x.str).join(' ') + ' ';
+  return t.replace(/\s+/g, ' ');
+}
+
+test('firmar: guarda la firma en PNG; firmar de nuevo reemplaza la anterior y borra su archivo', async () => {
+  const sb = sbFalso();
+  const r = await subirFirmaFicha(sb, ANA, UUID, COD_U, 'director', { archivo: { buffer: PNG } });
+  assert.equal(r.status, 200); assert.ok(r.body.firma.firmada_en);
+  assert.equal(sb.tablas.campo_fichas.length, 1, 'firmar crea la ficha si no existía');
+  const ruta1 = sb.tablas.campo_fichas_firmas[0].ruta;
+  assert.match(ruta1, new RegExp(`^campo/${UUID}/${COD_U}/firma_director_\\d+\\.png$`));
+  await new Promise(ok => setTimeout(ok, 5));
+  await subirFirmaFicha(sb, ANA, UUID, COD_U, 'director', { archivo: { buffer: PNG } });
+  assert.equal(sb.tablas.campo_fichas_firmas.length, 1);
+  assert.notEqual(sb.tablas.campo_fichas_firmas[0].ruta, ruta1); assert.equal(sb.archivos.has(ruta1), false);
+  assert.deepEqual((await leerImagenFirma(sb, ANA, UUID, COD_U, 'director')).buffer, PNG);
+  const ab = await abrirFichaCampo(sb, ANA, UUID, COD_U, DEPS);
+  assert.deepEqual(Object.keys(ab.body.firmas), ['director']);
+
+  assert.equal((await subirFirmaFicha(sb, ANA, UUID, COD_U, 'alcalde', { archivo: { buffer: PNG } })).status, 400);
+  assert.equal((await subirFirmaFicha(sb, ANA, UUID, COD_U, 'ugel', { archivo: { buffer: JPG } })).status, 400, 'solo PNG');
+  assert.equal((await subirFirmaFicha(sb, BETO, UUID, COD_U, 'ugel', { archivo: { buffer: PNG } })).status, 403);
+  const b = await borrarFirmaFicha(sb, ANA, UUID, COD_U, 'director');
+  assert.equal(b.body.borrada, true); assert.equal(sb.tablas.campo_fichas_firmas.length, 0); assert.equal(sb.archivos.size, 0);
+  const env = sbFalso({ fichas: [{ codigo_local: COD_U, estado: 'enviada', datos: FORM }] });
+  assert.equal((await subirFirmaFicha(env, ANA, UUID, COD_U, 'director', { archivo: { buffer: PNG } })).status, 409);
+  assert.equal((await abrirFichaCampo(sbFalso({ sinFirmas: true }), ANA, UUID, COD_U, DEPS)).body.firmas, null, 'sin la migración 025');
+});
+
+test('conformidad: avisa la firma del director y de la UGEL, salvo con el acta en papel; y firmas sin nombre', () => {
+  const sin = avisosFirmas(FORM, {});
+  assert.equal(sin.length, 1); assert.match(sin[0].motivo, /director\(a\) de la institución educativa y especialista o verificador de la ugel/);
+  assert.deepEqual(avisosFirmas(FORM, {}, [{ aula: null, muestra: 'Acta firmada en papel' }]), []);
+  const sinNombre = avisosFirmas(FORM, { director: {}, ugel: {} });
+  assert.equal(sinNombre.length, 1); assert.match(sinNombre[0].motivo, /Firma sin nombre: especialista o verificador de la ugel/);
+  assert.deepEqual(avisosFirmas(FORM, null), [], 'sin la migración, sin avisos');
+  assert.equal(rutaFirma('p', '1', 'ugel', 5), 'campo/p/1/firma_ugel_5.png');
+});
+
+test('PDF de la ficha llena: lo verificado, las aulas sin verificar, el panel fotográfico y las firmas', async () => {
+  const F = modeloFicha(D, C, iU, META);
+  const buf = await generarFichaPdf(F, {
+    datos: limpiarFormulario(FORM), estado: 'enviada', por: 'ana@ibero.pe', enviada_en: '2026-10-15T20:00:00Z',
+    fotos: [{ n: 1, lugar: 'Fachada y letrero', muestra: 'Fachada y letrero', tomada_en: '2026-10-15T15:00:00Z', lat: -16.1, lon: -70.5, buffer: PNG },
+      { n: 2, lugar: 'Aula 1 · Silla del estudiante', muestra: 'Detalle del mueble', tomada_en: '2026-10-15T15:05:00Z', buffer: null }],
+    firmas: { director: { buffer: PNG, firmada_en: '2026-10-15T21:00:00Z' } }
+  });
+  assert.equal(buf.subarray(0, 5).toString(), '%PDF-');
+  const t = await textoPdf(buf);
+  for (const x of ['Ficha llenada en la app por ana@ibero.pe', 'enviada a revisión', 'Ana Pérez, UGEL, DNI 12345678', '15/10/2026', 'De 5 a 10', 'foto 3',
+    'Foto 1 · Fachada y letrero', 'Luis Q.', '87654321', 'Firmado en pantalla el', 'Sin firma en pantalla', 'Sin novedad', 'llenada en la app · Página 1'])
+    assert.ok(t.includes(x), x);
+  assert.match(t, new RegExp(`Aulas sin verificar: 2${nAulas > 2 ? ` a ${nAulas}|2, 3` : ''}`));
+  // La ficha en blanco sigue igual
+  const blanco = await textoPdf(await generarFichaPdf(F));
+  assert.ok(blanco.includes('lo amarillo se llena en campo')); assert.ok(!blanco.includes('llenada en la app'));
+});
+
+test('PDF desde campo: con las fotos y firmas del bucket; sin ficha guardada, 404', async () => {
+  const sb = sbFalso({ fichas: [{ codigo_local: COD_U, estado: 'borrador', datos: FORM, editado_por_email: 'ana@ibero.pe' }] });
+  await subirFotoFicha(sb, ANA, UUID, COD_U, { archivo: { buffer: PNG }, campos: campos(ID1, { aula: '', bien: '', muestra: 'Fachada y letrero' }) });
+  await subirFirmaFicha(sb, ANA, UUID, COD_U, 'ugel', { archivo: { buffer: PNG } });
+  const r = await pdfFichaCampo(sb, ANA, UUID, COD_U, DEPS);
+  assert.equal(r.nombre, `Ficha_verificacion_llena_${COD_U}.pdf`);
+  const t = await textoPdf(r.buffer);
+  assert.ok(t.includes('Foto 1 · Fachada y letrero')); assert.ok(t.includes('Firmado en pantalla el'));
+  assert.equal((await pdfFichaCampo(sbFalso(), ANA, UUID, COD_U, DEPS)).status, 404);
+  assert.equal((await pdfFichaCampo(sb, BETO, UUID, COD_U, DEPS)).status, 403);
+  // Sin las migraciones 024 y 025 el PDF sale igual, sin fotos ni firmas
+  const viejo = sbFalso({ sinFotos: true, sinFirmas: true, fichas: [{ codigo_local: COD_U, estado: 'borrador', datos: FORM }] });
+  assert.ok((await textoPdf((await pdfFichaLlena(viejo, UUID, COD_U, modeloFicha(D, C, iU, META), { datos: FORM, estado: 'borrador' })))).includes('Sin fotos tomadas en la app'));
+});
+
+test('migración 025, acta al aprobar y páginas', () => {
+  const sql = leer('supabase/migrations/025_campo_fichas_firmas.sql');
+  assert.match(sql, /create table if not exists public\.campo_fichas_firmas/);
+  assert.match(sql, /check \(cargo in \('director', 'ugel', 'registradora'\)\)/);
+  assert.match(sql, /primary key \(proyecto_id, codigo_local, cargo\)/);
+  assert.match(sql, /on delete cascade/); assert.match(sql, /enable row level security/); assert.doesNotMatch(sql, /create policy/);
+  const exp = leer('src/selector-ioarr/expediente.js');
+  assert.match(exp, /guardarActaPdf\(p, cod/); assert.match(exp, /tipo: 'acta'/);
+  assert.match(exp, /campo_fichas_firmas'\)\.select\('ruta'\)\.eq\('proyecto_id', proyectoId\)/, 'al borrar el proyecto se borran las firmas');
+  const js = leer('src/public/campo-ficha.js');
+  assert.match(js, /data-fh="firmar"/); assert.match(js, /touch-action|setPointerCapture/);
+  assert.match(leer('src/public/campo.css'), /touch-action:none/);
+  assert.match(leer('src/public/selector-ioarr-fichas.js'), /data-ficha-pdf/);
 });

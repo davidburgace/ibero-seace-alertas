@@ -16,8 +16,9 @@
 //   leerFichaDigital / estadosFichas / guardarFichaDigital   acceso a la tabla
 // ============================================================================
 
-import { VERSION_FICHA, FIRMAS } from './ficha.js';
+import { VERSION_FICHA, FIRMAS, generarFichaPdf } from './ficha.js';
 import { TIPOS } from './costos.js';
+import { BUCKET_EXPEDIENTE } from './archivos.js';
 
 export const ESTADOS_DIGITAL = { borrador: 'Borrador', enviada: 'Por revisar', observada: 'Observada', aprobada: 'Aprobada' };
 export const AVISO_MIGRACION_FICHAS = 'Para llenar la ficha en la app falta ejecutar supabase/migrations/023_campo_fichas.sql en Supabase';
@@ -195,3 +196,64 @@ export function avisosFotos(datos, fotos) {
 
 // Las fotos como el panel fotográfico de la ficha (sección D del Excel): van al inventario al aprobarla
 export const panelFotos = fotos => (fotos || []).map((f, n) => ({ n: n + 1, ambiente: lugarFoto(f), muestra: f.aula == null ? f.muestra : (f.muestra || (f.bien ? 'Detalle del mueble' : 'Vista general del aula')), archivo: `Foto ${n + 1}` }));
+
+// ─── Firmas en pantalla (migración 025, tabla campo_fichas_firmas) ───────────
+export const CARGOS_FIRMA = FIRMAS.map(([k]) => k);           // director, ugel, registradora
+export const NOMBRE_CARGO = Object.fromEntries(FIRMAS);
+export const AVISO_MIGRACION_FIRMAS = 'Para firmar en la ficha falta ejecutar supabase/migrations/025_campo_fichas_firmas.sql en Supabase';
+export const MAX_FIRMA = 1024 * 1024;
+export const rutaFirma = (proyectoId, cod, cargo, ts = Date.now()) => `campo/${proyectoId}/${cod}/firma_${cargo}_${ts}.png`;
+
+/** Filas de las firmas de una ficha (con rutas: solo para el servidor). */
+export async function leerFirmas(sb, proyectoId, cod) {
+  const { data, error } = await sb.from('campo_fichas_firmas').select('cargo, ruta, firmada_en, subido_por_email').eq('proyecto_id', proyectoId).eq('codigo_local', cod);
+  if (error) throw error;
+  return data;
+}
+/** { cargo: { firmada_en, por } } para el navegador; null si falta la migración 025. */
+export async function firmasFicha(sb, proyectoId, cod) {
+  try { return Object.fromEntries((await leerFirmas(sb, proyectoId, cod)).map(f => [f.cargo, { firmada_en: f.firmada_en, por: f.subido_por_email || '' }])); }
+  catch (e) { if (faltaMigracion(e)) return null; throw e; }
+}
+
+// Conformidad: firma del director y del verificador de la UGEL, cada una con nombre (avisos, no errores)
+export function avisosFirmas(datos, firmas, fotos = []) {
+  if (!firmas) return [];
+  const f = obj(obj(datos).firmas), avisos = [];
+  const actaEnPapel = (fotos || []).some(x => x.aula == null && /acta/i.test(x.muestra || ''));
+  const faltan = actaEnPapel ? [] : ['director', 'ugel'].filter(k => !firmas[k]);
+  if (faltan.length) avisos.push({ hoja: '—', fila: 'Conformidad', motivo: `Falta la firma en pantalla de: ${faltan.map(k => NOMBRE_CARGO[k].toLowerCase()).join(' y ')}. Si firmaron en papel, adjunta la foto del acta firmada.` });
+  const sinNombre = CARGOS_FIRMA.filter(k => firmas[k] && !txt(obj(f[k]).nombre));
+  if (sinNombre.length) avisos.push({ hoja: '—', fila: 'Conformidad', motivo: `Firma sin nombre: ${sinNombre.map(k => NOMBRE_CARGO[k].toLowerCase()).join(', ')}. Escribe sus nombres y DNI.` });
+  return avisos;
+}
+
+// ─── PDF de la ficha llena ──────────────────────────────────────────────────
+async function bajar(sb, ruta) {
+  const { data, error } = await sb.storage.from(BUCKET_EXPEDIENTE).download(ruta);
+  if (error || !data) return null;
+  return Buffer.from(await data.arrayBuffer());
+}
+/**
+ * PDF con lo llenado, las fotos y las firmas.
+ * @param F      modeloFicha del local
+ * @param ficha  leerFichaDigital (datos, estado, por, enviada_en, revisada_en)
+ * Las fotos y las firmas se leen de sus tablas (sin las migraciones 024 o 025, el PDF sale sin ellas).
+ */
+export async function pdfFichaLlena(sb, proyectoId, cod, F, ficha) {
+  const [fotos, firmas] = await Promise.all([
+    leerFotos(sb, proyectoId, cod).catch(e => { if (faltaMigracion(e)) return []; throw e; }),
+    leerFirmas(sb, proyectoId, cod).catch(e => { if (faltaMigracion(e)) return []; throw e; })
+  ]);
+  // Las fotos de a cuatro, para no pedir todas a la vez al bucket
+  const buffers = [];
+  for (let i = 0; i < fotos.length; i += 4) buffers.push(...await Promise.all(fotos.slice(i, i + 4).map(f => bajar(sb, f.ruta))));
+  const panel = panelFotos(fotos);
+  const llena = {
+    datos: limpiarFormulario(ficha.datos), estado: ficha.estado, por: ficha.por, enviada_en: ficha.enviada_en, revisada_en: ficha.revisada_en,
+    fotos: fotos.map((f, i) => ({ n: i + 1, lugar: panel[i].ambiente, muestra: panel[i].muestra, tomada_en: f.tomada_en, lat: f.lat, lon: f.lon, buffer: buffers[i] })),
+    firmas: Object.fromEntries(await Promise.all(firmas.map(async f => [f.cargo, { firmada_en: f.firmada_en, buffer: await bajar(sb, f.ruta) }])))
+  };
+  return generarFichaPdf(F, llena);
+}
+export const nombrePdfLlena = F => `Ficha_verificacion_llena_${F.local.cod}.pdf`;

@@ -6,6 +6,8 @@
 // (src/selector-ioarr/ficha-digital.js y ficha.js).
 // Fotos (campo-fotos.js): 📷 en la fachada, en cada aula y en cada mueble. Se reducen y sellan en el
 // celular, quedan en la cola del equipo y se suben solas cuando hay señal (/fichas/:cod/fotos).
+// Firmas (sección E): ✍️ abre un lienzo a pantalla completa; la firma (PNG) va por la misma cola (/fichas/:cod/firmas/:cargo).
+// «PDF» baja la ficha llena con fotos y firmas (/fichas/:cod/pdf).
 //   abrirFicha({ proyecto: { id, nombre }, cod, toast, alCambiar(cod, ficha) })
 import { prepararFoto, nuevoId, encolar, enCola, quitarDeCola, colaPersistente, seguirUbicacion, dejarUbicacion, ubicacionReciente } from '/campo-fotos.js';
 
@@ -22,7 +24,8 @@ const LS = 'campo:ficha:';
 
 let F = null;   // { proyecto, cod, modelo, ficha, editable, guia, d (lo llenado), sucio, toast, alCambiar,
                 //   fotos: [{ id, aula, bien, muestra, tomada_en, lat, lon, estado: 'subida'|'pendiente'|'error', error?, reg? }] | null (sin la migración 024),
-                //   urls: Map(id → URL de la miniatura), slot (dónde va la próxima foto) }
+                //   urls: Map(id → URL de la miniatura), slot (dónde va la próxima foto),
+                //   firmas: { cargo: { estado, firmada_en, reg? } } | null (sin la migración 025) }
 
 async function api(ruta, opts = {}) {
   const r = await fetch(ruta, opts);
@@ -92,10 +95,11 @@ function difiere(j, k) {
 function metaSlot(slot) {
   if (slot === 'fachada') return { aula: null, bien: null, muestra: 'Fachada y letrero' };
   if (slot === 'local') return { aula: null, bien: null, muestra: 'Otra foto del local' };
+  if (slot === 'acta') return { aula: null, bien: null, muestra: 'Acta firmada en papel' };
   const [a, k] = slot.slice(1).split(':');
   return { aula: Number(a), bien: k || null, muestra: k ? 'Detalle del mueble' : 'Vista general del aula' };
 }
-const slotDe = f => f.aula == null ? (/fachada/i.test(f.muestra || '') ? 'fachada' : 'local') : `a${f.aula}${f.bien ? ':' + f.bien : ''}`;
+const slotDe = f => f.aula == null ? (/fachada/i.test(f.muestra || '') ? 'fachada' : /acta/i.test(f.muestra || '') ? 'acta' : 'local') : `a${f.aula}${f.bien ? ':' + f.bien : ''}`;
 const lugarSlot = slot => { const m = metaSlot(slot); return m.aula == null ? m.muestra : `Aula ${m.aula + 1}${m.bien ? ' · ' + BIEN(m.bien) : ''}`; };
 const fotosDe = slot => (F.fotos || []).filter(f => slotDe(f) === slot);
 const ICONO = { pendiente: '⏳', error: '⚠️', subida: '' };
@@ -152,6 +156,82 @@ function pintarPanel() {
     </ul>`;
 }
 
+// ─── Firmas en pantalla ──────────────────────────────────────────────────────
+const idFirma = k => `firma:${claveLocal()}:${k}`;
+function htmlFirma(k) {
+  if (!F.firmas) return '';
+  const x = F.firmas[k];
+  if (!x) return F.editable ? `<button class="btn btn-ghost fh-firmar" type="button" data-fh="firmar" data-cargo="${k}">✍️ Firmar</button>` : '<p class="sub">Sin firma en pantalla.</p>';
+  return `<div class="fh-firma ${x.estado}">
+    <img data-firma-img="${k}" alt="Firma">
+    <span class="sub">${x.estado === 'pendiente' ? '⏳ Por subir (se sube sola con señal) · ' : x.estado === 'error' ? `⚠️ No se pudo subir: ${esc(x.error)} · ` : ''}Firmado el ${esc(fechaHora(x.firmada_en))}</span>
+    ${F.editable ? `<div class="acts"><button class="x" type="button" data-fh="firmar" data-cargo="${k}">Firmar de nuevo</button><button class="x" type="button" data-fh="borrar-firma" data-cargo="${k}">Borrar firma</button></div>` : ''}
+  </div>`;
+}
+function repintarFirma(k) { const el = document.querySelector(`[data-firma="${k}"]`); if (el) el.innerHTML = htmlFirma(k); cargarFirmas(); }
+async function cargarFirmas() {
+  for (const img of document.querySelectorAll('#cFicha img[data-firma-img]:not([src])')) {
+    const k = img.dataset.firmaImg, x = F?.firmas?.[k]; if (!x) continue;
+    img.setAttribute('src', '');
+    if (x.reg) { img.src = URL.createObjectURL(x.reg.foto); continue; }
+    try { const r = await fetch(ruta(`/firmas/${k}`)); if (r.ok) img.src = URL.createObjectURL(await r.blob()); } catch { /* sin señal: queda vacía */ }
+  }
+}
+
+// Lienzo a pantalla completa: se firma con el dedo o un lápiz; se recorta al trazo y se guarda en PNG
+function abrirLienzo(k) {
+  const cargo = F.guia.firmas.find(([c]) => c === k)?.[1] || k, nombre = F.d.firmas[k]?.nombre;
+  const v = $('fhVisor'); v.hidden = false; v.classList.add('firmando');
+  v.innerHTML = `<div class="fh-visor-cab"><b>Firma: ${esc(cargo)}</b><span class="sub">${nombre ? esc(nombre) : 'Escribe también su nombre y DNI en la ficha'}</span></div>
+    <div class="fh-lienzo"><canvas aria-label="Recuadro para firmar"></canvas><span class="fh-lienzo-linea">Firme sobre la línea</span></div>
+    <div class="acts"><button class="btn btn-ghost" type="button" data-fh="firma-limpiar">Limpiar</button><button class="btn btn-ghost" type="button" data-fh="cerrar-visor">Cancelar</button>
+      <button class="btn btn-primary" type="button" data-fh="firma-guardar" data-cargo="${k}">Guardar firma</button></div>`;
+  const cv = v.querySelector('canvas'), dpr = window.devicePixelRatio || 1;
+  cv.width = cv.clientWidth * dpr; cv.height = cv.clientHeight * dpr;
+  const g = cv.getContext('2d');
+  g.lineCap = 'round'; g.lineJoin = 'round'; g.strokeStyle = '#10204a'; g.lineWidth = 2.6 * dpr;
+  const L = { trazos: 0, x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity, ult: null };
+  const pt = e => { const r = cv.getBoundingClientRect(); return [(e.clientX - r.left) * dpr, (e.clientY - r.top) * dpr]; };
+  const marcar = ([x, y]) => { L.x0 = Math.min(L.x0, x); L.y0 = Math.min(L.y0, y); L.x1 = Math.max(L.x1, x); L.y1 = Math.max(L.y1, y); };
+  cv.onpointerdown = e => { e.preventDefault(); cv.setPointerCapture(e.pointerId); L.ult = pt(e); marcar(L.ult); g.beginPath(); g.arc(L.ult[0], L.ult[1], g.lineWidth / 2, 0, 7); g.fillStyle = g.strokeStyle; g.fill(); L.trazos++; };
+  cv.onpointermove = e => {
+    if (!L.ult) return;
+    for (const ev of e.getCoalescedEvents?.() || [e]) {
+      const p = pt(ev), m = [(L.ult[0] + p[0]) / 2, (L.ult[1] + p[1]) / 2];
+      g.beginPath(); g.moveTo(L.ult[0], L.ult[1]); g.quadraticCurveTo(L.ult[0], L.ult[1], m[0], m[1]); g.lineTo(p[0], p[1]); g.stroke();
+      L.ult = p; marcar(p);
+    }
+  };
+  cv.onpointerup = cv.onpointercancel = () => { L.ult = null; };
+  F.lienzo = { cv, g, L };
+}
+function limpiarLienzo() { const z = F.lienzo; if (!z) return; z.g.clearRect(0, 0, z.cv.width, z.cv.height); Object.assign(z.L, { trazos: 0, x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity }); }
+async function guardarFirma(k) {
+  const z = F.lienzo;
+  if (!z?.L.trazos) { F.toast('Firma primero dentro del recuadro.'); return; }
+  const pad = 12 * (window.devicePixelRatio || 1), x = Math.max(0, z.L.x0 - pad), y = Math.max(0, z.L.y0 - pad);
+  const w = Math.min(z.cv.width, z.L.x1 + pad) - x, h = Math.min(z.cv.height, z.L.y1 + pad) - y;
+  const esc2 = Math.min(1, 900 / w), out = document.createElement('canvas');
+  out.width = Math.max(1, Math.round(w * esc2)); out.height = Math.max(1, Math.round(h * esc2));
+  out.getContext('2d').drawImage(z.cv, x, y, w, h, 0, 0, out.width, out.height);
+  const blob = await new Promise(ok => out.toBlob(ok, 'image/png'));
+  const firmada_en = new Date().toISOString(), reg = { id: idFirma(k), clave: claveLocal(), tipo: 'firma', cargo: k, meta: { firmada_en }, foto: blob };
+  // La fecha de la firma, si no la escribieron, es la de hoy
+  if (!F.d.firmas[k]?.fecha) { poner(`fi.${k}.fecha`, hoy()); const i = document.querySelector(`[data-p="fi.${k}.fecha"]`); if (i) i.value = hoy(); cambio(); }
+  await encolar(reg);
+  F.firmas[k] = { estado: 'pendiente', firmada_en, reg };
+  F.lienzo = null; cerrarVisor(); repintarFirma(k);
+  subirPendientes();
+}
+async function borrarFirma(k) {
+  const x = F.firmas[k]; if (!x || !confirm('¿Borrar esta firma?')) return;
+  try {
+    await quitarDeCola(idFirma(k));
+    if (x.estado === 'subida' || x.antes) await api(ruta(`/firmas/${k}`), { method: 'DELETE' });
+  } catch (e) { F.toast(`No se pudo borrar: ${e.message}`); return; }
+  delete F.firmas[k]; repintarFirma(k);
+}
+
 // ─── Pintar ──────────────────────────────────────────────────────────────────
 const campo = (p, valor, { label, tipo = 'text', num = false, ph = '', lista = '', ancho = '', max = '' } = {}) => `
   <label class="fh-campo ${ancho}"><span>${esc(label)}</span>
@@ -166,6 +246,7 @@ function pintar() {
     <button class="btn btn-ghost btn-sm" type="button" data-fh="cerrar">← Volver</button>
     <div class="fh-tit"><b>Ficha de verificación</b><span class="sub">Local ${esc(L.cod)} · ${esc(L.nombre)}</span></div>
     <span id="fhEstado">${chipEstado()}</span>
+    <button class="btn btn-ghost btn-sm" type="button" data-fh="pdf" title="La ficha llena en PDF, con fotos y firmas"${f ? '' : ' hidden'}>PDF</button>
   </div>
   <div class="fh-cuerpo">
     ${f?.nota && f.estado === 'observada' ? `<div class="aviso alerta" role="alert">El proveedor devolvió la ficha: ${esc(f.nota)}</div>` : ''}
@@ -219,11 +300,13 @@ function pintar() {
     <section class="fh-sec"><h3>E. Observaciones y conformidad</h3>
       <label class="fh-campo ancho"><span>Observaciones del verificador</span><textarea data-p="obs" rows="4">${esc(d.obs)}</textarea></label>
       <p class="sub">Quienes dan conformidad de lo constatado en la fecha indicada.</p>
+      ${F.firmas ? '<p class="sub">Firma al final, con la ficha completa: quien firma da conformidad de lo que dice.</p>' : ''}
       ${F.guia.firmas.map(([k, cargo]) => `<div class="fh-card"><b>${esc(cargo)}</b><div class="fh-grid">
         ${campo(`fi.${k}.nombre`, d.firmas[k]?.nombre, { label: 'Nombres y apellidos', ancho: 'ancho' })}
         ${campo(`fi.${k}.dni`, d.firmas[k]?.dni, { label: 'DNI', num: true })}
         ${campo(`fi.${k}.fecha`, d.firmas[k]?.fecha, { label: 'Fecha', tipo: 'date', max: hoy() })}
-      </div></div>`).join('')}
+      </div><div data-firma="${k}">${htmlFirma(k)}</div></div>`).join('')}
+      ${htmlSlot('acta', { titulo: 'Si firmaron en papel: foto del acta firmada' })}
     </section>
     </fieldset>
   </div>
@@ -235,11 +318,15 @@ function pintar() {
     <div class="acts"><button class="btn btn-ghost" type="button" data-fh="guardar">Guardar</button>
     <button class="btn btn-primary" type="button" data-fh="enviar">Enviar a revisión</button></div>
   </div>` : ''}`;
-  pintarAvance(); pintarPanel(); cargarMinis();
+  pintarAvance(); pintarPanel(); cargarMinis(); cargarFirmas();
 }
 
 const chipEstado = (f = F.ficha) => f ? `<span class="chip-est ${f.estado === 'aprobada' ? 'ok' : f.estado === 'observada' ? 'alerta' : f.estado === 'enviada' ? 'pend' : ''}">${esc(f.estado_texto)}</span>` : '<span class="chip-est">Nueva</span>';
-const repintarEstado = () => { const el = $('fhEstado'); if (el) el.innerHTML = chipEstado(); };
+// El chip del estado y el botón PDF (aparece cuando la ficha ya está guardada en el servidor)
+const repintarEstado = () => {
+  const el = $('fhEstado'); if (el) el.innerHTML = chipEstado();
+  const b = document.querySelector('#cFicha [data-fh="pdf"]'); if (b) b.hidden = !F.ficha;
+};
 
 function pintarAula(a) {
   const j = a.j, filas = filasAula(j), est = estadoAula(j), n = F.modelo.aulas.length;
@@ -417,11 +504,11 @@ async function tomarFotos(files, slot, galeria) {
 let subiendo = false;
 // Sube las fotos de la cola, una por una. Sin señal se detiene y deja el resto para después.
 async function subirPendientes() {
-  if (subiendo || !F?.fotos || !F.editable) return;
+  if (subiendo || !F?.editable || (!F.fotos && !F.firmas)) return;
   subiendo = true;
   const yo = F, subidas = [];
   try {
-    for (const f of yo.fotos.filter(x => x.estado === 'pendiente' || (x.estado === 'error' && x.reintentar))) {
+    for (const f of (yo.fotos || []).filter(x => x.estado === 'pendiente' || (x.estado === 'error' && x.reintentar))) {
       if (F !== yo) return;
       const fd = new FormData();
       fd.append('foto', f.reg.foto, f.id + '.jpg'); if (f.reg.mini) fd.append('mini', f.reg.mini, f.id + '_mini.jpg');
@@ -438,11 +525,25 @@ async function subirPendientes() {
       }
       if (F === yo) repintarSlot(slotDe(f));
     }
+    // Firmas
+    for (const [k, x] of Object.entries(yo.firmas || {})) {
+      if (F !== yo || x.estado !== 'pendiente') continue;
+      const fd = new FormData(); fd.append('firma', x.reg.foto, `firma_${k}.png`);
+      try {
+        const r = await api(ruta(`/firmas/${k}`), { method: 'PUT', body: fd });
+        Object.assign(x, { estado: 'subida', firmada_en: r.firma.firmada_en, antes: false }); delete x.error;
+        await quitarDeCola(x.reg.id); subidas.push(x);
+      } catch (e) {
+        if (!e.status) break;
+        x.estado = 'error'; x.error = e.message;
+      }
+      if (F === yo) repintarFirma(k);
+    }
   } finally { subiendo = false; }
-  // La ficha queda creada en el servidor con la primera foto: se guarda también lo llenado
+  // La ficha queda creada en el servidor con la primera foto o firma: se guarda también lo llenado
   if (subidas.length && F === yo && (yo.sucio || !yo.ficha)) guardar({ silencioso: true });
 }
-const pendientes = () => (F?.fotos || []).filter(f => f.estado !== 'subida').length;
+const pendientes = () => (F?.fotos || []).filter(f => f.estado !== 'subida').length + Object.values(F?.firmas || {}).filter(x => x.estado !== 'subida').length;
 
 async function verFoto(id) {
   const f = F.fotos.find(x => x.id === id); if (!f) return;
@@ -463,7 +564,7 @@ async function verFoto(id) {
 function cerrarVisor() {
   const v = $('fhVisor'); if (!v) return;
   const img = v.querySelector('img'); if (img?.src.startsWith('blob:') && ![...F.urls.values()].includes(img.src)) URL.revokeObjectURL(img.src);
-  v.hidden = true; v.innerHTML = '';
+  v.hidden = true; v.innerHTML = ''; v.classList.remove('firmando'); if (F) F.lienzo = null;
 }
 async function borrarFoto(id) {
   const f = F.fotos.find(x => x.id === id); if (!f) return;
@@ -477,12 +578,25 @@ async function borrarFoto(id) {
   cerrarVisor(); repintarSlot(slotDe(f));
 }
 
+async function bajarPdf(b) {
+  if (F.editable && F.sucio && !(await guardar({ silencioso: true }))) { F.toast('Sin conexión: el PDF necesita señal.'); return; }
+  if (pendientes()) F.toast('El PDF no incluye las fotos ni firmas que aún no se subieron.');
+  const txt = b.textContent; b.disabled = true; b.textContent = 'Armando…';
+  try {
+    const r = await fetch(ruta('/pdf'));
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'error ' + r.status);
+    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(await r.blob()), download: `Ficha_verificacion_llena_${F.cod}.pdf` });
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+  } catch (e) { F.toast(`No se pudo bajar el PDF: ${e.message}`); }
+  finally { b.disabled = false; b.textContent = txt; }
+}
+
 async function enviar() {
   // Las fotos van antes que la ficha: con fotos sin subir no se envía
   if (pendientes()) {
     await subirPendientes();
     if (pendientes()) {
-      pintarErrores([{ fila: 'Panel fotográfico', motivo: `Faltan subir ${pendientes()} ${pendientes() === 1 ? 'foto' : 'fotos'}. Espera a tener señal (se suben solas) o borra las que tienen error, y vuelve a enviar.` }], [], 'La ficha no se envió.');
+      pintarErrores([{ fila: 'Fotos y firmas', motivo: `Faltan subir ${pendientes()} (fotos o firmas). Espera a tener señal (se suben solas) o borra las que tienen error, y vuelve a enviar.` }], [], 'La ficha no se envió.');
       return;
     }
   }
@@ -540,7 +654,12 @@ function enlazar() {
     if (acc === 'cerrar') { cerrar(); return; }
     if (acc === 'ver-foto') { verFoto(b.dataset.id); return; }
     if (acc === 'cerrar-visor') { cerrarVisor(); return; }
+    if (acc === 'pdf') { bajarPdf(b); return; }
     if (!F.editable) return;
+    if (acc === 'firmar') { abrirLienzo(b.dataset.cargo); return; }
+    if (acc === 'firma-limpiar') { limpiarLienzo(); return; }
+    if (acc === 'firma-guardar') { guardarFirma(b.dataset.cargo); return; }
+    if (acc === 'borrar-firma') { borrarFirma(b.dataset.cargo); return; }
     if (acc === 'foto' || acc === 'galeria') { F.slot = b.dataset.slot; const i = $(acc === 'foto' ? 'fhCam' : 'fhGal'); i.value = ''; i.click(); return; }
     if (acc === 'borrar-foto') { borrarFoto(b.dataset.id); return; }
     if (acc === 'reintentar-foto') { const f = F.fotos.find(x => x.id === b.dataset.id); if (f) { f.estado = 'pendiente'; cerrarVisor(); repintarSlot(slotDe(f)); subirPendientes(); } return; }
@@ -575,11 +694,20 @@ export async function abrirFicha({ proyecto, cod, toast, alCambiar }) {
   catch (e) { el.innerHTML += `<div class="fh-cuerpo"><p class="aviso alerta">No se pudo abrir la ficha: ${esc(e.message)}</p></div>`; return; }
   if (F?.cod !== cod) return;
   Object.assign(F, { modelo: r.modelo, ficha: r.ficha, editable: r.editable, guia: r.guia, urls: new Map(),
-    fotos: r.fotos ? r.fotos.map(f => ({ ...f, estado: 'subida' })) : null });
+    fotos: r.fotos ? r.fotos.map(f => ({ ...f, estado: 'subida' })) : null,
+    firmas: r.firmas ? Object.fromEntries(Object.entries(r.firmas).map(([k, x]) => [k, { ...x, estado: 'subida' }])) : null });
+  const cola = F.editable ? await enCola(claveLocal()) : [];
+  // Firmas hechas en este equipo que aún no llegaron al servidor (reemplazan a la anterior, si había)
+  for (const reg of cola.filter(x => x.tipo === 'firma')) {
+    if (!F.firmas) continue;
+    const srv = F.firmas[reg.cargo];
+    if (srv && srv.firmada_en >= reg.meta.firmada_en) { quitarDeCola(reg.id); continue; }
+    F.firmas[reg.cargo] = { estado: 'pendiente', firmada_en: reg.meta.firmada_en, reg, antes: !!srv };
+  }
   if (F.fotos) {
     // Las fotos de la cola de este equipo que aún no llegaron al servidor
     const enServidor = new Set(F.fotos.map(f => f.id));
-    for (const reg of await enCola(claveLocal())) {
+    for (const reg of cola.filter(x => x.tipo !== 'firma')) {
       if (enServidor.has(reg.id)) { quitarDeCola(reg.id); continue; }
       F.fotos.push({ id: reg.id, ...reg.meta, estado: 'pendiente', reg });
     }

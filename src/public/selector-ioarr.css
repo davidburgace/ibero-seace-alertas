@@ -467,3 +467,6 @@ table.tabla{ width:100%; border-collapse:collapse; font-size:13px; }
 .rev-visor-cab{ display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
 .rev-visor-cab .btn{ margin-left:auto; }
 .rev-visor img{ max-width:100%; max-height:calc(100vh - 120px); object-fit:contain; border-radius:8px; }
+.rev-firmas{ display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:10px; margin:6px 0; }
+.rev-firma{ display:flex; flex-direction:column; gap:3px; border:1px solid var(--border); border-radius:10px; padding:8px 10px; font-size:13px; }
+.rev-firma img{ max-width:100%; max-height:80px; object-fit:contain; align-self:flex-start; background:#fff; }

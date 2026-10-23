@@ -26,6 +26,11 @@
 //          aula, bien, muestra, lat, lon, tomada_en. Reintentar con el mismo id no la duplica.
 //   GET    /api/campo/proyectos/:id/fichas/:cod/fotos/:fotoId   la imagen (?mini=1 la miniatura)
 //   DELETE /api/campo/proyectos/:id/fichas/:cod/fotos/:fotoId   solo con la ficha en borrador u observada
+// Firmas en pantalla (migración 025, tabla campo_fichas_firmas; cargo: director, ugel o registradora):
+//   PUT    /api/campo/proyectos/:id/fichas/:cod/firmas/:cargo   multipart: firma (PNG). Firmar de nuevo la reemplaza
+//   GET    /api/campo/proyectos/:id/fichas/:cod/firmas/:cargo   la imagen
+//   DELETE /api/campo/proyectos/:id/fichas/:cod/firmas/:cargo   solo con la ficha en borrador u observada
+//   GET    /api/campo/proyectos/:id/fichas/:cod/pdf             la ficha llena en PDF, con las fotos y las firmas
 // Acceso (ver crearProteccionApi en src/ioarr/auth.js): proveedor y supervisor de campo.
 //   proveedor  → solo sus proyectos
 //   supervisor → todos los proyectos, pero solo nombre, región y códigos de local
@@ -34,7 +39,8 @@ import multer from 'multer';
 import { supabase } from '../ioarr/db.js';
 import { limpiarFormulario, leerFichaDigital, estadosFichas, guardarFichaDigital, puedeEditar, origenDigital,
   AVISO_MIGRACION_FICHAS, faltaMigracion as faltaMigracionFichas, fotosFicha, leerFotos, limpiarMetaFoto, rutaFoto, vistaDeFoto, avisosFotos,
-  esUuid as esUuidFoto, MAX_FOTOS_FICHA, MAX_FOTO, MIMES_FOTO, AVISO_MIGRACION_FOTOS } from './ficha-digital.js';
+  esUuid as esUuidFoto, MAX_FOTOS_FICHA, MAX_FOTO, MIMES_FOTO, AVISO_MIGRACION_FOTOS,
+  firmasFicha, leerFirmas, avisosFirmas, rutaFirma, CARGOS_FIRMA, MAX_FIRMA, AVISO_MIGRACION_FIRMAS, pdfFichaLlena, nombrePdfLlena } from './ficha-digital.js';
 import { BUCKET_EXPEDIENTE, mimeDe } from './archivos.js';
 import { BIENES_FICHA, RANGOS, FIRMAS, CRITERIOS, MAX_PUESTOS, TOLERANCIA } from './ficha.js';
 
@@ -246,9 +252,9 @@ export async function abrirFichaCampo(sb, usuario, proyectoId, cod, deps) {
   const acc = await accesoFicha(sb, usuario, proyectoId, cod);
   if (acc.error) return { status: acc.status, body: { error: acc.error } };
   const ficha = await leerFichaDigital(sb, acc.p.id, cod);
-  const [modelo, fotos] = await Promise.all([deps.modelo(acc.p.id, cod), fotosFicha(sb, acc.p.id, cod)]);
-  // fotos: null = falta la migración 024 (la ficha funciona sin fotos)
-  return { status: 200, body: { modelo, ficha, editable: puedeEditar(ficha?.estado), guia: GUIA_FICHA, fotos } };
+  const [modelo, fotos, firmas] = await Promise.all([deps.modelo(acc.p.id, cod), fotosFicha(sb, acc.p.id, cod), firmasFicha(sb, acc.p.id, cod)]);
+  // fotos / firmas: null = falta la migración 024 / 025 (la ficha funciona sin ellas)
+  return { status: 200, body: { modelo, ficha, editable: puedeEditar(ficha?.estado), guia: GUIA_FICHA, fotos, firmas } };
 }
 
 const quien = usuario => ({ editado_por: usuario.id, editado_por_email: usuario.email || null });
@@ -270,9 +276,9 @@ export async function enviarFicha(sb, usuario, proyectoId, cod, { datos } = {}, 
   const actual = await leerFichaDigital(sb, acc.p.id, cod);
   if (!puedeEditar(actual?.estado)) return { status: 409, body: { error: YA_ENVIADA(actual), ficha: actual } };
   const limpio = limpiarFormulario(datos);
-  const fotos = actual ? await fotosFicha(sb, acc.p.id, cod) : [];
+  const [fotos, firmas] = actual ? await Promise.all([fotosFicha(sb, acc.p.id, cod), firmasFicha(sb, acc.p.id, cod)]) : [[], {}];
   const r = await deps.validar(acc.p.id, cod, limpio, origenDigital(usuario.email));
-  r.avisos = [...r.avisos, ...avisosFotos(limpio, fotos)];
+  r.avisos = [...r.avisos, ...avisosFotos(limpio, fotos), ...avisosFirmas(limpio, firmas, fotos)];
   if (r.rechazada || r.errores.length) {
     // Lo llenado no se pierde: queda como borrador
     const ficha = await guardarFichaDigital(sb, acc.p.id, cod, { estado: actual?.estado === 'observada' ? 'observada' : 'borrador', datos: limpio, ...quien(usuario) });
@@ -362,6 +368,56 @@ export async function borrarFotoFicha(sb, usuario, proyectoId, cod, fotoId) {
   return { status: 200, body: { id: fotoId, borrada: true } };
 }
 
+// ─── Firmas en pantalla ─────────────────────────────────────────────────────
+/** archivo: { buffer } con la firma en PNG → { status, body } */
+export async function subirFirmaFicha(sb, usuario, proyectoId, cod, cargo, { archivo }) {
+  const acc = await accesoFicha(sb, usuario, proyectoId, cod);
+  if (acc.error) return { status: acc.status, body: { error: acc.error } };
+  if (!CARGOS_FIRMA.includes(cargo)) return { status: 400, body: { error: 'Cargo no válido' } };
+  if (!archivo?.buffer || mimeDe(archivo.buffer) !== 'image/png') return { status: 400, body: { error: 'La firma debe ser una imagen PNG' } };
+  if (archivo.buffer.length > MAX_FIRMA) return { status: 400, body: { error: 'La firma pasa de 1 MB' } };
+  const p = acc.p, actual = await leerFichaDigital(sb, p.id, cod);
+  if (!puedeEditar(actual?.estado)) return { status: 409, body: { error: 'La ficha ya está enviada: no se puede firmar de nuevo.' } };
+  const previa = actual ? (await leerFirmas(sb, p.id, cod)).find(f => f.cargo === cargo) : null;
+  if (!actual) await asegurarFicha(sb, usuario, p.id, cod);
+  const ruta = rutaFirma(p.id, cod, cargo), bucket = sb.storage.from(BUCKET_EXPEDIENTE);
+  const { error: eUp } = await bucket.upload(ruta, archivo.buffer, { contentType: 'image/png', upsert: true });
+  if (eUp) return { status: /bucket not found/i.test(eUp.message) ? 503 : 500, body: { error: 'No se pudo guardar la firma: ' + eUp.message } };
+  const fila = { proyecto_id: p.id, codigo_local: cod, cargo, ruta, firmada_en: new Date().toISOString(), subido_por: usuario.id, subido_por_email: usuario.email || null };
+  const { error } = await sb.from('campo_fichas_firmas').upsert(fila, { onConflict: 'proyecto_id,codigo_local,cargo' });
+  if (error) { await bucket.remove([ruta]); throw error; }
+  if (previa) await bucket.remove([previa.ruta]);
+  return { status: 200, body: { cargo, firma: { firmada_en: fila.firmada_en, por: fila.subido_por_email || '' } } };
+}
+export async function leerImagenFirma(sb, usuario, proyectoId, cod, cargo) {
+  const acc = await accesoFicha(sb, usuario, proyectoId, cod);
+  if (acc.error) return { status: acc.status, error: acc.error };
+  const f = (await leerFirmas(sb, acc.p.id, cod)).find(x => x.cargo === cargo);
+  return f ? descargarFoto(sb, f) : { status: 404, error: 'Sin firma' };
+}
+export async function borrarFirmaFicha(sb, usuario, proyectoId, cod, cargo) {
+  const acc = await accesoFicha(sb, usuario, proyectoId, cod);
+  if (acc.error) return { status: acc.status, body: { error: acc.error } };
+  const actual = await leerFichaDigital(sb, acc.p.id, cod);
+  if (!puedeEditar(actual?.estado)) return { status: 409, body: { error: 'La ficha ya está enviada: no se le quitan firmas.' } };
+  const f = actual ? (await leerFirmas(sb, acc.p.id, cod)).find(x => x.cargo === cargo) : null;
+  if (!f) return { status: 200, body: { cargo, borrada: false } };
+  const { error } = await sb.from('campo_fichas_firmas').delete().eq('proyecto_id', acc.p.id).eq('codigo_local', cod).eq('cargo', cargo);
+  if (error) throw error;
+  await sb.storage.from(BUCKET_EXPEDIENTE).remove([f.ruta]);
+  return { status: 200, body: { cargo, borrada: true } };
+}
+
+// PDF de la ficha llena (deps.modelo: el modelo del local) → { status, error } o { buffer, nombre }
+export async function pdfFichaCampo(sb, usuario, proyectoId, cod, deps) {
+  const acc = await accesoFicha(sb, usuario, proyectoId, cod);
+  if (acc.error) return { status: acc.status, error: acc.error };
+  const ficha = await leerFichaDigital(sb, acc.p.id, cod);
+  if (!ficha) return { status: 404, error: 'Guarda la ficha antes de bajar el PDF' };
+  const F = await deps.modelo(acc.p.id, cod);
+  return { buffer: await pdfFichaLlena(sb, acc.p.id, cod, F, ficha), nombre: nombrePdfLlena(F) };
+}
+
 // deps.fichasZip(res, proyectoId, paquete): arma el ZIP (src/selector-ioarr/router.js → fichasZipProyecto)
 export function crearApiCampo(sb = supabase, deps = {}) {
   const api = express.Router();
@@ -388,8 +444,8 @@ export function crearApiCampo(sb = supabase, deps = {}) {
   const enFicha = fn => async (req, res, next) => {
     try {
       if (!deps.fichas) return res.status(503).json({ error: 'Las fichas no están disponibles' });
-      const r = await fn(req);
-      res.status(r.status).json(r.body);
+      const r = await fn(req, res);
+      if (r) res.status(r.status).json(r.body);   // sin r, fn ya respondió (el PDF)
     } catch (e) {
       if (faltaMigracionFichas(e)) return res.status(503).json({ error: AVISO_MIGRACION_FICHAS });
       if (e.status) return res.status(e.status).json({ error: e.message });
@@ -422,6 +478,29 @@ export function crearApiCampo(sb = supabase, deps = {}) {
     res.set({ 'Content-Type': r.mime, 'Cache-Control': 'private, max-age=86400' }).send(r.buffer);
   }));
   api.delete('/proyectos/:id/fichas/:cod/fotos/:fotoId', enFoto(req => borrarFotoFicha(sb, req.usuario, req.params.id, cod(req), req.params.fotoId)));
+
+  // Firmas: sin la migración 025, aviso claro
+  const enFirma = fn => async (req, res, next) => {
+    try { const r = await fn(req, res); if (r) res.status(r.status).json(r.body); }
+    catch (e) {
+      if (faltaMigracionFichas(e)) return res.status(503).json({ error: /campo_fichas_firmas/.test(e.message || '') || e.code === 'PGRST205' ? AVISO_MIGRACION_FIRMAS : AVISO_MIGRACION_FICHAS });
+      next(e);
+    }
+  };
+  const recibirFirma = (req, res, next) => subidaFoto.single('firma')(req, res, err => err ? res.status(400).json({ error: 'No se pudo recibir la firma: ' + err.message }) : next());
+  api.put('/proyectos/:id/fichas/:cod/firmas/:cargo', recibirFirma, enFirma(req => subirFirmaFicha(sb, req.usuario, req.params.id, cod(req), req.params.cargo, { archivo: req.file })));
+  api.get('/proyectos/:id/fichas/:cod/firmas/:cargo', enFirma(async (req, res) => {
+    const r = await leerImagenFirma(sb, req.usuario, req.params.id, cod(req), req.params.cargo);
+    if (r.error) return { status: r.status, body: { error: r.error } };
+    res.set({ 'Content-Type': r.mime, 'Cache-Control': 'private, no-cache' }).send(r.buffer);
+  }));
+  api.delete('/proyectos/:id/fichas/:cod/firmas/:cargo', enFirma(req => borrarFirmaFicha(sb, req.usuario, req.params.id, cod(req), req.params.cargo)));
+  api.get('/proyectos/:id/fichas/:cod/pdf', enFicha(async (req, res) => {
+    if (!deps.fichas) return { status: 503, body: { error: 'Las fichas no están disponibles' } };
+    const r = await pdfFichaCampo(sb, req.usuario, req.params.id, cod(req), deps.fichas);
+    if (r.error) return { status: r.status, body: { error: r.error } };
+    res.set({ 'Content-Type': 'application/pdf', 'Cache-Control': 'no-store', 'Content-Disposition': `attachment; filename="${r.nombre}"` }).send(r.buffer);
+  }));
 
   api.get('/proyectos/:id/fichas-zip', async (req, res, next) => {
     try {
