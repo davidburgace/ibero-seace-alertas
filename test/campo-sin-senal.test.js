@@ -132,3 +132,9 @@ test('llevar al equipo: el proveedor elige los colegios; límites y migraciones'
   assert.equal(sinFotos.body.fichas[0].fotos, null, 'sin la migración 024: fotos null');
   assert.equal(MAX_FICHAS_EQUIPO, 300);
 });
+
+test('formulario: sin la tabla de firmas, la sección E lo avisa en lugar de esconder el botón', () => {
+  const js = leer('src/public/campo-ficha.js');
+  assert.match(js, /el servidor no encuentra la tabla de firmas \(migración 025\)/);
+  assert.match(js, /Esta copia de la ficha se guardó en el equipo sin firmas en pantalla/);
+});
