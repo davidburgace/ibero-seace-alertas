@@ -79,9 +79,9 @@ export function limpiarFormulario(d) {
  * Lo llenado → la estructura de leerFicha(). En lugar del número de fila del Excel,
  * cada parte lleva dónde está en el formulario («Aula 3», «Cód. modular …»).
  * @param d     datos ya limpios (limpiarFormulario)
- * @param meta  { proyectoId, cod, region }
+ * @param meta  { proyectoId, cod, region, fotos? (leerFotos: el panel fotográfico) }
  */
-export function fichaDesdeFormulario(d, { proyectoId, cod, region }) {
+export function fichaDesdeFormulario(d, { proyectoId, cod, region, fotos }) {
   d = limpiarFormulario(d);
   const aula = j => `Aula ${Number(j) + 1}`;
   return {
@@ -90,7 +90,7 @@ export function fichaDesdeFormulario(d, { proyectoId, cod, region }) {
     servicios: Object.entries(d.servicios).map(([modular, s]) => ({ modular, est: s.est, obs: s.obs, fila: `Cód. modular ${modular}` })),
     aulas: Object.fromEntries(Object.entries(d.aulas).map(([j, a]) => [j, { j: Number(j), fila: aula(j), est: a.est, filas: a.filas.map(f => ({ ...f, fila: aula(j) })) }])),
     fuera: d.fuera.map((f, n) => ({ ...f, fila: `Fuera de aulas, fila ${n + 1}` })),
-    fotos: [], firmas: d.firmas, obs: d.obs
+    fotos: panelFotos(fotos), firmas: d.firmas, obs: d.obs
   };
 }
 
@@ -128,3 +128,70 @@ export async function guardarFichaDigital(sb, proyectoId, cod, cambios) {
   if (error) throw error;
   return vista(data);
 }
+
+// ─── Fotos de la ficha (migración 024, tabla campo_fichas_fotos) ─────────────
+// Se toman en el celular (campo-ficha.js), que las reduce, les pone el sello y arma
+// una miniatura. Archivos en el bucket del expediente, en campo/<proyecto>/<local>/.
+export const MAX_FOTOS_FICHA = 150;
+export const MAX_FOTO = 15 * 1024 * 1024;   // el límite del bucket
+export const AVISO_MIGRACION_FOTOS = 'Para tomar fotos en la ficha falta ejecutar supabase/migrations/024_campo_fichas_fotos.sql en Supabase';
+export const MIMES_FOTO = ['image/jpeg', 'image/png', 'image/webp'];
+const COLS_FOTO = 'id, aula, bien, muestra, ruta, ruta_mini, mime, tamano, lat, lon, tomada_en, subido_por_email, creado_en';
+const EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
+export const esUuid = s => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(s || ''));
+export const rutaFoto = (proyectoId, cod, id, mime, mini = false) => `campo/${proyectoId}/${cod}/${id}${mini ? '_mini' : ''}.${EXT[mime] || 'jpg'}`;
+
+/** Datos de una foto que manda el celular: dónde se tomó, qué muestra, coordenadas y hora. */
+export function limpiarMetaFoto(b, ahora = Date.now()) {
+  b = obj(b);
+  const aula = b.aula === '' || b.aula == null ? null : Number(b.aula);
+  const lat = Number(b.lat), lon = Number(b.lon);
+  const coordOk = b.lat != null && b.lat !== '' && Number.isFinite(lat) && Number.isFinite(lon) && lat >= -19 && lat <= 0 && lon >= -82 && lon <= -68;
+  const t = Date.parse(b.tomada_en);
+  return {
+    aula: Number.isInteger(aula) && aula >= 0 && aula < MAX_AULAS ? aula : null,
+    bien: TIPOS.includes(b.bien) ? b.bien : null,
+    muestra: txt(b.muestra, 200),
+    lat: coordOk ? lat : null, lon: coordOk ? lon : null,
+    tomada_en: Number.isFinite(t) && t > Date.UTC(2020, 0, 1) && t < ahora + 864e5 ? new Date(t).toISOString() : new Date(ahora).toISOString()
+  };
+}
+
+const NOMBRE_BIEN = { mesa: 'Mesa del estudiante', silla: 'Silla del estudiante', esc: 'Escritorio docente', sdoc: 'Silla docente', arm: 'Armario o estante' };
+/** «Fachada», «Aula 3», «Aula 3 · Silla del estudiante»… */
+export function lugarFoto(f) {
+  if (f.aula == null) return f.muestra || 'Local';
+  return `Aula ${f.aula + 1}${f.bien ? ' · ' + NOMBRE_BIEN[f.bien] : ''}`;
+}
+const vistaFoto = f => ({ id: f.id, aula: f.aula, bien: f.bien, muestra: f.muestra, lugar: lugarFoto(f), mime: f.mime, tamano: f.tamano,
+  lat: f.lat, lon: f.lon, tomada_en: f.tomada_en, por: f.subido_por_email || '', mini: !!f.ruta_mini });
+
+/** Fotos de una ficha, en el orden en que se tomaron (con rutas: solo para el servidor). */
+export async function leerFotos(sb, proyectoId, cod) {
+  const { data, error } = await sb.from('campo_fichas_fotos').select(COLS_FOTO).eq('proyecto_id', proyectoId).eq('codigo_local', cod).order('tomada_en');
+  if (error) throw error;
+  return data;
+}
+/** Lo mismo, para el navegador (sin rutas); [] si falta la migración 024. */
+export async function fotosFicha(sb, proyectoId, cod) {
+  try { return (await leerFotos(sb, proyectoId, cod)).map(vistaFoto); }
+  catch (e) { if (faltaMigracion(e)) return null; throw e; }
+}
+export const vistaDeFoto = vistaFoto;
+
+// Panel fotográfico de la ficha: fachada y detalle de cada mueble en mal estado (avisos, no errores)
+export function avisosFotos(datos, fotos) {
+  if (!fotos) return [];
+  const avisos = [];
+  if (!fotos.some(f => f.aula == null && /fachada/i.test(f.muestra || ''))) avisos.push({ hoja: '—', fila: 'Panel fotográfico', motivo: 'Falta la foto de la fachada con el letrero de la institución.' });
+  const sinFoto = [];
+  for (const [j, a] of Object.entries(obj(obj(datos).aulas))) {
+    const malos = new Set(arr(a.filas).filter(f => TIPOS.includes(f.k) && Number(f.m) > 0).map(f => f.k));
+    for (const k of malos) if (!fotos.some(f => f.aula === Number(j) && f.bien === k)) sinFoto.push(`aula ${Number(j) + 1} (${NOMBRE_BIEN[k].toLowerCase()})`);
+  }
+  if (sinFoto.length) avisos.push({ hoja: '—', fila: 'Panel fotográfico', motivo: `Muebles en mal estado sin foto: ${sinFoto.slice(0, 8).join(', ')}${sinFoto.length > 8 ? ` y ${sinFoto.length - 8} más` : ''}.` });
+  return avisos;
+}
+
+// Las fotos como el panel fotográfico de la ficha (sección D del Excel): van al inventario al aprobarla
+export const panelFotos = fotos => (fotos || []).map((f, n) => ({ n: n + 1, ambiente: lugarFoto(f), muestra: f.aula == null ? f.muestra : (f.muestra || (f.bien ? 'Detalle del mueble' : 'Vista general del aula')), archivo: `Foto ${n + 1}` }));
