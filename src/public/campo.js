@@ -6,12 +6,16 @@
 // (/api/campo/visitas/:codigo) y, el proveedor, el reparto entre supervisores (/api/campo/proyectos/:id/asignaciones).
 // Con un proyecto elegido, cada colegio asignado al supervisor (al proveedor, todos) tiene «Llenar ficha»: la ficha de
 // verificación en el celular, que se envía a revisión del proveedor (campo-ficha.js, /api/campo/proyectos/:id/fichas/*).
+// Sin señal: la página se instala como app (campo-sw.js, campo.webmanifest) y abre sin conexión; las respuestas de la API
+// que necesita el listado se guardan en el equipo (localStorage, por usuario) y «Llevar mis fichas al equipo» guarda las
+// fichas (campo-equipo.js). Al volver la señal, sincronizarEquipo() sube lo pendiente y la barra lo muestra.
 import { DEF, NIVN, NIVS, NIVB, FILTRO_VACIO, coordValidas } from '/selector-ioarr/calculo.js';
 import { limitarN as limitarNBase, N_MAX, N_MAX_PROYECTO } from '/selector-ioarr/cercania.js';
 import { limitarPorDia, colorDia, tramosRutaDia, cuotasIguales, AVISO_VISITAS } from '/selector-ioarr/visitas.js';
 import { crearMapa, fmtKm } from '/selector-ioarr-mapa.js';
 import { htmlListado, itemListado } from '/selector-ioarr-listado.js';
-import { abrirFicha } from '/campo-ficha.js';
+import { abrirFicha, sincronizarEquipo, resumenEquipo } from '/campo-ficha.js';
+import { guardarFichaEquipo, fichasEnEquipo } from '/campo-equipo.js';
 
 const BASE_DATOS = '/data/selector-ioarr/2025/';
 // «Colegios a visitar»: hasta 200 en toda la región; con un proyecto, hasta todos los de «Colegios del proyecto»
@@ -34,8 +38,20 @@ function store(k, v) {
 async function api(ruta, opts) {
   const r = await fetch(ruta, opts);
   const b = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(b.error || `error ${r.status}`);
+  if (!r.ok) throw Object.assign(new Error(b.error || `error ${r.status}`), { status: r.status });
   return b;
+}
+// Lecturas que el listado necesita sin señal: la última respuesta queda en el equipo (por usuario)
+const sinSenal = e => !e?.status;
+async function apiGuardada(ruta) {
+  const k = `cache:${S.yo}:${ruta}`;
+  try { const b = await api(ruta); store(k, { b, en: Date.now() }); return b; }
+  catch (e) {
+    const c = sinSenal(e) ? store(k) : null;
+    if (!c) throw e;
+    marcarSinSenal(c.en);
+    return c.b;
+  }
 }
 function toast(t) { const el = $('toast'); el.textContent = t; el.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => { el.hidden = true; }, 4200); }
 
@@ -63,6 +79,8 @@ const S = {
   visitas: null,            // { códigoLocal: { fecha, por, mia } }; null = no disponible (falta la migración 021)
   ocultar: false,           // «Ocultar visitados»: no se listan los colegios ya visitados
   fichas: null,             // fichas llenadas en la app del proyecto: { códigoLocal: { estado, estado_texto, nota, … } }; null = no disponible
+  enEquipo: {},             // fichas del proyecto guardadas en este equipo para usar sin señal: { códigoLocal: bajada_en }
+  sinSenalDesde: null,      // sin señal: hora de los datos guardados que se están mostrando
   mapa: null, mapaCreando: null, mapaFalla: false, pick: false, vista: 'lista'
 };
 
@@ -83,7 +101,17 @@ async function boot() {
   catch { $('cInfo').innerHTML = '<span class="err">No se pudo cargar la lista de regiones. Revisa tu conexión y recarga.</span>'; return; }
   $('cRegion').innerHTML = S.idx.regiones.map(g => `<option value="${esc(g.nombre)}">${esc(g.nombre)}</option>`).join('');
   $('cFuente').textContent = `Fuente: ${S.idx.fuente}. Ubicaciones y direcciones declaradas en el padrón de ESCALE; pueden tener error. Las distancias son en línea recta.`;
+  if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('/campo-sw.js', { scope: '/campo' }).catch(e => console.warn('Service worker', e));
+  if (u?.sin_conexion) marcarSinSenal(Date.now());
+  addEventListener('online', async () => {
+    S.sinSenalDesde = null; pintarEquipo();
+    await Promise.all([cargarVisitas(), S.proy ? cargarFichas() : null]);
+    pintarLista(); sincronizar();
+  });
+  addEventListener('offline', () => { pintarSenal(); pintarEquipo(); });
+  addEventListener('campo:ficha-cerrada', () => sincronizar());
   await Promise.all([cargarProyectos(), cargarVisitas(), cargarSupervisores()]);
+  sincronizar();
   const p = store('proyecto');
   if (p && S.proys.some(x => x.id === p)) { $('cProy').value = p; await elegirProyecto(p); return; }
   const r = store('region');
@@ -92,7 +120,7 @@ async function boot() {
 
 // ─── Proyectos del Selector IOARR ───────────────────────────────────────────
 async function cargarProyectos() {
-  try { S.proys = await api('/api/campo/proyectos'); }
+  try { S.proys = await apiGuardada('/api/campo/proyectos'); }
   catch (e) { console.warn('Proyectos', e); S.proys = []; }
   $('cProyCampo').hidden = !S.proys.length;
   $('cFichasCampo').hidden = true;
@@ -103,7 +131,7 @@ async function cargarProyectos() {
 // ─── Reparto entre supervisores ─────────────────────────────────────────────
 async function cargarSupervisores() {
   if (S.rol !== 'proveedor') return;
-  try { S.sups = await api('/api/campo/supervisores'); }
+  try { S.sups = await apiGuardada('/api/campo/supervisores'); }
   catch (e) { console.warn('Supervisores', e); S.sups = []; }
 }
 const corto = email => String(email || '').split('@')[0] || 'supervisor';
@@ -134,6 +162,7 @@ function pintarVer() {
   $('cVer').innerHTML = op('todo', `Todo el proyecto (${fmt(P.locales.length)})`)
     + ids.map(id => op(id, `${id === S.yo ? 'Mis colegios' : corto(correoSup(id))} (${fmt(porSup.get(id))})`)).join('')
     + (sin ? op('sin', `Sin asignar (${fmt(sin)})`) : '');
+  pintarEquipo();
 }
 
 // Limita la búsqueda a los colegios de «Colegios del proyecto» y busca desde el centro de esos colegios
@@ -264,27 +293,97 @@ function extraItem(f) {
 async function cargarFichas() {
   S.fichas = null;
   if (!S.proy) return;
-  try { S.fichas = (await api(`/api/campo/proyectos/${encodeURIComponent(S.proy.id)}/fichas`)).fichas; }
-  catch (e) { console.warn('Fichas', e); if (S.rol === 'proveedor') toast(e.message); }
+  try { S.fichas = (await apiGuardada(`/api/campo/proyectos/${encodeURIComponent(S.proy.id)}/fichas`)).fichas; }
+  catch (e) { console.warn('Fichas', e); if (S.rol === 'proveedor' && !sinSenal(e)) toast(e.message); }
+  S.enEquipo = S.yo ? await fichasEnEquipo(S.yo, S.proy.id) : {};
+  pintarEquipo();
 }
 // El supervisor llena la ficha de sus colegios; el proveedor, de cualquiera de su proyecto
-const puedeFicha = cod => !!S.proy && !!S.fichas && S.proy.set.has(cod) && (S.rol === 'proveedor' || S.proy.asig?.[cod] === S.yo);
+const puedeFicha = cod => !!S.proy && (!!S.fichas || !!S.enEquipo[cod]) && S.proy.set.has(cod) && (S.rol === 'proveedor' || S.proy.asig?.[cod] === S.yo);
 const BOTON_FICHA = { borrador: 'Seguir la ficha', observada: 'Corregir la ficha', enviada: 'Ver la ficha', aprobada: 'Ver la ficha' };
 function extraFicha(f) {
   if (!f?.cod || !puedeFicha(f.cod)) return {};
-  const x = S.fichas[f.cod];
-  const chip = !x ? '' : `<div class="lst-ficha"><span class="chip-est ${x.estado === 'aprobada' ? 'ok' : x.estado === 'observada' ? 'alerta' : x.estado === 'enviada' ? 'pend' : ''}">Ficha: ${esc(x.estado_texto)}</span>${x.estado === 'observada' && x.nota ? ` <span class="sub">${esc(x.nota)}</span>` : ''}</div>`;
+  const x = S.fichas?.[f.cod];
+  const equipo = S.enEquipo[f.cod] ? ' <span class="sub" title="Se puede abrir sin señal">· 📥 en el equipo</span>' : '';
+  const chip = !x ? (equipo ? `<div class="lst-ficha">${equipo}</div>` : '') : `<div class="lst-ficha"><span class="chip-est ${x.estado === 'aprobada' ? 'ok' : x.estado === 'observada' ? 'alerta' : x.estado === 'enviada' ? 'pend' : ''}">Ficha: ${esc(x.estado_texto)}</span>${x.estado === 'observada' && x.nota ? ` <span class="sub">${esc(x.nota)}</span>` : ''}${equipo}</div>`;
   const primario = !x || x.estado === 'borrador' || x.estado === 'observada';
   return { cuerpo: chip, acc: `<button class="btn ${primario ? 'btn-primary' : 'btn-ghost'} btn-sm" type="button" data-ficha="${esc(f.cod)}" aria-label="Ficha de verificación de ${esc(f.nom)}">${x ? BOTON_FICHA[x.estado] : 'Llenar ficha'}</button>` };
 }
 function abrirFichaDe(cod) {
   abrirFicha({ proyecto: S.proy, cod, toast, alCambiar: (c, ficha) => {
+    S.enEquipo[c] ||= new Date().toISOString();
+    pintarEquipo();
     if (!S.fichas) return;
     S.fichas[c] = ficha;
     // Al enviarla, el servidor marca el colegio como visitado con la fecha de la ficha (si nadie lo marcó)
     if (ficha.estado === 'enviada' && S.visitas && !S.visitas[c] && ficha.datos?.a?.fecha) S.visitas[c] = { fecha: ficha.datos.a.fecha, por: '', mia: true };
     pintarLista(); pintarInfoVisitas();
   } });
+}
+
+// ─── Sin señal: fichas en el equipo y sincronización ────────────────────────
+// Colegios cuyas fichas se llevan: el supervisor, los suyos (el servidor los elige); el proveedor, los de «Colegios del proyecto»
+const MAX_EQUIPO = 300;
+function codigosEquipo() {
+  if (!S.proy) return [];
+  return S.rol === 'supervisor' ? S.proy.locales.filter(c => S.proy.asig?.[c] === S.yo) : (codigosVer() || []).slice(0, MAX_EQUIPO);
+}
+function pintarEquipo() {
+  const caja = $('cEquipoCampo'); if (!caja) return;
+  const cods = codigosEquipo(), n = cods.filter(c => S.enEquipo[c]).length;
+  caja.hidden = !S.proy || !cods.length || (!S.fichas && !n);
+  if (caja.hidden) return;
+  const fechas = cods.map(c => S.enEquipo[c]).filter(Boolean).sort();
+  $('cEquipo').textContent = n ? `Actualizar las fichas en el equipo (${fmt(cods.length)})` : `Llevar mis fichas al equipo (${fmt(cods.length)})`;
+  $('cEquipo').disabled = !navigator.onLine;
+  $('cEquipoInfo').textContent = n ? `${plural(n, 'ficha lista', 'fichas listas')} para abrir sin señal${fechas.length ? ` (guardadas el ${fechaHoraPe(fechas[0])})` : ''}. Actualízalas antes de salir si cambió algo.`
+    : 'Antes de salir a una zona sin señal: guarda en este equipo la ficha de cada colegio (padrón, censo y lo ya llenado).';
+}
+const fechaHoraPe = iso => new Date(iso).toLocaleString('es-PE', { timeZone: 'America/Lima', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+async function llevarAlEquipo() {
+  const P = S.proy, b = $('cEquipo'); if (!P) return;
+  const txt = b.textContent; b.disabled = true; b.textContent = 'Guardando las fichas en el equipo…';
+  try {
+    const q = S.rol === 'supervisor' ? '' : '?codigos=' + encodeURIComponent(codigosEquipo().join(','));
+    const r = await api(`/api/campo/proyectos/${encodeURIComponent(P.id)}/fichas-equipo${q}`);
+    for (const f of r.fichas) await guardarFichaEquipo(S.yo, P, { ...f, guia: r.guia, bajada_en: r.bajada_en });
+    S.enEquipo = await fichasEnEquipo(S.yo, P.id);
+    // La página y los datos de la región quedan en el equipo con el service worker; se confirma que esté activo
+    const sw = 'serviceWorker' in navigator ? await Promise.race([navigator.serviceWorker.ready.then(() => true), new Promise(ok => setTimeout(() => ok(false), 3000))]) : false;
+    toast(`${plural(r.fichas.length, 'ficha guardada', 'fichas guardadas')} en el equipo.${sw ? ' Ya puedes abrirlas sin señal.' : ' Este navegador no guarda la página para abrirla sin señal: déjala abierta.'}`);
+    pintarLista();
+  } catch (e) { toast(sinSenal(e) ? 'Sin señal: para guardar las fichas en el equipo necesitas señal.' : `No se pudieron guardar las fichas: ${e.message}`); }
+  finally { b.disabled = false; b.textContent = txt; pintarEquipo(); }
+}
+
+// Barra de señal: sin conexión, de cuándo son los datos; y lo que falta subir
+function marcarSinSenal(en) { S.sinSenalDesde = Math.min(S.sinSenalDesde || Infinity, en || Date.now()); pintarSenal(); }
+async function pintarSenal(estado) {
+  const el = $('cSenal'); if (!el) return;
+  const R = await resumenEquipo().catch(() => ({ borradores: 0, fotos: 0, firmas: 0 }));
+  const partes = [R.borradores && plural(R.borradores, 'ficha con cambios', 'fichas con cambios'), R.fotos && plural(R.fotos, 'foto', 'fotos'), R.firmas && plural(R.firmas, 'firma', 'firmas')].filter(Boolean);
+  const offline = !navigator.onLine || S.sinSenalDesde;
+  let html = '';
+  if (estado === 'subiendo') html = `Subiendo lo guardado en el equipo (${partes.join(', ')})…`;
+  else if (offline) html = `<b>Sin señal.</b> ${S.sinSenalDesde ? `Ves los datos guardados en el equipo (${esc(fechaHoraPe(S.sinSenalDesde))}). ` : ''}${partes.length ? `Por subir: ${partes.join(', ')}. Se sube solo cuando vuelva la señal.` : 'Lo que llenes queda en el equipo y se sube solo con señal.'}`;
+  else if (partes.length) html = `Por subir: ${partes.join(', ')}. <button class="btn btn-ghost btn-sm" type="button" id="cSubir">Subir ahora</button>`;
+  else if (estado === 'listo') html = '✓ Todo lo del equipo quedó subido.';
+  el.innerHTML = html; el.hidden = !html;
+  el.className = 'senal-bar' + (offline ? ' sin' : estado === 'listo' ? ' ok' : '');
+  if (estado === 'listo') setTimeout(() => { if (el.classList.contains('ok')) el.hidden = true; }, 5000);
+}
+async function sincronizar() {
+  if (!navigator.onLine) { pintarSenal(); return; }
+  const R0 = await resumenEquipo().catch(() => null);
+  if (!R0 || !(R0.borradores + R0.fotos + R0.firmas)) { pintarSenal(); return; }
+  pintarSenal('subiendo');
+  const r = await sincronizarEquipo();
+  if (r.sinSenal) { pintarSenal(); return; }
+  S.sinSenalDesde = null;
+  if (S.proy) await cargarFichas();
+  pintarLista();
+  pintarSenal(r.errores ? null : 'listo');
+  if (r.errores) toast(`${plural(r.errores, 'cosa no se pudo subir', 'cosas no se pudieron subir')}: abre la ficha para ver qué pasó.`);
 }
 
 // ─── Fichas de verificación del supervisor ──────────────────────────────────
@@ -304,8 +403,8 @@ async function bajarFichas() {
 
 // ─── Colegios visitados ─────────────────────────────────────────────────────
 async function cargarVisitas() {
-  try { S.visitas = await api('/api/campo/visitas'); }
-  catch (e) { console.warn('Visitas', e); S.visitas = null; toast(e.message); }
+  try { S.visitas = await apiGuardada('/api/campo/visitas'); }
+  catch (e) { console.warn('Visitas', e); S.visitas = null; if (!sinSenal(e)) toast(e.message); }
   $('cOcultarCampo').hidden = !S.visitas;
   S.ocultar = !!S.visitas && !!store('ocultarVisitados'); $('cOcultar').checked = S.ocultar;
   filtrosSum();
@@ -353,7 +452,7 @@ async function elegirProyecto(id) {
   const sel = $('cProy'); sel.disabled = true;
   try {
     let p;
-    try { p = await api('/api/campo/proyectos/' + encodeURIComponent(id)); }
+    try { p = await apiGuardada('/api/campo/proyectos/' + encodeURIComponent(id)); }
     catch (e) { toast(`No se pudo abrir el proyecto: ${e.message}`); sel.value = S.proy?.id || ''; return; }
     if (p.region !== S.region) await cargarRegion(p.region);
     if (p.region !== S.region) { toast(`No se pudo cargar la región ${p.region} del proyecto.`); sel.value = ''; S.proy = null; return; }
@@ -372,8 +471,8 @@ async function elegirProyecto(id) {
 // Vuelve a toda la región (sin recargarla) y a la cantidad de colegios que el usuario tenía
 async function quitarProyecto({ rebuscar = true } = {}) {
   const habia = !!S.proy;
-  S.proy = null; S.fichas = null; S.ver = 'todo'; store('proyecto', null); $('cProy').value = '';
-  $('cVerCampo').hidden = true; $('cReparto').hidden = true; $('cFichasCampo').hidden = true;
+  S.proy = null; S.fichas = null; S.enEquipo = {}; S.ver = 'todo'; store('proyecto', null); $('cProy').value = '';
+  $('cVerCampo').hidden = true; $('cReparto').hidden = true; $('cFichasCampo').hidden = true; $('cEquipoCampo').hidden = true;
   if (!habia) return;
   await w('limitar', { codigos: null });
   fijarMaxN();
@@ -544,6 +643,8 @@ function bind() {
   $('cProy').onchange = e => elegirProyecto(e.target.value);
   $('cVer').onchange = e => { S.ver = e.target.value; aplicarVer(); };
   $('cFichas').onclick = bajarFichas;
+  $('cEquipo').onclick = llevarAlEquipo;
+  document.addEventListener('click', e => { if (e.target.id === 'cSubir') sincronizar(); });
   $('cRepSups').addEventListener('change', e => {
     const ch = e.target.closest('[data-sup]');
     if (ch) { if (ch.checked) S.cuotas.set(ch.dataset.sup, 0); else S.cuotas.delete(ch.dataset.sup); partesIguales(); return; }

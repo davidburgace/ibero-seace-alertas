@@ -31,6 +31,9 @@
 //   GET    /api/campo/proyectos/:id/fichas/:cod/firmas/:cargo   la imagen
 //   DELETE /api/campo/proyectos/:id/fichas/:cod/firmas/:cargo   solo con la ficha en borrador u observada
 //   GET    /api/campo/proyectos/:id/fichas/:cod/pdf             la ficha llena en PDF, con las fotos y las firmas
+// Sin señal (campo-equipo.js): llevar las fichas al equipo antes de salir
+//   GET    /api/campo/proyectos/:id/fichas-equipo[?codigos=a,b]  → { guia, fichas: [{ cod, modelo, ficha, editable, fotos, firmas }] }
+//          El supervisor recibe sus colegios asignados (aunque pida otros); el proveedor, los que pida (hasta 300)
 // Acceso (ver crearProteccionApi en src/ioarr/auth.js): proveedor y supervisor de campo.
 //   proveedor  → solo sus proyectos
 //   supervisor → todos los proyectos, pero solo nombre, región y códigos de local
@@ -418,6 +421,35 @@ export async function pdfFichaCampo(sb, usuario, proyectoId, cod, deps) {
   return { buffer: await pdfFichaLlena(sb, acc.p.id, cod, F, ficha), nombre: nombrePdfLlena(F) };
 }
 
+// ─── Fichas al equipo (sin señal) ───────────────────────────────────────────
+export const MAX_FICHAS_EQUIPO = 300;
+export async function fichasParaEquipo(sb, usuario, proyectoId, pedido, deps) {
+  const p = await proyectoCampo(sb, usuario, proyectoId);
+  if (!p) return { status: 404, body: { error: 'Proyecto no encontrado' } };
+  const mias = Object.entries(p.asignaciones || {}).filter(([, id]) => id === usuario.id).map(([c]) => c);
+  const del = new Set(p.locales);
+  let cods = usuario.rol === 'supervisor' ? mias : [...new Set(String(pedido || '').split(',').map(c => c.trim()).filter(c => del.has(c)))];
+  if (!cods.length) return { status: 400, body: { error: usuario.rol === 'supervisor' ? 'No tienes colegios asignados en este proyecto' : 'Elige los colegios que vas a llevar' } };
+  if (cods.length > MAX_FICHAS_EQUIPO) return { status: 400, body: { error: `Máximo ${MAX_FICHAS_EQUIPO} colegios a la vez` } };
+  const estados = await estadosFichas(sb, p.id);
+  if (!estados) return { status: 503, body: { error: AVISO_MIGRACION_FICHAS } };
+  const modelos = await deps.modelos(p.id, cods);
+  // ¿Están las migraciones de fotos (024) y firmas (025)? null = no (la ficha funciona sin ellas)
+  const [conFotos, conFirmas] = await Promise.all([fotosFicha(sb, p.id, '-'), firmasFicha(sb, p.id, '-')]);
+  const una = async cod => {
+    // Lo llenado, las fotos y las firmas solo de las fichas que existen (las demás se crean al guardar)
+    const ficha = estados[cod] ? await leerFichaDigital(sb, p.id, cod) : null;
+    const [fotos, firmas] = await Promise.all([
+      conFotos && ficha ? fotosFicha(sb, p.id, cod) : conFotos && [],
+      conFirmas && ficha ? firmasFicha(sb, p.id, cod) : conFirmas && {}]);
+    if (ficha) delete ficha.por_id;
+    return { cod, modelo: modelos[cod], ficha, editable: puedeEditar(ficha?.estado), fotos, firmas };
+  };
+  const lista = cods.filter(c => modelos[c]), fichas = [];
+  for (let i = 0; i < lista.length; i += 5) fichas.push(...await Promise.all(lista.slice(i, i + 5).map(una)));
+  return { status: 200, body: { guia: GUIA_FICHA, proyecto: { id: p.id, nombre: p.nombre, region: p.region }, bajada_en: new Date().toISOString(), fichas } };
+}
+
 // deps.fichasZip(res, proyectoId, paquete): arma el ZIP (src/selector-ioarr/router.js → fichasZipProyecto)
 export function crearApiCampo(sb = supabase, deps = {}) {
   const api = express.Router();
@@ -454,6 +486,7 @@ export function crearApiCampo(sb = supabase, deps = {}) {
   };
   const cod = req => String(req.params.cod);
   api.get('/proyectos/:id/fichas', enFicha(req => fichasDelUsuario(sb, req.usuario, req.params.id)));
+  api.get('/proyectos/:id/fichas-equipo', enFicha(req => fichasParaEquipo(sb, req.usuario, req.params.id, req.query.codigos, deps.fichas)));
   api.get('/proyectos/:id/fichas/:cod', enFicha(req => abrirFichaCampo(sb, req.usuario, req.params.id, cod(req), deps.fichas)));
   api.put('/proyectos/:id/fichas/:cod', enFicha(req => guardarBorradorFicha(sb, req.usuario, req.params.id, cod(req), req.body || {})));
   api.post('/proyectos/:id/fichas/:cod/enviar', enFicha(req => enviarFicha(sb, req.usuario, req.params.id, cod(req), req.body || {}, deps.fichas)));

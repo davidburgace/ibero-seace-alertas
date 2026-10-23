@@ -813,6 +813,19 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
 
   // Para Visitas de campo (src/selector-ioarr/campo.js, por router.js): el proyecto ya viene validado
   api.fichaLocal = fichaLocal;
+  // Varias fichas de una vez (para llevarlas al equipo sin señal): una sola carga de la región y del reparto
+  api.fichasLocales = async (p, cods) => {
+    const [D, codigos, R] = await Promise.all([cargarRegion(p.region), leerCodigos(p.id), asignacionesProyecto(supabase, p.id)]);
+    if (!D) { const e = new Error('No hay datos para la región ' + p.region); e.status = 400; throw e; }
+    const C = calc(D, limpiarParams(p.criterios)), del = new Set(codigos), fecha = hoyLima(), out = {};
+    const idx = new Map(D.locs.map((l, i) => [l[0], i]));
+    for (const cod of cods) {
+      if (!del.has(cod) || !idx.has(cod)) continue;
+      const sup = R.asignaciones?.[cod];
+      out[cod] = modeloFicha(D, C, idx.get(cod), { proyecto: { id: p.id, nombre: p.nombre }, anio: p.anio_datos, fecha, supervisor: sup ? R.supervisores[sup] || '' : '' });
+    }
+    return out;
+  };
   api.validarFichaDigital = async (p, cod, datos, origen) => validarFicha(await contextoFichas(p), fichaDesdeFormulario(datos, { proyectoId: p.id, cod, region: p.region }), origen);
 
   // ─── Documentos: Formato 07-C y memoria descriptiva ───────────────────────

@@ -1,0 +1,15 @@
+{
+  "name": "Visitas de campo — Radar Ibero",
+  "short_name": "Campo",
+  "description": "Colegios por visitar y fichas de verificación, también sin señal.",
+  "lang": "es-PE",
+  "start_url": "/campo.html",
+  "scope": "/campo",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#f7f8fa",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}

@@ -1,7 +1,7 @@
 // Visitas de campo — fotos de la ficha de verificación (las usa campo-ficha.js).
 //   prepararFoto(file, sello)   reduce la foto (lado mayor 1600 px, JPEG), le pone el sello abajo
 //                               (local, aula, fecha y coordenadas) y arma una miniatura de 320 px
-//   cola en el equipo (IndexedDB): la foto queda guardada hasta que se sube, aunque no haya señal
+//   cola en el equipo (campo-equipo.js): la foto queda guardada hasta que se sube, aunque no haya señal
 //   o se cierre la página: encolar, enCola(clave), quitarDeCola(id)
 //   ubicación: seguirUbicacion() / ubicacionReciente(ms) / dejarUbicacion()
 
@@ -61,48 +61,8 @@ export function nuevoId() {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
-// ─── Cola en el equipo (IndexedDB) ───────────────────────────────────────────
-// Registro: { id, clave: '<proyecto>:<local>', meta, foto: Blob, mini: Blob, creada }.
-// Sin IndexedDB (navegación privada), la cola vive en memoria mientras la página está abierta.
-const DB = 'campo-fotos', ST = 'pendientes';
-const memoria = new Map();
-let dbP = null;
-function abrirDb() {
-  if (dbP) return dbP;
-  dbP = new Promise(ok => {
-    try {
-      const rq = indexedDB.open(DB, 1);
-      rq.onupgradeneeded = () => rq.result.createObjectStore(ST, { keyPath: 'id' });
-      rq.onsuccess = () => ok(rq.result);
-      rq.onerror = () => ok(null);
-    } catch { ok(null); }
-  });
-  return dbP;
-}
-async function tx(modo, fn) {
-  const db = await abrirDb();
-  if (!db) return fn(null);
-  return new Promise((ok, mal) => {
-    const t = db.transaction(ST, modo), st = t.objectStore(ST), r = fn(st);
-    t.oncomplete = () => ok(r?.result ?? r); t.onerror = () => mal(t.error); t.onabort = () => mal(t.error);
-  });
-}
-export const colaPersistente = async () => !!(await abrirDb());
-export async function encolar(reg) {
-  const r = { ...reg, creada: Date.now() };
-  memoria.set(r.id, r);
-  try { await tx('readwrite', st => st?.put(r)); } catch (e) { console.warn('Cola de fotos', e); }
-}
-export async function enCola(clave) {
-  let todas = [];
-  try { todas = (await tx('readonly', st => st?.getAll())) || []; } catch (e) { console.warn('Cola de fotos', e); }
-  const porId = new Map([...memoria.values(), ...todas].map(r => [r.id, r]));
-  return [...porId.values()].filter(r => r.clave === clave).sort((a, b) => a.creada - b.creada);
-}
-export async function quitarDeCola(id) {
-  memoria.delete(id);
-  try { await tx('readwrite', st => st?.delete(id)); } catch (e) { console.warn('Cola de fotos', e); }
-}
+// ─── Cola en el equipo: vive en campo-equipo.js (junto con las fichas guardadas para trabajar sin señal) ───
+export { encolar, enCola, quitarDeCola, colaPersistente } from '/campo-equipo.js';
 
 // ─── Ubicación ───────────────────────────────────────────────────────────────
 // Mientras la ficha está abierta se sigue la ubicación, así cada foto lleva coordenadas sin esperar

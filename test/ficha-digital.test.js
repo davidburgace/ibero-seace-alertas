@@ -225,7 +225,7 @@ test('migración 023, rutas de revisión y páginas', () => {
   for (const r of ["'/proyectos/:id/fichas/:cod/digital'", "'/proyectos/:id/fichas/:cod/digital/aprobar'", "'/proyectos/:id/fichas/:cod/digital/observar'"]) assert.ok(exp.includes(r), r);
   assert.match(exp, /if \(f\.estado !== 'enviada'\)/, 'solo se aprueba o devuelve una ficha enviada');
   assert.match(leer('src/public/campo.html'), /id="cFicha"/);
-  assert.match(leer('src/public/campo.js'), /import \{ abrirFicha \} from '\/campo-ficha\.js'/);
+  assert.match(leer('src/public/campo.js'), /import \{ abrirFicha\b[^}]*\} from '\/campo-ficha\.js'/);
   assert.match(leer('src/public/selector-ioarr-fichas.js'), /data-ficha-aprobar/);
 });
 
@@ -322,7 +322,7 @@ test('migración 024, copia al sustento al aprobar, CSP y páginas', () => {
   const js = leer('src/public/campo-ficha.js');
   assert.match(js, /capture="environment"/);
   assert.match(js, /from '\/campo-fotos\.js'/);
-  assert.match(leer('src/public/campo-fotos.js'), /indexedDB\.open/);
+  assert.match(leer('src/public/campo-equipo.js'), /indexedDB\.open/);
 });
 
 // ─── Firmas en pantalla y PDF de la ficha llena (migración 025) ─────────────
