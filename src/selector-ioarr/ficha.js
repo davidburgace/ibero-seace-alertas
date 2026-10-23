@@ -100,7 +100,9 @@ export const CRITERIOS = [
   ['Regular', 'Se usa con desgaste o un desperfecto menor reparable (tablero rayado, tornillo flojo)', 'No; se informa como diagnóstico (la propuesta repone solo lo Malo)'],
   ['Malo', 'No se puede usar, o es un riesgo para el estudiante (estructura rota, tablero partido) y no conviene repararlo', 'Sí']];
 export const REGLAS = [
-  'Se cuenta por unidad física. La mesa múltiple y la carpeta bipersonal se anotan por unidad, con su número de puestos en «Puestos por unidad» (vacío = 1). Si en un aula hay mesas de distinto tipo, copia la fila de la mesa debajo y anota cada tipo en su fila.',
+  'Se cuenta por unidad física: cada mueble que hay en el aula, uno por uno.',
+  '«Puestos por unidad» (solo mesas): cuántos estudiantes se sientan en cada mesa. Mesa individual = 1; carpeta bipersonal = 2; mesa grupal de inicial = de 4 a 6 (de 1 a 12; vacío = 1). El censo cuenta las mesas en puestos, así que la app multiplica las mesas por sus puestos para compararlas con el censo y calcular lo que se repone. Ejemplo: 12 carpetas bipersonales (10 buenas, 1 regular y 1 mala) se anotan Bueno 10, Regular 1, Malo 1 y Puestos por unidad 2; cuentan como 20, 2 y 2 puestos. Si no anotas los puestos de una carpeta bipersonal, se cuenta como individual y lo contado saldrá muy por debajo del censo.',
+  'Si en un aula hay mesas de distinto tipo (por ejemplo, bipersonales e individuales), copia la fila de la mesa debajo y anota cada tipo en su fila, con sus puestos; la app las suma.',
   'Si llenas un estado verificado, llena los tres (Bueno, Regular y Malo; 0 si no hay). Un aula sin verificar se deja en blanco y sigue con el censo.',
   'La antigüedad es en años, según el año de adquisición si hay documento. Si no lo hay, escribe un rango: «Menos de 5», «De 5 a 10» o «Más de 10»; queda marcada como estimada.',
   'Estado de baja: Sí, No o En trámite.',
@@ -235,7 +237,8 @@ export async function generarFichaExcel(F) {
   fila(); titulo('Criterios de estado y reglas de llenado');
   cab([[1, 1, 'Estado'], [2, 8, 'Cuándo se marca'], [9, 12, 'Entra a reponer']]);
   for (const [e, cuando, rep] of CRITERIOS) { fila(null, 30); unir(1, 1, e, { fill: GRIS, bold: true }); unir(2, 8, cuando, { fill: GRIS, size: 9 }); unir(9, 12, rep, { fill: GRIS, size: 9 }); }
-  for (const t of REGLAS) parrafo('• ' + t, { alto: 26 });
+  // Alto según el largo del texto (unas 170 letras por línea), para que no se corte
+  for (const t of REGLAS) parrafo('• ' + t, { alto: Math.max(26, Math.ceil((t.length + 2) / 170) * 13 + 4) });
 
   // Claves para la importación (hoja oculta)
   const app = wb.addWorksheet(HOJA_APP, { state: 'veryHidden' });
