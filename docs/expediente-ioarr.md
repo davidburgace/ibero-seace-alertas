@@ -36,11 +36,19 @@ Ejecuta `supabase/migrations/027_ioarr_estructura_oferta.sql` después de la 026
 
 **Escenarios de cantidad** (en los criterios del proyecto, `criterios.escenario`; se eligen en Expediente → Costos o en los criterios del Selector):
 - «Solo Malo» (por defecto): lo Malo del censo, por tipo de bien.
-- «Malo + Regular»: cota superior sustentada con el censo.
+- «Malo + % de Regular»: Malo y una parte del Regular (ver abajo). Con 100 % (por defecto) es la cota superior; con 0 % da lo mismo que «Solo Malo».
 - «Por capacidad (método de convocatoria)»: mesa y silla = aulas × ocupación × % (30 y 80 % por defecto, redondeado por aula); escritorio, silla docente y armario = lo requerido por aula. Solo para comparar con una convocatoria ya publicada; no es sustento de reposición.
 - El faltante es siempre informativo. Expediente → Costos muestra los tres escenarios lado a lado (cantidades, kits y monto) con la diferencia frente a «Solo Malo». El 07-C, la memoria, la lista de verificación, las fichas y los dos Excel usan el escenario elegido y lo declaran en una línea; el sustento del 07-C declara el método de cuantificación.
 
-**Kit (mesa + silla del estudiante):** kits por aula = mayor entre mesas y sillas a reponer; el local suma sus aulas (con inventario verificado, que es por local, el mayor del local). En Primaria los kits se reparten entre 1.°-2.°, 3.°-4.° y 5.°-6.° con una distribución editable (por defecto, partes iguales) y se asignan a cada local en enteros. En el 07-C sale una línea «MOBILIARIO DE AULA», unidad «Kit de mobiliario»; escritorio, silla docente y armario van aparte si entran.
+**Malo + % de Regular** (`criterios.pctRegular`, `pctRegularNivel`, `umbralVida`, `pctOrigen`):
+- Por aula y tipo de bien: Regular a reponer = MIN(Regular, redondeo hacia arriba de Regular × % / 100). Nunca pasa del Regular existente.
+- % global de 0 a 100 (paso 1, por defecto 100). Con varios niveles en el proyecto, un % por nivel (Inicial, Primaria, Secundaria); el nivel vacío usa el global. Básica Especial usa el global.
+- Local con ficha de verificación con antigüedad: en las aulas contadas, el Regular a reponer es el Regular con vida útil cumplida (antigüedad ≥ umbral, por defecto 10 años, editable; referencial: Directiva 005-2016-EF/51.01). Las filas sin antigüedad y las aulas no contadas usan el %. Cada local se marca «Regular por dato verificado» (todo su Regular tiene antigüedad) o «Regular por estimación (%)», con «dato parcial» si tiene algo de dato.
+- Expediente → Costos muestra los locales con dato verificado, el % observado de Regular con vida útil cumplida en esa muestra y el botón «Usar el % observado como porcentaje global» (solo se aplica al pulsarlo; el origen queda como «% observado en N locales verificados»). Cambiar el % a mano vuelve el origen a «valor manual».
+- El 07-C (sustento y línea del escenario), la memoria, los Excel y las fichas declaran el % usado, su origen y que la cantidad es una estimación hasta completar la verificación.
+- Control: `node scripts/selector-ioarr/control-pct-regular.mjs loreto P Maynas [codigos.txt]` da las cantidades con 0, 25, 50 y 100 % (solo censo).
+
+**Kit (mesa + silla del estudiante):** kits por aula = mayor entre mesas y sillas a reponer, sin pasar de la matrícula del aula (salvo «Por capacidad»); el local suma sus aulas (con inventario verificado, que es por local, el mayor del local, sin pasar de su matrícula). En Primaria los kits se reparten entre 1.°-2.°, 3.°-4.° y 5.°-6.° con una distribución editable (por defecto, partes iguales) y se asignan a cada local en enteros. En el 07-C sale una línea «MOBILIARIO DE AULA», unidad «Kit de mobiliario»; escritorio, silla docente y armario van aparte si entran.
 
 **Estructura de costos (reemplaza GG, utilidad, gestión e imprevistos):**
 

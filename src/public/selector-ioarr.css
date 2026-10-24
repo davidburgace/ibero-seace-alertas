@@ -479,6 +479,10 @@ table.tabla{ width:100%; border-collapse:collapse; font-size:13px; }
 .esc-op.esc-cap{ border-style:dashed; }
 .tabla-esc th.activa, .tabla-esc td.activa{ background:var(--accent-soft); }
 .tabla-esc tr.fuerte td{ font-weight:600; }
+.borde-sup{ border-top:1px solid var(--border); }
+.resumen-campo h4{ margin:0 0 4px; }
+.resumen-campo .lista-corta{ margin:6px 0 10px; padding-left:18px; }
+.resumen-campo .lista-corta li{ margin:2px 0; }
 .precio-in{ max-width:120px; text-align:right; }
 .kit-dist{ margin-top:6px; }
 .subtabs .tab-interna{ border-style:dashed; }

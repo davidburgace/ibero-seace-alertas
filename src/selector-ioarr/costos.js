@@ -4,15 +4,18 @@
 // Función pura: la usan la API (pantalla), el Excel y los documentos, así dan lo mismo.
 //
 // Metrado por local y tipo de bien (sale de calc() de calculo.js, según el escenario):
-//   Solo Malo (base) · Malo + Regular · Por capacidad (solo para comparar)
+//   Solo Malo (base) · Malo + % de Regular · Por capacidad (solo para comparar)
+//   En «Malo + % de Regular», un local con ficha de verificación con antigüedad usa el Regular
+//   con vida útil cumplida (antigüedad ≥ umbral) de las aulas contadas, en lugar del %.
 //   Faltante = MAX(0, Requerido − Existente), por aula: brecha de dotación, no reposición.
 // Solo la reposición entra al costo. El faltante se valoriza aparte, como referencia.
 //
 // Tallas (TALLAS en calculo.js): mesa y silla se costean por talla según el grado del aula.
 //
 // Kit (mesa + silla del estudiante), opcional:
-//   Kits por aula = MAX(mesas, sillas) del escenario; el local suma sus aulas (no se toma
-//   el mayor de los totales). Con inventario verificado (por local), MAX del local.
+//   Kits por aula = MIN(matrícula del aula, MAX(mesas, sillas)) del escenario; el local suma
+//   sus aulas (no se toma el mayor de los totales). Con inventario verificado (por local),
+//   MIN(matrícula del local, MAX del local). «Por capacidad» no se limita a la matrícula.
 //   En Primaria los kits se reparten entre 1.°-2.°, 3.°-4.° y 5.°-6.° con una distribución
 //   editable (por defecto, partes iguales); los demás niveles, según el grado del aula.
 //
@@ -29,7 +32,7 @@
 // locales (y entre las IOARR por nivel) según su costo directo.
 // ============================================================================
 
-import { ITEMS, TALLAS, TIPOS_TALLA, LINEAS, CLAVES_PRECIO, tallasDeAula, ESCENARIOS } from './calculo.js';
+import { ITEMS, TALLAS, TIPOS_TALLA, LINEAS, CLAVES_PRECIO, tallasDeAula, ESCENARIOS, regularAReponer } from './calculo.js';
 export { TALLAS, LINEAS, CLAVES_PRECIO };
 
 export const TIPOS = ITEMS.map(x => x.k);                       // ['mesa', 'silla', 'esc', 'sdoc', 'arm']
@@ -144,9 +147,10 @@ export function pesosTalla(D, C, i) {
   const W = [0, 1].map(() => ({ b: vacio(), r: vacio(), m: vacio(), rep: vacio(), req: vacio(), fal: vacio(), est: vacio(), aul: vacio(), niv: vacio() }));
   W.kit = vacio(); W.kits = 0;
   for (const si of D.locSvc[i]) for (const w of W) TALLAS.forEach((z, j) => { if (z.nivel === D.svcs[si][2]) w.niv[j] = 1; });
+  const tope = C.escenario !== 'capacidad';   // el kit no pasa de la matrícula del aula
   for (const ai of D.locAul[i]) {
     const a = D.aulas[ai], js = tallasDeAula(D.svcs[a[1]][2], a[5]), parte = 1 / js.length;
-    const kit = Math.max(C.A.rep[0][ai], C.A.rep[1][ai]);
+    const mayor = Math.max(C.A.rep[0][ai], C.A.rep[1][ai]), kit = tope ? Math.min(a[8], mayor) : mayor;
     W.kits += kit;
     for (const j of js) W.kit[j] += kit * parte;
     for (const t of [0, 1]) {
@@ -198,6 +202,46 @@ export function limpiarAdquisicion(obj, anioMax) {
 }
 
 /**
+ * Regular de un tipo de bien en un local con ficha de verificación, aula por aula
+ * (solo las aulas de la vista D, es decir, del nivel de la IOARR):
+ *   aula contada, filas con antigüedad → Regular con vida útil cumplida (antigüedad ≥ umbral): dato
+ *   aula contada, filas sin antigüedad → redondeo hacia arriba de Regular × % (estimación)
+ *   aula no contada                    → el censo × % (estimación)
+ * @returns { rep, repVerif, conocido, vida, cubierto, conR, conDato }
+ *   rep       Regular a reponer del tipo en el local
+ *   repVerif  la parte de rep que sale de aulas contadas en campo
+ *   conocido  Regular contado con antigüedad; vida: de eso, con vida útil cumplida
+ *   cubierto  todo el Regular del tipo tiene antigüedad verificada
+ */
+export function regularFicha(D, C, i, ficha, t, k, umbral) {
+  const base = D.base || D, enVista = new Set(D.locAul[i]);
+  const out = { rep: 0, repVerif: 0, conocido: 0, vida: 0, cubierto: true, conR: 0, conDato: 0 };
+  base.locAul[i].forEach((ai, j) => {
+    if (!enVista.has(ai)) return;
+    const pct = C.pctNiv?.[D.svcs[D.aulas[ai][1]][2]] ?? C.pctRegular ?? 100;
+    const filas = (ficha?.aulas?.[j]?.filas || []).filter(f => f.k === k && f.b != null);
+    if (!filas.length) {
+      const r = C.A.r[t][ai];
+      out.rep += regularAReponer(r, pct);
+      if (r > 0) { out.cubierto = false; out.conR++; }
+      return;
+    }
+    let sinAnt = 0, dato = 0, r = 0;
+    for (const f of filas) {
+      r += f.r;
+      if (f.antig == null) { sinAnt += f.r; continue; }
+      out.conocido += f.r;
+      if (f.antig >= umbral) { out.vida += f.r; dato += f.r; }
+    }
+    const est = regularAReponer(sinAnt, pct);
+    out.rep += dato + est; out.repVerif += dato + est;
+    if (r > 0) { out.conR++; if (!sinAnt) out.conDato++; }
+    if (sinAnt > 0) out.cubierto = false;
+  });
+  return out;
+}
+
+/**
  * Estructura de costos.
  * @param {object} p
  *   D, C, list   datos de la región (prep), cálculo (calc, con el escenario) e índices de los locales
@@ -209,7 +253,9 @@ export function limpiarAdquisicion(obj, anioMax) {
  *                (una por nivel, ver niveles.js). Reemplaza a D, C, list e inventario.
  *
  * Con inventario verificado, en ese local y tipo se reemplaza el censo:
- *   Faltante = MAX(0, Requerido − (B + R + M)); A reponer = M (Solo Malo) o M + R (Malo + Regular).
+ *   Faltante = MAX(0, Requerido − (B + R + M)); A reponer = M (Solo Malo) o M + Regular a reponer
+ *   (Malo + % de Regular: con ficha, aula por aula según la antigüedad, ver regularFicha; corregido
+ *   a mano, redondeo hacia arriba de R × % del nivel).
  *   Por capacidad no usa el estado del mobiliario: lo verificado solo cambia el diagnóstico.
  * repVerif es la parte de lo que se repone verificada en campo, para el porcentaje del 07-C.
  *
@@ -250,7 +296,8 @@ export function costear({ D, C, list, precios, estructura, uit, inventario, grup
     l.total = l.cd + l.igv + l.doc + l.sup + l.liq;
   }
 
-  const P = { pu, puGeneral, propio, incl, puKit, kit, E, escenario };
+  const C0 = fuentes[0]?.C || {};
+  const P = { pu, puGeneral, propio, incl, puKit, kit, E, escenario, pctRegular: C0.pctRegular ?? 100, umbralVida: C0.umbralVida ?? 10 };
   const res = resumir(locales, P, uit);
   if (grupos) res.grupos = Object.fromEntries(grupos.map(g => [g.clave, resumir(locales.filter(l => l.grupo === g.clave), P, uit)]));
   return res;
@@ -267,6 +314,12 @@ function localDe(g, i) {
   // Parte de lo que se repone que está verificada en campo (el resto sale del censo)
   const repVerif = TIPOS.map(() => 0);
   let verificado = null, kitLocal = false;
+  // Regular por dato verificado (ficha con antigüedad) o por estimación (%), y la muestra para el % observado
+  const umbral = C.umbralVida ?? 10;
+  const nivLoc = [...new Set(D.locSvc[i].map(si => D.svcs[si][2]))];
+  const pctLocal = C.pctNiv?.[D.nivel || (nivLoc.length === 1 ? nivLoc[0] : '')] ?? C.pctRegular ?? 100;
+  const regular = { origen: 'estimacion', pct: pctLocal, conocido: 0, vida: 0, conR: 0, conDato: 0, cubierto: false };
+  let hayDato = false, todoCubierto = true;
   if (inv) {
     const tipos = [];
     TIPOS.forEach((k, t) => {
@@ -282,17 +335,29 @@ function localDe(g, i) {
       fal[t] = Math.max(0, (req ?? C.L.req[t * nL + i]) - (x.b + x.r + x.m));
       diag[t] = { ...diag[t], b: x.b, r: x.r, m: x.m };
       tipos.push(k);
+      // Con ficha, aula por aula; corregido a mano, todo el tipo
+      const v = inv.verif?.[k];
+      const fc = v && inv.ficha?.aulas ? regularFicha(D, C, i, inv.ficha, t, k, umbral) : null;
+      if (fc) {
+        regular.conocido += fc.conocido; regular.vida += fc.vida; regular.conR += fc.conR; regular.conDato += fc.conDato;
+        if (fc.conocido > 0 || fc.conDato > 0) hayDato = true;
+        if (!fc.cubierto) todoCubierto = false;
+      } else if (x.r > 0) todoCubierto = false;
       if (esc === 'capacidad') return;   // por capacidad no usa el estado del mobiliario
-      rep[t] = esc === 'malo_regular' ? x.m + x.r : x.m;
+      rep[t] = esc === 'malo_regular' ? x.m + (fc ? fc.rep : regularAReponer(x.r, pctLocal)) : x.m;
       if (t < 2) kitLocal = true;
       // Con ficha, solo las aulas contadas (Malo verificado frente al Malo del censo); corregido a mano, todo el tipo
-      const v = inv.verif?.[k];
-      repVerif[t] = !v ? rep[t] : esc === 'malo_regular' ? Math.round(rep[t] * (v.mv + v.mc ? v.mv / (v.mv + v.mc) : 1)) : v.mv;
+      repVerif[t] = !v ? rep[t] : esc === 'malo_regular' ? v.mv + (fc ? fc.repVerif : 0) : v.mv;
     });
     // Visita registrada: puede corregir cantidades (tipos) o solo traer el año de adquisición
     verificado = { tipos, adquisicion: inv.adquisicion || {}, adq_estimada: inv.adq_estimada || [], fecha_visita: inv.fecha_visita, responsable: inv.responsable || null, observacion: inv.observacion,
       ficha: inv.ficha ? { archivo: inv.ficha.archivo, importado_en: inv.ficha.importado_en, verificador: inv.ficha.verificador } : null };
   }
+  // Tipos sin inventario verificado: su Regular sale del censo (estimación), salvo que no haya
+  if (todoCubierto) TIPOS.forEach((k, t) => { if (incl[t] && !verificado?.tipos.includes(k) && C.L.r[t * nL + i] > 0) todoCubierto = false; });
+  regular.cubierto = hayDato && todoCubierto;
+  regular.origen = regular.cubierto ? 'dato' : 'estimacion';
+  regular.parcial = hayDato && !todoCubierto;
   // Por línea (talla): mesa y silla repartidas según las aulas del censo
   const W = pesosTalla(D, C, i);
   const lin = { rep: [], fal: [], b: [], r: [], m: [], req: [] };
@@ -312,12 +377,13 @@ function localDe(g, i) {
   }
   // Kits: MAX(mesas, sillas) por aula, sumado en el local. Con inventario verificado de mesa
   // o silla (que es por local), MAX del local, repartido entre tallas como los kits del censo.
-  const kits = !incl[0] || !incl[1] ? 0 : kitLocal ? Math.max(rep[0], rep[1]) : W.kits;
+  const mat = D.locAul[i].reduce((a, ai) => a + D.aulas[ai][8], 0);
+  const kits = !incl[0] || !incl[1] ? 0 : kitLocal ? (esc === 'capacidad' ? Math.max(rep[0], rep[1]) : Math.min(mat, Math.max(rep[0], rep[1]))) : W.kits;
   const w0 = W[0];
   const kitTalla = repartirCon(kits, W.kit, w0.est, w0.aul, w0.niv);
   return {
     i, grupo: g.clave, cod: l[0], nom: D.locName[i], dist: d[0], prov: D.provs[d[2]], ubigeo: d[1], rural: !!l[4],
-    est: D.locEst[i], aul: D.locAul[i].length, rep, repVerif, fal, diag, verificado, lin, kits, kitTalla, kitPorLocal: kitLocal
+    est: D.locEst[i], aul: D.locAul[i].length, rep, repVerif, fal, diag, verificado, lin, kits, kitTalla, kitPorLocal: kitLocal, regular
   };
 }
 
@@ -356,7 +422,7 @@ function costoLocal(l, { kit, pu, puKit, E }) {
 const r2 = n => Math.round((n + Number.EPSILON) * 100) / 100;
 
 // Totales, partidas, metas, distritos, UIT y avisos de un conjunto de locales ya costeados
-function resumir(locales, { pu, puGeneral, propio, incl, puKit, kit, E, escenario }, uit) {
+function resumir(locales, { pu, puGeneral, propio, incl, puKit, kit, E, escenario, pctRegular, umbralVida }, uit) {
   const n = locales.length;
   const sum = f => locales.reduce((a, loc) => a + f(loc), 0);
   const T = {
@@ -441,9 +507,18 @@ function resumir(locales, { pu, puGeneral, propio, incl, puKit, kit, E, escenari
   U.supera = U.limite != null ? T.total > U.limite : null;
   U.enUit = valorUit ? T.total / valorUit : null;
 
+  // Muestra de campo: Regular contado con antigüedad y, de eso, con vida útil cumplida
+  const conDato = locales.filter(l => l.regular?.conocido > 0);
+  const conocido = conDato.reduce((a, l) => a + l.regular.conocido, 0), vida = conDato.reduce((a, l) => a + l.regular.vida, 0);
+  const regularCampo = {
+    umbral: umbralVida, pct: pctRegular, locales: n,
+    conDato: conDato.length, completos: locales.filter(l => l.regular?.origen === 'dato').length,
+    conocido, vida, observado: conocido ? Math.round(vida / conocido * 1000) / 10 : null
+  };
+
   const avisos = [];
   if (escenario === 'capacidad') avisos.push({ tipo: 'escenario', alerta: true, texto: 'Escenario «Por capacidad (método de convocatoria)»: solo para comparar con una convocatoria ya publicada; no es sustento de reposición. Las cantidades no usan el estado del mobiliario.' });
-  else if (escenario === 'malo_regular') avisos.push({ tipo: 'escenario', texto: 'Escenario «Malo + Regular»: cota superior. El mobiliario regular todavía se puede usar: sustenta con la verificación en campo por qué se repone.' });
+  else if (escenario === 'malo_regular') avisos.push({ tipo: 'escenario', texto: `Escenario «Malo + % de Regular» (${pctRegular} % del Regular${pctRegular === 100 ? ', cota superior' : ''}). El mobiliario regular todavía se puede usar: la cantidad es una estimación hasta completar la verificación en campo${regularCampo.completos ? `; ${regularCampo.completos === 1 ? '1 local usa' : regularCampo.completos + ' locales usan'} el Regular con vida útil cumplida verificado` : ''}.` });
   // Sin precio: las líneas con algo que reponer
   const sinPrecio = lineas.filter(y => y.rep > 0 && y.pu == null).map(y => y.n);
   if (sinPrecio.length) avisos.push({ tipo: 'precio', texto: `Falta el precio unitario de: ${sinPrecio.join(', ')}. Se calcula con 0 hasta que lo cargues.` });
@@ -456,7 +531,7 @@ function resumir(locales, { pu, puGeneral, propio, incl, puKit, kit, E, escenari
 
   // Precio por línea (con el respaldo del tipo) y del kit por talla, para el Excel
   const preciosLinea = Object.fromEntries([...LINEAS.map((x, j) => [x.k, { pu: pu[j], propio: propio[j] }]), ...LINEAS_KIT.map((x, j) => [x.k, { pu: puKit[j] }])]);
-  return { partidas, lineas, lineasTalla, lineasKit, metas, estructura, totales: T, locales, distritos, uit: U, avisos, escenario, kit, preciosLinea };
+  return { partidas, lineas, lineasTalla, lineasKit, metas, estructura, totales: T, locales, distritos, uit: U, avisos, escenario, kit, preciosLinea, regularCampo };
 }
 
 // Nombre corto del escenario

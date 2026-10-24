@@ -41,7 +41,7 @@ export function vistaNivel(D, nivel) {
   D._vistas ??= {};
   if (D._vistas[nivel]) return D._vistas[nivel];
   const V = Object.create(D), nL = D.locs.length;
-  V.nivel = nivel;
+  V.nivel = nivel; V.base = D;
   V.locSvc = D.locSvc.map(ss => ss.filter(si => D.svcs[si][2] === nivel));
   V.locAul = D.locAul.map(as => as.filter(ai => D.svcs[D.aulas[ai][1]][2] === nivel));
   V.locEst = new Int32Array(nL); V.locSec = new Int32Array(nL); V.locNiv = new Uint8Array(nL); V.locGes = new Uint8Array(nL);

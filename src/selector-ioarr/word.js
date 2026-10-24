@@ -295,7 +295,7 @@ export async function generarMemoria(M) {
   c.push(tablaUPs(M), ...notaUPs(M), ...notaSinRep(M), ...notaExcluidos(M));
 
   c.push(titulo('5. Diagnóstico de la situación actual'));
-  c.push(p(`${M.ups.length === 1 ? 'El local atiende' : 'Los locales atienden'} a ${ent(M.est)} estudiantes en ${ent(M.aulas)} aulas. Estado del mobiliario por tipo de bien${M.ups.some(u => u.verificado) ? ' (con el inventario verificado en campo donde lo hay)' : ''}. ${{ malo: 'Se repone solo el estado malo', malo_regular: 'Se repone el estado malo y el regular (cota superior)', capacidad: 'Las cantidades a adquirir se calculan por capacidad, no por el estado' }[M.escenario] || 'Se repone solo el estado malo'}; el faltante es brecha de dotación y no se repone:`));
+  c.push(p(`${M.ups.length === 1 ? 'El local atiende' : 'Los locales atienden'} a ${ent(M.est)} estudiantes en ${ent(M.aulas)} aulas. Estado del mobiliario por tipo de bien${M.ups.some(u => u.verificado) ? ' (con el inventario verificado en campo donde lo hay)' : ''}. ${{ malo: 'Se repone solo el estado malo', malo_regular: `Se repone el estado malo y ${M.regular?.pct || '100 %'} del regular (${M.regular?.origen || 'valor manual'}; estimación hasta completar la verificación en campo)`, capacidad: 'Las cantidades a adquirir se calculan por capacidad, no por el estado' }[M.escenario] || 'Se repone solo el estado malo'}; el faltante es brecha de dotación y no se repone:`));
   c.push(tabla(['Tipo de bien', 'Unidad', 'Existente', 'Bueno', 'Regular', 'Malo', 'A reponer', 'Requerido', 'Faltante (brecha de dotación, no reposición)'],
     M.partidas.filter(x => !x.excluido).map(x => [x.n, x.u, ...[x.ex, x.b, x.r, x.m, x.rep, x.req, x.fal].map(v => ({ v: ent(v) }))]), { num: [2, 3, 4, 5, 6, 7, 8], size: 16 }));
   const verif = M.ups.filter(u => u.verificado);
@@ -324,7 +324,7 @@ export async function generarMemoria(M) {
   }
 
   c.push(titulo('7. Descripción de la intervención'));
-  c.push(p(`Adquisición, transporte y entrega de ${M.F.metas.map(m => `${ent(m.cantidad)} ${m.plural}`).join(', ')}${M.escenario === 'capacidad' ? '' : ', para reemplazar el mobiliario ' + (M.escenario === 'malo_regular' ? 'en estado malo y regular' : 'en mal estado')}. El mobiliario reemplazado se dará de baja conforme a los procedimientos de control patrimonial de la entidad.`));
+  c.push(p(`Adquisición, transporte y entrega de ${M.F.metas.map(m => `${ent(m.cantidad)} ${m.plural}`).join(', ')}${M.escenario === 'capacidad' ? '' : ', para reemplazar el mobiliario ' + (M.escenario === 'malo_regular' ? `en estado malo y ${M.regular?.pct || '100 %'} del regular` : 'en mal estado')}. El mobiliario reemplazado se dará de baja conforme a los procedimientos de control patrimonial de la entidad.`));
   c.push(titulo('7.1 Especificaciones técnicas', 2));
   c.push(tabla(['Bien', 'Descripción técnica'], M.E.intervencion.map(a => [a.nombre, a.descripcion]), { anchos: [28, 72] }));
   c.push(titulo('7.2 Metas por local', 2));

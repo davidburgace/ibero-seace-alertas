@@ -64,24 +64,51 @@ export const NIVN = { I: 'Inicial', P: 'Primaria', S: 'Secundaria', E: 'Básica 
 export const NIVS = { I: 'Inicial', P: 'Primaria', S: 'Secundaria', E: 'Especial' };
 export const NIVB = { I: 1, P: 2, S: 4, E: 8 };
 export const DEF = { kI: 4, kPS: 2, carpBip: 2, carpEstado: 'r', mesaEst: 1, sillaEst: 1, esc: 1, sdoc: 1, arm: 1, muebles: ITEMS.map(x => x.k),
-  escenario: 'malo', capOcup: 30, capPct: 80 };
+  escenario: 'malo', capOcup: 30, capPct: 80, pctRegular: 100, pctRegularNivel: {}, pctOrigen: { tipo: 'manual' }, umbralVida: 10 };
 // Escenarios de cantidad a reponer (se guardan en los criterios del proyecto):
 //   malo          lo Malo del censo, por tipo de bien (base)
-//   malo_regular  Malo + Regular: cota superior sustentada con el censo
+//   malo_regular  Malo + % de Regular: por aula y tipo de bien,
+//                 Regular a reponer = MIN(Regular, redondeo hacia arriba de Regular × % / 100).
+//                 % = 0 da lo mismo que «Solo Malo»; % = 100 es la cota superior (Malo + Regular).
+//                 El % puede ser distinto por nivel (pctRegularNivel: { I, P, S }); si no, el global.
+//                 Con ficha de verificación con antigüedad, en ese local se usa el Regular con
+//                 vida útil cumplida (antigüedad ≥ umbralVida años) en lugar del % (costos.js).
 //   capacidad     aulas × ocupación × %: método de algunas convocatorias. Solo para
 //                 comparar con una convocatoria ya publicada; no es sustento de reposición.
 //                 Mesa y silla = round(ocupación × % / 100) por aula; escritorio, silla
 //                 docente y armario = lo requerido por aula (no usa el estado del mobiliario).
 export const ESCENARIOS = [
   { k: 'malo', n: 'Solo Malo', corto: 'Solo Malo' },
-  { k: 'malo_regular', n: 'Malo + Regular', corto: 'Malo + Regular' },
+  { k: 'malo_regular', n: 'Malo + % de Regular', corto: 'Malo + % de Regular' },
   { k: 'capacidad', n: 'Por capacidad (método de convocatoria)', corto: 'Por capacidad' }];
 export const AVISO_CAPACIDAD = 'Solo para comparar con una convocatoria ya publicada; no es sustento de reposición.';
 export const LIM_CAP = { capOcup: [1, 60], capPct: [1, 100] };
-// Una línea que declara el escenario en los documentos
-export function textoEscenario(P) {
+// % de Regular que se repone: global y por nivel (Básica Especial usa el global)
+export const NIVELES_PCT = ['I', 'P', 'S'];
+export const LIM_UMBRAL = [1, 50];
+export const ROTULO_UMBRAL = 'referencial: Directiva 005-2016-EF/51.01';
+export const pctRegularDe = (P, nivel) => P?.pctRegularNivel?.[nivel] ?? P?.pctRegular ?? DEF.pctRegular;
+// Regular a reponer de un aula (o de un conteo): redondeo hacia arriba, nunca más que el Regular existente
+export const regularAReponer = (r, pct) => r > 0 && pct > 0 ? Math.min(r, Math.ceil(r * pct / 100 - 1e-9)) : 0;
+// «60 %» o «60 % (Inicial 40 %, Primaria 60 %)» si algún nivel tiene otro
+export function textoPct(P, niveles = NIVELES_PCT) {
+  const g = P?.pctRegular ?? DEF.pctRegular;
+  const otros = niveles.filter(n => P?.pctRegularNivel?.[n] != null && P.pctRegularNivel[n] !== g);
+  return `${g} %` + (otros.length ? ` (${niveles.filter(n => NIVELES_PCT.includes(n)).map(n => `${NIVN[n]} ${pctRegularDe(P, n)} %`).join(', ')})` : '');
+}
+// Origen del %: valor manual u observado en N locales verificados (y, aparte, el dato por local)
+export function textoOrigenPct(P, regDato) {
+  const o = P?.pctOrigen || {};
+  const base = o.tipo === 'observado'
+    ? `% observado de Regular con vida útil cumplida en ${o.n} ${o.n === 1 ? 'local verificado' : 'locales verificados'} (umbral ${o.umbral ?? P.umbralVida} años, ${ROTULO_UMBRAL})`
+    : 'valor manual';
+  const dato = regDato?.n ? `; en ${regDato.n} de ${regDato.de} ${regDato.de === 1 ? 'local' : 'locales'} se usa el dato verificado por local (Regular con antigüedad de ${P.umbralVida} años o más, ${ROTULO_UMBRAL})` : '';
+  return base + dato;
+}
+// Una línea que declara el escenario en los documentos. regDato: { n, de } locales con dato verificado (opcional)
+export function textoEscenario(P, regDato) {
   const e = P?.escenario || 'malo';
-  if (e === 'malo_regular') return 'Escenario de cantidad: Malo + Regular (cota superior sustentada con el Censo Educativo 2025).';
+  if (e === 'malo_regular') return `Escenario de cantidad: Malo + % de Regular: Malo y ${textoPct(P)} del Regular del Censo Educativo 2025, por aula y tipo de bien (origen del %: ${textoOrigenPct(P, regDato)}). La cantidad es una estimación hasta completar la verificación en campo.`;
   if (e === 'capacidad') return `Escenario de cantidad: Por capacidad (método de convocatoria): aulas × ${P.capOcup} estudiantes × ${P.capPct} %. ${AVISO_CAPACIDAD}`;
   return 'Escenario de cantidad: Solo Malo (mobiliario en estado malo del Censo Educativo 2025).';
 }
@@ -104,8 +131,7 @@ export const urlMapaEmbed = (lat, lon, llave) => llave
 
 export const norm = s =>String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
-// Criterios válidos a partir de lo que venga guardado (ignora claves o valores raros,
-// como el antiguo «% de Regular que se repone», que ya no existe)
+// Criterios válidos a partir de lo que venga guardado (ignora claves o valores raros)
 export function limpiarParams(p) {
   const P = { ...DEF };
   if (p && typeof p === 'object') {
@@ -120,6 +146,16 @@ export function limpiarParams(p) {
       const v = Number(p[k]);
       if (p[k] !== '' && p[k] != null && Number.isFinite(v)) P[k] = Math.min(mx, Math.max(mn, v));
     }
+    // % de Regular (0 a 100, entero), por nivel y umbral de vida útil
+    const pct = v => { if (v === '' || v == null) return null; const n = Number(v); return Number.isFinite(n) ? Math.min(100, Math.max(0, Math.round(n))) : null; };
+    if (pct(p.pctRegular) != null) P.pctRegular = pct(p.pctRegular);
+    P.pctRegularNivel = {};
+    for (const n of NIVELES_PCT) if (pct(p.pctRegularNivel?.[n]) != null) P.pctRegularNivel[n] = pct(p.pctRegularNivel[n]);
+    const u = Number(p.umbralVida);
+    if (p.umbralVida !== '' && p.umbralVida != null && Number.isFinite(u)) P.umbralVida = Math.min(LIM_UMBRAL[1], Math.max(LIM_UMBRAL[0], Math.round(u)));
+    const o = p.pctOrigen;
+    P.pctOrigen = o?.tipo === 'observado' && Number.isInteger(o.n) && o.n > 0
+      ? { tipo: 'observado', n: o.n, umbral: Number.isInteger(o.umbral) ? o.umbral : P.umbralVida, pct: pct(o.pct) ?? P.pctRegular } : { tipo: 'manual' };
     // Muebles que entran a la IOARR (al menos uno, en el orden de ITEMS)
     if (Array.isArray(p.muebles)) {
       const m = ITEMS.map(x => x.k).filter(k => p.muebles.includes(k));
@@ -127,6 +163,7 @@ export function limpiarParams(p) {
     }
   }
   P.muebles = [...P.muebles];
+  P.pctRegularNivel = { ...P.pctRegularNivel }; P.pctOrigen = { ...P.pctOrigen };
   return P;
 }
 
@@ -153,7 +190,7 @@ export function prep(D) {
 // Mobiliario por aula (A) y acumulado por local (L), según los criterios P.
 // Con nivel (I, P, S o E), solo cuentan las aulas de los servicios de ese nivel.
 // Los muebles que no entran a la IOARR (P.muebles) quedan en 0. incl[t] dice si el tipo t entra.
-// A reponer según P.escenario (ver ESCENARIOS): Malo, Malo + Regular o por capacidad.
+// A reponer según P.escenario (ver ESCENARIOS): Malo, Malo + % de Regular o por capacidad.
 // El faltante (Requerido − Existente) es siempre informativo y no entra a lo que se repone.
 export function calc(D, P, nivel = null) {
   const nA = D.aulas.length, nL = D.locs.length;
@@ -163,6 +200,7 @@ export function calc(D, P, nivel = null) {
   const A = { b: [], r: [], m: [], req: [], fal: [], rep: [] };
   for (const k in A) for (let t = 0; t < 5; t++) A[k].push(new Int32Array(nA));
   const esc = P.escenario || 'malo', cap = Math.round((P.capOcup ?? DEF.capOcup) * (P.capPct ?? DEF.capPct) / 100);
+  const pctNiv = { I: pctRegularDe(P, 'I'), P: pctRegularDe(P, 'P'), S: pctRegularDe(P, 'S'), E: pctRegularDe(P, 'E') };
   for (let i = 0; i < nA; i++) {
     if (nivel && D.svcs[D.aulas[i][1]][2] !== nivel) continue;
     const a = D.aulas[i], niv = D.svcs[a[1]][2], k = (niv === 'I' || niv === 'E') ? P.kI : P.kPS, f = j => a[11 + j], loc = a[0];
@@ -173,17 +211,18 @@ export function calc(D, P, nivel = null) {
     const req = [Math.round(a[8] * P.mesaEst), Math.round(a[8] * P.sillaEst), P.esc, P.sdoc, P.arm];
     for (let t = 0; t < 5; t++) {
       if (!incl[t]) continue;
-      const [b, r, m] = trip[t], ex = b + r + m, fal = Math.max(0, req[t] - ex), rep = repDe(esc, t, b, r, m, req[t], cap);
+      const [b, r, m] = trip[t], ex = b + r + m, fal = Math.max(0, req[t] - ex), rep = repDe(esc, t, b, r, m, req[t], cap, pctNiv[niv]);
       A.b[t][i] = b; A.r[t][i] = r; A.m[t][i] = m; A.req[t][i] = req[t]; A.fal[t][i] = fal; A.rep[t][i] = rep;
       const o = t * nL + loc; L.b[o] += b; L.r[o] += r; L.m[o] += m; L.req[o] += req[t]; L.fal[o] += fal; L.rep[o] += rep;
       L.repTot[loc] += rep; L.falTot[loc] += fal; L.reqTot[loc] += req[t];
     }
   }
-  return { A, L, nL, incl, escenario: esc, capOcup: P.capOcup ?? DEF.capOcup, capPct: P.capPct ?? DEF.capPct };
+  return { A, L, nL, incl, escenario: esc, capOcup: P.capOcup ?? DEF.capOcup, capPct: P.capPct ?? DEF.capPct,
+    pctRegular: P.pctRegular ?? DEF.pctRegular, pctRegularNivel: { ...(P.pctRegularNivel || {}) }, pctNiv, pctOrigen: { ...(P.pctOrigen || DEF.pctOrigen) }, umbralVida: P.umbralVida ?? DEF.umbralVida };
 }
 // A reponer en un aula, según el escenario (t: 0 mesa, 1 silla, 2-4 docente y armario)
-function repDe(esc, t, b, r, m, req, cap) {
-  if (esc === 'malo_regular') return m + r;
+function repDe(esc, t, b, r, m, req, cap, pct) {
+  if (esc === 'malo_regular') return m + regularAReponer(r, pct);
   if (esc === 'capacidad') return t < 2 ? cap : req;
   return m;
 }
