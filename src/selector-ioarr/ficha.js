@@ -88,7 +88,7 @@ export function modeloFicha(D, C, i, meta = {}) {
     version: VERSION_FICHA, proyecto: meta.proyecto || { id: '', nombre: '' }, anio: meta.anio || null, fecha: meta.fecha || '', supervisor: meta.supervisor || '',
     local: { cod: l[0], nombre: D.locName[i], region: D.region, prov: D.provs[dist[2]], dist: dist[0], ubigeo: dist[1], ugel: D.ugels?.[l[2]] || '', cp: l[3] || '', rural: !!l[4], direccion: l[5] || '', lat: l[6], lon: l[7] },
     niveles: nivelesDeLocal(D, i), servicios, aulas,
-    escenario: C.escenario || 'malo', escenarioTexto: textoEscenario({ escenario: C.escenario || 'malo', capOcup: C.capOcup, capPct: C.capPct }),
+    escenario: C.escenario || 'malo', escenarioTexto: textoEscenario({ escenario: C.escenario || 'malo', capOcup: C.capOcup, capPct: C.capPct, pctRegular: C.pctRegular, pctRegularNivel: C.pctRegularNivel, pctOrigen: C.pctOrigen, umbralVida: C.umbralVida }),
     // Solo los muebles que entran a la IOARR (criterios del proyecto)
     bienes: BIENES_FICHA.filter(b => !C.incl || C.incl[TIPOS.indexOf(b.k)])
   };
@@ -106,7 +106,7 @@ export const CRITERIOS = [
   ['Malo', 'No se puede usar, o es un riesgo para el estudiante (estructura rota, tablero partido) y no conviene repararlo', 'Sí']];
 // «Entra a reponer» según el escenario de cantidad del proyecto
 export function criteriosDe(escenario) {
-  if (escenario === 'malo_regular') return CRITERIOS.map(([e, c, r]) => [e, c, e === 'Regular' ? 'Sí (escenario Malo + Regular)' : r]);
+  if (escenario === 'malo_regular') return CRITERIOS.map(([e, c, r]) => [e, c, e === 'Regular' ? 'Sí, si cumplió su vida útil según la antigüedad; sin antigüedad, el % de Regular (escenario Malo + % de Regular)' : r]);
   if (escenario === 'capacidad') return CRITERIOS.map(([e, c]) => [e, c, 'No aplica: el escenario «Por capacidad» no usa el estado; se verifica como diagnóstico']);
   return CRITERIOS;
 }

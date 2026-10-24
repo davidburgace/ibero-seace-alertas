@@ -1,6 +1,6 @@
 // Selector IOARR — interfaz. Los datos y el cálculo viven en selector-ioarr-worker.js;
 // los proyectos se guardan en Supabase vía /api/selector-ioarr/* (sesión de sesion.js).
-import { CRIT, DEF, ITEMS, NIVN, NIVS, NIVB, FILTRO_VACIO, ESCENARIOS, AVISO_CAPACIDAD, limpiarParams, coordValidas, urlGoogleMaps, urlMapaEmbed, piTexto } from '/selector-ioarr/calculo.js';
+import { CRIT, DEF, ITEMS, NIVN, NIVS, NIVB, FILTRO_VACIO, ESCENARIOS, AVISO_CAPACIDAD, limpiarParams, textoPct, coordValidas, urlGoogleMaps, urlMapaEmbed, piTexto } from '/selector-ioarr/calculo.js';
 import { renderExpediente, enlazarExpediente } from '/selector-ioarr-expediente.js';
 import { limitarN, MAX_PUNTOS } from '/selector-ioarr/cercania.js';
 import { crearMapa as crearMapaLocales, fmtKm } from '/selector-ioarr-mapa.js';
@@ -12,7 +12,7 @@ const BASE_DATOS = `/data/selector-ioarr/${ANIO}/`;
 const PAGE = 40;
 const FALTANTE = 'Faltante (brecha de dotación, no reposición)';
 const DUP = 'Otra inversión vigente o reciente';
-const ESC_CORTO = { malo: 'Malo', malo_regular: 'Malo + Regular', capacidad: 'por capacidad' };
+const ESC_CORTO = { malo: 'Malo', malo_regular: 'Malo + % de Regular', capacidad: 'por capacidad' };
 const ESTADO_DUP = { si: 'Sí', no: 'No', sin_verificar: 'Sin verificar' };
 const dupDe = cod => S.dup[cod] || { estado: 'sin_verificar', codigo: null, nota: null, excluir: false };
 const LS = 'selector-ioarr:';
@@ -543,7 +543,7 @@ async function renderSel() {
     <div class="panel"><div class="panel-cab"><h3>Mobiliario por tipo</h3><div class="leyenda"><span style="--c:var(--bueno)">Bueno</span><span style="--c:var(--regular)">Regular</span><span style="--c:var(--malo)">Malo</span></div></div>
         <div class="tabla-wrap"><table class="tabla"><thead><tr><th>Tipo</th><th class="num">Existente</th><th class="num">Bueno</th><th class="num">Regular</th><th class="num">Malo</th><th class="num">A reponer</th><th class="num">Requerido</th><th class="num col-fal">${FALTANTE}</th></tr></thead><tbody>${trows}</tbody>
         <tfoot><tr><td>Total</td><td class="num">${fmt(T.tipos.reduce((a, o) => a + o.b + o.r + o.m, 0))}</td><td class="num">${sum('b')}</td><td class="num">${sum('r')}</td><td class="num">${sum('m')}</td><td class="num">${fmt(T.rep)}</td><td class="num">${sum('req')}</td><td class="num col-fal">${sum('fal')}</td></tr></tfoot></table></div>
-        <p class="sub pad">${{ malo: 'Se repone solo el estado malo. Bueno y regular son diagnóstico.', malo_regular: 'Escenario Malo + Regular: cota superior sustentada con el censo. Bueno es diagnóstico.', capacidad: 'Escenario por capacidad (aulas × ocupación × %): ' + AVISO_CAPACIDAD }[S.params.escenario] || ''} El faltante es lo que falta para llegar a lo requerido: no suma a lo que se repone, al costo ni al Formato 07-C.</p></div>
+        <p class="sub pad">${{ malo: 'Se repone solo el estado malo. Bueno y regular son diagnóstico.', malo_regular: `Escenario Malo + % de Regular: Malo y ${textoPct(S.params)} del Regular, por aula (redondeo hacia arriba). Bueno es diagnóstico.`, capacidad: 'Escenario por capacidad (aulas × ocupación × %): ' + AVISO_CAPACIDAD }[S.params.escenario] || ''} El faltante es lo que falta para llegar a lo requerido: no suma a lo que se repone, al costo ni al Formato 07-C.</p></div>
     <div class="panel"><div class="panel-cab"><h3>Por distrito</h3></div>
         <div class="tabla-wrap"><table class="tabla"><thead><tr><th>Distrito</th><th class="num">Locales</th><th class="num">Estudiantes</th><th class="num">Aulas</th><th class="num">A reponer</th><th class="num col-fal" title="${FALTANTE}">Faltante (no reposición)</th></tr></thead><tbody>${drows}</tbody>
         <tfoot><tr><td>Total</td><td class="num">${fmt(T.n)}</td><td class="num">${fmt(T.est)}</td><td class="num">${fmt(T.aul)}</td><td class="num">${fmt(T.rep)}</td><td class="num col-fal">${fmt(T.fal)}</td></tr></tfoot></table></div></div>
@@ -744,6 +744,7 @@ function renderCrit() {
       <span class="sub">Mesa y silla se costean por talla según el grado del aula.</span></fieldset>` + CRIT.filter(([k]) => !['esc', 'sdoc', 'arm'].includes(k) || P.muebles.includes(k)).map(([k, l, mn, mx, st]) => `<div class="campo"><label for="c_${k}">${l}</label><input id="c_${k}" type="number" inputmode="decimal" min="${mn}" max="${mx}" step="${st}" value="${P[k]}"></div>`).join('') +
     `<div class="campo"><label for="c_carpEstado">Estado de las carpetas (vienen sin estado)</label><select id="c_carpEstado"><option value="b">Bueno</option><option value="r">Regular</option><option value="m">Malo</option></select></div>
      <div class="campo"><label for="c_escenario">Escenario de cantidad a reponer</label><select id="c_escenario">${ESCENARIOS.map(x => `<option value="${x.k}" ${P.escenario === x.k ? 'selected' : ''}>${x.n}</option>`).join('')}</select>${P.escenario === 'capacidad' ? `<span class="sub aviso-linea">${AVISO_CAPACIDAD}</span>` : ''}</div>
+     ${P.escenario === 'malo_regular' ? `<div class="campo"><label for="c_pctRegular">% de Regular que se repone</label><input id="c_pctRegular" type="number" min="0" max="100" step="1" value="${P.pctRegular}"><span class="sub">El % por nivel y el umbral de vida útil se ajustan en Expediente → Costos.</span></div>` : ''}
      ${P.escenario === 'capacidad' ? `<div class="campo"><label for="c_capOcup">Ocupación (estudiantes por aula)</label><input id="c_capOcup" type="number" min="1" max="60" step="1" value="${P.capOcup}"></div><div class="campo"><label for="c_capPct">Porcentaje (%)</label><input id="c_capPct" type="number" min="1" max="100" step="1" value="${P.capPct}"></div>` : ''}
      <div class="campo"><span class="lbl">&nbsp;</span><button class="btn btn-ghost" id="critReset" type="button">Restablecer criterios</button></div>`;
   $('c_carpEstado').value = P.carpEstado;
@@ -752,7 +753,7 @@ function renderCrit() {
 function critSum() {
   const P = S.params;
   const muebles = P.muebles.length === ITEMS.length ? 'todos los muebles' : ITEMS.filter(x => P.muebles.includes(x.k)).map(x => x.n.toLowerCase()).join(', ');
-  $('critSum').textContent = `Muebles: ${muebles} · Mesa múltiple = ${P.kI} puestos (Inicial) o ${P.kPS} (Primaria y Secundaria) · carpeta bipersonal = ${P.carpBip} · carpetas como ${{ b: 'Bueno', r: 'Regular', m: 'Malo' }[P.carpEstado]} · a reponer = ${{ malo: 'Malo', malo_regular: 'Malo + Regular', capacidad: `por capacidad (aulas × ${P.capOcup} × ${P.capPct} %; solo para comparar)` }[P.escenario] || 'Malo'} (el faltante va aparte, no se repone)`;
+  $('critSum').textContent = `Muebles: ${muebles} · Mesa múltiple = ${P.kI} puestos (Inicial) o ${P.kPS} (Primaria y Secundaria) · carpeta bipersonal = ${P.carpBip} · carpetas como ${{ b: 'Bueno', r: 'Regular', m: 'Malo' }[P.carpEstado]} · a reponer = ${{ malo: 'Malo', malo_regular: `Malo + ${textoPct(P)} de Regular`, capacidad: `por capacidad (aulas × ${P.capOcup} × ${P.capPct} %; solo para comparar)` }[P.escenario] || 'Malo'} (el faltante va aparte, no se repone)`;
 }
 let tCrit;
 function onCrit(e) {
@@ -764,7 +765,7 @@ function onCrit(e) {
     const m = k.slice(7), resto = P.muebles.filter(x => x !== m);
     if (!e.target.checked && !resto.length) { e.target.checked = true; toast('Deja al menos un mueble en la IOARR'); return; }
     P.muebles = e.target.checked ? [...P.muebles, m] : resto;
-  } else { let v = parseFloat(e.target.value); if (!isFinite(v) || v < 0) return; P[k] = v; }
+  } else { let v = parseFloat(e.target.value); if (!isFinite(v) || v < 0) return; P[k] = v; if (k === 'pctRegular') P.pctOrigen = { tipo: 'manual' }; }
   S.params = limpiarParams(P);
   // Al cambiar los muebles se muestran u ocultan sus criterios por aula
   if (k.startsWith('mueble_') || k === 'escenario') renderCrit(); else critSum();

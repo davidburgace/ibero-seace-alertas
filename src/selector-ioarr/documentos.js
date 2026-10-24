@@ -17,7 +17,7 @@
 //     lo carga el usuario; si falta, se lista como pendiente. No se inventan valores.
 // ============================================================================
 
-import { ITEMS, TALLAS, NIVN, textoEscenario, DEF as DEF_CRIT } from './calculo.js';
+import { ITEMS, TALLAS, NIVN, textoEscenario, textoPct, textoOrigenPct, ROTULO_UMBRAL, DEF as DEF_CRIT } from './calculo.js';
 import { TIPOS, LIMITE_UIT } from './costos.js';
 
 // Nota del material, dentro de la descripción técnica
@@ -314,12 +314,20 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, efectivos = 
       : repVerif > 0
         ? `Cantidades a reponer verificadas en campo: ${cantidades.pct.toLocaleString('es-PE')} % (${repVerif.toLocaleString('es-PE')} de ${T.rep.toLocaleString('es-PE')}), en ${verificados.length} de ${nLoc} ${nLoc === 1 ? 'local' : 'locales'}. El resto sale del Censo Educativo 2025, declarado por cada institución.`
         : `Ninguna cantidad a reponer está verificada en campo (0 %): las ${T.rep.toLocaleString('es-PE')} salen del Censo Educativo 2025, declarado por cada institución. Carga las fichas de verificación de los locales.`;
+  // Malo + % de Regular: el % usado, su origen y los locales con el Regular verificado por antigüedad
+  const RC = R.regularCampo || { completos: 0 };
+  const regDato = { n: RC.completos, de: R.locales.length };
+  const pctTxt = textoPct(Pesc, niveles);
+  const porDato = R.locales.filter(l => l.regular?.origen === 'dato').map(l => l.cod);
+  const parciales = R.locales.filter(l => l.regular?.parcial).map(l => l.cod);
   const METODO = {
     malo: 'Método de cuantificación (escenario Solo Malo). Se repone el mobiliario en estado malo del Censo Educativo 2025; debe confirmarse con el inventario patrimonial y la verificación en campo.',
-    malo_regular: 'Método de cuantificación (escenario Malo + Regular, cota superior). Se repone el mobiliario en estado malo y regular del Censo Educativo 2025; debe confirmarse con el inventario patrimonial y la verificación en campo. El mobiliario regular todavía es utilizable: su reposición requiere sustento adicional en campo.',
+    malo_regular: `Método de cuantificación (escenario Malo + % de Regular${Pesc.pctRegular === 100 && pctTxt === '100 %' ? ', cota superior' : ''}). Se repone el mobiliario en estado malo y, del regular, ${pctTxt} por aula y tipo de bien (redondeo hacia arriba, sin pasar del regular existente), según el Censo Educativo 2025. Origen del porcentaje: ${textoOrigenPct(Pesc, regDato)}. La cantidad es una estimación hasta completar la verificación en campo y debe confirmarse con el inventario patrimonial. El mobiliario regular todavía es utilizable: su reposición se sustenta con la vida útil cumplida.`
+      + (porDato.length ? ` Regular por dato verificado (antigüedad de ${Pesc.umbralVida} años o más, ${ROTULO_UMBRAL}): ${porDato.length === 1 ? 'local' : 'locales'} ${lista(porDato)}; en los demás, Regular por estimación (%).` : ' Ningún local tiene aún todo su Regular verificado por antigüedad: en todos, Regular por estimación (%).')
+      + (parciales.length ? ` En ${parciales.length === 1 ? 'el local' : 'los locales'} ${lista(parciales)}, las aulas contadas con antigüedad usan el dato verificado y las demás, el %.` : ''),
     capacidad: `Método de cuantificación (escenario Por capacidad, método de convocatoria). Las cantidades se calculan como aulas × ${Pesc.capOcup} estudiantes × ${Pesc.capPct} %. Este método no usa el estado del mobiliario: no sustenta una reposición y sirve solo para comparar con una convocatoria ya publicada.`
   };
-  const queSeRepone = escenario === 'malo_regular' ? 'el mobiliario en estado malo o regular' : 'el mobiliario en estado malo, que ya no es útil ni operativo y no puede recuperarse con mantenimiento correctivo (vida útil efectiva, Lineamientos IOARR 2.4.B.e)';
+  const queSeRepone = escenario === 'malo_regular' ? `el mobiliario en estado malo y ${pctTxt} del regular` : 'el mobiliario en estado malo, que ya no es útil ni operativo y no puede recuperarse con mantenimiento correctivo (vida útil efectiva, Lineamientos IOARR 2.4.B.e)';
   const metasTexto = lista(metas.map(m => `${m.cantidad.toLocaleString('es-PE')} ${m.cantidad === 1 ? m.nombre.toLowerCase() : m.plural}`));
   const sustentoAuto = [
     METODO[escenario] || METODO.malo,
@@ -340,7 +348,7 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, efectivos = 
     escenario === 'malo'
       ? { texto: 'Vida útil: se repone solo mobiliario en estado malo, que ya no es útil ni operativo (vida útil efectiva, 2.4.B.e).', estado: 'cumple', nota: d.informe_vida_util ? 'Informe de vida útil: ' + d.informe_vida_util : 'El informe de vida útil estimada de la entidad (2.4.C.b) es recomendable como respaldo.' }
       : { texto: 'Vida útil: el mobiliario a reponer ya no es útil ni operativo (vida útil efectiva, 2.4.B.e) o cumplió su vida útil estimada (2.4.C.b).', estado: porCapacidad ? 'no' : 'pendiente',
-        nota: porCapacidad ? 'El escenario «Por capacidad» no usa el estado del mobiliario.' : `El escenario «Malo + Regular» incluye mobiliario regular, que todavía se puede usar: sustenta su reposición con la verificación en campo${d.informe_vida_util ? ' y el informe de vida útil (' + d.informe_vida_util + ')' : ' o con el informe de vida útil estimada'}.` },
+        nota: porCapacidad ? 'El escenario «Por capacidad» no usa el estado del mobiliario.' : `El escenario «Malo + % de Regular» incluye ${pctTxt} del mobiliario regular, que todavía se puede usar: sustenta su reposición con la verificación en campo (antigüedad de ${Pesc.umbralVida} años o más, ${ROTULO_UMBRAL})${d.informe_vida_util ? ' y el informe de vida útil (' + d.informe_vida_util + ')' : ' o con el informe de vida útil estimada'}.` },
     { texto: 'Los bienes reemplazados se darán de baja o se inició su trámite (2.4.C.f).', estado: conBaja.length === nLoc && nLoc ? 'cumple' : 'pendiente', nota: conBaja.length ? `Hay sustento de baja en ${conBaja.length} de ${nLoc} ${nLoc === 1 ? 'local' : 'locales'}.` : 'Adjunta la resolución o el trámite de baja en «Corregir inventario» de cada local.' },
     { texto: 'Verificación en campo con acta.', estado: nLoc && conActa.length === nLoc ? 'cumple' : 'pendiente', nota: `${conActa.length} de ${nLoc} ${nLoc === 1 ? 'local' : 'locales'} con acta adjunta.` }
   ];
@@ -372,7 +380,8 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, efectivos = 
     nombre: d.nombre_inversion || nombreSugerido, nombreSugerido, cui: d.cui || proyecto.ioarr?.cui || '',
     masiva, supera, registro: supera == null ? 'pendiente' : supera ? 'completo' : 'abreviado',
     uit: U, limite: LIMITE_UIT, A,
-    escenario, escenarioTexto: textoEscenario(Pesc), kit: !!R.kit,
+    escenario, escenarioTexto: textoEscenario(Pesc, regDato), kit: !!R.kit,
+    regular: escenario === 'malo_regular' ? { pct: pctTxt, origen: textoOrigenPct(Pesc, regDato), porDato, umbral: Pesc.umbralVida, observado: RC.observado ?? null, muestra: RC.conDato || 0 } : null,
     B: { opmi: d.opmi, uf: d.uf, uf_responsable: d.uf_responsable, uei: d.uei, uei_responsable: d.uei_responsable },
     ejecucion: { modalidad: d.modalidad, fuente: d.fuente_financiamiento, plazo: plazoTexto },
     ups, upsRegistro, upPor: d.up_por, sinRep: porModular ? [] : sinRep.map(l => ({ cod: l.cod, nombre: l.nom, fal: l.fal.reduce((a, b) => a + b, 0) })), est, aulas,
@@ -383,7 +392,7 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, efectivos = 
       inicio: inicio && fechaPe(inicio), fin: fin && fechaPe(fin), meses: N, plazo: plazoTexto, cronograma, mantenimiento },
     totales: T, estructura: R.estructura, partidas: R.partidas, lineas: R.lineas || R.partidas, distritos: R.distritos, excluidos: R.excluidos || [],
     faltante: { cantidad: T.fal, valor: T.falValor, partidas: R.partidas.filter(p => p.fal > 0).map(p => ({ nombre: p.n, cantidad: p.fal, valor: p.falValor })) },
-    memoria: { antecedentes: d.antecedentes, objetivo: d.objetivo || `${porCapacidad ? 'Dotar de' : 'Reponer el'} mobiliario de aula${porCapacidad ? '' : escenario === 'malo_regular' ? ' en estado malo y regular' : ' en mal estado'} ${nLoc > 1 ? `de ${nLoc} locales educativos` : 'del local educativo'} de nivel ${nomNiveles.toLowerCase()}, para mantener el nivel y la calidad del servicio educativo que reciben ${est.toLocaleString('es-PE')} estudiantes.` },
+    memoria: { antecedentes: d.antecedentes, objetivo: d.objetivo || `${porCapacidad ? 'Dotar de' : 'Reponer el'} mobiliario de aula${porCapacidad ? '' : escenario === 'malo_regular' ? ` en estado malo y ${pctTxt} del regular` : ' en mal estado'} ${nLoc > 1 ? `de ${nLoc} locales educativos` : 'del local educativo'} de nivel ${nomNiveles.toLowerCase()}, para mantener el nivel y la calidad del servicio educativo que reciben ${est.toLocaleString('es-PE')} estudiantes.` },
     anioRef, informe_vida_util: d.informe_vida_util, cantidades,
     faltan, completo: !faltan.length,
     ioarr: proyecto.ioarr || null,

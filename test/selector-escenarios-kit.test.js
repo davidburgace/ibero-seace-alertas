@@ -193,7 +193,7 @@ test('escenarios en los documentos: sustento según el método, Excel del Select
   // Ningún escenario presenta el faltante como reposición
   for (const x of [malo, cap, mr]) assert.ok(x.M.E.sustento.some(s => /faltantes .*no son reposición/.test(s)));
   // Los Word declaran el escenario
-  assert.match(await textoDocx(await generar07C(mr.M)), /Escenario de cantidad: Malo \+ Regular/);
+  assert.match(await textoDocx(await generar07C(mr.M)), /Escenario de cantidad: Malo \+ % de Regular/);
   assert.match(await textoDocx(await generarMemoria(cap.M)), /Por capacidad/);
   // Excel del Selector: «A reponer» = Regular + Malo en Malo + Regular; valor por capacidad
   const leerAulas = async x => { const wb = new ExcelJS.Workbook(); await wb.xlsx.load((await generarExcel(D, x.C, x.P, x.list, { proyecto: 'x', fecha: '2026-10-23' })).buffer); return wb; };
@@ -203,8 +203,8 @@ test('escenarios en los documentos: sustento según el método, Excel del Select
   assert.match((await textoXlsx((await generarExcel(D, cap.C, cap.P, cap.list, { proyecto: 'x', fecha: '2026-10-23' })).buffer)), /Escenario de cantidad: Por capacidad/);
   // La ficha de verificación declara el escenario y qué estados entran a reponer
   const F = modeloFicha(D, mr.C, mr.list[0], {});
-  assert.match(F.escenarioTexto, /Malo \+ Regular/);
-  assert.match(await textoXlsx(await generarFichaExcel(F)), /Sí \(escenario Malo \+ Regular\)/);
+  assert.match(F.escenarioTexto, /Malo \+ % de Regular/);
+  assert.match(await textoXlsx(await generarFichaExcel(F)), /escenario Malo \+ % de Regular\)/);
 });
 
 // ─── 5. Correcciones al 07-C ────────────────────────────────────────────────

@@ -2,7 +2,7 @@
 // El cálculo lo hace el servidor (src/selector-ioarr/costos.js), el mismo que
 // arma el Excel: así la pantalla y el Excel dan lo mismo.
 import { LIMITE_UIT, TIPOS_ARCHIVO } from '/selector-ioarr/costos.js';
-import { ITEMS, CLAVES_PRECIO, TALLAS, AVISO_CAPACIDAD } from '/selector-ioarr/calculo.js';
+import { ITEMS, CLAVES_PRECIO, TALLAS, AVISO_CAPACIDAD, NIVN, NIVELES_PCT, ROTULO_UMBRAL, LIM_UMBRAL } from '/selector-ioarr/calculo.js';
 import { renderOferta, enlazarOferta } from '/selector-ioarr-oferta.js';
 import { renderDocumentos, enlazarDocumentos } from '/selector-ioarr-documentos.js';
 import { renderVerificacion, enlazarVerificacion } from '/selector-ioarr-verificacion.js';
@@ -148,7 +148,7 @@ function pintarAvisos() {
 // ─── Escenarios de cantidad, lado a lado ────────────────────────────────────
 const ESC_AYUDA = {
   malo: 'Lo Malo del censo, por tipo de bien. Escenario base.',
-  malo_regular: 'Cota superior sustentada con el censo.',
+  malo_regular: 'Malo y un % del Regular, por aula (100 % = cota superior; 0 % = Solo Malo).',
   capacidad: `Aulas × ocupación × %. ${AVISO_CAPACIDAD}`
 };
 function pintarEscenarios() {
@@ -171,9 +171,33 @@ function pintarEscenarios() {
       <div class="campo"><label for="esc-pct">Porcentaje (%)</label><input id="esc-pct" type="number" min="1" max="100" step="1" value="${act.capPct ?? 80}"></div>
       <div class="campo ancho"><span class="sub">Parámetros del escenario «Por capacidad». ${esc(AVISO_CAPACIDAD)}</span></div>
     </div>
-    <div class="tabla-wrap borde-0"><table class="tabla tabla-esc"><thead><tr><th>Cantidad a reponer</th>${E.map(x => `<th class="num${x.actual ? ' activa' : ''}">${esc(x.n)}${x.actual ? '<br><span class="chip-est ok">Elegido</span>' : ''}${x.k === 'capacidad' ? '<br><span class="chip-est alerta">Solo para comparar</span>' : ''}</th>`).join('')}</tr></thead>
+    ${panelRegular(act)}
+    <div class="tabla-wrap borde-0"><table class="tabla tabla-esc"><thead><tr><th>Cantidad a reponer</th>${E.map(x => `<th class="num${x.actual ? ' activa' : ''}">${esc(x.n)}${x.pct ? `<br><span class="sub">${esc(x.pct)}</span>` : ''}${x.actual ? '<br><span class="chip-est ok">Elegido</span>' : ''}${x.k === 'capacidad' ? '<br><span class="chip-est alerta">Solo para comparar</span>' : ''}</th>`).join('')}</tr></thead>
       <tbody>${filas}</tbody></table></div>
     <p class="sub pad">Debajo de cada cifra, la diferencia con «Solo Malo». El faltante (brecha de dotación) es informativo y no entra en ningún escenario. Los documentos (07-C, memoria, fichas y Excel) usan el escenario elegido y lo declaran en una línea.</p>`;
+}
+
+// Parámetros de «Malo + % de Regular»: % global, % por nivel, umbral de vida útil y la muestra de campo
+function panelRegular(act) {
+  const niv = (act.niveles || []).filter(n => NIVELES_PCT.includes(n)), g = act.pctRegular ?? 100;
+  const C = act.campo || {}, o = act.pctOrigen || {};
+  const origen = o.tipo === 'observado' ? `% observado en ${ent(o.n)} ${o.n === 1 ? 'local verificado' : 'locales verificados'} (umbral ${o.umbral} años)` : 'valor manual';
+  const obs = C.observado;
+  return `<div class="form-grid pad borde-sup">
+      <div class="campo"><label for="esc-pctreg">% de Regular que se repone${niv.length > 1 ? ' (global)' : ''}</label><input id="esc-pctreg" type="number" min="0" max="100" step="1" value="${g}"></div>
+      ${niv.length > 1 ? niv.map(n => `<div class="campo"><label for="esc-pctniv-${n}">% de Regular – ${esc(NIVN[n])}</label><input id="esc-pctniv-${n}" data-pct-niv="${n}" type="number" min="0" max="100" step="1" value="${act.pctRegularNivel?.[n] ?? ''}" placeholder="${g} (global)"></div>`).join('') : ''}
+      <div class="campo"><label for="esc-umbral">Umbral de vida útil (años)</label><input id="esc-umbral" type="number" min="${LIM_UMBRAL[0]}" max="${LIM_UMBRAL[1]}" step="1" value="${act.umbralVida ?? 10}"><span class="sub">${esc(ROTULO_UMBRAL)}</span></div>
+      <div class="campo ancho"><span class="sub">Parámetros del escenario «Malo + % de Regular». Por aula y tipo de bien: Regular a reponer = redondeo hacia arriba de Regular × %, sin pasar del Regular. Con 0 % da lo mismo que «Solo Malo». Origen del %: <b>${esc(origen)}</b>.${niv.length > 1 ? ' Un nivel vacío usa el global.' : ''}</span></div>
+    </div>
+    <div class="pad resumen-campo">
+      <h4>Regular con vida útil cumplida en los locales verificados</h4>
+      <p class="sub">Un local con ficha de verificación con antigüedad usa su Regular con antigüedad de ${ent(act.umbralVida ?? 10)} años o más en lugar del %: «Regular por dato verificado». Los demás: «Regular por estimación (%)».</p>
+      <ul class="lista-corta">
+        <li>Locales con dato verificado: <b>${ent(C.conDato || 0)}</b> de ${ent(C.locales || 0)}${C.conDato && C.completos !== C.conDato ? ` (${ent(C.completos)} con todo su Regular verificado)` : ''}</li>
+        <li>% observado de Regular con vida útil cumplida: <b>${obs == null ? '—' : obs.toLocaleString('es-PE') + ' %'}</b>${C.conocido ? ` <span class="sub">(${ent(C.vida)} de ${ent(C.conocido)} bienes regulares con antigüedad)</span>` : ''}</li>
+      </ul>
+      <button class="btn btn-ghost" id="esc-usar-obs" type="button" ${obs == null ? 'disabled' : ''}>Usar el % observado como porcentaje global</button>
+    </div>`;
 }
 
 // ─── Precios unitarios de mercado (tabla editable) ──────────────────────────
@@ -258,7 +282,7 @@ function pintarResultados() {
     .sort((a, b) => b.total - a.total || a.cod.localeCompare(b.cod));
   const pags = Math.max(1, Math.ceil(locs.length / PAGE)); pagLoc = Math.min(pagLoc, pags - 1);
   const desde = pagLoc * PAGE;
-  const lrows = locs.slice(desde, desde + PAGE).map(l => `<tr><td class="mono">${l.cod}</td><td><span class="nm">${esc(l.nom)}</span><span class="sub">${esc(l.dist)}${l.rural ? ' · rural' : ''}</span>${l.duplicidad?.estado === 'si' ? `<br><span class="chip-est alerta" title="Otra inversión vigente o reciente: riesgo de duplicidad">Otra inversión${l.duplicidad.codigo ? ' ' + esc(l.duplicidad.codigo) : ''}</span>` : ''}</td><td class="num">${ent(l.est)}</td><td class="num">${ent(l.rep)}</td><td class="num">${ent(l.kits)}</td><td class="num">${ent(l.fal)}</td><td class="num">${soles(l.cd)}</td><td class="num"><b>${soles(l.total)}</b></td>
+  const lrows = locs.slice(desde, desde + PAGE).map(l => `<tr><td class="mono">${l.cod}</td><td><span class="nm">${esc(l.nom)}</span><span class="sub">${esc(l.dist)}${l.rural ? ' · rural' : ''}</span>${l.duplicidad?.estado === 'si' ? `<br><span class="chip-est alerta" title="Otra inversión vigente o reciente: riesgo de duplicidad">Otra inversión${l.duplicidad.codigo ? ' ' + esc(l.duplicidad.codigo) : ''}</span>` : ''}</td>${datos.escenario?.k === 'malo_regular' && l.regular ? `<br><span class="chip-est${l.regular.origen === 'dato' ? ' ok' : ''}" title="${l.regular.parcial ? 'Parte del Regular tiene antigüedad verificada; el resto se estima con el %' : ''}">${l.regular.origen === 'dato' ? 'Regular por dato verificado' : `Regular por estimación (${l.regular.pct} %)`}${l.regular.parcial ? ' · dato parcial' : ''}</span>` : ''}</td><td class="num">${ent(l.est)}</td><td class="num">${ent(l.rep)}</td><td class="num">${ent(l.kits)}</td><td class="num">${ent(l.fal)}</td><td class="num">${soles(l.cd)}</td><td class="num"><b>${soles(l.total)}</b></td>
     <td>${l.verificado ? `<span class="chip-est ok">Verificado ${fechaPe(l.verificado.fecha_visita)}</span><br>${l.verificado.ficha ? '<span class="sub">con ficha</span><br>' : ''}${l.archivos ? `<span class="sub">${l.archivos} archivo${l.archivos === 1 ? '' : 's'}</span><br>` : '<span class="chip-est pend">Sin sustento</span><br>'}` : ''}<button class="x" data-inv="${esc(l.cod)}" type="button">${l.verificado ? 'Editar' : 'Corregir inventario'}</button></td></tr>`).join('');
 
   document.getElementById('exp-resultados').innerHTML = `
@@ -385,6 +409,19 @@ export function enlazarExpediente(el, abrirNuevo) {
       if (o >= 1 && o <= 60 && p >= 1 && p <= 100) tEsc = setTimeout(() => cambiarEscenario({ capOcup: o, capPct: p }), 900);
       return;
     }
+    if (e.target.id === 'esc-pctreg' || e.target.id === 'esc-umbral' || e.target.dataset.pctNiv) {
+      clearTimeout(tEsc);
+      const g = document.getElementById('esc-pctreg').value, u = Number(document.getElementById('esc-umbral').value);
+      const vg = Number(g), porNiv = {};
+      document.querySelectorAll('[data-pct-niv]').forEach(x => { if (x.value !== '') porNiv[x.dataset.pctNiv] = Number(x.value); });
+      const ok = v => Number.isInteger(v) && v >= 0 && v <= 100;
+      if (g === '' || !ok(vg) || !Object.values(porNiv).every(ok) || !(Number.isInteger(u) && u >= LIM_UMBRAL[0] && u <= LIM_UMBRAL[1])) return;
+      const cambios = { umbralVida: u, pctRegularNivel: porNiv };
+      // Cambiar el % a mano lo vuelve «valor manual»; el umbral solo no cambia el origen
+      if (e.target.id !== 'esc-umbral') { cambios.pctRegular = vg; cambios.pctOrigen = { tipo: 'manual' }; }
+      tEsc = setTimeout(() => cambiarEscenario(cambios), 900);
+      return;
+    }
     if (e.target.id === 'exp-anio') {
       clearTimeout(tGuardar);
       const a = Number(e.target.value);
@@ -406,6 +443,10 @@ export function enlazarExpediente(el, abrirNuevo) {
     const nv = e.target.closest('[data-exp-nivel]');
     if (nv) cambiarNivel(nv.dataset.expNivel);
     if (e.target.id === 'exp-excel') exportar(e.target);
+    if (e.target.id === 'esc-usar-obs') {
+      const C = datos.escenario?.campo;
+      if (C?.observado != null) { clearTimeout(tEsc); const pct = Math.round(C.observado); cambiarEscenario({ pctRegular: pct, pctOrigen: { tipo: 'observado', n: C.conDato, umbral: datos.escenario.umbralVida, pct } }); }
+    }
     const pr = e.target.closest('[data-precio-reset]');
     if (pr) { clearTimeout(tGuardar); guardar({ estructura: { precios: { [pr.dataset.precioReset]: null } } }); }
     if (e.target.id === 'est-kd-iguales') { clearTimeout(tGuardar); guardar({ estructura: { kit_dist: [1, 1, 1] } }); }
