@@ -25,6 +25,7 @@
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { ESPECIFICACIONES, NORMAS_SUGERIDAS } from './bases-especificaciones.js';
+import { descuadre } from './montos.js';
 
 const DIR = new URL('../../templates/bases/', import.meta.url);
 export const MANIFEST = JSON.parse(readFileSync(new URL('MANIFEST.json', DIR), 'utf8'));
@@ -140,6 +141,8 @@ export const SECCIONES = [
     C('MONTO_SUPERVISION_TOTAL', { tipo: 'monto', calculado: true, ayuda: 'Supervisión del documento equivalente + supervisión de la ejecución.' }),
     C('MONTO_TOTAL', { tipo: 'monto', calculado: true, ayuda: 'Documento equivalente + ejecución + las dos supervisiones.' }),
     C('MONTO_TOTAL_LETRAS', { calculado: true }),
+    C('total_declarado', { tipo: 'monto', opcional: true, etiqueta: 'Monto total declarado (07-C o entidad), opcional',
+      ayuda: 'Si lo escribes, las cuatro prestaciones deben sumarlo exactamente: si no cuadran, la ficha no se guarda.' }),
     C('PLAZO_DOC_EQUIVALENTE_DIAS', { tipo: 'dias', etiqueta: 'Plazo del documento equivalente (días calendario)', ayuda: REFERENCIA_PLAZO_DE, obligatorioDE: true }),
     C('PLAZO_EJECUCION_DIAS', { tipo: 'dias', etiqueta: 'Plazo de ejecución física (días calendario)' }),
     C('propuesta_min_pct', { tipo: 'pct', etiqueta: 'Propuesta económica: mínimo (% del monto referencial)', ayuda: `El Anexo 4-E fija ${PROPUESTA_MIN} %.` }),
@@ -337,7 +340,7 @@ export function validarFicha(d, ctx = {}) {
 
   // 1. Obligatorios completos (todo lo que aplica, salvo confirmaciones y opciones)
   for (const c of CAMPOS) {
-    if (c.calculado || ['confirmacion', 'si_no', 'opcion', 'pct'].includes(c.tipo) || !aplica(c, d)) continue;
+    if (c.calculado || c.opcional || ['confirmacion', 'si_no', 'opcion', 'pct'].includes(c.tipo) || !aplica(c, d)) continue;
     if (vacio(d[c.k])) {
       pendientes.push(c.k);
       err(c.k, OBLIGATORIOS_DE.includes(c.k) ? `Documento equivalente (obligatorio): falta «${c.etiqueta}».` : `Falta «${c.etiqueta}».`);
@@ -348,6 +351,8 @@ export function validarFicha(d, ctx = {}) {
   for (const k of ['MONTO_DOC_EQUIVALENTE', 'MONTO_EJECUCION', 'MONTO_SUP_DOC_EQUIVALENTE', 'MONTO_SUP_EJECUCION'])
     if (d[k] === 0) err(k, `«${etiquetaDe(k)}» debe ser mayor que cero${OBLIGATORIOS_DE.includes(k) ? ': el documento equivalente y su supervisión son obligatorios' : ''}.`);
   if (M.total != null && !verificarTotal(d)) err('MONTO_TOTAL', 'El monto total no es la suma de las cuatro prestaciones.');
+  const dTotal = descuadreFicha(d);
+  if (dTotal) err('total_declarado', dTotal);
   if (M.total != null && M.doc + M.supDoc >= M.total) err('MONTO_TOTAL', 'El documento equivalente y su supervisión no pueden ser todo el monto: falta la ejecución física.');
   // 3. Propuesta económica entre 90 % y 110 % (texto fijo del Anexo 4-E): solo se advierte si la ficha dice otra cosa
   if ((d.propuesta_min_pct ?? PROPUESTA_MIN) !== PROPUESTA_MIN || (d.propuesta_max_pct ?? PROPUESTA_MAX) !== PROPUESTA_MAX)
@@ -401,6 +406,16 @@ export function validarFicha(d, ctx = {}) {
     adv(null, `Texto fijo con datos del proceso de origen (resaltado en el Word): ${r.texto.split(':')[0]}. La entidad debe ajustarlo a esta IOARR (documento equivalente ${d.PLAZO_DOC_EQUIVALENTE_DIAS ?? '—'} días, ejecución ${d.PLAZO_EJECUCION_DIAS ?? '—'} días).`);
 
   return { ok: !errores.length, errores, advertencias, pendientes, montos: M };
+}
+/**
+ * Si la ficha declara un total (07-C o entidad), las cuatro prestaciones deben sumarlo exactamente.
+ * @returns null si cuadra o si falta algún dato; si no, el mensaje (bloquea el guardado)
+ */
+export function descuadreFicha(d) {
+  const k = ['MONTO_DOC_EQUIVALENTE', 'MONTO_EJECUCION', 'MONTO_SUP_DOC_EQUIVALENTE', 'MONTO_SUP_EJECUCION'];
+  if (d.total_declarado == null || k.some(x => d[x] == null)) return null;
+  return descuadre({ 'Documento equivalente': d.MONTO_DOC_EQUIVALENTE, 'Ejecución física': d.MONTO_EJECUCION,
+    'Supervisión del documento equivalente': d.MONTO_SUP_DOC_EQUIVALENTE, 'Supervisión de la ejecución': d.MONTO_SUP_EJECUCION }, d.total_declarado, { que: 'Las cuatro prestaciones' });
 }
 const normalizarDs = s => String(s || '').toUpperCase().replace(/DECRETO\s+SUPREMO/g, 'DS').replace(/N[°º.]?\s*/g, '').replace(/[^A-Z0-9-]/g, '');
 /** El total es exactamente la suma de las cuatro prestaciones (al céntimo) */

@@ -90,7 +90,7 @@ function control(c) {
 }
 function campo(c) {
   const chk = c.tipo === 'confirmacion' || c.tipo === 'si_no';
-  const req = !c.calculado && !chk && !['opcion', 'pct'].includes(c.tipo);
+  const req = !c.calculado && !c.opcional && !chk && !['opcion', 'pct'].includes(c.tipo);
   const de = lista.obligatorios_de.includes(c.k);
   return `<div class="campo${c.tipo === 'parrafo' || chk ? ' ancho' : ''}" data-bx-campo="${c.k}" ${visibleSi(c, vista.datos) ? '' : 'hidden'}>
     ${chk ? '' : `<label>${esc(c.etiqueta)}${req ? ' <span class="bx-req" title="Obligatorio">*</span>' : ''}${de ? ' <span class="chip-est alerta">Documento equivalente</span>' : ''} <span class="chip-est ok bx-app" ${deApp(c.k) ? '' : 'hidden'}>de la app</span></label>`}
@@ -195,7 +195,11 @@ async function guardar() {
     const v = await ctx.api(`/bases/${fichaId}`, { method: 'PATCH', body: { datos: cambios } });
     if (mio !== version) return;
     vista = v; actualizar(); estado('Guardado', 'ok');
-  } catch (e) { if (mio === version) estado('No se pudo guardar: ' + e.message, 'error'); }
+  } catch (e) {
+    // Lo no guardado se conserva para el próximo intento
+    pendientes = { ...cambios, ...pendientes };
+    if (mio === version) estado(/^No se guardó/.test(e.message) ? e.message : 'No se pudo guardar: ' + e.message, 'error');
+  }
 }
 const programar = ms => { clearTimeout(tGuardar); estado('Cambios sin guardar', 'pend'); tGuardar = setTimeout(guardar, ms); };
 async function guardarYa() { if (Object.keys(pendientes).length) { clearTimeout(tGuardar); await guardar(); } }

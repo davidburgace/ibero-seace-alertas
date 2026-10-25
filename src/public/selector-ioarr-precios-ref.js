@@ -97,7 +97,8 @@ function pintarRegistros() {
       <td>${r.propio ? '<span class="chip-est alerta">Precio propio · uso interno</span><br>' : ''}<b>${esc(r.entidad || r.region || '—')}</b> · ${r.anio}<span class="sub">${esc(O().tipos[r.tipo_documento])}${r.cui ? ' · CUI ' + esc(r.cui) : ''}${r.url ? ` · <a href="${esc(r.url)}" target="_blank" rel="noopener noreferrer">enlace</a>` : ''}${r.tiene_archivo ? ` · <button class="btn-link" data-pr-pdf="${r.id}" type="button">PDF</button>` : ''}</span></td>
       <td>${esc(O().unidades[r.unidad])}<span class="sub">${esc(O().niveles[r.nivel])} · ${esc(O().materiales[r.material])}${r.composicion.length ? ' · kit = ' + esc(r.composicion.map(x => `${x.cantidad} ${x.unidad}${x.precio != null ? ' (S/ ' + x.precio + ')' : ''}`).join(' + ')) : ''}</span></td>
       <td class="num">${soles(r.monto)}${r.monto_hasta != null ? ' a ' + soles(r.monto_hasta) : ''}<span class="sub">${r.incluye_igv == null ? 'IGV por confirmar' : r.incluye_igv ? 'con IGV' : 'sin IGV'}${r.cotizaciones ? ` · ${r.cotizaciones.n ?? r.cotizaciones.valores.length} cotizaciones, promedio ${soles(r.cotizaciones.promedio)}` : ''}${r.flete_transporte != null ? ` · flete ${soles(r.flete_transporte)}` : ''}</span></td>
-      <td class="num">${r.comparable ? `<b>${soles(r.precio_kit_sin_igv)}</b>` : `<span class="chip-est pend">No comparable</span><span class="sub">${esc(r.motivo)}</span>`}</td>
+      <td class="num">${r.comparable ? `<b>${soles(r.precio_kit_sin_igv)}</b>${r.precio_alternativo_sin_igv != null ? `<span class="sub">alternativa ${soles(r.precio_alternativo_sin_igv)}</span>` : ''}` : `<span class="chip-est pend">No comparable</span><span class="sub">${esc(r.motivo)}</span>`}
+        ${r.formula ? `<span class="sub pr-formula">${esc(r.formula)}</span>` : ''}${r.componentes ? `<span class="sub">07-C: total ${soles(r.componentes.total)}</span>` : ''}</td>
       <td>${esc(O().confianzas[r.confianza])}${r.notas ? `<span class="sub">${esc(r.notas)}</span>` : ''}</td>
       <td><div class="pr-acc"><button class="btn btn-ghost btn-sm" data-pr-editar="${r.id}" type="button">Editar</button>
         <label class="btn btn-ghost btn-sm">${r.tiene_archivo ? 'Cambiar PDF' : 'Adjuntar PDF'}<input type="file" accept="application/pdf" data-pr-subir="${r.id}" hidden></label>
@@ -116,7 +117,7 @@ function pintarForm() {
         ${s('tipo_documento', 'Tipo de documento', O().tipos)}${inp('cui', 'CUI', { ph: '2512345' })}${inp('entidad', 'Entidad')}${inp('region', 'Región', { req: true, ayuda: 'No obligatoria en el precio propio' })}
         ${inp('anio', 'Año', { tipo: 'number', req: true })}${inp('url', 'Enlace al documento', { ancho: true, ph: 'https://…' })}
         ${s('nivel', 'Nivel', O().niveles)}${s('unidad', 'Unidad', O().unidades)}${s('material', 'Material', O().materiales)}
-        ${inp('monto', 'Monto (S/)', { tipo: 'number', req: true })}${inp('monto_hasta', 'Hasta (si es un rango)', { tipo: 'number', ayuda: 'Se compara el punto medio' })}
+        ${inp('monto', 'Monto (S/)', { tipo: 'number', req: true, ayuda: 'En «estimado derivado» se calcula con la fórmula' })}${inp('monto_hasta', 'Hasta (si es un rango)', { tipo: 'number', ayuda: 'Se compara el punto medio' })}
         <div class="campo"><label>¿Incluye IGV? <span class="bx-req">*</span></label>${sel('name="incluye_igv"', { no: 'No (sin IGV)', si: 'Sí (con IGV)', '': 'Por confirmar (no comparable)' }, r.incluye_igv == null ? '' : r.incluye_igv ? 'si' : 'no')}</div>
         ${inp('composicion', 'Composición del kit (si la unidad no es kit)', { v: (r.composicion || []).map(x => `${x.unidad}:${x.cantidad}${x.precio != null ? ':' + x.precio : ''}`).join(';'), ph: 'mesa:1;silla:1:150', ancho: true,
           ayuda: 'unidad:cantidad[:precio], separados por «;». El precio de la unidad del registro es el monto; los demás, en la misma condición de IGV.' })}
@@ -124,6 +125,19 @@ function pintarForm() {
         ${inp('cotizaciones_n', 'N.° de cotizaciones', { tipo: 'number', v: r.cotizaciones?.valores?.length ? '' : r.cotizaciones?.n ?? '' })}
         ${inp('flete_transporte', 'Flete o transporte por kit (S/)', { tipo: 'number', ayuda: 'Se muestra aparte: no se suma al precio' })}
         ${s('confianza', 'Confianza', O().confianzas)}
+      </div>
+      <h3>Componentes del total (07-C o bases)</h3>
+      <p class="sub">Opcional. Si los escribes, deben sumar exactamente el total declarado: si no, no se guarda. Obligatorio en «estimado derivado».</p>
+      <div class="form-grid">
+        ${Object.entries(cat.componentes).map(([k, et]) => inp('c_' + k, et + ' (S/)', { tipo: 'number', v: r.componentes?.[k] ?? '' })).join('')}
+        ${inp('c_total', 'Total declarado (S/)', { tipo: 'number', v: r.componentes?.total ?? '' })}
+      </div>
+      <h3>Fórmula (solo «estimado derivado»)</h3>
+      <p class="sub">Precio = ejecución física / cantidad. Con IGV si los montos del 07-C lo incluyen.</p>
+      <div class="form-grid">
+        ${inp('d_divisor', 'Dividir entre (cantidad)', { tipo: 'number', v: r.derivacion?.divisor ?? '', ph: '1045' })}
+        ${inp('d_divisor_alternativo', 'Cantidad alternativa (opcional)', { tipo: 'number', v: r.derivacion?.divisor_alternativo ?? '', ph: '1087' })}
+        ${inp('d_detalle', 'Detalle de las cantidades', { v: r.derivacion?.detalle ?? '', ancho: true, ph: '1,045 mesas y 1,045 sillas de alumno (420 + 420 + 205)' })}
         <div class="campo ancho"><label>Notas</label><textarea name="notas" rows="2" maxlength="1000">${esc(r.notas || '')}</textarea></div>
       </div>
       <p class="err" id="pr-err" hidden></p>
@@ -133,7 +147,11 @@ function pintarForm() {
 function leerForm(f) {
   const v = Object.fromEntries(new FormData(f));
   const comp = String(v.composicion || '').trim();
+  const compTotal = Object.fromEntries(Object.keys(cat.componentes).concat('total').map(k => [k, v['c_' + k]]));
+  const deriv = { divisor: v.d_divisor === '' ? null : Number(v.d_divisor), divisor_alternativo: v.d_divisor_alternativo === '' ? null : Number(v.d_divisor_alternativo), detalle: v.d_detalle };
   return { ...v, incluye_igv: v.incluye_igv === '' ? null : v.incluye_igv,
+    componentes: Object.values(compTotal).some(x => x !== '' && x != null) ? compTotal : null,
+    derivacion: deriv.divisor != null || deriv.divisor_alternativo != null ? deriv : null,
     composicion: comp ? comp.split(';').map(x => x.trim()).filter(Boolean).map(x => { const [unidad, cantidad, precio] = x.split(':').map(y => y.trim()); return { unidad, cantidad: Number(cantidad), precio: precio === undefined ? null : Number(precio) }; }) : [],
     cotizaciones: v.cotizaciones_valores || v.cotizaciones_n ? { valores: String(v.cotizaciones_valores || '').split(';').map(x => x.trim()).filter(Boolean).map(Number), n: v.cotizaciones_n ? Number(v.cotizaciones_n) : null } : null };
 }

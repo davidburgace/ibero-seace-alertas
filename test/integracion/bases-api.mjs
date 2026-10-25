@@ -132,6 +132,18 @@ test('precargar: solo llena lo vacío', async () => {
   assert.deepEqual(r.json.llenados, ['UF_NOMBRE']);
 });
 
+test('total declarado: si las prestaciones no lo suman, no se guarda', async () => {
+  const antes = (await pedir('GET', `/bases/${fid}`)).json.datos;
+  const r = await pedir('PATCH', `/bases/${fid}`, { datos: { total_declarado: 1, N_PROCESO: 'NO-DEBE-GUARDARSE' } });
+  assert.equal(r.status, 400);
+  assert.match(r.json.error, /^No se guardó: Las cuatro prestaciones suman S\/ [\d,.]+ y el total declarado es S\/ 1\.00/);
+  const despues = (await pedir('GET', `/bases/${fid}`)).json.datos;
+  assert.equal(despues.N_PROCESO, antes.N_PROCESO);
+  assert.equal(despues.total_declarado, null);
+  const M = (await pedir('GET', `/bases/${fid}`)).json.calculados.MONTO_TOTAL;
+  assert.equal((await pedir('PATCH', `/bases/${fid}`, { datos: { total_declarado: M } })).status, 200);
+});
+
 test('solo el dueño del proyecto', async () => {
   usuario = { id: 'u2', email: 'otro@ejemplo.invalid' };
   try {
