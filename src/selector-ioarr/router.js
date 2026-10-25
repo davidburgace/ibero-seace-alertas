@@ -15,6 +15,7 @@
 //   POST /api/selector-ioarr/proyectos/:id/duplicidad/excluir { excluir } a todos los marcados Sí
 // Cuadro de estado situacional: advertencias revisadas, en ioarr_expediente_documentos (015)
 //   PUT  /api/selector-ioarr/proyectos/:id/situacional/revisiones  { clave, nota } (nota vacía la quita)
+// Generador de bases OxI (fichas, Word y versiones): src/selector-ioarr/bases-api.js, migración 028
 // ============================================================================
 
 import express from 'express';
@@ -29,6 +30,7 @@ import { generarExcel } from './excel.js';
 import { generarExcelVisitas } from './excel-visitas.js';
 import { agruparVisitas, puntosVisita, limitarPorDia } from './visitas.js';
 import { crearApiExpediente, borrarArchivosProyecto } from './expediente.js';
+import { crearApiBases } from './bases-api.js';
 import { MODOS } from './niveles.js';
 import { limpiarDatosDoc } from './documentos.js';
 import { leerDuplicidad, limpiarDuplicidad, aFila, deFila, esVacia, separarLocales, AVISO_DUP } from './duplicidad.js';
@@ -392,6 +394,8 @@ api.post('/visitas.xlsx', async (req, res, next) => {
 // Expediente IOARR (costos): supabase/migrations/012_ioarr_expediente_costos.sql
 const expediente = crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegion, leerIndice });
 api.use(expediente);
+// Generador de bases OxI (bases-api.js): supabase/migrations/028_ioarr_bases_oxi.sql
+api.use(crearApiBases({ expediente }));
 
 // Visitas de campo (src/selector-ioarr/campo.js): el ZIP de fichas de un proyecto, sin validar al dueño
 // (campo.js ya validó que el supervisor tiene colegios asignados o que el proveedor es el dueño)

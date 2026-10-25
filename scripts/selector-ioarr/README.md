@@ -31,3 +31,9 @@ El alcance son los servicios públicos, escolarizados y activos de Inicial, Prim
 6. Puedes borrar la carpeta del año anterior. Los proyectos guardados conservan los mismos códigos de local, y `anio_datos` registra con qué censo se armó cada uno.
 
 La carpeta de cada año se sirve con caché inmutable de un año. Como un censo nuevo va en otra carpeta, no hace falta invalidar nada.
+
+## bases-ejemplo.mjs
+
+Genera un borrador de bases OxI de ejemplo (Word) con datos de prueba ficticios, para revisar el formato sin entrar a la app:
+
+    node scripts/selector-ioarr/bases-ejemplo.mjs salida.docx

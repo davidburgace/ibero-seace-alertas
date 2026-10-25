@@ -1,0 +1,293 @@
+{
+ "campos": {
+  "ACTO_PRIORIZACION": "Acto de priorización (p. ej., Acuerdo Regional N°)",
+  "ANTECEDENTE_NUEVA_CONVOCATORIA": "Texto de antecedente si es nueva convocatoria (opcional)",
+  "AUTORIDAD_DESIGNA_COMITE": "Autoridad que designa al comité",
+  "CAMARA_COMERCIO": "Cámara de Comercio para arbitraje",
+  "CARGO_REPRESENTANTE": "Cargo del representante de la entidad",
+  "CIRCULAR_DESIERTO": "N° de circular del proceso anterior",
+  "CIUDAD_JURISDICCION": "Ciudad de jurisdicción para DJ del postor",
+  "COMPONENTE": "Componente (p. ej., Equipamiento)",
+  "CUI": "Código único de inversiones",
+  "DIRECCION_COMITE": "Dirección de recepción de documentos del Comité",
+  "DNI_REPRESENTANTE": "DNI del representante",
+  "ENTIDAD": "Nombre de la entidad (formato normal)",
+  "ENTIDAD_CORREOS_CIPRL": "Correos para trámite de CIPRL",
+  "ENTIDAD_CORREO_COMITE": "Correo del Comité Especial",
+  "ENTIDAD_DOMICILIO": "Domicilio legal de la entidad",
+  "ENTIDAD_DOMICILIO_CIPRL": "Domicilio para trámite de CIPRL",
+  "ENTIDAD_MAYUS": "Nombre de la entidad en mayúsculas",
+  "ENTIDAD_RUC": "RUC de la entidad",
+  "ENTIDAD_TELEFONO": "Teléfono de la entidad",
+  "FECHA_07C": "Fecha de aprobación del 07-C",
+  "FECHA_BASES": "Fecha de esa resolución",
+  "FECHA_CIRCULAR_DESIERTO": "Fecha de esa circular",
+  "FECHA_OFICIO_CGR": "Fecha del oficio",
+  "FECHA_PRIORIZACION": "Fecha del acto de priorización",
+  "FECHA_RESOLUCION_COMITE": "Fecha de esa resolución",
+  "HORARIO_RECEPCION": "Horario de recepción",
+  "INFORME_PREVIO_CGR": "N° de Informe Previo de la Contraloría",
+  "MONTO_DOC_EQUIVALENTE": "Monto del documento equivalente (OBLIGATORIO)",
+  "MONTO_EJECUCION": "Monto de ejecución",
+  "MONTO_SUPERVISION_TOTAL": "Subtotal de supervisión",
+  "MONTO_SUP_DOC_EQUIVALENTE": "Supervisión del documento equivalente (OBLIGATORIO)",
+  "MONTO_SUP_EJECUCION": "Supervisión de la ejecución física",
+  "MONTO_TOTAL": "Monto total referencial (S/)",
+  "MONTO_TOTAL_LETRAS": "Monto total en letras",
+  "MOTIVO_NUEVA_CONVOCATORIA": "Motivo (desierto, pérdida de buena pro, etc.)",
+  "NOMBRE_IOARR": "Nombre de la IOARR (del 07-C)",
+  "NOMBRE_REPRESENTANTE": "Nombre del representante",
+  "NORMAS_ADICIONALES": "Normas adicionales (sector Educación, etc.)",
+  "N_PROCESO": "Número del proceso de selección",
+  "N_PROCESO_ANTERIOR": "N° del proceso anterior",
+  "OFICIO_CGR": "Oficio de la Contraloría",
+  "PEI_ENTIDAD": "PEI de la entidad (nombre y periodo)",
+  "PLAZO_DOC_EQUIVALENTE_DIAS": "Plazo en días calendario del documento equivalente (referencia: San Juan 60, Loreto 30)",
+  "PLAZO_EJECUCION_DIAS": "Plazo en días calendario de la ejecución física",
+  "PMI_PERIODO": "Periodo del PMI",
+  "PROVINCIA_NOTIFICACION": "Provincia donde debe tener domicilio de notificación",
+  "RESOLUCION_BASES": "Resolución que aprueba las bases",
+  "RESOLUCION_COMITE": "Resolución que designa al Comité Especial",
+  "SIGLAS_ENTIDAD": "Siglas de la entidad (uso en numeración)",
+  "SUSTENTO_FACULTADES": "Documento que sustenta sus facultades",
+  "UF_NOMBRE": "Unidad Formuladora que aprobó el 07-C",
+  "VERIFICAR_REGLAMENTO_VIGENTE": "Aviso: confirmar el Reglamento vigente (borrar al validar)",
+  "VERIFICAR_VIGENCIA": "Aviso: confirmar vigencia de la RD 005-2024-EF/68.01 (borrar al validar)"
+ },
+ "plantillas": [
+  {
+   "file": "00_seccion_I_condiciones_especiales.md",
+   "titulo": "Sección I – Condiciones especiales del proceso de selección",
+   "chars": 6525,
+   "marcadores": [
+    "ACTO_PRIORIZACION",
+    "ANTECEDENTE_NUEVA_CONVOCATORIA",
+    "COMPONENTE",
+    "CUI",
+    "ENTIDAD",
+    "ENTIDAD_CORREO_COMITE",
+    "ENTIDAD_DOMICILIO",
+    "ENTIDAD_RUC",
+    "ENTIDAD_TELEFONO",
+    "FECHA_07C",
+    "FECHA_BASES",
+    "FECHA_OFICIO_CGR",
+    "FECHA_PRIORIZACION",
+    "FECHA_RESOLUCION_COMITE",
+    "INFORME_PREVIO_CGR",
+    "MONTO_DOC_EQUIVALENTE",
+    "MONTO_EJECUCION",
+    "MONTO_SUPERVISION_TOTAL",
+    "MONTO_SUP_DOC_EQUIVALENTE",
+    "MONTO_SUP_EJECUCION",
+    "MONTO_TOTAL",
+    "MONTO_TOTAL_LETRAS",
+    "NOMBRE_IOARR",
+    "NORMAS_ADICIONALES",
+    "OFICIO_CGR",
+    "RESOLUCION_BASES",
+    "RESOLUCION_COMITE",
+    "UF_NOMBRE",
+    "VERIFICAR_REGLAMENTO_VIGENTE",
+    "VERIFICAR_VIGENCIA"
+   ]
+  },
+  {
+   "file": "01_seccion_II_cap_I_etapas.md",
+   "titulo": "Sección II – Capítulo I: Etapas del proceso",
+   "chars": 31822,
+   "marcadores": []
+  },
+  {
+   "file": "02_seccion_II_cap_II_controversias.md",
+   "titulo": "Sección II – Capítulo II: Solución de controversias",
+   "chars": 4183,
+   "marcadores": []
+  },
+  {
+   "file": "03_seccion_II_cap_III_convenio_inversion.md",
+   "titulo": "Sección II – Capítulo III: Del convenio de inversión",
+   "chars": 14279,
+   "marcadores": []
+  },
+  {
+   "file": "04_anexo_1_definiciones.md",
+   "titulo": "Anexo 1: Definiciones",
+   "chars": 3346,
+   "marcadores": []
+  },
+  {
+   "file": "05_anexo_4A_expresion_interes.md",
+   "titulo": "Anexo 4-A: Carta de expresión de interés",
+   "chars": 1640,
+   "marcadores": [
+    "CUI",
+    "NOMBRE_IOARR",
+    "N_PROCESO"
+   ]
+  },
+  {
+   "file": "06_anexo_4B_contenido_sobres.md",
+   "titulo": "Anexo 4-B: Contenido de los sobres",
+   "chars": 10534,
+   "marcadores": [
+    "CUI",
+    "DIRECCION_COMITE",
+    "ENTIDAD_MAYUS",
+    "MONTO_TOTAL",
+    "MONTO_TOTAL_LETRAS",
+    "NOMBRE_IOARR",
+    "N_PROCESO"
+   ]
+  },
+  {
+   "file": "07_anexo_4C_acreditacion.md",
+   "titulo": "Anexo 4-C: Carta de acreditación",
+   "chars": 1716,
+   "marcadores": [
+    "N_PROCESO"
+   ]
+  },
+  {
+   "file": "08_anexo_4D_info_financiera_tecnica.md",
+   "titulo": "Anexo 4-D: Información financiera y técnica",
+   "chars": 4967,
+   "marcadores": [
+    "CUI",
+    "ENTIDAD_MAYUS",
+    "NOMBRE_IOARR"
+   ]
+  },
+  {
+   "file": "09_anexo_4E_propuesta_economica.md",
+   "titulo": "Anexo 4-E: Propuesta económica",
+   "chars": 9114,
+   "marcadores": [
+    "CUI",
+    "ENTIDAD_MAYUS",
+    "NOMBRE_IOARR"
+   ]
+  },
+  {
+   "file": "10_anexo_4G_dj_postor.md",
+   "titulo": "Anexo 4-G: Declaración jurada del postor",
+   "chars": 6924,
+   "marcadores": [
+    "CIUDAD_JURISDICCION"
+   ]
+  },
+  {
+   "file": "11_anexo_4H_compromiso_ejecutora.md",
+   "titulo": "Anexo 4-H: Compromiso de contratación de la empresa ejecutora",
+   "chars": 2144,
+   "marcadores": [
+    "CUI",
+    "ENTIDAD_MAYUS",
+    "NOMBRE_IOARR"
+   ]
+  },
+  {
+   "file": "12_anexo_4J_dj_contrato_ejecucion.md",
+   "titulo": "Anexo 4-J: DJ respecto al contrato de ejecución",
+   "chars": 4777,
+   "marcadores": []
+  },
+  {
+   "file": "13_anexo_4K_promesa_consorcio.md",
+   "titulo": "Anexo 4-K: Promesa formal de consorcio",
+   "chars": 3733,
+   "marcadores": [
+    "N_PROCESO"
+   ]
+  },
+  {
+   "file": "14_anexo_4L_dj_personal.md",
+   "titulo": "Anexo 4-L: DJ del personal profesional",
+   "chars": 2099,
+   "marcadores": [
+    "N_PROCESO"
+   ]
+  },
+  {
+   "file": "15_anexo_4M_carta_compromiso_personal.md",
+   "titulo": "Anexo 4-M: Carta de compromiso del personal",
+   "chars": 1650,
+   "marcadores": [
+    "N_PROCESO"
+   ]
+  },
+  {
+   "file": "16_anexo_5A_garantia_apelacion.md",
+   "titulo": "Anexo 5-A: Modelo de garantía de apelación",
+   "chars": 3363,
+   "marcadores": [
+    "CUI",
+    "NOMBRE_IOARR",
+    "N_PROCESO"
+   ]
+  },
+  {
+   "file": "17_anexo_5B_garantia_fiel_cumplimiento.md",
+   "titulo": "Anexo 5-B: Garantía de fiel cumplimiento",
+   "chars": 11872,
+   "marcadores": [
+    "CUI",
+    "ENTIDAD_MAYUS",
+    "NOMBRE_IOARR",
+    "N_PROCESO"
+   ]
+  },
+  {
+   "file": "18_anexo_6_formato_convenio.md",
+   "titulo": "Anexo 6: Formato de convenio de inversión",
+   "chars": 86310,
+   "marcadores": [
+    "ACTO_PRIORIZACION",
+    "AUTORIDAD_DESIGNA_COMITE",
+    "CAMARA_COMERCIO",
+    "CARGO_REPRESENTANTE",
+    "CIRCULAR_DESIERTO",
+    "CUI",
+    "DNI_REPRESENTANTE",
+    "ENTIDAD",
+    "ENTIDAD_CORREOS_CIPRL",
+    "ENTIDAD_DOMICILIO",
+    "ENTIDAD_DOMICILIO_CIPRL",
+    "ENTIDAD_MAYUS",
+    "ENTIDAD_RUC",
+    "ENTIDAD_TELEFONO",
+    "FECHA_07C",
+    "FECHA_BASES",
+    "FECHA_CIRCULAR_DESIERTO",
+    "FECHA_OFICIO_CGR",
+    "FECHA_PRIORIZACION",
+    "FECHA_RESOLUCION_COMITE",
+    "INFORME_PREVIO_CGR",
+    "MONTO_TOTAL",
+    "MONTO_TOTAL_LETRAS",
+    "MOTIVO_NUEVA_CONVOCATORIA",
+    "NOMBRE_IOARR",
+    "NOMBRE_REPRESENTANTE",
+    "N_PROCESO_ANTERIOR",
+    "OFICIO_CGR",
+    "PEI_ENTIDAD",
+    "PMI_PERIODO",
+    "PROVINCIA_NOTIFICACION",
+    "RESOLUCION_BASES",
+    "RESOLUCION_COMITE",
+    "SIGLAS_ENTIDAD",
+    "SUSTENTO_FACULTADES",
+    "UF_NOMBRE"
+   ]
+  },
+  {
+   "file": "19_anexo_2_calendario.md",
+   "titulo": "Anexo 2: Calendario del proceso de selección",
+   "chars": 3887,
+   "marcadores": [
+    "DIRECCION_COMITE",
+    "HORARIO_RECEPCION"
+   ]
+  }
+ ]
+}

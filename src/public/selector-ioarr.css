@@ -490,3 +490,19 @@ table.tabla{ width:100%; border-collapse:collapse; font-size:13px; }
 .aviso.interno{ font-weight:500; }
 .kpi.kpi-alerta .v{ color:var(--malo); }
 tr.fila-alerta td{ background:rgba(214,69,58,0.06); }
+
+/* Expediente › Bases OxI (selector-ioarr-bases.js) */
+.bx-sec{ border:1px solid var(--border2); border-radius:12px; padding:10px 16px 16px; margin:0 0 14px; }
+.bx-sec legend{ font-family:var(--font-display); font-size:14px; font-weight:700; padding:0 6px; }
+.bx-acc, .bx-nueva, .bx-sel, .bx-comparar{ display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.bx-nueva{ justify-content:center; margin-top:10px; }
+.bx-acc input[type=text]{ min-width:180px; }
+.bx-req{ color:var(--malo); }
+.bx-calc{ display:block; padding:8px 10px; border-radius:8px; background:var(--surface2, rgba(0,0,0,.04)); font-weight:600; min-height:38px; }
+.bx-con-error input, .bx-con-error textarea, .bx-con-error select{ border-color:var(--malo) !important; }
+.bx-sec .chip-est{ font-size:10.5px; padding:1px 6px; }
+@media (max-width:640px){ .bx-acc input[type=text]{ min-width:0; width:100%; } }
+.bx-app[hidden], [data-bx-campo][hidden]{ display:none !important; }
+.form-grid .chk{ justify-content:flex-start; }
+.form-grid .chk input{ width:16px; flex:none; }
+#bx-cantidades td .sub{ display:block; }
