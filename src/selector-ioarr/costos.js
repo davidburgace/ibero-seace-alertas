@@ -62,7 +62,7 @@ export const NOTA_PORCENTAJES = 'Los porcentajes (IGV, documento equivalente, su
 // Grupos de grado de Primaria para repartir los kits
 export const GRUPOS_PRIMARIA = TALLAS.filter(z => z.nivel === 'P').map(z => z.k);   // ['p12', 'p34', 'p56']
 export const ESTRUCTURA_DEF = { igv: 18, doc_pct: 3, sup_pct: 5, liquidacion: 15000, transporte_pieza: TRANSPORTE_REFERENCIA, kit: false, kit_dist: [1, 1, 1], precios: {},
-  cc_aplica: '', cc_pct: null, cc_umbral: null };
+  cc_aplica: '', cc_pct: null, cc_umbral: null, liq_modo: 'monto', liq_pct: 1 };
 export const ROTULO_CC = 'Control concurrente (Ley 31358)';
 // Registro del Formato 07-C: una inversión masiva (varias UP) va siempre con registro completo
 export const REGISTRO_MASIVA = 'Registro completo (masiva)';
@@ -84,6 +84,8 @@ export function limpiarEstructura(e) {
   return {
     igv: num(x.igv, 0, 100, D.igv), doc_pct: num(x.doc_pct, 0, 100, D.doc_pct), sup_pct: num(x.sup_pct, 0, 100, D.sup_pct),
     liquidacion: Math.round(num(x.liquidacion, 0, 1e10, D.liquidacion) * 100) / 100,
+    // Liquidación: monto fijo (por defecto) o % del costo directo sin IGV
+    liq_modo: x.liq_modo === 'pct' ? 'pct' : 'monto', liq_pct: num(x.liq_pct, 0, 100, D.liq_pct),
     transporte_pieza: Math.round(num(x.transporte_pieza, 0, 1e6, D.transporte_pieza) * 100) / 100,
     kit: x.kit === true, kit_dist: dist.some(v => v > 0) ? dist : D.kit_dist, precios,
     // Control concurrente: '' = según el umbral (si lo hay) o pendiente; 'si' / 'no' a mano
@@ -313,7 +315,7 @@ export function costear({ D, C, list, precios, estructura, uit, inventario, ajus
   const cdTodos = locales.reduce((a, l) => a + l.cd, 0), n = locales.length;
   for (const l of locales) {
     l.igv = l.cd * E.igv / 100; l.doc = l.cd * E.doc_pct / 100; l.sup = l.cd * E.sup_pct / 100;
-    l.liq = cdTodos ? E.liquidacion * l.cd / cdTodos : E.liquidacion / (n || 1);
+    l.liq = E.liq_modo === 'pct' ? l.cd * E.liq_pct / 100 : cdTodos ? E.liquidacion * l.cd / cdTodos : E.liquidacion / (n || 1);
     l.total = l.cd + l.igv + l.doc + l.sup + l.liq;
   }
   // Control concurrente (Ley 31358): por IOARR, si corresponde (a mano o porque supera el umbral)
@@ -553,17 +555,17 @@ function resumir(locales, { pu, puGeneral, propio, incl, puKit, kit, E, escenari
   const ccTexto = cc.aplica ? (E.cc_pct != null ? `${ROTULO_CC}: ${E.cc_pct} % de lo anterior` : `${ROTULO_CC}: PENDIENTE el %`)
     : cc.pendiente ? `${ROTULO_CC}: PENDIENTE indicar si corresponde` : `${ROTULO_CC}: no corresponde`;
   const estructura = {
-    kit, escenario, params: { igv: E.igv, doc_pct: E.doc_pct, sup_pct: E.sup_pct, liquidacion: E.liquidacion, transporte_pieza: E.transporte_pieza, kit_dist: E.kit_dist,
+    kit, escenario, params: { igv: E.igv, doc_pct: E.doc_pct, sup_pct: E.sup_pct, liquidacion: E.liquidacion, liq_modo: E.liq_modo, liq_pct: E.liq_pct, transporte_pieza: E.transporte_pieza, kit_dist: E.kit_dist,
       cc_aplica: E.cc_aplica, cc_pct: E.cc_pct, cc_umbral: E.cc_umbral, cc_corresponde: !!cc.aplica },
     filas: [
       { clave: 'bienes', nombre: 'Bienes (cantidad × precio unitario sin IGV)', monto: T.bienes },
       { clave: 'transporte', nombre: `Transporte (${T.piezas.toLocaleString('es-PE')} piezas × S/ ${tp.toFixed(2)})`, monto: T.transporte },
       { clave: 'cd', nombre: 'Costo directo sin IGV (bienes + transporte)', monto: T.cd },
       { clave: 'igv', nombre: `IGV (${E.igv} %)`, monto: T.igv },
-      { clave: 'cdIgv', nombre: 'A. COSTO DIRECTO (con IGV)', monto: T.cdIgv, fuerte: true },
-      { clave: 'doc', nombre: `Documento equivalente (${E.doc_pct} % del costo directo sin IGV)`, monto: T.doc },
+      { clave: 'cdIgv', nombre: 'A. ADQUISICIÓN DE MOBILIARIO (costo directo con IGV)', monto: T.cdIgv, fuerte: true },
+      { clave: 'doc', nombre: `Expediente técnico o documento equivalente (${E.doc_pct} % del costo directo sin IGV)`, monto: T.doc },
       { clave: 'sup', nombre: `Supervisión (${E.sup_pct} % del costo directo sin IGV)`, monto: T.sup },
-      { clave: 'liq', nombre: 'Liquidación (monto fijo)', monto: T.liq },
+      { clave: 'liq', nombre: E.liq_modo === 'pct' ? `Liquidación (${E.liq_pct} % del costo directo sin IGV)` : 'Liquidación (monto fijo)', monto: T.liq },
       { clave: 'cc', nombre: ccTexto, monto: T.cc },
       { clave: 'b', nombre: 'B. OTROS COSTOS DE INVERSIÓN', monto: T.b, fuerte: true },
       { clave: 'total', nombre: 'C = A + B. COSTO DE INVERSIÓN (MONTO DE INVERSIÓN)', monto: T.total, total: true }]

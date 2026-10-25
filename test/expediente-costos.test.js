@@ -103,7 +103,7 @@ test('sin precios: bienes en 0 y avisos (no se inventan precios dentro del cálc
   assert.deepEqual(R.avisos.map(a => a.tipo).sort(), ['censo', 'control_concurrente', 'faltante', 'precio', 'uit']);
   // La estructura por defecto: transporte 19.50 por pieza, IGV 18 %, 3 %, 5 % y 15,000
   // Control concurrente (Ley 31358): vacío por defecto, no se inventa si corresponde ni su %
-  assert.deepEqual(R.estructura.params, { igv: 18, doc_pct: 3, sup_pct: 5, liquidacion: 15000, transporte_pieza: 19.5, kit_dist: [1, 1, 1], cc_aplica: '', cc_pct: null, cc_umbral: null, cc_corresponde: false });
+  assert.deepEqual(R.estructura.params, { igv: 18, doc_pct: 3, sup_pct: 5, liquidacion: 15000, liq_modo: 'monto', liq_pct: 1, transporte_pieza: 19.5, kit_dist: [1, 1, 1], cc_aplica: '', cc_pct: null, cc_umbral: null, cc_corresponde: false });
   assert.equal(R.totales.cc, 0);
 });
 
@@ -186,6 +186,18 @@ test('Excel con control concurrente (Ley 31358): A + B = C y LibreOffice da el m
   cerca(Math.round(valorResumen(h.Resumen, T) * 100), Math.round(R.totales.total * 100), 'total con control concurrente');
   cerca(Math.round(valorResumen(h.Resumen, 'Control concurrente (Ley 31358)') * 100), Math.round(R.totales.cc * 100), 'control concurrente');
   cerca(Math.round(valorResumen(h.Resumen, 'B. OTROS COSTOS DE INVERSIÓN') * 100), Math.round(R.totales.b * 100), 'B');
+});
+
+test('liquidación como % del costo directo: líneas separadas y LibreOffice da el mismo total', { skip: !soffice && 'LibreOffice no está instalado' }, async () => {
+  const D = moquegua(), C = calc(D, DEF), list = filtrar(D, C, { ...FILTRO_VACIO(), q: 'mariscal' });
+  const R = costear({ D, C, list, precios: PRECIOS, estructura: { ...EST, liq_modo: 'pct', liq_pct: 2 }, uit: { anio: 2026, valor: 5500 } });
+  cerca(R.totales.liq, Math.round(R.totales.cd * 2) / 100, 'liquidación 2 %');
+  assert.deepEqual(R.estructura.filas.map(f => f.clave), ['bienes', 'transporte', 'cd', 'igv', 'cdIgv', 'doc', 'sup', 'liq', 'cc', 'b', 'total']);
+  assert.match(R.estructura.filas.find(f => f.clave === 'cdIgv').nombre, /ADQUISICIÓN DE MOBILIARIO/);
+  assert.match(R.estructura.filas.find(f => f.clave === 'doc').nombre, /^Expediente técnico/);
+  const h = recalcular(await generarExcelCostos(R, meta));
+  cerca(Math.round(valorResumen(h.Resumen, 'C = A + B. COSTO DE INVERSIÓN (MONTO DE INVERSIÓN)') * 100), Math.round(R.totales.total * 100), 'total');
+  cerca(Math.round(valorResumen(h.Resumen, 'Liquidación') * 100), Math.round(R.totales.liq * 100), 'liquidación');
 });
 
 test('copiar de Radar IOARR: el tipo de bien se propone por la descripción', () => {
