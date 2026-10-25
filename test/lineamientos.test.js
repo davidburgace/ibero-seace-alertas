@@ -114,7 +114,7 @@ export const CHECK_OK = { inventario: { registrado: 'si', contabilidad: 'si', ba
 const CODIGOS = LISTA.map(i => D.locs[i][0]);
 export function paquete(datos = {}, { final = false, P = DEF } = {}) {
   const datosDoc = limpiarDatosDoc(datos);
-  const K = calcularPaquete({ D, P, codigos: CODIGOS, comun: BASE, datosDoc, final });
+  const K = calcularPaquete({ D, P, codigos: CODIGOS, comun: BASE, datosDoc, final, anioRef: 2026 });
   const A = { ...K, detalle: {}, efectivos: preciosEfectivos({}, {}) };
   return { A, datosDoc, M: nivel => modeloIoarr(A, elegirIoarr(A, nivel), datosDoc, { nombre: 'Prueba', region: 'Moquegua' }, '2026-10-25') };
 }
@@ -154,4 +154,46 @@ test('07-C final: solo los colegios con el checklist completo; el borrador trae 
   ws.eachRow((r, n) => { if (n > 4) vals.push([r.getCell(1).value, r.getCell(9).value]); });
   assert.equal(vals.length, xB.list.length);
   assert.ok(vals.some(([, e]) => e === 'Entra') && vals.some(([, e]) => /Bloqueado/.test(e)));
+});
+
+test('duplicación: entrega reciente sin descontar es riesgo; descontada, se resta de lo que se repone', async () => {
+  const { riesgoDuplicacion } = await import('../src/selector-ioarr/lineamientos.js');
+  const c = limpiarColegio({ entregas: [{ anio: 2024, cantidad: 30, tipo: 'kit', fuente: 'pronied' }, { anio: 2019, cantidad: 50, tipo: 'mesa', fuente: 'ugel' }] });
+  let r = riesgoDuplicacion(c, { anioRef: 2026, niveles: ['P'] });
+  assert.equal(r.riesgo, true); assert.match(r.motivos[0], /2024: 30 kit .*Pronied.* sin descontar/i);
+  assert.equal(r.recientes.length, 1); assert.equal(r.antiguas.length, 1);   // 2019 queda fuera de la ventana de 3 años
+  // Descontada: sin riesgo y con ajuste en su nivel (un solo nivel: no hace falta indicarlo)
+  const c2 = limpiarColegio({ entregas: [{ anio: 2023, cantidad: 30, tipo: 'kit', fuente: 'pronied', restar: true }] });
+  r = riesgoDuplicacion(c2, { anioRef: 2026, niveles: ['P'] });
+  assert.equal(r.riesgo, false); assert.equal(r.ajuste.P.kit, 30);
+  // Con varios niveles, sin nivel no se puede descontar
+  r = riesgoDuplicacion(c2, { anioRef: 2026, niveles: ['P', 'S'] });
+  assert.equal(r.riesgo, true); assert.match(r.motivos[0], /indica el nivel/);
+  // Inversión en ejecución y otra inversión «Sí» también son riesgo
+  assert.ok(riesgoDuplicacion(limpiarColegio({ inversion_ejecucion: true, inversion_codigo: '2501234' }), { anioRef: 2026 }).motivos[0].includes('2501234'));
+  assert.ok(riesgoDuplicacion(null, { anioRef: 2026, dupEstado: 'si' }).riesgo);
+  assert.equal(riesgoDuplicacion(null, { anioRef: 2026, dupEstado: 'si', excluido: true }).riesgo, false);
+});
+
+test('duplicación en el paquete: se descuenta en la IOARR del nivel, se avisa y sale en el listado de riesgos', async () => {
+  const x0 = elegirIoarr(paquete().A, 'P'), l = x0.R.locales.find(y => y.rep[1] > 0), quitar = Math.min(5, l.rep[1]);
+  const otro = x0.R.locales.find(y => y.cod !== l.cod);
+  const datos = { colegios: { [l.cod]: { entregas: [{ anio: 2025, cantidad: quitar, tipo: 'silla', fuente: 'gore', nivel: 'P', restar: true }] },
+    [otro.cod]: { entregas: [{ anio: 2024, cantidad: 10, tipo: 'kit', fuente: 'municipalidad', nivel: 'P' }] } } };
+  const { A, M } = paquete(datos), x = elegirIoarr(A, 'P'), l2 = x.R.locales.find(y => y.cod === l.cod);
+  assert.equal(l2.rep[1], l.rep[1] - quitar); assert.equal(l2.descuento.tipos[1], quitar);
+  assert.equal(x.R.totales.descontado, quitar);
+  assert.ok(x.R.avisos.some(a => a.tipo === 'duplicacion' && /Se descuentan? \d+ bien/.test(a.texto)));
+  assert.ok(x.R.avisos.some(a => a.tipo === 'duplicacion' && a.alerta && a.texto.includes(otro.cod)));
+  // Secundaria no cambia: la entrega es de Primaria
+  const s0 = elegirIoarr(paquete().A, 'S'), s1 = elegirIoarr(A, 'S');
+  assert.equal(s1.R.totales.rep, s0.R.totales.rep);
+  // La ficha de activos sigue cuadrando con el metrado (con una fila de ajuste)
+  const MP = M('P');
+  assert.equal(MP.fichaActivos.totales.cantidad, x.R.totales.rep);
+  assert.ok(MP.faltan.some(t => /Riesgo de duplicación en 1 colegio/.test(t)));
+  const wb = new ExcelJS.Workbook(); await wb.xlsx.load(await excelL({ ficha: MP.fichaActivos, riesgos: MP.riesgos, anioRef: 2026 }));
+  const ws = wb.getWorksheet('Riesgo de duplicación'), filas = [];
+  ws.eachRow((r, n) => { if (n > 4) filas.push([r.getCell(1).value, r.getCell(3).value, r.getCell(10).value]); });
+  assert.deepEqual(filas.sort(), [[l.cod, 'Entrega reciente descontada', 'Sí'], [otro.cod, 'Riesgo de duplicación', 'No']].sort());
 });

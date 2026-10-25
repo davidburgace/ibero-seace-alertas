@@ -4,11 +4,13 @@
 // Un libro por IOARR (nivel). Hojas:
 //   Ficha de activos   estructura preliminar de costos: un lote por aula, bien y estado a reponer
 //   Inventario y baja  checklist por colegio; sin completar, el colegio no entra al 07-C final
+//   Riesgo de duplicación  entregas previas de mobiliario (3 años) e inversiones en ejecución
 // Las filas «pendiente de verificación en campo» van en amarillo. La oferta (uso interno) no entra.
 // ============================================================================
 
 import ExcelJS from 'exceljs';
-import { PENDIENTE_CAMPO, DOCS_BAJA, SI_NO } from './lineamientos.js';
+import { PENDIENTE_CAMPO, DOCS_BAJA, SI_NO, FUENTES_ENTREGA, TIPOS_ENTREGA, VENTANA_DUP } from './lineamientos.js';
+import { NIVN } from './calculo.js';
 
 const AZUL = 'FF3A63E0', AMARILLO = 'FFFFF3B0', GRIS = 'FFF1F3F7';
 const SOLES = '"S/ "#,##0.00', ENTERO = '#,##0';
@@ -84,8 +86,36 @@ function hojaChecklist(wb, filas, borrador) {
   ws.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: cols.length } };
 }
 
+// ─── Riesgo de duplicación ──────────────────────────────────────────────────
+function hojaRiesgos(wb, riesgos, anioRef) {
+  const ws = wb.addWorksheet('Riesgo de duplicación', { views: [{ state: 'frozen', ySplit: 4 }] });
+  const cols = [['Código de local', 11], ['Institución educativa', 34], ['Situación', 22], ['Año de la entrega', 10], ['Cantidad', 10], ['Tipo', 20], ['Fuente', 16], ['Nivel', 11],
+    ['¿Reciente? (últimos 3 años)', 12], ['¿Se descuenta?', 12], ['Motivo del riesgo', 60]];
+  ws.columns = cols.map(([, width]) => ({ width }));
+  titulo(ws, 'Chequeo de duplicación: entregas previas de mobiliario e inversiones en ejecución',
+    `Una entrega de mobiliario desde ${anioRef - VENTANA_DUP} (últimos ${VENTANA_DUP} años) se descuenta de lo que se repone o deja el colegio en «Riesgo de duplicación». Fuentes: Pronied, Minedu, gobierno regional, UGEL, municipalidad.`);
+  ws.getRow(4).values = cols.map(([t]) => t); cabecera(ws, 4, cols.length);
+  let r = 5;
+  for (const x of riesgos) {
+    const situacion = x.riesgo ? 'Riesgo de duplicación' : x.recientes.length ? 'Entrega reciente descontada' : 'Sin riesgo (entregas antiguas)';
+    const entregas = [...x.recientes, ...x.antiguas];
+    const filas = entregas.length ? entregas : [null];
+    for (const e of filas) {
+      const reciente = e && e.anio >= anioRef - VENTANA_DUP;
+      ws.getRow(r).values = [x.cod, x.nombre, situacion, e?.anio ?? '', e?.cantidad ?? '', e ? TIPOS_ENTREGA[e.tipo] : '', e ? FUENTES_ENTREGA[e.fuente] : '', e?.nivel ? NIVN[e.nivel] : '',
+        e ? (reciente ? 'Sí' : 'No') : '', e ? (reciente && e.restar ? 'Sí' : 'No') : '', x.motivos.join('; ')];
+      ws.getCell(r, 5).numFmt = ENTERO;
+      ws.getCell(r, 11).alignment = { wrapText: true, vertical: 'top' };
+      if (x.riesgo) for (const c of [3, 11]) ws.getCell(r, c).fill = relleno(AMARILLO);
+      r++;
+    }
+  }
+  if (!riesgos.length) ws.getCell(5, 1).value = 'Ningún colegio de esta IOARR tiene entregas previas registradas ni inversión en ejecución.';
+  ws.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: cols.length } };
+}
+
 /**
- * @param {object} L  { ficha: fichaActivos(), checklist: [filas], borrador }
+ * @param {object} L  { ficha: fichaActivos(), checklist: [filas], riesgos: [filas], anioRef, borrador }
  * @param {object} meta { proyecto, nombreIoarr, region, fecha }
  * @returns {Promise<Buffer>}
  */
@@ -95,5 +125,6 @@ export async function generarExcelLineamientos(L, meta = {}) {
   wb.created = new Date();
   hojaFicha(wb, L.ficha, meta);
   if (L.checklist) hojaChecklist(wb, L.checklist, L.borrador);
+  if (L.riesgos) hojaRiesgos(wb, L.riesgos, L.anioRef || new Date().getFullYear());
   return Buffer.from(await wb.xlsx.writeBuffer());
 }

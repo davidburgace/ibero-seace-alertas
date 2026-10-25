@@ -12,7 +12,7 @@ import { costear } from './costos.js';
 import { porNivel, validarNiveles, inventarioNivel, inventarioUna, sinNivel, nivelesDeLocal } from './niveles.js';
 import { separarLocales, estadoDe, avisosDuplicidad } from './duplicidad.js';
 import { armarModelo } from './documentos.js';
-import { fichaActivos, modeloVidaUtil, checklistColegio, colegioDe } from './lineamientos.js';
+import { fichaActivos, modeloVidaUtil, checklistColegio, colegioDe, riesgoDuplicacion, ajusteTotal, VENTANA_DUP } from './lineamientos.js';
 
 /**
  * @param {object} p
@@ -24,8 +24,9 @@ import { fichaActivos, modeloVidaUtil, checklistColegio, colegioDe } from './lin
  *   datosDoc   datos de Documentos (limpiarDatosDoc), con colegios
  *   final      true: solo los colegios con el checklist de inventario y baja completo (07-C final)
  *   modo       'por_nivel' (siempre, ver niveles.js)
+ *   anioRef    año de referencia para la ventana de 3 años del chequeo de duplicación
  */
-export function calcularPaquete({ D, P, codigos, dup = {}, inv = {}, comun, datosDoc = {}, final = false, modo = 'por_nivel' }) {
+export function calcularPaquete({ D, P, codigos, dup = {}, inv = {}, comun, datosDoc = {}, final = false, modo = 'por_nivel', anioRef = new Date().getFullYear() }) {
   // Los locales con otra inversión vigente o reciente que se excluyeron no entran a la propuesta
   const sep = separarLocales(D, codigos, dup), excluidos = sep.excluidos;
   // Checklist de inventario y baja por colegio (lineamientos.js)
@@ -33,24 +34,28 @@ export function calcularPaquete({ D, P, codigos, dup = {}, inv = {}, comun, dato
   const checklist = Object.fromEntries(sep.list.map(i => [D.locs[i][0], checklistColegio(colegios[D.locs[i][0]], { registrado: datosDoc.inventario_registrado })]));
   const bloqueados = sep.list.filter(i => !checklist[D.locs[i][0]].completo);
   const list = final ? sep.list.filter(i => checklist[D.locs[i][0]].completo) : sep.list;
+  // Chequeo de duplicación: entregas previas en los últimos 3 años, inversión en ejecución, otra inversión
+  const riesgos = Object.fromEntries(sep.list.map(i => { const cod = D.locs[i][0];
+    return [cod, riesgoDuplicacion(colegios[cod], { anioRef, niveles: nivelesDeLocal(D, i), dupEstado: estadoDe(dup, cod).estado })]; }));
+  const ajustesDe = nivel => Object.fromEntries(Object.entries(riesgos).map(([cod, r]) => [cod, nivel ? r.ajuste[nivel] : (Object.keys(r.ajuste).length ? ajusteTotal(r.ajuste) : null)]).filter(([, a]) => a));
 
   const C = calc(D, P);
   // Una IOARR (todos los niveles) y una por nivel: se calculan las dos para compararlas
   // Niveles de toda la selección: en el 07-C final, un nivel con todos sus colegios bloqueados queda vacío
   const enList = new Set(list);
   const G = porNivel(D, P, sep.list).map(g => ({ ...g, list: g.list.filter(i => enList.has(i)) })), Cn = Object.fromEntries(G.map(g => [g.nivel, g.C]));
-  const Runa = costear({ D, C, list, ...comun, inventario: inventarioUna(inv, D, Cn) });
+  const Runa = costear({ D, C, list, ...comun, inventario: inventarioUna(inv, D, Cn), ajustes: ajustesDe(null) });
   // Los tres escenarios de cantidad lado a lado (IOARR única, con la misma estructura y precios)
   const escenarios = ESCENARIOS.map(e => {
     const Pe = { ...P, escenario: e.k };
     const R = e.k === P.escenario ? Runa : (() => {
       const Ce = calc(D, Pe), Gn = Object.fromEntries(porNivel(D, Pe, list).map(g => [g.nivel, g.C]));
-      return costear({ D, C: Ce, list, ...comun, inventario: inventarioUna(inv, D, Gn) });
+      return costear({ D, C: Ce, list, ...comun, inventario: inventarioUna(inv, D, Gn), ajustes: ajustesDe(null) });
     })();
     return { k: e.k, n: e.n, pct: e.k === 'malo_regular' ? textoPct(P, G.map(g => g.nivel)) : null, actual: e.k === P.escenario, rep: R.totales.rep, kits: R.totales.kits, cd: R.totales.cd, total: R.totales.total,
       partidas: Object.fromEntries(R.partidas.map(x => [x.k, x.excluido ? null : x.rep])), aulas: R.totales.aul };
   });
-  const Rniv = costear({ ...comun, grupos: G.map(g => ({ clave: g.nivel, D: g.D, C: g.C, list: g.list, inventario: inventarioNivel(inv, D, g.nivel) })) });
+  const Rniv = costear({ ...comun, grupos: G.map(g => ({ clave: g.nivel, D: g.D, C: g.C, list: g.list, inventario: inventarioNivel(inv, D, g.nivel), ajustes: ajustesDe(g.nivel) })) });
   // Cada 07-C es de un solo nivel. Sin locales no hay niveles: se muestra una IOARR vacía
   const ioarrs = !G.length
     ? [{ nivel: null, nombre: 'Todos los niveles', R: Runa, D, C, list, inv: inventarioUna(inv, D, Cn) }]
@@ -75,6 +80,9 @@ export function calcularPaquete({ D, P, codigos, dup = {}, inv = {}, comun, dato
         ? { tipo: 'checklist', alerta: true, texto: `No ${n === 1 ? 'entra' : 'entran'} al Formato 07-C ${n === 1 ? '1 colegio' : n + ' colegios'} con el checklist de inventario y baja incompleto: ${lst}. Complétalo en «Por colegio» o exporta el borrador.` }
         : { tipo: 'checklist', alerta: true, texto: `${n === 1 ? '1 colegio tiene' : n + ' colegios tienen'} el checklist de inventario y baja incompleto (${lst}): ${n === 1 ? 'no entrará' : 'no entrarán'} al Formato 07-C final hasta completarlo en «Por colegio». El borrador sí ${n === 1 ? 'lo incluye' : 'los incluye'}.` });
     }
+    // Riesgo de duplicación: colegios de la IOARR con entrega reciente sin descontar o inversión en ejecución
+    x.riesgos = x.list.filter(i => riesgos[D.locs[i][0]]?.riesgo).map(i => ({ cod: D.locs[i][0], nom: D.locName[i], motivos: riesgos[D.locs[i][0]].motivos }));
+    if (x.riesgos.length) R.avisos.push({ tipo: 'duplicacion', alerta: true, texto: `Riesgo de duplicación en ${x.riesgos.length === 1 ? '1 colegio' : x.riesgos.length + ' colegios'} (entrega de mobiliario en los últimos ${VENTANA_DUP} años sin descontar, inversión en ejecución u otra inversión): ${x.riesgos.slice(0, 10).map(r => `${r.cod} (${r.motivos.join('; ')})`).join(' · ')}${x.riesgos.length > 10 ? '…' : ''}. Descuenta la entrega o explica en «Por colegio».` });
     const sn = sinNiv.filter(c => R.locales.some(l => l.cod === c));
     if (sn.length) R.avisos.push({ tipo: 'inventario', alerta: true, texto: `El inventario verificado de ${sn.length === 1 ? 'el local' : 'los locales'} ${sn.join(', ')} se cargó sin nivel y el local tiene varios niveles: en esta IOARR se usa el censo. Vuelve a cargarlo por nivel en «Corregir inventario».` });
   }
@@ -88,7 +96,7 @@ export function calcularPaquete({ D, P, codigos, dup = {}, inv = {}, comun, dato
     // Paquete: colegios distintos (un colegio con varios niveles cuenta una vez) y control de doble conteo
     colegios: list.length, control
   };
-  return { final, colegios, checklist, bloqueados, modo, niveles: G.map(g => g.nivel), ioarrs, comparativo, Runa, P, escenarios, D, C, list, inv, dup, excluidos };
+  return { final, colegios, checklist, bloqueados, riesgos, anioRef, modo, niveles: G.map(g => g.nivel), ioarrs, comparativo, Runa, P, escenarios, D, C, list, inv, dup, excluidos };
 }
 
 /**
@@ -112,8 +120,13 @@ export function modeloIoarr(A, x, datos, p, fecha) {
   const nom = Object.fromEntries([...x.list.map(i => [x.D.locs[i][0], x.D.locName[i]]), ...(x.bloqueados || []).map(b => [b.cod, b.nom])]);
   const checklist = cods.map(cod => { const v = colegioDe(A.colegios, cod).inventario, ch = A.checklist?.[cod] || checklistColegio(null);
     return { cod, nombre: nom[cod], ...v, registrado: v.registrado || datos.inventario_registrado || '', completo: ch.completo, faltan: ch.faltan }; });
+  // Listado de riesgos de duplicación: los colegios de la IOARR con entregas o riesgo
+  const riesgos = cods.map(cod => ({ cod, nombre: nom[cod], ...(A.riesgos?.[cod] || riesgoDuplicacion(null, { anioRef: A.anioRef })), descuento: x.R.locales.find(l => l.cod === cod)?.descuento || null }))
+    .filter(r => r.riesgo || r.recientes.length || r.antiguas.length);
+  const enRiesgo = riesgos.filter(r => r.riesgo);
+  if (enRiesgo.length) M.faltan.push(`Riesgo de duplicación en ${enRiesgo.length === 1 ? '1 colegio' : enRiesgo.length + ' colegios'} (${enRiesgo.slice(0, 10).map(r => r.cod).join(', ')}${enRiesgo.length > 10 ? '…' : ''}): descuenta las entregas de los últimos ${VENTANA_DUP} años o explica por qué no hay duplicación.`);
   return Object.assign(M, { nivel: x.nivel, nombreIoarr: x.nombre, fichaActivos: ficha, vidaUtil: vida, completo: !M.faltan.length,
-    borrador: !A.final, bloqueados: x.bloqueados || [], checklist });
+    borrador: !A.final, bloqueados: x.bloqueados || [], checklist, riesgos, anioRef: A.anioRef ?? M.anioRef });
 }
 
 // La IOARR pedida (nivel); sin nivel o si no está, la primera

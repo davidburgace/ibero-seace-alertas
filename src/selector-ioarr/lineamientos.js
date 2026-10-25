@@ -210,10 +210,27 @@ const txt = (v, max) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, max
 const sino = v => ['si', 'no'].includes(v) ? v : '';
 const fechaOk = v => /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(String(v || '')) ? v : null;
 
+// Entregas previas de mobiliario (chequeo de duplicación)
+export const FUENTES_ENTREGA = { pronied: 'Pronied', minedu: 'Minedu', gore: 'Gobierno regional', ugel: 'UGEL', municipalidad: 'Municipalidad', otra: 'Otra' };
+export const TIPOS_ENTREGA = { kit: 'Kit (mesa + silla)', mesa: 'Mesa del estudiante', silla: 'Silla del estudiante', esc: 'Escritorio docente', sdoc: 'Silla docente', arm: 'Armario / estante' };
+export const VENTANA_DUP = 3;   // años: una entrega en los últimos 3 años es riesgo de duplicación
+const NIVELES = ['I', 'P', 'S', 'E'];
+function limpiarEntrega(e, anioMax) {
+  if (!e || typeof e !== 'object') return null;
+  const anio = Number(e.anio), cantidad = Number(e.cantidad);
+  if (!Number.isInteger(anio) || anio < 1990 || anio > anioMax) return null;
+  if (!Number.isInteger(cantidad) || cantidad < 0 || cantidad > 1e6) return null;
+  return { anio, cantidad, tipo: TIPOS_ENTREGA[e.tipo] ? e.tipo : 'kit', fuente: FUENTES_ENTREGA[e.fuente] ? e.fuente : 'otra',
+    nivel: NIVELES.includes(e.nivel) ? e.nivel : '', restar: e.restar === true, nota: txt(e.nota, 200) };
+}
+
 /** Valida los datos de un colegio. Lo desconocido se descarta; lo vacío queda vacío. */
-export function limpiarColegio(b = {}) {
+export function limpiarColegio(b = {}, anioMax = new Date().getFullYear() + 1) {
   const x = b && typeof b === 'object' ? b : {}, inv = x.inventario && typeof x.inventario === 'object' ? x.inventario : {};
   return {
+    // Entregas previas de mobiliario e inversión en ejecución (chequeo de duplicación)
+    entregas: (Array.isArray(x.entregas) ? x.entregas : []).slice(0, 30).map(e => limpiarEntrega(e, anioMax)).filter(Boolean),
+    inversion_ejecucion: x.inversion_ejecucion === true, inversion_codigo: txt(x.inversion_codigo, 30),
     // Inventario y baja (Lineamientos 2.4.C.e y 2.4.C.f)
     inventario: {
       registrado: sino(inv.registrado), contabilidad: sino(inv.contabilidad), baja: sino(inv.baja),
@@ -223,7 +240,7 @@ export function limpiarColegio(b = {}) {
   };
 }
 // Sin nada cargado: no hace falta guardar la fila
-export const colegioVacio = c => !c.nota && !Object.values(c.inventario).some(Boolean);
+export const colegioVacio = c => !c.nota && !Object.values(c.inventario).some(Boolean) && !c.entregas.length && !c.inversion_ejecucion && !c.inversion_codigo;
 export function limpiarColegios(obj) {
   const out = {};
   for (const [cod, v] of Object.entries(obj && typeof obj === 'object' ? obj : {}).slice(0, 50000)) {
@@ -251,3 +268,31 @@ export function checklistColegio(c, def = {}) {
   return { completo: !faltan.length, faltan };
 }
 export const AVISO_BORRADOR = 'BORRADOR CON TODOS LOS COLEGIOS: incluye colegios con el checklist de inventario y baja incompleto, que no entran al Formato 07-C final.';
+
+// ─── Chequeo de duplicación (entregas en los últimos 3 años) ─────────────────
+const vacioAj = () => ({ kit: 0, mesa: 0, silla: 0, esc: 0, sdoc: 0, arm: 0 });
+/**
+ * Riesgo de duplicación de un colegio y lo que se descuenta por nivel.
+ *   reciente  · entrega con año ≥ anioRef − 3
+ *   restar    · una entrega reciente marcada «restar» se descuenta de lo que se repone en su nivel
+ *               (en un colegio de un solo nivel, el nivel vacío vale; con varios, hay que indicarlo)
+ *   riesgo    · entrega reciente sin restar, inversión en ejecución u otra inversión vigente («Sí» sin excluir)
+ * @param niveles  niveles del colegio (nivelesDeLocal)
+ * @param dupEstado  'si' | 'no' | 'sin_verificar' (duplicidad.js); excluido: el colegio ya se excluyó
+ * @returns { riesgo, motivos, recientes, ajuste: { [nivel]: { kit, mesa, … } } }
+ */
+export function riesgoDuplicacion(c, { anioRef, niveles = [], dupEstado = 'sin_verificar', excluido = false } = {}) {
+  const x = c || limpiarColegio({}), desde = anioRef - VENTANA_DUP, motivos = [], ajuste = {};
+  const recientes = x.entregas.filter(e => e.anio >= desde);
+  for (const e of recientes) {
+    const n = e.nivel || (niveles.length === 1 ? niveles[0] : '');
+    const txtE = `${e.anio}: ${e.cantidad.toLocaleString('es-PE')} ${TIPOS_ENTREGA[e.tipo].toLowerCase()} (${FUENTES_ENTREGA[e.fuente]}${e.nivel ? ', ' + NIVN[e.nivel] : ''})`;
+    if (e.restar && n && niveles.includes(n)) { (ajuste[n] ??= vacioAj())[e.tipo] += e.cantidad; continue; }
+    motivos.push(e.restar && !n ? `entrega ${txtE}: indica el nivel para descontarla` : `entrega ${txtE} sin descontar`);
+  }
+  if (x.inversion_ejecucion) motivos.push(`inversión en ejecución${x.inversion_codigo ? ' ' + x.inversion_codigo : ''}`);
+  if (dupEstado === 'si' && !excluido) motivos.push('otra inversión vigente o reciente (marcada «Sí» en Mi selección)');
+  return { riesgo: motivos.length > 0, motivos, recientes, ajuste, antiguas: x.entregas.filter(e => e.anio < desde) };
+}
+// Suma de los ajustes de todos los niveles (para la IOARR única de comparación)
+export const ajusteTotal = aj => Object.values(aj || {}).reduce((a, o) => { for (const k in o) a[k] += o[k]; return a; }, vacioAj());

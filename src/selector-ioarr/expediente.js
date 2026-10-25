@@ -80,7 +80,7 @@ import { generarExcelCostos } from './excel-costos.js';
 import { armarModelo, limpiarDatosDoc, ESTADOS_ACTIVO, MODALIDADES, FUENTES_FIN } from './documentos.js';
 import { generar07C, generarMemoria, generarVerificacion, generarVidaUtil } from './word.js';
 import { leerDuplicidad, separarLocales } from './duplicidad.js';
-import { fichaActivos, modeloVidaUtil, FUENTES_VIDA_UTIL, limpiarColegio, colegioVacio, colegioDe, checklistColegio, DOCS_BAJA } from './lineamientos.js';
+import { fichaActivos, modeloVidaUtil, FUENTES_VIDA_UTIL, limpiarColegio, colegioVacio, colegioDe, checklistColegio, DOCS_BAJA, FUENTES_ENTREGA, TIPOS_ENTREGA, VENTANA_DUP } from './lineamientos.js';
 import { generarExcelLineamientos } from './excel-lineamientos.js';
 import { calcularPaquete, modeloIoarr, elegirIoarr } from './paquete.js';
 import { porNivel, modoDe, sinNivel, nivelesDeLocal, vistaNivel, limpiarPorNivel, NOMBRE_NIVEL } from './niveles.js';
@@ -344,7 +344,7 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
       req_ficha: x.ficha && idxCod.has(x.cod_local) ? requeridoFicha(x, D, P, idxCod.get(x.cod_local)) : null,
       archivos: archivos.filter(a => a.cod_local === x.cod_local).map(sinRuta) }]));
     const comun = { precios, estructura, uit: { anio: anioUit, valor: uit?.valor ?? null } };
-    const K = calcularPaquete({ D, P, codigos, dup: dup.mapa, inv, comun, datosDoc, final, modo: modoDe(p) });
+    const K = calcularPaquete({ D, P, codigos, dup: dup.mapa, inv, comun, datosDoc, final, modo: modoDe(p), anioRef: anioLima() });
     return { ...K, detalle, efectivos, estructura, factores, anioUit, uit, sinMigracionEst: !!fila && !('estructura' in fila) };
   }
   // La IOARR pedida (?nivel=P); sin nivel o con una sola IOARR, la primera
@@ -911,12 +911,14 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     const fila = (i, excluido) => {
       const cod = D.locs[i][0], c = colegioDe(A.colegios, cod);
       return { cod, nombre: D.locName[i], dist: D.dists[D.locs[i][1]][0], niveles: nivelesDeLocal(D, i).map(n => NOMBRE_NIVEL[n]), est: D.locEst[i], aulas: D.locAul[i].length,
-        datos: c, checklist: A.checklist[cod] || checklistColegio(c), excluido_dup: excluido, costo: porCod[cod] || null };
+        datos: c, checklist: A.checklist[cod] || checklistColegio(c), riesgo: A.riesgos?.[cod] ? { riesgo: A.riesgos[cod].riesgo, motivos: A.riesgos[cod].motivos } : null,
+        niveles_k: nivelesDeLocal(D, i), excluido_dup: excluido, costo: porCod[cod] || null };
     };
     const filas = [...A.list.map(i => fila(i, false)), ...A.excluidos.map(i => fila(i, true))];
     return {
-      filas, docs_baja: DOCS_BAJA,
-      resumen: { colegios: A.list.length, bloqueados: A.bloqueados.length, completos: A.list.length - A.bloqueados.length, excluidos_dup: A.excluidos.length },
+      filas, docs_baja: DOCS_BAJA, fuentes_entrega: FUENTES_ENTREGA, tipos_entrega: TIPOS_ENTREGA, ventana: VENTANA_DUP, anio: A.anioRef,
+      resumen: { colegios: A.list.length, bloqueados: A.bloqueados.length, completos: A.list.length - A.bloqueados.length, excluidos_dup: A.excluidos.length,
+        riesgo: Object.values(A.riesgos || {}).filter(r => r.riesgo).length },
       comparativo: A.comparativo
     };
   }
@@ -1150,7 +1152,7 @@ const LEEME_PAQUETE = (proyecto, paq, D, idxDe) => [
 ].join('\r\n');
 
 // Lo que va al Excel de anexos de los Lineamientos, desde el modelo de una IOARR
-export const anexosDe = M => ({ ficha: M.fichaActivos, checklist: M.checklist || [], borrador: !!M.borrador });
+export const anexosDe = M => ({ ficha: M.fichaActivos, checklist: M.checklist || [], riesgos: M.riesgos || [], anioRef: M.anioRef, borrador: !!M.borrador });
 
 export function textoCriterios(P) {
   const est = { b: 'Bueno', r: 'Regular', m: 'Malo' }[P.carpEstado];

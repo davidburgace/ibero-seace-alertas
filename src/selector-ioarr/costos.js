@@ -249,7 +249,8 @@ export function regularFicha(D, C, i, ficha, t, k, umbral) {
  *   estructura   limpiarEstructura(): kit, distribución de kits, transporte por pieza, %, liquidación
  *   uit          { anio, valor } | null
  *   inventario   { [codLocal]: { bienes: { mesa: { b, r, m } }, fecha_visita, observacion } } verificado en campo
- *   grupos       opcional: [{ clave, D, C, list, inventario }] varias IOARR que se costean juntas
+ *   ajustes      { [codLocal]: { kit, mesa, silla, esc, sdoc, arm } } entregas previas a descontar (lineamientos.js)
+ *   grupos       opcional: [{ clave, D, C, list, inventario, ajustes }] varias IOARR que se costean juntas
  *                (una por nivel, ver niveles.js). Reemplaza a D, C, list e inventario.
  *
  * Con inventario verificado, en ese local y tipo se reemplaza el censo:
@@ -262,7 +263,7 @@ export function regularFicha(D, C, i, ficha, t, k, umbral) {
  * Con grupos, los % se aplican igual en cada IOARR y la liquidación se reparte entre
  * todos los locales de todas, según su costo directo: la suma de las IOARR es el total.
  */
-export function costear({ D, C, list, precios, estructura, uit, inventario, grupos }) {
+export function costear({ D, C, list, precios, estructura, uit, inventario, ajustes, grupos }) {
   const E = limpiarEstructura(estructura);
   const val = k => precios?.[k] != null && Number(precios[k]) >= 0 ? Number(precios[k]) : null;
   // Precio por línea: el de la talla o, si no tiene, el de su tipo
@@ -274,7 +275,7 @@ export function costear({ D, C, list, precios, estructura, uit, inventario, grup
     const m = pu[LINEAS.findIndex(x => x.k === `mesa_${z.k}`)], s = pu[LINEAS.findIndex(x => x.k === `silla_${z.k}`)];
     return m == null || s == null ? null : m + s;
   });
-  const fuentes = grupos || [{ clave: null, D, C, list, inventario }];
+  const fuentes = grupos || [{ clave: null, D, C, list, inventario, ajustes }];
   // Muebles que entran: cada IOARR (nivel) tiene su composición; en el total, los de alguna
   const inclDe = g => g.C?.incl || TIPOS.map(() => true);
   const incl = TIPOS.map((_, t) => fuentes.some(g => inclDe(g)[t]));
@@ -359,6 +360,14 @@ function localDe(g, i) {
     verificado = { tipos, adquisicion: inv.adquisicion || {}, adq_estimada: inv.adq_estimada || [], fecha_visita: inv.fecha_visita, responsable: inv.responsable || null, observacion: inv.observacion,
       ficha: inv.ficha ? { archivo: inv.ficha.archivo, importado_en: inv.ficha.importado_en, verificador: inv.ficha.verificador } : null };
   }
+  // Entregas previas de los últimos 3 años marcadas «restar» (lineamientos.js): se descuentan de lo que se
+  // repone. El kit descuenta mesa y silla; mesa y silla sueltas, cada una lo suyo.
+  const aj = g.ajustes?.[l[0]], descuento = { tipos: TIPOS.map(() => 0), kits: 0 };
+  if (aj) TIPOS.forEach((k, t) => {
+    if (!incl[t]) return;
+    const d = t === 0 ? aj.kit + aj.mesa : t === 1 ? aj.kit + aj.silla : aj[k] || 0, q = Math.min(rep[t], d);
+    rep[t] -= q; descuento.tipos[t] = q; repVerif[t] = Math.min(repVerif[t], rep[t]);
+  });
   // Tipos sin inventario verificado: su Regular sale del censo (estimación), salvo que no haya
   if (todoCubierto) TIPOS.forEach((k, t) => { if (incl[t] && !verificado?.tipos.includes(k) && C.L.r[t * nL + i] > 0) todoCubierto = false; });
   regular.cubierto = hayDato && todoCubierto;
@@ -384,12 +393,18 @@ function localDe(g, i) {
   // Kits: MAX(mesas, sillas) por aula, sumado en el local. Con inventario verificado de mesa
   // o silla (que es por local), MAX del local, repartido entre tallas como los kits del censo.
   const mat = D.locAul[i].reduce((a, ai) => a + D.aulas[ai][8], 0);
-  const kits = !incl[0] || !incl[1] ? 0 : kitLocal ? (esc === 'capacidad' ? Math.max(rep[0], rep[1]) : Math.min(mat, Math.max(rep[0], rep[1]))) : W.kits;
+  let kits = !incl[0] || !incl[1] ? 0 : kitLocal ? (esc === 'capacidad' ? Math.max(rep[0], rep[1]) : Math.min(mat, Math.max(rep[0], rep[1]))) : W.kits;
+  // Kits entregados (o mesa y silla entregadas juntas) se descuentan de los kits
+  if (aj && !kitLocal) { const q = Math.min(kits, aj.kit + Math.min(aj.mesa, aj.silla)); kits -= q; descuento.kits = q; }
+  else if (aj && kits) {   // con inventario por local, los kits ya salen de mesa y silla descontadas
+    const antes = esc === 'capacidad' ? Math.max(rep[0] + descuento.tipos[0], rep[1] + descuento.tipos[1]) : Math.min(mat, Math.max(rep[0] + descuento.tipos[0], rep[1] + descuento.tipos[1]));
+    descuento.kits = Math.max(0, antes - kits);
+  }
   const w0 = W[0];
   const kitTalla = repartirCon(kits, W.kit, w0.est, w0.aul, w0.niv);
   return {
     i, grupo: g.clave, cod: l[0], nom: D.locName[i], dist: d[0], prov: D.provs[d[2]], ubigeo: d[1], rural: !!l[4],
-    est: D.locEst[i], aul: D.locAul[i].length, rep, repVerif, fal, diag, verificado, lin, kits, kitTalla, kitPorLocal: kitLocal, regular
+    est: D.locEst[i], aul: D.locAul[i].length, rep, repVerif, fal, diag, verificado, lin, kits, kitTalla, kitPorLocal: kitLocal, regular, descuento
   };
 }
 
@@ -435,7 +450,9 @@ function resumir(locales, { pu, puGeneral, propio, incl, puKit, kit, E, escenari
     locales: n, est: sum(l => l.est), aul: sum(l => l.aul),
     bienes: sum(l => l.bienes), piezas: sum(l => l.piezas), cd: sum(l => l.cd),
     rep: sum(l => l.rep.reduce((a, b) => a + b, 0)), repVerif: sum(l => l.repVerif.reduce((a, b) => a + b, 0)), fal: sum(l => l.fal.reduce((a, b) => a + b, 0)), falValor: sum(l => l.falValor),
-    kits: sum(l => l.kits)
+    kits: sum(l => l.kits),
+    // Descontado por entregas previas de los últimos 3 años (no entra a lo que se repone)
+    descontado: sum(l => l.descuento?.tipos.reduce((a, b) => a + b, 0) || 0), kitsDescontados: sum(l => l.descuento?.kits || 0)
   };
   T.transporte = r2(T.piezas * E.transporte_pieza);
   T.bienes = r2(T.bienes); T.cd = r2(T.bienes + T.transporte);
@@ -534,6 +551,8 @@ function resumir(locales, { pu, puGeneral, propio, incl, puKit, kit, E, escenari
   if (T.fal > 0) avisos.push({ tipo: 'faltante', texto: 'El faltante (brecha de dotación, no reposición) es lo que falta para llegar a lo requerido. No entra a lo que se repone, al costo de inversión ni al Formato 07-C: amplía la capacidad de la UP y una IOARR de reposición no se puede sustentar en eso (Lineamientos IOARR del MEF, 2.4.C). Se muestra valorizado aparte, como referencia.' });
   if (!valorUit) avisos.push({ tipo: 'uit', texto: `Carga el valor de la UIT${U.anio ? ' de ' + U.anio : ''} para saber si el registro del Formato 07-C es abreviado o completo.` });
   else if (U.supera) avisos.push({ tipo: 'uit75', texto: `El monto de inversión supera las ${LIMITE_UIT} UIT (UIT ${U.anio}): corresponde el registro completo del Formato 07-C (secciones D, E y F).` });
+  const conDesc = locales.filter(l => l.descuento?.tipos.some(q => q > 0) || l.descuento?.kits > 0);
+  if (conDesc.length) avisos.push({ tipo: 'duplicacion', texto: `Se ${T.descontado === 1 ? 'descuenta' : 'descuentan'} ${T.descontado.toLocaleString('es-PE')} ${T.descontado === 1 ? 'bien' : 'bienes'}${T.kitsDescontados ? ` (${T.kitsDescontados.toLocaleString('es-PE')} kits)` : ''} por entregas previas de mobiliario de los últimos 3 años en ${conDesc.length === 1 ? '1 colegio' : conDesc.length + ' colegios'} (${conDesc.slice(0, 15).map(l => l.cod).join(', ')}${conDesc.length > 15 ? '…' : ''}).` });
   const verif = locales.filter(l => l.verificado?.tipos.length);
   if (verif.length) avisos.push({ tipo: 'inventario', texto: `${verif.length === 1 ? '1 local usa' : verif.length + ' locales usan'} inventario verificado en campo en lugar del Censo Educativo (${verif.map(l => l.cod).join(', ')}). Adjunta al expediente el sustento de la visita (acta, fotos, firma del director).` });
 
