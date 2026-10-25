@@ -88,14 +88,15 @@ test('caso de control en el 07-C, el Excel y el ZIP: sin gastos generales ni uti
   assert.equal(M.F.subtotalActivos, 3848832.00 + 692789.76);
   assert.deepEqual([M.F.expediente, M.F.supervision, M.F.liquidacion], [115464.96, 192441.60, 15000]);
   assert.equal(M.F.metas.length, 1);
-  assert.equal(M.F.metas[0].unidad, 'Kit de mobiliario');
+  // Meta física en «número de mobiliario»: un kit cuenta como 2 (mesa y silla)
+  assert.equal(M.F.metas[0].unidad, 'Número de mobiliario'); assert.equal(M.F.metas[0].numero, 2 * M.F.metas[0].cantidad);
   assert.equal(M.F.metas[0].costo, 4541621.76);
   const t07 = await textoDocx(await generar07C(M)), tMem = await textoDocx(await generarMemoria(M));
   for (const t of [t07, tMem]) {
     assert.doesNotMatch(t, /utilidad|gastos generales|imprevistos|gestión del proyecto/i);
     assert.match(t, /4\.864\.528,32|4,864,528\.32/);
   }
-  assert.match(t07, /Kit de mobiliario/);
+  assert.match(t07, /kits: mesa \+ silla/);
   const x = await textoXlsx(await generarExcelCostos(R, { proyecto: 'Control', region: 'Prueba', fecha: '2026-10-23', escenario: M.escenarioTexto, efectivos: preciosEfectivos({}, {}) }));
   assert.match(x, /MONTO DE INVERSIÓN/);
   assert.match(x, /4864528\.32/);
@@ -144,12 +145,12 @@ test('kit por aula: el mayor entre mesas y sillas en cada aula, sumado en el loc
   assert.equal(costear({ D, C, list: [0], precios: precioNum(), estructura: { kit: true }, uit: null, inventario: inv }).totales.kits, 10);
 });
 
-test('kit en el 07-C: una línea «MOBILIARIO DE AULA» con unidad «Kit de mobiliario»; los demás aparte', async () => {
+test('kit en el 07-C: una línea «MOBILIARIO DE AULA» en «número de mobiliario» (kit = 2); los demás aparte', async () => {
   const D = region([[{ grado: '2° Primaria', f: { 2: 10, 10: 2, 13: 1 } }, { grado: '5° Primaria', f: { 2: 1, 10: 8, 19: 1 } }]]);
   const C = calc(D, DEF), R = costear({ D, C, list: [0], precios: precioNum({ precios: { esc: 300, arm: 400 } }), estructura: { kit: true }, uit: { anio: 2026, valor: 1 } });
   const M = armarModelo({ R, D, list: [0], proyecto: { nombre: 'Kit', region: 'Prueba' }, datos: limpiarDatosDoc({}), precios: {}, P: DEF, fecha: '2026-10-23' });
   const t = await textoDocx(await generar07C(M));
-  assert.match(t, /MOBILIARIO DE AULA\nMOBILIARIO\nKit de mobiliario\n18\n/);
+  assert.match(t, /MOBILIARIO DE AULA\n\(18 kits: mesa \+ silla\)\nMOBILIARIO\nNúmero de mobiliario\n36\n/);
   assert.match(t, /MOBILIARIO DE AULA\n\(escritorio docente\)/);
   assert.match(t, /MOBILIARIO DE AULA\n\(armario \/ estante\)/);
   assert.doesNotMatch(t, /\(silla docente\)/);

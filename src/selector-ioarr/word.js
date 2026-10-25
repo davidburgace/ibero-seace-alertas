@@ -116,12 +116,12 @@ const tablaUPs = M => M.upPor === 'modular'
       u.lat != null ? `Lat. ${u.lat}\nLong. ${u.lon}` : '', ent(u.est)]), { num: [4], anchos: [12, 33, 30, 14, 11], size: 16 });
 const notaUPs = M => M.upPor === 'modular' ? [nota(`UP listadas por código modular: ${ent((M.upsRegistro || []).length)} servicios educativos, incluidos los de locales sin bienes a reponer.`)] : [];
 // Activo de una meta: con kit, «MOBILIARIO DE AULA» en una línea
-const activoMeta = m => m.k === 'kit' ? m.activo : `${m.activo}\n(${m.nombre.toLowerCase()})`;
+const activoMeta = m => m.k === 'kit' ? `${m.activo}\n(${ent(m.cantidad)} kits: mesa + silla)` : `${m.activo}\n(${m.nombre.toLowerCase()})`;
 
 // Metas y costo según la Tabla 3.7: A. costo directo (activos), B. otros costos de inversión, C = A + B
 const filaCosto = (txt, v, o = {}) => [{ v: txt, span: 6, gris: !o.bold, bold: o.bold }, { v: NS.format(v), gris: !o.bold, bold: o.bold }, { v: '', gris: !o.bold }, { v: '', gris: !o.bold }];
 const tablaMetas = M => tabla(['Tipo de IOARR', 'Acción', 'Activo', 'Tipo de factor productivo', 'Unidad de medida', 'Cantidad', 'Costo de inversión (S/)', 'Inicio', 'Término'], [
-  ...M.F.metas.map(m => ['REPOSICIÓN', 'ADQUISICIÓN', activoMeta(m), 'MOBILIARIO', m.unidad, { v: ent(m.cantidad) }, { v: NS.format(m.costo) }, M.F.inicio || PEND, M.F.fin || PEND]),
+  ...M.F.metas.map(m => ['REPOSICIÓN', 'ADQUISICIÓN', activoMeta(m), 'MOBILIARIO', m.unidad, { v: ent(m.numero ?? m.cantidad) }, { v: NS.format(m.costo) }, M.F.inicio || PEND, M.F.fin || PEND]),
   filaCosto('A. COSTO DIRECTO (activos, con IGV)', M.F.subtotalActivos, { bold: true }),
   filaCosto('EXPEDIENTE TÉCNICO O DOCUMENTO EQUIVALENTE', M.F.expediente),
   filaCosto('SUPERVISIÓN', M.F.supervision),

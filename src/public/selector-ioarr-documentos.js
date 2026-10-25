@@ -150,7 +150,8 @@ function pintar() {
       <h3>Por tipo de bien</h3>
       <p class="sub">Antigüedad, vida útil estimada, estado y mantenimiento del mobiliario a reponer (E.3 y 2.4.C.b), y vida útil y mantenimiento anual del nuevo (F.4 o G.3). La antigüedad vacía se toma del año de adquisición registrado en cada local.</p>
       <div class="tabla-wrap"><table class="tabla tabla-doc"><thead><tr><th>Tipo de bien</th><th>Antigüedad (años)</th><th>Vida útil estimada (años)</th><th>Estado actual</th><th>Mant. anual actual (S/)</th></tr></thead><tbody>${tipos || '<tr><td colspan="5" class="vacio">No hay bienes a reponer.</td></tr>'}</tbody></table></div>
-      <p class="sub">Mobiliario nuevo, por meta del 07-C: vida útil y costo anual de mantenimiento (puede ser 0).</p>
+      <p class="sub">Mobiliario nuevo, por meta del 07-C: vida útil y costo anual de mantenimiento (puede ser 0). El cronograma de mantenimiento del 07-C repite el monto anual durante los años indicados.</p>
+      <div class="form-grid">${campo('mant_anios', 'Años del cronograma de mantenimiento', { tipo: 'number', min: 1, max: 20, ph: '3' })}</div>
       <div class="tabla-wrap"><table class="tabla tabla-doc"><thead><tr><th>Meta</th><th>Vida útil del nuevo (años)</th><th>Mant. anual del nuevo (S/)</th></tr></thead><tbody>${metas || '<tr><td colspan="3" class="vacio">No hay metas.</td></tr>'}</tbody></table></div>
       <div class="form-grid">
         ${campo('informe_vida_util', 'Documento de sustento de la vida útil', { ancho: true, ph: 'Ej.: Informe N° …-2026-UGEL…/APP, control patrimonial', ayuda: 'Va en el informe técnico de vida útil. Vacío = la antigüedad sale del año de adquisición registrado en cada local, si lo cargaste.' })}

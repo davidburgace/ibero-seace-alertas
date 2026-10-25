@@ -86,7 +86,9 @@ test('Moquegua «mariscal»: inversión masiva, cronogramas que suman exacto y s
   for (const a of C.activos) cerca(a.valores.reduce((x, y) => x + y, 0), a.total, 'cronograma de ' + a.nombre);
   for (const m of C.metas) assert.equal(m.valores.reduce((x, y) => x + y, 0), m.total);
   assert.equal(M.F.inicio, '01/03/2027'); assert.equal(M.F.fin, '31/07/2027');
-  assert.equal(M.F.mantenimiento.anios, 12);
+  // Cronograma de mantenimiento: 3 años por defecto, con el monto anual de cada meta
+  assert.equal(M.F.mantenimiento.anios, 3);
+  assert.ok(M.F.mantenimiento.filas.every(f => f.valores.length === 3 && f.valores.every(v => v === f.anual)));
   assert.ok(!M.faltan.length, 'pendientes: ' + M.faltan.join(' | '));
 });
 

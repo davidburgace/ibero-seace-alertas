@@ -47,7 +47,10 @@ function descripcionMeta(m, precios, refTecnica) {
 
 // ─── Datos que carga el usuario ─────────────────────────────────────────────
 export const ESTADOS_ACTIVO = ['REGULAR', 'MALO', 'MUY MALO', 'IRRECUPERABLE'];
-const UNIDAD_META = { kit: 'Kit de mobiliario', mesa: 'Número de mobiliario (puestos)', silla: 'Número de mobiliario', esc: 'Número de mobiliario', sdoc: 'Número de mobiliario', arm: 'Número de mobiliario' };
+// Meta física en «número de mobiliario»: un kit cuenta como 2 (mesa y silla)
+export const PIEZAS_KIT = 2;
+export const MANT_ANIOS = 3;   // años del cronograma de mantenimiento (precedente de IOARR masivas aprobadas)
+const UNIDAD_META = { kit: 'Número de mobiliario', mesa: 'Número de mobiliario (puestos)', silla: 'Número de mobiliario', esc: 'Número de mobiliario', sdoc: 'Número de mobiliario', arm: 'Número de mobiliario' };
 const PLURAL = { kit: 'kits de mobiliario (mesa + silla del estudiante)', mesa: 'mesas del estudiante', silla: 'sillas del estudiante', esc: 'escritorios del docente', sdoc: 'sillas del docente', arm: 'armarios o estantes' };
 // Clasificación funcional (verificar contra el PMI). Solo se conoce el grupo de Secundaria (0105);
 // los demás se escriben en Documentos (grupo_funcional) y, mientras falten, quedan pendientes.
@@ -141,6 +144,8 @@ export function limpiarDatosDoc(b = {}) {
     mant_actual: porTipo(b.mant_actual, v => numero(v, 0, 1e9)),
     vida_util: porTipo(b.vida_util, v => entero(v, 1, 30)),
     mant_nuevo: porTipo(b.mant_nuevo, v => numero(v, 0, 1e9)),
+    // Años del cronograma de mantenimiento del mobiliario nuevo (3 por defecto)
+    mant_anios: entero(b.mant_anios, 1, 20),
     sustento: parrafo(b.sustento),
     // F. Plazo
     fecha_inicio: fecha,
@@ -259,7 +264,7 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, efectivos = 
   //    así las metas suman el costo directo + IGV de la estructura ──
   const igvPct = R.estructura?.params?.igv ?? 18;
   const metas = metasR.map(m => ({ k: m.k, nombre: m.n, plural: PLURAL[m.k], activo: 'MOBILIARIO DE AULA', unidad: UNIDAD_META[m.k] || 'Número de mobiliario',
-    cantidad: m.cantidad, porTalla: m.porTalla, costo: r2(m.cd * (1 + igvPct / 100)) }));
+    cantidad: m.cantidad, numero: m.k === 'kit' ? m.cantidad * PIEZAS_KIT : m.cantidad, porTalla: m.porTalla, costo: r2(m.cd * (1 + igvPct / 100)) }));
   if (metas.length) metas[metas.length - 1].costo = r2(T.cdIgv - metas.slice(0, -1).reduce((a, m) => a + m.costo, 0));
   // Tabla 3.7: A = costo directo (activos con IGV); B = documento equivalente + supervisión + liquidación + control concurrente
   const subtotalActivos = r2(T.cdIgv);
@@ -283,17 +288,18 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, efectivos = 
     supervision: { valores: repartir(r2(supervision), N), total: r2(supervision) },
     liquidacion: { valores: [...Array(N - 1).fill(0), liquidacion], total: liquidacion },
     control: control ? { valores: repartir(r2(control), N), total: r2(control) } : null,
-    metas: metas.map(m => ({ nombre: m.nombre, unidad: m.unidad, valores: repartirEnteros(m.cantidad, N), total: m.cantidad }))
+    metas: metas.map(m => ({ nombre: m.nombre, unidad: m.unidad, valores: repartirEnteros(m.numero, N), total: m.numero }))
   } : null;
   const plazoTexto = enDias ? (d.dias ? `${d.dias} días` : null) : (d.meses ? `${d.meses} ${d.meses === 1 ? 'mes' : 'meses'}` : null);
 
   // ── Mantenimiento de los activos nuevos (por meta; el costo puede ser 0) ──
-  const anios = Math.min(20, Math.max(0, ...metas.map(m => d.vida_util[m.k] || 0)));
+  // Cronograma de mantenimiento: 3 años (editable), con el monto anual de cada meta (editable, puede ser 0)
+  const anios = d.mant_anios || MANT_ANIOS;
   const mantenimiento = {
     inicio: fin ? new Date(Date.UTC(fin.getUTCFullYear(), fin.getUTCMonth() + 1, 1)) : null,
     anios,
     filas: metas.map(m => ({ nombre: m.nombre, anual: d.mant_nuevo[m.k] ?? null, vida: d.vida_util[m.k] ?? null,
-      valores: Array.from({ length: anios }, (_, j) => d.mant_nuevo[m.k] != null && j < (d.vida_util[m.k] || 0) ? d.mant_nuevo[m.k] : 0) }))
+      valores: Array.from({ length: anios }, () => d.mant_nuevo[m.k] ?? 0) }))
   };
   mantenimiento.totales = Array.from({ length: anios }, (_, j) => r2(mantenimiento.filas.reduce((a, f) => a + f.valores[j], 0)));
 
