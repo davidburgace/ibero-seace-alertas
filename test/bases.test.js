@@ -1,7 +1,7 @@
 // Generador de bases OxI: marcadores, documento equivalente, montos, validaciones y .docx de ejemplo.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync, mkdtempSync } from 'node:fs';
+import { writeFileSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import JSZip from 'jszip';
@@ -11,6 +11,7 @@ import {
   montoEnLetras, compararFichas, revisarNeutralidad, valoresMarcadores, cuadroCantidades, precargar
 } from '../src/selector-ioarr/bases.js';
 import { ESPECIFICACIONES } from '../src/selector-ioarr/bases-especificaciones.js';
+import { GOBIERNOS_REGIONALES, goreDe } from '../src/selector-ioarr/entidades-gore.js';
 import { generarBasesDocx } from '../src/selector-ioarr/word-bases.js';
 import { FICHA_PRUEBA, CTX_PRUEBA } from './helpers/ficha-bases.js';
 
@@ -204,6 +205,43 @@ test('precarga: toma de la app nombre, CUI, entidad, montos y no inventa la supe
   assert.deepEqual(datos, { NOMBRE_IOARR: 'IOARR X', CUI: '2600001', ENTIDAD: 'Gobierno Regional X', UF_NOMBRE: 'UF X', COMPONENTE: 'Equipamiento', MONTO_DOC_EQUIVALENTE: 2000, MONTO_EJECUCION: 70000, MONTO_SUP_EJECUCION: 3500 });
   assert.ok(!('MONTO_SUP_DOC_EQUIVALENTE' in datos) && !('PLAZO_EJECUCION_DIAS' in datos) && !('PLAZO_DOC_EQUIVALENTE_DIAS' in datos));
   assert.match(notas.COMPONENTE, /Supuesto/);
+});
+
+test('precarga del Gobierno Regional: RUC, domicilio y sede de la región del proyecto; nunca si la entidad es otra', () => {
+  const gore = goreDe('Moquegua');
+  const { datos, notas } = precargar({ M: null, gore });
+  assert.equal(datos.ENTIDAD, 'Gobierno Regional de Moquegua');
+  assert.equal(datos.ENTIDAD_RUC, '20519752604');
+  assert.match(datos.ENTIDAD_DOMICILIO, /MARISCAL DOMINGO NIETO.*distrito de Moquegua, provincia de Mariscal Nieto/);
+  assert.equal(datos.PROVINCIA_NOTIFICACION, 'Mariscal Nieto');
+  assert.equal(datos.CIUDAD_JURISDICCION, 'Moquegua');
+  assert.match(notas.ENTIDAD_RUC, /SUNAT/);
+  // La ficha valida el RUC precargado
+  assert.ok(!validarFicha(ficha({ ENTIDAD_RUC: datos.ENTIDAD_RUC }), CTX_PRUEBA).errores.some(e => e.k === 'ENTIDAD_RUC'));
+  // Radar con un Gobierno Regional: su nombre manda, los demás datos siguen
+  const conRadar = precargar({ M: null, gore, radar: { entidad: 'GOBIERNO REGIONAL MOQUEGUA' } }).datos;
+  assert.equal(conRadar.ENTIDAD, 'GOBIERNO REGIONAL MOQUEGUA');
+  assert.equal(conRadar.ENTIDAD_RUC, '20519752604');
+  // Radar con una municipalidad: nada del Gobierno Regional
+  const muni = precargar({ M: null, gore, radar: { entidad: 'Municipalidad Provincial de Ilo' } }).datos;
+  assert.deepEqual(Object.keys(muni).filter(k => k.startsWith('ENTIDAD_') || ['PROVINCIA_NOTIFICACION', 'CIUDAD_JURISDICCION'].includes(k)), []);
+  assert.equal(muni.ENTIDAD, 'Municipalidad Provincial de Ilo');
+  // Lima: aviso de Lima Metropolitana
+  assert.match(precargar({ M: null, gore: goreDe('Lima') }).notas.ENTIDAD, /Lima Metropolitana/);
+});
+
+test('gobiernos regionales: uno por cada región del selector, con RUC válido, activo y habido', () => {
+  const indice = JSON.parse(readFileSync(new URL('../src/public/data/selector-ioarr/2025/index.json', import.meta.url), 'utf8'));
+  const regiones = indice.regiones.map(r => r.nombre);
+  assert.equal(GOBIERNOS_REGIONALES.length, 25);
+  assert.deepEqual(GOBIERNOS_REGIONALES.map(g => g.region).sort(), [...regiones].sort());
+  assert.equal(new Set(GOBIERNOS_REGIONALES.map(g => g.ruc)).size, 25, 'RUC repetido');
+  for (const g of GOBIERNOS_REGIONALES) {
+    assert.match(g.ruc, /^20\d{9}$/, g.region);
+    assert.ok(g.estado === 'ACTIVO' && g.condicion === 'HABIDO', g.region);
+    assert.ok(g.domicilio && g.provincia && g.ciudad, g.region);
+  }
+  assert.equal(goreDe('Región inventada'), null);
 });
 
 test('residuos del proceso de origen: siguen en el convenio fijo y se detectan', () => {

@@ -26,6 +26,7 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { ESPECIFICACIONES, NORMAS_SUGERIDAS } from './bases-especificaciones.js';
 import { descuadre } from './montos.js';
+import { FUENTE_GORE, esEntidadGore } from './entidades-gore.js';
 
 const DIR = new URL('../../templates/bases/', import.meta.url);
 export const MANIFEST = JSON.parse(readFileSync(new URL('MANIFEST.json', DIR), 'utf8'));
@@ -444,14 +445,24 @@ export function armarTexto(d) {
 // ─── Precarga desde la app ──────────────────────────────────────────────────
 /**
  * Lo que la app ya conoce. M: modelo del expediente de la IOARR (documentos.js / paquete.js);
- * radar: registro de Radar IOARR (entidad); datosDoc: datos de Documentos.
+ * radar: registro de Radar IOARR (entidad); datosDoc: datos de Documentos;
+ * gore: Gobierno Regional de la región del proyecto (entidades-gore.js).
  * @returns { datos, notas } notas = de dónde sale cada valor
  */
-export function precargar({ M, radar = null, datosDoc = {} }) {
+export function precargar({ M, radar = null, datosDoc = {}, gore = null }) {
   const datos = {}, notas = {};
   const poner = (k, v, nota) => { if (v != null && v !== '') { datos[k] = v; notas[k] = nota; } };
   poner('NOMBRE_IOARR', M?.nombre, 'Nombre de la IOARR del expediente (Documentos o nombre propuesto).');
   poner('CUI', M?.cui, 'CUI de la IOARR (Documentos o Radar IOARR).');
+  // Gobierno Regional de la región del proyecto, salvo que Radar diga que la entidad es otra (p. ej. una municipalidad)
+  if (gore && esEntidadGore(radar?.entidad)) {
+    const lima = gore.region === 'Lima' ? ' Ojo: los colegios de Lima Metropolitana (UGEL 01 a 07) no dependen del Gobierno Regional de Lima.' : '';
+    poner('ENTIDAD', gore.entidad, `Gobierno Regional de la región del proyecto.${lima}`);
+    poner('ENTIDAD_RUC', gore.ruc, `${FUENTE_GORE} (sede central, ${gore.estado.toLowerCase()} y ${gore.condicion.toLowerCase()}). Verifícalo en SUNAT antes de exportar.`);
+    poner('ENTIDAD_DOMICILIO', gore.domicilio, `Domicilio fiscal de la sede central (${FUENTE_GORE}). Confirma que es el domicilio legal que usa la entidad.`);
+    poner('PROVINCIA_NOTIFICACION', gore.provincia, 'Provincia de la sede del Gobierno Regional.');
+    poner('CIUDAD_JURISDICCION', gore.ciudad, 'Ciudad de la sede del Gobierno Regional.');
+  }
   poner('ENTIDAD', radar?.entidad, 'Entidad del registro de Radar IOARR vinculado.');
   poner('UF_NOMBRE', datosDoc?.uf, 'Unidad Formuladora (Documentos).');
   poner('COMPONENTE', 'Equipamiento', 'Supuesto: la reposición de mobiliario es del componente Equipamiento.');
