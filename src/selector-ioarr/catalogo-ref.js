@@ -23,7 +23,7 @@ export const IGV = 18;
 export const TIPOS_DOC = { '07-C': 'Formato 07-C', bases: 'Bases', estudio_mercado: 'Estudio de mercado', propio: 'Precio propio (uso interno)', por_confirmar: 'Por confirmar' };
 export const NIVELES = { Inicial: 'Inicial', Primaria: 'Primaria', Secundaria: 'Secundaria', por_confirmar: 'Por confirmar' };
 export const UNIDADES = { kit: 'Kit (mesa + silla)', mesa: 'Mesa', silla: 'Silla', carpeta: 'Carpeta', pieza: 'Pieza de mobiliario (sin especificar)' };
-export const MATERIALES = { 'metal-madera': 'Metal y madera', 'metal-polipropileno': 'Metal y polipropileno', por_confirmar: 'Por confirmar' };
+export const MATERIALES = { madera: 'Madera', 'metal-madera': 'Metal y madera', 'metal-polipropileno': 'Metal y polipropileno', por_confirmar: 'Por confirmar' };
 export const CONFIANZAS = { alta: 'Alta', media: 'Media', baja: 'Baja' };
 export const MIN_FUENTES = 3;
 export const RANGO_MIN = 90, RANGO_MAX = 110;   // propuesta económica válida: 90 %–110 % del monto referencial
@@ -184,6 +184,7 @@ export function referencia(registros, { nivel, sel = {} }) {
     if (x.propio) return { precio: null, n: 0, fuente: null, avisos: ['El precio propio no puede ser la referencia'], registros: [] };
     if (!x.comparable) return { precio: null, n: 0, fuente: describir(x), avisos: [`La fuente elegida no es comparable: ${x.motivo}`], registros: [] };
     if (x.nivel !== nivelNom && x.nivel !== 'por_confirmar') avisos.push(`La fuente elegida es de ${x.nivel}; la IOARR es de ${nivelNom}.`);
+    if (material && x.material !== material) avisos.push(`La fuente elegida es de ${MATERIALES[x.material].toLowerCase()}; el material elegido es ${MATERIALES[material].toLowerCase()}.`);
     avisos.push('Referencia de una sola fuente: menos de 3 fuentes comparables.');
     return { precio: x.precio_kit_sin_igv, n: 1, min: x.precio_kit_sin_igv, max: x.precio_kit_sin_igv, fuente: describir(x), modo, avisos, registros: [x.id] };
   }
@@ -287,11 +288,11 @@ export function validarCsv(texto, existentes = []) {
   return { ok: !errores.length && registros.length > 0, registros, errores, total: filas.length - 1, columnas_ignoradas: desconocidas };
 }
 
-// ─── Precarga (la misma de la migración 029; los ids fijos evitan duplicados) ──
+// ─── Precarga (la de la migración 029, con los materiales de la 030; ids fijos) ──
 export const PRECARGA = [
-  { id: 'c0a7a10e-0000-4000-8000-000000000001', tipo_documento: 'por_confirmar', entidad: null, region: 'Loreto', anio: 2026, nivel: 'por_confirmar', unidad: 'kit', material: 'por_confirmar', monto: 624, monto_hasta: null, incluye_igv: false, cotizaciones: null, composicion: [], confianza: 'media' },
-  { id: 'c0a7a10e-0000-4000-8000-000000000002', tipo_documento: 'por_confirmar', entidad: null, region: 'Huánuco', anio: 2023, nivel: 'por_confirmar', unidad: 'pieza', material: 'por_confirmar', monto: 267.5, monto_hasta: null, incluye_igv: true, cotizaciones: { valores: [], n: 4, promedio: 267.5 }, composicion: [], confianza: 'media' },
-  { id: 'c0a7a10e-0000-4000-8000-000000000003', tipo_documento: 'por_confirmar', entidad: null, region: 'Huánuco', anio: 2025, nivel: 'por_confirmar', unidad: 'kit', material: 'por_confirmar', monto: 455, monto_hasta: 480, incluye_igv: null, cotizaciones: null, composicion: [], confianza: 'media' },
-  { id: 'c0a7a10e-0000-4000-8000-000000000004', tipo_documento: 'por_confirmar', entidad: 'Gobierno Regional de La Libertad', region: 'La Libertad', anio: 2026, nivel: 'por_confirmar', unidad: 'kit', material: 'por_confirmar', monto: 700, monto_hasta: null, incluye_igv: null, cotizaciones: null, composicion: [], confianza: 'media' },
+  { id: 'c0a7a10e-0000-4000-8000-000000000001', tipo_documento: 'por_confirmar', entidad: null, region: 'Loreto', anio: 2026, nivel: 'por_confirmar', unidad: 'kit', material: 'madera', monto: 624, monto_hasta: null, incluye_igv: false, cotizaciones: null, composicion: [], confianza: 'media' },
+  { id: 'c0a7a10e-0000-4000-8000-000000000002', tipo_documento: 'por_confirmar', entidad: null, region: 'Huánuco', anio: 2023, nivel: 'por_confirmar', unidad: 'pieza', material: 'metal-madera', monto: 267.5, monto_hasta: null, incluye_igv: true, cotizaciones: { valores: [], n: 4, promedio: 267.5 }, composicion: [], confianza: 'media' },
+  { id: 'c0a7a10e-0000-4000-8000-000000000003', tipo_documento: 'por_confirmar', entidad: null, region: 'Huánuco', anio: 2025, nivel: 'por_confirmar', unidad: 'kit', material: 'metal-madera', monto: 455, monto_hasta: 480, incluye_igv: null, cotizaciones: null, composicion: [], confianza: 'media' },
+  { id: 'c0a7a10e-0000-4000-8000-000000000004', tipo_documento: 'por_confirmar', entidad: 'Gobierno Regional de La Libertad', region: 'La Libertad', anio: 2026, nivel: 'por_confirmar', unidad: 'kit', material: 'metal-polipropileno', monto: 700, monto_hasta: null, incluye_igv: null, cotizaciones: null, composicion: [], confianza: 'media' },
   { id: 'c0a7a10e-0000-4000-8000-000000000005', tipo_documento: 'propio', entidad: null, region: null, anio: 2026, nivel: 'por_confirmar', unidad: 'kit', material: 'por_confirmar', monto: 850, monto_hasta: null, incluye_igv: false, cotizaciones: null, composicion: [], confianza: 'media' }
 ];

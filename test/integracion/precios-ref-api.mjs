@@ -39,7 +39,8 @@ test('catálogo con la precarga: normalizado, estadísticos sin el propio y posi
   assert.equal(status, 200, JSON.stringify(json));
   assert.equal(json.registros.length, 5);
   assert.equal(json.registros.filter(r => r.comparable && !r.propio).length, 1);
-  assert.deepEqual(json.estadisticos.map(g => [g.material, g.nivel, g.n, g.mediana, g.pocas]), [['por_confirmar', 'por_confirmar', 1, 624, true]]);
+  assert.deepEqual(json.estadisticos.map(g => [g.material, g.nivel, g.n, g.mediana, g.pocas]), [['madera', 'por_confirmar', 1, 624, true]]);
+  assert.ok('madera' in json.opciones.materiales);
   assert.equal(json.propio.precio_kit_sin_igv, 850);
   assert.match(json.estadisticos[0].propio.texto, /36\.22 % sobre la mediana/);
 });
@@ -99,7 +100,14 @@ test('proyecto: referencia (mediana), monto del convenio estimado y riesgo del p
   // Una fuente específica; el propio no se puede elegir
   assert.equal((await pedir('PUT', `/proyectos/${PID}/precios-ref`, { modo: 'registro', registro_id: 'c0a7a10e-0000-4000-8000-000000000005' })).status, 400);
   assert.equal((await pedir('PUT', `/proyectos/${PID}/precios-ref`, { modo: 'registro', registro_id: 'c0a7a10e-0000-4000-8000-000000000004' })).status, 400, 'no comparable');
-  const u = await pedir('PUT', `/proyectos/${PID}/precios-ref`, { modo: 'registro', registro_id: 'c0a7a10e-0000-4000-8000-000000000001' });
+  // Loreto es de madera: no se puede guardar como fuente de metal y madera
+  const m = await pedir('PUT', `/proyectos/${PID}/precios-ref`, { modo: 'registro', registro_id: 'c0a7a10e-0000-4000-8000-000000000001', material: 'metal-madera' });
+  assert.equal(m.status, 400);
+  assert.match(m.json.error, /es de madera, no de metal y madera/);
+  // Mediana de metal y madera: mesa 450, Huánuco 2025 467.50 (IGV confirmado arriba), Tacna 600 y Puno 700 (CSV)
+  const mm = await pedir('PUT', `/proyectos/${PID}/precios-ref`, { modo: 'mediana', material: 'metal-madera' });
+  assert.equal(mm.json.ioarrs.find(x => x.nivel === 'P').referencia.precio, 533.75);
+  const u = await pedir('PUT', `/proyectos/${PID}/precios-ref`, { modo: 'registro', registro_id: 'c0a7a10e-0000-4000-8000-000000000001', material: 'madera' });
   assert.equal(u.status, 200);
   assert.equal(u.json.ioarrs.find(x => x.nivel === 'P').referencia.precio, 624);
 });
