@@ -38,8 +38,8 @@ test('catálogo con la precarga: normalizado, estadísticos sin el propio y posi
   const { status, json } = await pedir('GET', '/precios-ref');
   assert.equal(status, 200, JSON.stringify(json));
   assert.equal(json.registros.length, 5);
-  assert.equal(json.registros.filter(r => r.comparable && !r.propio).length, 2);   // Loreto y San Juan (estimado del 07-C)
-  assert.deepEqual(json.estadisticos.map(g => [g.material, g.nivel, g.n, g.mediana, g.pocas]), [['madera', 'por_confirmar', 1, 624, true], ['metal-polipropileno', 'por_confirmar', 1, 599.6, true]]);
+  assert.equal(json.registros.filter(r => r.comparable && !r.propio).length, 2);   // Loreto y San Juan (memoria de costos)
+  assert.deepEqual(json.estadisticos.map(g => [g.material, g.nivel, g.n, g.mediana, g.pocas]), [['madera', 'por_confirmar', 1, 624, true], ['metal-polipropileno', 'Secundaria', 1, 411.85, true]]);
   assert.ok('madera' in json.opciones.materiales);
   assert.equal(json.propio.precio_kit_sin_igv, 850);
   assert.match(json.estadisticos[0].propio.texto, /36\.22 % sobre la mediana/);
@@ -91,18 +91,21 @@ test('proyecto: referencia (mediana), monto del convenio estimado y riesgo del p
   assert.equal(status, 200, JSON.stringify(json));
   assert.deepEqual(json.seleccion, { modo: 'mediana', registro_id: null, material: 'todos' });
   const P = json.ioarrs.find(x => x.nivel === 'P');
-  // Primaria: mesa 450, Huánuco 2025 467.50 (nivel por confirmar), San Juan 599.60, Tacna 600, Loreto 624, Puno 700
-  assert.deepEqual(P.referencia.registros.length, 6);
-  assert.equal(P.referencia.precio, 599.8);
+  // Primaria: mesa 450, Huánuco 2025 467.50 (nivel por confirmar), Tacna 600, Loreto 624, Puno 700. San Juan es de Secundaria: no entra
+  assert.deepEqual(P.referencia.registros.length, 5);
+  assert.equal(P.referencia.precio, 600);
+  assert.ok(json.ioarrs.find(x => x.nivel === 'S').referencia.registros.includes('c0a7a10e-0000-4000-8000-000000000004'));
   assert.ok(P.estimado.convenio > 0 && P.propio.convenio > P.estimado.convenio);
   assert.equal(P.riesgo.fuera, 'encima');
   assert.match(P.riesgo.texto, /supera el 110 %/);
   // Una fuente específica; el propio no se puede elegir
   assert.equal((await pedir('PUT', `/proyectos/${PID}/precios-ref`, { modo: 'registro', registro_id: 'c0a7a10e-0000-4000-8000-000000000005' })).status, 400);
-  // San Juan ya es comparable (estimado del 07-C): S/ 599.60 sin IGV
+  // San Juan (memoria de costos): S/ 411.85 sin IGV; para la IOARR de Primaria avisa que es de Secundaria
   const sj = await pedir('PUT', `/proyectos/${PID}/precios-ref`, { modo: 'registro', registro_id: 'c0a7a10e-0000-4000-8000-000000000004', material: 'metal-polipropileno' });
   assert.equal(sj.status, 200, JSON.stringify(sj.json));
-  assert.equal(sj.json.ioarrs.find(x => x.nivel === 'P').referencia.precio, 599.6);
+  assert.equal(sj.json.ioarrs.find(x => x.nivel === 'S').referencia.precio, 411.85);
+  assert.ok(sj.json.ioarrs.find(x => x.nivel === 'P').avisos.some(a => /es de Secundaria; la IOARR es de Primaria/.test(a)));
+  assert.ok(!sj.json.ioarrs.find(x => x.nivel === 'S').avisos.some(a => /la IOARR es de/.test(a)));
   // Editar San Juan con componentes que no suman el total: no se guarda
   const desc = await pedir('PATCH', '/precios-ref/c0a7a10e-0000-4000-8000-000000000004', { componentes: { ejecucion: 739373.42, doc_equivalente: 43144.10, sup_doc_equivalente: 41219.36, sup_ejecucion: 41219.36, total: 919915.39 } });
   assert.equal(desc.status, 400);

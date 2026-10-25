@@ -327,17 +327,16 @@ export function validarCsv(texto, existentes = []) {
   return { ok: !errores.length && registros.length > 0, registros, errores, total: filas.length - 1, columnas_ignoradas: desconocidas };
 }
 
-// ─── Precarga (la de la migración 029, con los materiales de la 030; ids fijos) ──
+// ─── Precarga (la de la migración 029, con los materiales de la 030 y San Juan de la 032; ids fijos) ──
 export const PRECARGA = [
   { id: 'c0a7a10e-0000-4000-8000-000000000001', tipo_documento: 'por_confirmar', entidad: null, region: 'Loreto', anio: 2026, nivel: 'por_confirmar', unidad: 'kit', material: 'madera', monto: 624, monto_hasta: null, incluye_igv: false, cotizaciones: null, composicion: [], confianza: 'media' },
   { id: 'c0a7a10e-0000-4000-8000-000000000002', tipo_documento: 'por_confirmar', entidad: null, region: 'Huánuco', anio: 2023, nivel: 'por_confirmar', unidad: 'pieza', material: 'metal-madera', monto: 267.5, monto_hasta: null, incluye_igv: true, cotizaciones: { valores: [], n: 4, promedio: 267.5 }, composicion: [], confianza: 'media' },
   { id: 'c0a7a10e-0000-4000-8000-000000000003', tipo_documento: 'por_confirmar', entidad: null, region: 'Huánuco', anio: 2025, nivel: 'por_confirmar', unidad: 'kit', material: 'metal-madera', monto: 455, monto_hasta: 480, incluye_igv: null, cotizaciones: null, composicion: [], confianza: 'media' },
-  // San Juan: corregido con el Formato 07-C (migración 031)
-  { id: 'c0a7a10e-0000-4000-8000-000000000004', tipo_documento: 'estimado_derivado', cui: '2711098', entidad: 'Gobierno Regional de La Libertad', region: 'La Libertad', anio: 2026, nivel: 'por_confirmar', unidad: 'kit', material: 'metal-polipropileno',
-    monto: 707.53, monto_hasta: null, incluye_igv: true, cotizaciones: null, composicion: [], confianza: 'media',
+  // San Juan: precio unitario real de la memoria de costos y presupuestos (migración 032; antes, el estimado de la 031)
+  { id: 'c0a7a10e-0000-4000-8000-000000000004', tipo_documento: '07-C', cui: '2711098', entidad: 'Gobierno Regional de La Libertad', region: 'La Libertad', anio: 2026, nivel: 'Secundaria', unidad: 'kit', material: 'metal-polipropileno',
+    monto: 411.85, monto_hasta: null, incluye_igv: false, flete_transporte: 26.02, cotizaciones: { valores: [], n: 4, promedio: null }, composicion: [], confianza: 'alta',
     componentes: { ejecucion: 739373.42, doc_equivalente: 43144.10, sup_doc_equivalente: 41219.36, sup_ejecucion: 96178.51, total: 919915.39 },
-    derivacion: { divisor: 1045, divisor_alternativo: 1087, detalle: '1,045 mesas y 1,045 sillas de alumno (420 + 420 + 205); alternativa con 42 escritorios: 1,087' },
-    notas: 'Estimado a partir del 07-C; el precio unitario real está en la memoria de costos, pendiente' },
+    notas: 'Memoria de costos y presupuestos (dic. 2025): precio del bien sin flete, gastos generales, utilidad ni IGV; promedio de 1,045 kits mesa + silla (rojo 420, verde 420, marrón 205). Flete S/ 13.01 por pieza (S/ 26.02 por kit). Con flete por color: S/ 434.47 / 436.09 / 448.49. Con gastos generales 18.17 % y utilidad 10 %: S/ 561.23 sin IGV.' },
 
   { id: 'c0a7a10e-0000-4000-8000-000000000005', tipo_documento: 'propio', entidad: null, region: null, anio: 2026, nivel: 'por_confirmar', unidad: 'kit', material: 'por_confirmar', monto: 850, monto_hasta: null, incluye_igv: false, cotizaciones: null, composicion: [], confianza: 'media' }
 ];
