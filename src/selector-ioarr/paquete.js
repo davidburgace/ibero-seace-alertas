@@ -7,7 +7,7 @@
 //   modeloIoarr()      el modelo de los documentos de una IOARR (07-C, memoria, anexos, vida útil)
 // ============================================================================
 
-import { calc, ESCENARIOS, textoPct } from './calculo.js';
+import { calc, ESCENARIOS, textoPct, estadoSituacional } from './calculo.js';
 import { costear } from './costos.js';
 import { porNivel, validarNiveles, inventarioNivel, inventarioUna, sinNivel, nivelesDeLocal } from './niveles.js';
 import { separarLocales, estadoDe, avisosDuplicidad } from './duplicidad.js';
@@ -143,7 +143,17 @@ export function modeloIoarr(A, x, datos, p, fecha) {
   const uso = [...x.list.map(i => ({ cod: x.D.locs[i][0], nombre: x.D.locName[i], uso: colegioDe(A.colegios, x.D.locs[i][0]).uso || (datos.en_uso === 'si' ? 'operativo' : ''), entra: true })),
     ...(x.sinUso || []).map(u => ({ cod: u.cod, nombre: u.nom, uso: u.uso, entra: false }))];
   if (capacidad.some(f => f.inconsistente)) M.faltan.push(`Datos inconsistentes del censo en ${capacidad.filter(f => f.inconsistente).length} colegios (más mesas o sillas que matrícula): verifícalos en campo.`);
-  return Object.assign(M, { nivel: x.nivel, nombreIoarr: x.nombre, fichaActivos: ficha, vidaUtil: vida, completo: !M.faltan.length,
+  // Paquete tipo Huánuco: listado de UP y activos, y consolidado por UGEL y nivel con la columna de duplicación
+  const conProyecto = cod => { const r = A.riesgos?.[cod], e = A.dup?.[cod]?.estado;
+    return r?.riesgo || r?.recientes?.length || e === 'si' ? 'si' : e === 'no' ? 'no' : 'sin_verificar'; };
+  const tIdx = Object.fromEntries((M.partidas || []).map((p, t) => [p.k, t]));
+  const paquete = {
+    metas: M.F.metas.map(m => ({ k: m.k, nombre: m.nombre, unidad: m.unidad })),
+    ups: M.ups.map(u => ({ cod: u.cod, nombre: u.nombre, ubigeo: u.ubigeo, dpto: u.dpto, prov: u.prov, dist: u.dist, cp: u.cp, lat: u.lat ?? null, lon: u.lon ?? null,
+      ugel: u.ugel, metas: Object.fromEntries(M.F.metas.map(m => [m.k, m.k === 'kit' ? u.kits * 2 : u.rep[tIdx[m.k]] || 0])) })),
+    consolidado: estadoSituacional(x.D, x.C, x.list, conProyecto)
+  };
+  return Object.assign(M, { paquete, nivel: x.nivel, nombreIoarr: x.nombre, fichaActivos: ficha, vidaUtil: vida, completo: !M.faltan.length,
     borrador: !A.final, bloqueados: x.bloqueados || [], checklist, riesgos, capacidad, uso, sinUso: x.sinUso || [], anioRef: A.anioRef ?? M.anioRef });
 }
 

@@ -323,3 +323,24 @@ test('sección A: 22 / 047, grupo por nivel (Secundaria 0105; los demás editabl
   assert.equal(S.A.espacio, 'DEPARTAMENTO DE MOQUEGUA');
   assert.deepEqual(limpiarDatosDoc({ grupo_funcional: { P: '01x4', S: ' 0105 ', X: '1' } }).grupo_funcional, { S: '0105' });
 });
+
+test('paquete tipo Huánuco: listado de UP y activos, y consolidado por UGEL y nivel con la columna de duplicación', async () => {
+  const { generarExcelPaquete } = await import('../src/selector-ioarr/excel-paquete.js');
+  const x0 = elegirIoarr(paquete().A, 'P'), otro = x0.R.locales[0].cod;
+  const M = paquete({ estructura: {}, colegios: { [otro]: { entregas: [{ anio: 2025, cantidad: 3, tipo: 'kit', fuente: 'ugel' }] } } }).M('P');
+  const P = M.paquete;
+  assert.equal(P.ups.length, M.ups.length);
+  assert.ok(P.ups.every(u => u.ugel && u.ubigeo && 'lat' in u && u.cp !== undefined));
+  // Totales de las metas del listado = metas del 07-C (número de mobiliario)
+  for (const m of M.F.metas) assert.equal(P.ups.reduce((a, u) => a + u.metas[m.k], 0), m.numero);
+  // Consolidado: suma la población y las aulas de la IOARR; el colegio con entrega reciente cuenta «con proyecto»
+  assert.equal(P.consolidado.total.est, elegirIoarr(paquete().A, 'P').R.totales.est);
+  assert.equal(P.consolidado.total.pi.si, 1);
+  const wb = new ExcelJS.Workbook(); await wb.xlsx.load(await generarExcelPaquete(P, { nombreIoarr: 'Primaria' }));
+  assert.deepEqual(wb.worksheets.map(w => w.name), ['UP y activos', 'Consolidado UGEL y nivel']);
+  const ws = wb.getWorksheet('UP y activos');
+  assert.equal(ws.getCell('J4').value, 'Activo'); assert.equal(ws.getCell('J5').value, 'MOBILIARIO DE AULA');
+  assert.match(ws.getRow(4).values.at(-1), /UGEL responsable del mantenimiento/);
+  let tot = null; wb.getWorksheet('Consolidado UGEL y nivel').eachRow(r => { if (r.getCell(1).value === 'TOTAL') tot = r; });
+  assert.equal(tot.getCell(9).value, 1);
+});
