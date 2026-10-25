@@ -4,6 +4,7 @@
 //   generar07C(M)      Borrador del Formato 07-C: Registro de IOARR
 //   generarMemoria(M)  Memoria descriptiva
 //   generarVerificacion(M)  Lista de verificación del expediente
+//   generarVidaUtil(M, V, cod?)  Informe técnico de vida útil (consolidado o de un colegio)
 // M es el modelo de armarModelo() (src/selector-ioarr/documentos.js).
 // ============================================================================
 
@@ -11,6 +12,7 @@ import {
   Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, AlignmentType,
   HeadingLevel, ShadingType, Header, Footer, PageNumber, BorderStyle, PageOrientation
 } from 'docx';
+import { FUENTES_VIDA_UTIL } from './lineamientos.js';
 
 const AZUL = '3A63E0', GRIS = 'EEF0F4', AMARILLO = 'FFF3B0', TEXTO = '16181D', TENUE = '5C6270';
 const FUENTE = 'Calibri';
@@ -413,4 +415,53 @@ export async function generarVerificacion(M) {
     V.locales.map(u => [u.cod, u.nombre, u.visita ? u.visita.split('-').reverse().join('/') : PEND, sn(u.acta), u.fotos ? String(u.fotos) : PEND, sn(u.inventario), sn(u.baja), sn(u.anio)]), { size: 15, anchos: [11, 31, 12, 8, 8, 12, 8, 10] }));
   c.push(nota('Los puntos de «Documentos y coordinaciones» se marcan a mano en Selector IOARR → Expediente → Verificación. Esta lista no reemplaza la revisión de la UF ni la de la OPMI.'));
   return Packer.toBuffer(documento(M, 'Lista de verificación', c));
+}
+
+// ─── Informe técnico de vida útil ────────────────────────────────────────────
+// V = modeloVidaUtil() (lineamientos.js). Con cod, solo ese colegio.
+const lineaFirma = t => [new Paragraph({ spacing: { before: 600, after: 40 }, children: [run('_______________________________________', { color: TENUE })] }), p(t, { size: 18, after: 40 })];
+const tablaTipos = (tipos, umbral) => tabla(['Tipo de bien', 'A reponer: Malo', 'A reponer: Regular', 'Regular sin sustento', 'Antigüedad promedio (años)', 'Rango (años)', 'Vida útil estimada (años)'],
+  tipos.map(t => [t.nombre, { v: ent(t.malo) }, { v: ent(t.regular) }, { v: ent(t.regularSin), pend: t.regularSin > 0 }, { v: t.antiguedad == null ? PEND : NS.format(t.antiguedad) },
+    t.antMin == null ? '—' : t.antMin === t.antMax ? String(t.antMin) : `${t.antMin} a ${t.antMax}`, { v: t.vida == null ? `${PEND} (referencial ${umbral})` : String(t.vida) }]),
+  { num: [1, 2, 3, 4, 6], size: 16 });
+export async function generarVidaUtil(M, V, cod = null) {
+  const c = [], cols = cod ? V.colegios.filter(x => x.cod === cod) : V.colegios;
+  const uno = cols.length === 1 && cod;
+  c.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 60 }, children: [run('INFORME TÉCNICO DE VIDA ÚTIL DEL MOBILIARIO ESCOLAR A REPONER', { bold: true, size: 26 })] }));
+  c.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 200 }, children: [run(uno ? `${cols[0].colegio} (código de local ${cols[0].cod})` : `${M.nombre}${V.nombreIoarr ? ' — IOARR ' + V.nombreIoarr : ''}`, { bold: true, size: 20 })] }));
+  c.push(p('BORRADOR DE TRABAJO para revisión y firma de la oficina de control patrimonial. Lo marcado «PENDIENTE» falta completar.', { italics: true, color: TENUE, size: 17, plano: true }));
+  if (V.faltan.length) { c.push(p('Datos pendientes:', { bold: true, size: 18 })); V.faltan.forEach(x => c.push(vinieta(x))); }
+  c.push(titulo('1. Objeto'));
+  c.push(p(`Sustentar la vida útil del mobiliario escolar que se propone reponer mediante la IOARR${V.nombreIoarr ? ' de ' + V.nombreIoarr : ''} «${M.nombre}», en ${uno ? 'el local educativo ' + cols[0].cod : `${ent(cols.length)} locales educativos`}, conforme a los Lineamientos IOARR del MEF (9.ª versión, junio 2025, 2.4.B.e y 2.4.C.b).`));
+  c.push(titulo('2. Base normativa y fuentes de la vida útil'));
+  c.push(p('La Directiva N.° 005-2016-EF/51.01 admite como fuentes para estimar la vida útil de los activos:'));
+  for (const [k, t] of Object.entries(FUENTES_VIDA_UTIL)) c.push(vinieta(`${V.fuentes.includes(k) ? '[X]' : '[  ]'} ${t}.`));
+  if (!V.fuentes.length) c.push(p('PENDIENTE: marca la fuente usada en Documentos.'));
+  if (V.documento) c.push(p('Documento de sustento: ' + V.documento));
+  c.push(p(`Para el mobiliario, ${V.referencial} años es un valor referencial: no se aplica en forma automática. La vida útil de cada tipo de bien la fija la entidad con alguna de las fuentes anteriores.`));
+  c.push(titulo('3. Criterio de inclusión'));
+  c.push(vinieta('Estado Malo: el mobiliario ya no es útil ni operativo y no se recupera con mantenimiento correctivo (vida útil efectiva). Lo que sale del censo debe confirmarse en campo.'));
+  c.push(vinieta(`Estado Regular: solo entra si tiene antigüedad documentada mayor o igual a su vida útil estimada (o ${V.umbral} años si aún no se fijó) o un daño documentado en la ficha de verificación. Sin eso, no se sustenta su reposición.`));
+  c.push(titulo(uno ? '4. Resultado del local' : '4. Consolidado por tipo de bien'));
+  c.push(tablaTipos(uno ? cols[0].tipos : V.tipos, V.umbral));
+  if (!uno) {
+    c.push(titulo('5. Detalle por colegio'));
+    for (const x of cols) {
+      c.push(p(`${x.cod} — ${x.colegio}`, { bold: true, before: 160 }));
+      c.push(tablaTipos(x.tipos, V.umbral));
+    }
+  } else {
+    c.push(titulo('5. Lotes del local'));
+    c.push(tabla(['Ambiente', 'Bien', 'Cód. patrimonial', 'Estado', 'Cant.', 'Antig. (años)', 'Sustento'], cols[0].lotes.map(f => [f.ambiente + (f.grado ? ' · ' + f.grado : ''), f.denom_existente,
+      { v: f.patrimonial || PEND }, `${f.estado}\n${f.origen}`, { v: ent(f.cantidad) }, { v: f.antiguedad == null ? PEND : String(f.antiguedad) },
+      { v: f.sustento.motivo, pend: !f.sustento.ok }]), { num: [4], size: 15, anchos: [18, 18, 13, 15, 7, 8, 21] }));
+  }
+  c.push(titulo('6. Conclusión'));
+  const regSin = uno ? cols[0].tipos.reduce((a, t) => a + t.regularSin, 0) : V.regularSin;
+  c.push(p(`El mobiliario en estado Malo cumplió su vida útil efectiva.${regSin ? ` ${ent(regSin)} bienes en estado Regular no tienen antigüedad ni daño documentado: PENDIENTE documentarlos en campo; mientras tanto no se sustenta su reposición.` : ' El mobiliario en estado Regular que se repone tiene antigüedad o daño documentado.'} Las cantidades por lote están en el anexo de la memoria y en el Excel de anexos de los Lineamientos (hoja «Ficha de activos»).`));
+  c.push(titulo('7. Firmas'));
+  c.push(kv([['Responsable de control patrimonial', V.responsable.nombre || null], ['Cargo', V.responsable.cargo || null], ['Fecha', null]]));
+  c.push(...lineaFirma('Firma y sello del responsable de control patrimonial'));
+  c.push(...lineaFirma('Visto bueno: responsable de la Unidad Formuladora (nombre, firma y fecha)'));
+  return Packer.toBuffer(documento(M, 'Informe de vida útil', c));
 }

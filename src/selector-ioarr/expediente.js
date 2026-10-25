@@ -35,6 +35,7 @@
 //     GET    /proyectos/:id/documentos/verificacion Word de la lista de verificación (etapa 3)
 //   Lineamientos IOARR (lineamientos.js)
 //     GET    /proyectos/:id/lineamientos/anexos      Excel: ficha de activos a reponer…
+//     GET    /proyectos/:id/documentos/vida-util     Word del informe técnico de vida útil (?cod= un colegio)
 //   Oferta (uso interno, migración 027): NO entra al 07-C, a las fichas, a los Excel ni al ZIP
 //     GET    /proyectos/:id/oferta                  entradas guardadas + costo puesto en colegio y margen
 //     PUT    /proyectos/:id/oferta                  { datos }
@@ -73,9 +74,9 @@ import { costear, limpiarEstructura, preciosEfectivos, limpiarInventario, limpia
 import { limpiarOferta, calcularOferta } from './oferta.js';
 import { generarExcelCostos } from './excel-costos.js';
 import { armarModelo, limpiarDatosDoc, ESTADOS_ACTIVO, MODALIDADES, FUENTES_FIN } from './documentos.js';
-import { generar07C, generarMemoria, generarVerificacion } from './word.js';
+import { generar07C, generarMemoria, generarVerificacion, generarVidaUtil } from './word.js';
 import { leerDuplicidad, separarLocales, estadoDe, avisosDuplicidad } from './duplicidad.js';
-import { fichaActivos } from './lineamientos.js';
+import { fichaActivos, modeloVidaUtil, FUENTES_VIDA_UTIL } from './lineamientos.js';
 import { generarExcelLineamientos } from './excel-lineamientos.js';
 import { porNivel, validarNiveles, inventarioNivel, inventarioUna, modoDe, sinNivel, nivelesDeLocal, vistaNivel, limpiarPorNivel, NOMBRE_NIVEL } from './niveles.js';
 import { modeloFicha, generarFichaExcel, generarFichaPdf, leerFicha, procesarFicha, requeridoFicha, ESTADO_VERIF } from './ficha.js';
@@ -918,7 +919,10 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     const M = armarModelo({ R: x.R, D: x.D, list: x.list, proyecto: proyectoX, datos: datosX, precios: A.detalle, efectivos: A.efectivos, P: A.P, inv: A.inv, fecha: hoyLima() });
     // Estructura preliminar de costos: lotes de activos a reponer (anexo de la memoria y Excel)
     const ficha = fichaActivos({ x, P: A.P, datos: datosX, anioRef: M.anioRef });
-    return Object.assign(M, { nivel: x.nivel, nombreIoarr: x.nombre, fichaActivos: ficha });
+    const vida = modeloVidaUtil({ ficha, datos: datosX, umbral: A.P.umbralVida, nombreIoarr: x.nombre });
+    // El Regular sin antigüedad ni daño documentado no se sustenta: queda como pendiente del expediente
+    if (vida.regularSin) M.faltan.push(vida.faltan.find(t => /Regular sin antigüedad/.test(t)));
+    return Object.assign(M, { nivel: x.nivel, nombreIoarr: x.nombre, fichaActivos: ficha, vidaUtil: vida, completo: !M.faltan.length });
   }
   async function modelo(p, nivel) {
     const [A, { datos, sinMigracion }] = await Promise.all([armar(p), leerDatosDoc(p)]);
@@ -934,7 +938,8 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
   const vistaDoc = ({ M, datos, sinMigracion, A, x }, p) => ({
     modo: A.modo, nivel: x.nivel, nombre_ioarr: x.nombre, ioarrs: A.ioarrs.map(y => ({ nivel: y.nivel, nombre: y.nombre })), comparativo: A.comparativo,
     datos, sin_migracion: sinMigracion, estados: ESTADOS_ACTIVO, verificacion: M.verificacion, ioarr: p?.ioarr || null,
-    modalidades: MODALIDADES, fuentes: FUENTES_FIN, escenario: M.escenarioTexto, kit: M.kit,
+    modalidades: MODALIDADES, fuentes: FUENTES_FIN, fuentes_vida_util: FUENTES_VIDA_UTIL, escenario: M.escenarioTexto, kit: M.kit,
+    vida_util: { colegios: M.vidaUtil.colegios.map(x => ({ cod: x.cod, colegio: x.colegio })), regular_sin: M.vidaUtil.regularSin, faltan: M.vidaUtil.faltan },
     resumen: {
       nombre: M.nombre, nombre_sugerido: M.nombreSugerido, cui: M.cui, masiva: M.masiva, registro: M.registro,
       total: M.F.total, en_uit: M.uit.enUit, uit: M.uit.valor ? { anio: M.uit.anio, valor: M.uit.valor } : null,
@@ -985,6 +990,15 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     const p = await proyecto(req), { M } = await modelo(p, req.query.nivel);
     if (!M.ups.length) return res.status(400).json({ error: 'Ningún local del proyecto tiene bienes a reponer' });
     enviarWord(res, await generarVerificacion(M), `Lista_verificacion_${slug(p.nombre)}${sufijo(M)}_${M.fecha}.docx`);
+  }));
+
+  // Informe técnico de vida útil: consolidado de la IOARR o de un colegio (?cod=)
+  api.get('/proyectos/:id/documentos/vida-util', responder(async (req, res) => {
+    const p = await proyecto(req), { M } = await modelo(p, req.query.nivel);
+    if (!M.ups.length) return res.status(400).json({ error: 'Ningún local del proyecto tiene bienes a reponer' });
+    const cod = req.query.cod ? String(req.query.cod) : null;
+    if (cod && !M.vidaUtil.colegios.some(x => x.cod === cod)) return res.status(404).json({ error: 'Ese colegio no tiene bienes a reponer en esta IOARR' });
+    enviarWord(res, await generarVidaUtil(M, M.vidaUtil, cod), `Informe_vida_util_${slug(p.nombre)}${sufijo(M)}${cod ? '_' + cod : ''}_${M.fecha}.docx`);
   }));
 
   api.get('/proyectos/:id/costos/excel', responder(async (req, res) => {
@@ -1088,14 +1102,19 @@ export async function piezasExpediente({ A, datos, lista, meta, nombre }) {
   const porNiv = A.modo === 'por_nivel';
   const xs = await Promise.all(lista.map(async ({ x, M }, j) => {
     M.fichaActivos ??= fichaActivos({ x, P: A.P, datos, anioRef: M.anioRef });
+    M.vidaUtil ??= modeloVidaUtil({ ficha: M.fichaActivos, datos, umbral: A.P.umbralVida, nombreIoarr: x.nombre });
     const carpeta = porNiv ? `${String(j + 1).padStart(2, '0')}_IOARR_${nombreSeguro(x.nombre)}/` : '';
     const m = { ...meta, proyecto: porNiv ? `${nombre} — IOARR ${x.nombre}` : nombre };
+    // Informe de vida útil: consolidado y uno por colegio
+    const vidaPorColegio = await Promise.all(M.vidaUtil.colegios.map(async y => ({ nombre: `${carpeta}07_Informes_vida_util_por_colegio/Informe_vida_util_${y.cod}.docx`, contenido: await generarVidaUtil(M, M.vidaUtil, y.cod), oculto: true })));
+
     const fuera = x.nivel ? (A.excluidos || []).filter(i => x.D.locSvc[i].length) : (A.excluidos || []);
-    const [f07c, memoria, verificacion, costos, { buffer: seleccion }, anexos] = await Promise.all([
+    const [f07c, memoria, verificacion, costos, { buffer: seleccion }, anexos, vida] = await Promise.all([
       generar07C(M), generarMemoria(M), generarVerificacion(M),
       generarExcelCostos(x.R, { ...m, criterios: textoCriterios(A.P), escenario: textoEscenario(A.P, regDato(x.R)), precios: A.detalle, efectivos: A.efectivos, inventario: x.inv }),
       generarExcel(x.D, x.C, A.P, x.list, { ...m, duplicidad: A.dup, excluidos: fuera, revisiones: datos.situacional?.revisiones }),
-      generarExcelLineamientos(anexosDe(M), { ...m, nombreIoarr: M.nombreIoarr })
+      generarExcelLineamientos(anexosDe(M), { ...m, nombreIoarr: M.nombreIoarr }),
+      generarVidaUtil(M, M.vidaUtil)
     ]);
     return [
       { nombre: carpeta + '01_Formato_07C_borrador.docx', contenido: f07c, descripcion: 'borrador del Formato 07-C' },
@@ -1103,7 +1122,9 @@ export async function piezasExpediente({ A, datos, lista, meta, nombre }) {
       { nombre: carpeta + '03_Lista_de_verificacion.docx', contenido: verificacion },
       { nombre: carpeta + '04_Estructura_de_costos.xlsx', contenido: costos, descripcion: 'con fórmulas' },
       { nombre: carpeta + '05_Seleccion_de_locales_y_metrado.xlsx', contenido: seleccion, descripcion: 'metrado por aula del Selector' },
-      { nombre: carpeta + '06_Anexos_Lineamientos.xlsx', contenido: anexos, descripcion: 'ficha de activos a reponer' }
+      { nombre: carpeta + '06_Anexos_Lineamientos.xlsx', contenido: anexos, descripcion: 'ficha de activos a reponer' },
+      { nombre: carpeta + '07_Informe_vida_util.docx', contenido: vida, descripcion: 'consolidado; uno por colegio en la carpeta 07' },
+      ...vidaPorColegio
     ];
   }));
   return xs.flat();

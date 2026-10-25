@@ -138,8 +138,18 @@ function pintar() {
       <p class="sub">Mobiliario nuevo, por meta del 07-C: vida útil y costo anual de mantenimiento (puede ser 0).</p>
       <div class="tabla-wrap"><table class="tabla tabla-doc"><thead><tr><th>Meta</th><th>Vida útil del nuevo (años)</th><th>Mant. anual del nuevo (S/)</th></tr></thead><tbody>${metas || '<tr><td colspan="3" class="vacio">No hay metas.</td></tr>'}</tbody></table></div>
       <div class="form-grid">
-        ${campo('informe_vida_util', 'Informe técnico de vida útil estimada', { ancho: true, ph: 'Ej.: Informe N° …-2026-UGEL…/APP, control patrimonial', ayuda: 'Recomendable. Vacío = la antigüedad sale del año de adquisición registrado en cada local, si lo cargaste.' })}
+        ${campo('informe_vida_util', 'Documento de sustento de la vida útil', { ancho: true, ph: 'Ej.: Informe N° …-2026-UGEL…/APP, control patrimonial', ayuda: 'Va en el informe técnico de vida útil. Vacío = la antigüedad sale del año de adquisición registrado en cada local, si lo cargaste.' })}
       </div>
+      <h3>Informe técnico de vida útil</h3>
+      <p class="sub">Fuentes admitidas por la Directiva 005-2016-EF/51.01 (marca las que usa la entidad). 10 años para mobiliario es referencial, no automático: la vida útil estimada se carga por tipo de bien arriba. El Regular solo entra con antigüedad o daño documentado.</p>
+      <fieldset class="campo-muebles">${Object.entries(vista.fuentes_vida_util).map(([k, t]) => `<label class="chk"><input type="checkbox" data-doc-fuente="${k}" ${(d.fuentes_vida_util || []).includes(k) ? 'checked' : ''}> ${esc(t)}</label>`).join('')}</fieldset>
+      <div class="form-grid">
+        ${campo('patrimonial_nombre', 'Responsable de control patrimonial (firma)', { max: 200 })}
+        ${campo('patrimonial_cargo', 'Cargo', { max: 200 })}
+      </div>
+      ${vista.vida_util.faltan.length ? `<ul class="pendientes">${vista.vida_util.faltan.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+      <div class="acciones-fila"><button class="btn btn-ghost" data-doc-bajar="vida-util" type="button">Informe de vida útil consolidado (Word)</button>
+        ${vista.vida_util.colegios.length ? `<select id="doc-vida-cod" aria-label="Colegio">${vista.vida_util.colegios.map(x => `<option value="${esc(x.cod)}">${esc(x.cod)} · ${esc(x.colegio)}</option>`).join('')}</select><button class="btn btn-ghost" data-doc-bajar="vida-util" data-doc-cod type="button">De este colegio (Word)</button>` : ''}</div>
       <h3>Plazo de ejecución</h3>
       <div class="form-grid">
         ${campo('fecha_inicio', 'Mes de inicio', { tipo: 'month', ph: 'AAAA-MM' })}
@@ -161,6 +171,7 @@ function leer() {
   const datos = { antiguedad: {}, vida_util_estimada: {}, estado_actual: {}, mant_actual: {}, vida_util: {}, mant_nuevo: {} };
   ctx.el.querySelectorAll('[data-doc]').forEach(e => { datos[e.dataset.doc] = e.value; });
   ctx.el.querySelectorAll('[data-doc-t]').forEach(e => { if (e.value !== '') datos[e.dataset.docT][e.dataset.k] = e.value; });
+  datos.fuentes_vida_util = [...ctx.el.querySelectorAll('[data-doc-fuente]:checked')].map(e => e.dataset.docFuente);
   if (vista.nivel) {
     const propio = {}; ctx.el.querySelectorAll('[data-doc-niv]').forEach(e => { propio[e.dataset.docNiv] = e.value; });
     datos.por_nivel = { ...(vista.datos.por_nivel || {}), [vista.nivel]: propio };
@@ -190,7 +201,10 @@ async function bajar(btn) {
     if (tGuardar) { clearTimeout(tGuardar); tGuardar = null; await guardar(); }
     // «formato-07c», «memoria»… van bajo /documentos; una ruta con «/» va directo bajo el proyecto
     const ruta = btn.dataset.docBajar.includes('/') ? btn.dataset.docBajar : 'documentos/' + btn.dataset.docBajar;
-    const r = await fetch(`/api/selector-ioarr/proyectos/${ctx.proyecto.id}/${ruta}${qn()}`);
+    const q = new URLSearchParams(ctx.nivel ? { nivel: ctx.nivel } : {});
+    if ('docCod' in btn.dataset) q.set('cod', document.getElementById('doc-vida-cod')?.value || '');
+    if ('docBorrador' in btn.dataset) q.set('borrador', '1');
+    const r = await fetch(`/api/selector-ioarr/proyectos/${ctx.proyecto.id}/${ruta}${q.size ? '?' + q : ''}`);
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Error ' + r.status);
     const blob = await r.blob(), cd = r.headers.get('Content-Disposition') || '';
     const nombre = decodeURIComponent((cd.match(/filename\*=UTF-8''([^;]+)/) || [])[1] || 'documento.docx');

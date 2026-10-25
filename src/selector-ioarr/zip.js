@@ -35,7 +35,7 @@ export async function escribirZip(salida, { base, piezas, archivos, nombreLocal 
 
   for (const x of piezas) await agregar(x.contenido, x.nombre);
 
-  const carpeta = cod => `06_Sustento/${nombreSeguro(`${cod} ${nombreLocal[cod] || ''}`.trim()).slice(0, 80)}`;
+  const carpeta = cod => `09_Sustento/${nombreSeguro(`${cod} ${nombreLocal[cod] || ''}`.trim()).slice(0, 80)}`;
   const incluidos = [], fallidos = [], usados = new Set();
   for (const [j, a] of archivos.entries()) {
     let nombre = `${carpeta(a.cod_local)}/${String(j + 1).padStart(2, '0')}_${ETIQ[a.tipo] || 'Otro'}_${nombreSeguro(a.nombre_archivo)}`;
@@ -69,8 +69,8 @@ export async function escribirZip(salida, { base, piezas, archivos, nombreLocal 
       'La norma no aclara si los niveles cuentan como un mismo servicio: confirmar con la OPMI si van separadas o en una sola IOARR.'] : []), '',
     ...Ms.flatMap(bloque),
     'CONTENIDO',
-    ...piezas.map(x => '  ' + x.nombre + (x.descripcion ? ' — ' + x.descripcion : '')),
-    `  06_Sustento/ — ${incluidos.length} archivo(s) de sustento, una carpeta por local${varias ? ' (comunes a todas las IOARR)' : ''}`, '',
+    ...piezas.filter(x => !x.oculto).map(x => '  ' + x.nombre + (x.descripcion ? ' — ' + x.descripcion : '')),
+    `  09_Sustento/ — ${incluidos.length} archivo(s) de sustento, una carpeta por local${varias ? ' (comunes a todas las IOARR)' : ''}`, '',
     ...(sinArchivos.length ? ['LOCALES SIN ARCHIVOS DE SUSTENTO', ...sinArchivos.map(x => '- ' + x), ''] : []),
     ...(fallidos.length ? ['ARCHIVOS QUE NO SE PUDIERON INCLUIR', ...fallidos.map(x => '- ' + x), ''] : []),
     'El Formato 07-C es un borrador de trabajo: el registro oficial se hace en el aplicativo del Banco de Inversiones del MEF.',

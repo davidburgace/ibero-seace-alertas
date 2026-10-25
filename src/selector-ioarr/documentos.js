@@ -19,6 +19,7 @@
 
 import { ITEMS, TALLAS, NIVN, textoEscenario, textoPct, textoOrigenPct, ROTULO_UMBRAL, DEF as DEF_CRIT } from './calculo.js';
 import { TIPOS, LIMITE_UIT } from './costos.js';
+import { FUENTES_VIDA_UTIL } from './lineamientos.js';
 
 // Nota del material, dentro de la descripción técnica
 export const NOTA_MATERIAL = 'El material debe respetar la ficha técnica aplicable; la entidad convocante puede exigir madera.';
@@ -113,6 +114,10 @@ export function limpiarDatosDoc(b = {}) {
     antiguedad: porTipo(b.antiguedad, v => numero(v, 0, 100)),
     vida_util_estimada: porTipo(b.vida_util_estimada, v => entero(v, 1, 50)),
     informe_vida_util: texto(b.informe_vida_util, 300),
+    // Informe técnico de vida útil: fuentes de la Directiva 005-2016-EF/51.01 y quien firma
+    fuentes_vida_util: Array.isArray(b.fuentes_vida_util) ? Object.keys(FUENTES_VIDA_UTIL).filter(k => b.fuentes_vida_util.includes(k)) : [],
+    patrimonial_nombre: texto(b.patrimonial_nombre, 200),
+    patrimonial_cargo: texto(b.patrimonial_cargo, 200),
     // Cuadro de estado situacional: advertencias revisadas, con su explicación ({ clave: { nota, fecha } })
     situacional: { revisiones: Object.fromEntries(Object.entries(b.situacional?.revisiones || {}).slice(0, 200)
       .map(([k, v]) => [String(k).slice(0, 300), { nota: texto(v?.nota, 500), fecha: /^\d{4}-\d{2}-\d{2}$/.test(v?.fecha || '') ? v.fecha : null }]).filter(([, v]) => v.nota)) },

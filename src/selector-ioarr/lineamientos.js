@@ -76,19 +76,20 @@ export function fichaActivos({ x, P = {}, datos = {}, anioRef }) {
           const comun = { ambiente: textoAmbiente(a), grado: a[5] || '', seccion: a[6] || '', denom_nueva: nuevo(t, nivel, a[5]) };
           const fk = (ficha?.aulas?.[j]?.filas || []).filter(f => f.k === it.k && f.b != null);
           if (fk.length) {
-            const m = fk.reduce((s, f) => s + f.m, 0);
-            let reg = 0;
-            if (esc === 'malo_regular') {
-              const conVida = fk.filter(f => f.antig != null && f.antig >= umbral).reduce((s, f) => s + f.r, 0);
-              const sinAnt = fk.filter(f => f.antig == null).reduce((s, f) => s + f.r, 0);
-              reg = conVida + regularAReponer(sinAnt, pct);
+            // Un lote por fila de la ficha: cada una con su código patrimonial, antigüedad y observación.
+            // Regular («Malo + % de Regular»): con antigüedad ≥ umbral, todo; sin antigüedad, el % del aula
+            // repartido entre esas filas; con antigüedad menor, nada (igual que en el costo).
+            let est = esc === 'malo_regular' ? regularAReponer(fk.filter(f => f.antig == null).reduce((a, f) => a + f.r, 0), pct) : 0;
+            for (const f of fk) {
+              let reg = 0;
+              if (esc === 'malo_regular') {
+                if (f.antig == null) { reg = Math.min(f.r, est); est -= reg; } else if (f.antig >= umbral) reg = f.r;
+              }
+              const dato = { ...comun, denom_existente: NOMBRE_BIEN[it.k], patrimonial: f.patrimonial || '', antiguedad: f.antig ?? null,
+                antig_origen: f.antig != null ? (f.estimada ? 'ficha (rango, estimada)' : 'ficha') : '', origen: 'Verificado en campo (ficha)', obs: f.obs || '', baja: f.baja || '' };
+              push({ ...dato, estado: 'Malo', cantidad: f.m });
+              push({ ...dato, estado: 'Regular', cantidad: reg });
             }
-            const ants = fk.map(f => f.antig).filter(v => v != null), pat = [...new Set(fk.map(f => f.patrimonial).filter(Boolean))].join('; ');
-            const antiguedad = !ants.length ? null : Math.min(...ants) === Math.max(...ants) ? ants[0] : `${Math.min(...ants)} a ${Math.max(...ants)}`;
-            const dato = { ...comun, denom_existente: NOMBRE_BIEN[it.k], patrimonial: pat, antiguedad, antig_origen: ants.length ? (fk.some(f => f.estimada) ? 'ficha (rango, estimada)' : 'ficha') : '',
-              origen: 'Verificado en campo (ficha)', obs: [...new Set(fk.map(f => f.obs).filter(Boolean))].join('; '), baja: fk.map(f => f.baja).filter(Boolean)[0] || '' };
-            push({ ...dato, estado: 'Malo', cantidad: m });
-            push({ ...dato, estado: 'Regular', cantidad: reg });
           } else {
             const m = C.A.m[t][ai], reg = Math.max(0, C.A.rep[t][ai] - m);
             const adq = fila?.adquisicion?.[it.k];
@@ -136,4 +137,67 @@ export function fichaActivos({ x, P = {}, datos = {}, anioRef }) {
   if (totales.pendientes) avisos.push({ tipo: 'ficha_activos', texto: `${totales.pendientes} de ${totales.filas} lotes de activos a reponer están pendientes de verificación en campo (estado del censo, sin código patrimonial o sin antigüedad).` });
   if (sinMant.size) avisos.push({ tipo: 'ficha_activos', texto: `Costo anual de mantenimiento vacío en: ${[...sinMant].join(', ')}. Cárgalo en Documentos (puede ser 0).` });
   return { filas, totales, sinMant: [...sinMant], avisos };
+}
+
+// ─── Informe técnico de vida útil ────────────────────────────────────────────
+// Fuentes admitidas por la Directiva 005-2016-EF/51.01 para fijar la vida útil
+export const FUENTES_VIDA_UTIL = {
+  control_patrimonial: 'Información de la oficina de control patrimonial (o la que haga sus veces)',
+  estimacion_entidad: 'Estimación técnica de la propia entidad',
+  estimacion_externa: 'Estimación técnica externa (especialista o proveedor)',
+  similares: 'Vida útil de elementos similares usados por la entidad u otras entidades'
+};
+export const VIDA_REFERENCIAL = 10;   // años, referencial para mobiliario: no se aplica en automático
+
+/**
+ * Modelo del informe de vida útil de una IOARR, a partir de la ficha de activos.
+ *   Malo     · sustento por vida útil efectiva: ya no es útil ni operativo (estado verificado o del censo)
+ *   Regular  · solo entra con antigüedad ≥ vida útil estimada (o el umbral, si falta) o con daño
+ *              documentado en la ficha; si no, «sin sustento» y se avisa
+ * @param ficha  fichaActivos()
+ * @param datos  Documentos: vida_util_estimada, fuentes_vida_util, patrimonial_nombre, patrimonial_cargo, informe_vida_util
+ * @param umbral años de vida útil del escenario (criterios), para el Regular sin vida útil estimada
+ */
+export function modeloVidaUtil({ ficha, datos = {}, umbral = VIDA_REFERENCIAL, nombreIoarr = '' }) {
+  const filas = ficha.filas.filter(f => !f.ajuste);
+  const vidaDe = k => datos.vida_util_estimada?.[k] ?? null;
+  const sustento = f => {
+    if (f.estado === 'Malo') return { ok: true, motivo: /^Verificado/.test(f.origen) ? 'Malo verificado en campo: vida útil efectiva cumplida' : 'Malo según el censo: confirmar en campo' };
+    if (f.estado !== 'Regular') return { ok: true, motivo: f.estado };
+    const lim = vidaDe(f.bien) ?? umbral, ant = typeof f.antiguedad === 'number' ? f.antiguedad : parseFloat(String(f.antiguedad ?? '').split(' a ').pop());
+    if (Number.isFinite(ant) && ant >= lim) return { ok: true, motivo: `Antigüedad ${f.antiguedad} años ≥ vida útil ${lim} años` };
+    if (f.obs && /^Verificado/.test(f.origen)) return { ok: true, motivo: 'Daño documentado en la ficha: ' + f.obs };
+    return { ok: false, motivo: Number.isFinite(ant) ? `Antigüedad ${f.antiguedad} años < vida útil ${lim} años y sin daño documentado` : 'Sin antigüedad ni daño documentado' };
+  };
+  const agrupar = fs => {
+    const g = new Map();
+    for (const f of fs) {
+      const o = g.get(f.bien) || { k: f.bien, nombre: NOMBRE_BIEN[f.bien], malo: 0, regular: 0, regularSin: 0, ants: [], vida: vidaDe(f.bien), lotes: 0, pendientes: 0 };
+      const s = sustento(f);
+      if (f.estado === 'Malo') o.malo += f.cantidad;
+      if (f.estado === 'Regular') { o.regular += f.cantidad; if (!s.ok) o.regularSin += f.cantidad; }
+      if (typeof f.antiguedad === 'number') o.ants.push([f.antiguedad, f.cantidad]);
+      o.lotes++; if (f.pendiente) o.pendientes++;
+      g.set(f.bien, o);
+    }
+    return ITEMS.map(x => g.get(x.k)).filter(Boolean).map(o => {
+      const peso = o.ants.reduce((a, [, q]) => a + q, 0);
+      return { ...o, antiguedad: peso ? Math.round(o.ants.reduce((a, [v, q]) => a + v * q, 0) / peso * 10) / 10 : null,
+        antMin: o.ants.length ? Math.min(...o.ants.map(([v]) => v)) : null, antMax: o.ants.length ? Math.max(...o.ants.map(([v]) => v)) : null };
+    });
+  };
+  const colegios = [];
+  for (const f of filas) { let c = colegios.find(x => x.cod === f.cod); if (!c) colegios.push(c = { cod: f.cod, colegio: f.colegio, filas: [] }); c.filas.push(f); }
+  for (const c of colegios) { c.tipos = agrupar(c.filas); c.lotes = c.filas.map(f => ({ ...f, sustento: sustento(f) })); }
+  const tipos = agrupar(filas);
+  const fuentes = (datos.fuentes_vida_util || []).filter(k => FUENTES_VIDA_UTIL[k]);
+  const regularSin = tipos.reduce((a, t) => a + t.regularSin, 0);
+  const faltan = [];
+  if (!fuentes.length) faltan.push('Fuente de la vida útil estimada (Directiva 005-2016-EF/51.01): control patrimonial, estimación técnica o elementos similares.');
+  const sinVida = tipos.filter(t => t.vida == null).map(t => t.nombre.toLowerCase());
+  if (sinVida.length) faltan.push(`Vida útil estimada de: ${sinVida.join(', ')} (${VIDA_REFERENCIAL} años es solo referencial).`);
+  if (!datos.patrimonial_nombre) faltan.push('Nombre y cargo del responsable de control patrimonial que firma el informe.');
+  if (regularSin) faltan.push(`${regularSin.toLocaleString('es-PE')} bienes en estado Regular sin antigüedad ni daño documentado: no se sustenta su reposición hasta documentarlos en campo.`);
+  return { nombreIoarr, tipos, colegios, fuentes, umbral, referencial: VIDA_REFERENCIAL, regularSin, documento: datos.informe_vida_util || '',
+    responsable: { nombre: datos.patrimonial_nombre || '', cargo: datos.patrimonial_cargo || '' }, faltan };
 }

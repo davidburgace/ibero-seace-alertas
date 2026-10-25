@@ -6,7 +6,11 @@ import ExcelJS from 'exceljs';
 import { prep, calc, filtrar, FILTRO_VACIO, DEF } from '../src/selector-ioarr/calculo.js';
 import { costear } from '../src/selector-ioarr/costos.js';
 import { porNivel } from '../src/selector-ioarr/niveles.js';
-import { fichaActivos, PENDIENTE_CAMPO } from '../src/selector-ioarr/lineamientos.js';
+import { fichaActivos, modeloVidaUtil, PENDIENTE_CAMPO } from '../src/selector-ioarr/lineamientos.js';
+import { limpiarParams } from '../src/selector-ioarr/calculo.js';
+import { generarVidaUtil } from '../src/selector-ioarr/word.js';
+import JSZip from 'jszip';
+const textoDocx = async b => (await (await JSZip.loadAsync(b)).file('word/document.xml').async('string')).replace(/<\/w:p>/g, '\n').replace(/<[^>]+>/g, '');
 import { generarExcelLineamientos } from '../src/selector-ioarr/excel-lineamientos.js';
 
 const DIR = new URL('../src/public/data/selector-ioarr/2025/', import.meta.url);
@@ -68,4 +72,33 @@ test('Excel de anexos: hoja Ficha de activos con las filas pendientes en amarill
   assert.equal(ws.getCell(6, 19).value, PENDIENTE_CAMPO);
   assert.equal(ws.getCell(6, 8).fill.fgColor.argb, 'FFFFF3B0');
   assert.equal(ws.getCell(6 + F.filas.length, 15).value.result, x.R.totales.rep);
+});
+
+test('vida útil: el Regular solo se sustenta con antigüedad o daño documentado; 10 años es referencial', async () => {
+  const P = limpiarParams({ escenario: 'malo_regular', pctRegular: 100 });
+  const x0 = ioarr('P', {}, P), l = x0.R.locales.find(y => y.diag[1].r > 0), i = D.locs.findIndex(z => z[0] === l.cod);
+  const ai = x0.D.locAul[i].find(a => x0.C.A.r[1][a] > 0), j = D.locAul[i].indexOf(ai);
+  // En el aula se cuentan 4 sillas regulares de 12 años y 2 sin antigüedad pero con daño anotado
+  const filas = [{ k: 'silla', b: 0, r: 4, m: 0, antig: 12, patrimonial: 'P-1' }, { k: 'silla', b: 0, r: 2, m: 0, patrimonial: 'P-2', obs: 'respaldar partido' }];
+  const resto = l.diag[1].r - x0.C.A.r[1][ai], mResto = l.diag[1].m - x0.C.A.m[1][ai];
+  const inv = { [l.cod]: { bienes: { silla: { b: 0, r: 6 + resto, m: mResto } }, verif: { silla: { mv: 0, mc: mResto } }, ficha: { aulas: { [j]: { filas } } } } };
+  const x = ioarr('P', inv, P);
+  const F = fichaActivos({ x, P, datos: {}, anioRef: 2026 });
+  const V = modeloVidaUtil({ ficha: F, datos: { vida_util_estimada: { silla: 10 } }, umbral: 10, nombreIoarr: 'Primaria' });
+  const c = V.colegios.find(y => y.cod === l.cod), lotes = c.lotes.filter(f => f.bien === 'silla' && f.estado === 'Regular' && /^Verificado/.test(f.origen));
+  // Un lote por fila de la ficha: 4 por antigüedad (12 ≥ 10) y 2 por daño documentado
+  assert.deepEqual(lotes.map(f => [f.cantidad, f.patrimonial, f.sustento.ok]), [[4, 'P-1', true], [2, 'P-2', true]]);
+  assert.match(lotes[0].sustento.motivo, /Antigüedad 12 años ≥ vida útil 10/); assert.match(lotes[1].sustento.motivo, /Daño documentado/);
+  assert.equal(F.totales.cantidad, x.R.totales.rep);
+  // El Regular del censo (sin antigüedad ni daño) no se sustenta
+  assert.ok(V.regularSin > 0);
+  assert.ok(V.faltan.some(t => /Fuente de la vida útil/.test(t)) && V.faltan.some(t => /control patrimonial/.test(t)));
+  assert.ok(V.faltan.some(t => /Regular sin antigüedad ni daño documentado/.test(t)));
+  const M = { nombre: 'IOARR de prueba', fecha: '2026-10-25' };
+  const todo = await textoDocx(await generarVidaUtil(M, { ...V, fuentes: ['control_patrimonial'] }));
+  assert.match(todo, /Directiva N\.° 005-2016-EF\/51\.01/); assert.match(todo, /\[X\] Información de la oficina de control patrimonial/);
+  assert.match(todo, /10 años es un valor referencial: no se aplica en forma automática/);
+  assert.match(todo, /Firma y sello del responsable de control patrimonial/); assert.match(todo, /Visto bueno/);
+  const uno = await textoDocx(await generarVidaUtil(M, V, l.cod));
+  assert.match(uno, new RegExp(`código de local ${l.cod}`)); assert.match(uno, /Lotes del local/); assert.match(uno, /Daño documentado/);
 });

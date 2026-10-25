@@ -237,11 +237,11 @@ test('ZIP: documentos, sustento por local, nombres repetidos, fallos e índice',
   const nombres = Object.keys(z.files).filter(n => !z.files[n].dir).sort();
   assert.deepEqual(nombres, [
     'Exp/00_LEEME.txt', 'Exp/01_Formato_07C_borrador.docx', 'Exp/02_Memoria_descriptiva.docx',
-    'Exp/06_Sustento/276008_11124_NUESTRA_SENORA_DE_LA_PAZ/01_Acta_Acta_de_visita.pdf',
-    'Exp/06_Sustento/276008_11124_NUESTRA_SENORA_DE_LA_PAZ/02_Foto_foto.jpg',
-    'Exp/06_Sustento/276008_11124_NUESTRA_SENORA_DE_LA_PAZ/03_Foto_foto.jpg'
+    'Exp/09_Sustento/276008_11124_NUESTRA_SENORA_DE_LA_PAZ/01_Acta_Acta_de_visita.pdf',
+    'Exp/09_Sustento/276008_11124_NUESTRA_SENORA_DE_LA_PAZ/02_Foto_foto.jpg',
+    'Exp/09_Sustento/276008_11124_NUESTRA_SENORA_DE_LA_PAZ/03_Foto_foto.jpg'
   ]);
-  assert.equal(await z.file('Exp/06_Sustento/276008_11124_NUESTRA_SENORA_DE_LA_PAZ/02_Foto_foto.jpg').async('string'), 'contenido r2');
+  assert.equal(await z.file('Exp/09_Sustento/276008_11124_NUESTRA_SENORA_DE_LA_PAZ/02_Foto_foto.jpg').async('string'), 'contenido r2');
   assert.deepEqual(r.fallidos, ['276008: baja.pdf (no existe)']);
   const leeme = await z.file('Exp/00_LEEME.txt').async('string');
   for (const s of ['EXPEDIENTE IOARR — Chiclayo', 'por yo@x.pe', 'registro: abreviado'.replace('registro', 'Registro'), '3 archivo(s) de sustento', 'ARCHIVOS QUE NO SE PUDIERON INCLUIR', 'DATOS PENDIENTES', 'borrador de trabajo'])
