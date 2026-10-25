@@ -74,7 +74,7 @@ function pintar() {
     ${R.sin_rep.length ? `<div class="avisos"><div class="aviso">No se incluyen como UP ${R.sin_rep.length === 1 ? 'el local' : 'los locales'} sin bienes a reponer: ${R.sin_rep.map(esc).join(', ')}.</div></div>` : ''}
     <div class="exportar">
       <div><h3>Documentos en Word</h3><p>Borrador del Formato 07-C para preparar el registro en el Banco de Inversiones, y memoria descriptiva. Lo que falte sale marcado «PENDIENTE» en amarillo.</p></div>
-      <div class="acciones-fila"><button class="btn btn-primary" data-doc-bajar="formato-07c" type="button">Formato 07-C (Word)</button><button class="btn btn-ghost" data-doc-bajar="memoria" type="button">Memoria descriptiva (Word)</button><button class="btn btn-ghost" data-doc-zip type="button">Expediente completo (ZIP)</button></div>
+      <div class="acciones-fila"><button class="btn btn-primary" data-doc-bajar="formato-07c" type="button">Formato 07-C (Word)</button><button class="btn btn-ghost" data-doc-bajar="memoria" type="button">Memoria descriptiva (Word)</button><button class="btn btn-ghost" data-doc-bajar="lineamientos/anexos" type="button">Anexos de Lineamientos (Excel)</button><button class="btn btn-ghost" data-doc-zip type="button">Expediente completo (ZIP)</button></div>
     </div>
     <div class="cols">
       <div class="panel"><div class="panel-cab"><h3>Pendientes</h3><span class="guardado" id="doc-guardado"></span></div>
@@ -188,13 +188,15 @@ async function bajar(btn) {
   btn.disabled = true; const txt = btn.textContent; btn.textContent = 'Generando…';
   try {
     if (tGuardar) { clearTimeout(tGuardar); tGuardar = null; await guardar(); }
-    const r = await fetch(`/api/selector-ioarr/proyectos/${ctx.proyecto.id}/documentos/${btn.dataset.docBajar}${qn()}`);
+    // «formato-07c», «memoria»… van bajo /documentos; una ruta con «/» va directo bajo el proyecto
+    const ruta = btn.dataset.docBajar.includes('/') ? btn.dataset.docBajar : 'documentos/' + btn.dataset.docBajar;
+    const r = await fetch(`/api/selector-ioarr/proyectos/${ctx.proyecto.id}/${ruta}${qn()}`);
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Error ' + r.status);
     const blob = await r.blob(), cd = r.headers.get('Content-Disposition') || '';
     const nombre = decodeURIComponent((cd.match(/filename\*=UTF-8''([^;]+)/) || [])[1] || 'documento.docx');
     const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: nombre });
     document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 10000);
-    ctx.toast('Word descargado.');
+    ctx.toast(nombre.endsWith('.xlsx') ? 'Excel descargado.' : 'Word descargado.');
   } catch (e) { ctx.toast('No se pudo generar: ' + e.message); }
   finally { btn.disabled = false; btn.textContent = txt; }
 }

@@ -269,7 +269,7 @@ test('la pestaña interna de oferta no sale en ninguna exportación (07-C, memor
   const A = { modo: 'una', P, detalle: {}, efectivos: preciosEfectivos({}, {}), excluidos: [], dup: {} };
   const x = { nivel: null, nombre: 'Todos los niveles', D, C, list, R, inv: {} };
   const piezas = await piezasExpediente({ A, datos, lista: [{ x, M }], meta: { region: 'Prueba', fecha: '2026-10-23' }, nombre: 'Control' });
-  assert.deepEqual(piezas.map(p => p.nombre), ['01_Formato_07C_borrador.docx', '02_Memoria_descriptiva.docx', '03_Lista_de_verificacion.docx', '04_Estructura_de_costos.xlsx', '05_Seleccion_de_locales_y_metrado.xlsx']);
+  assert.deepEqual(piezas.map(p => p.nombre), ['01_Formato_07C_borrador.docx', '02_Memoria_descriptiva.docx', '03_Lista_de_verificacion.docx', '04_Estructura_de_costos.xlsx', '05_Seleccion_de_locales_y_metrado.xlsx', '06_Anexos_Lineamientos.xlsx']);
   // ZIP completo
   const salida = new PassThrough(), partes = []; salida.on('data', c => partes.push(c));
   const fin = new Promise(ok => salida.on('end', ok));
@@ -290,9 +290,9 @@ test('la pestaña interna de oferta no sale en ninguna exportación (07-C, memor
   assert.doesNotMatch(todo, /utilidad|gastos generales|imprevistos|gestión del proyecto/i);
   // Y en el código: ningún exportador importa oferta.js ni la ruta del ZIP la lee
   const src = f => readFileSync(new URL('../src/selector-ioarr/' + f, import.meta.url), 'utf8');
-  for (const f of ['word.js', 'excel-costos.js', 'excel.js', 'zip.js', 'documentos.js', 'ficha.js', 'ficha-digital.js']) assert.doesNotMatch(src(f), /oferta\.js|leerOferta|calcularOferta/, f);
+  for (const f of ['word.js', 'excel-costos.js', 'excel.js', 'zip.js', 'documentos.js', 'ficha.js', 'ficha-digital.js', 'lineamientos.js', 'excel-lineamientos.js']) assert.doesNotMatch(src(f), /oferta\.js|leerOferta|calcularOferta/, f);
   const exp = src('expediente.js');
-  const rutas = ['/documentos/formato-07c', '/documentos/memoria', '/documentos/verificacion', '/costos/excel', '/expediente-zip', '/fichas-zip'];
+  const rutas = ['/documentos/formato-07c', '/documentos/memoria', '/documentos/verificacion', '/costos/excel', '/expediente-zip', '/fichas-zip', '/lineamientos/anexos'];
   for (const r of rutas) {
     const i = exp.indexOf(`'/proyectos/:id${r}'`), cuerpo = exp.slice(i, exp.indexOf('\n  }));', i));
     assert.ok(i > 0, r); assert.doesNotMatch(cuerpo, /leerOferta|calcularOferta|ioarr_expediente_oferta/, r);

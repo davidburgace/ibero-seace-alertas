@@ -355,13 +355,42 @@ export async function generarMemoria(M) {
   c.push(titulo('11. Anexos'));
   c.push(vinieta('Estructura de costos en Excel (Selector IOARR → Expediente → Exportar costos a Excel).'));
   c.push(vinieta('Selección de locales y metrado por aula en Excel (Selector IOARR → Exportar a Excel).'));
+  c.push(vinieta('Anexo 1: estructura preliminar de costos, activos a reponer (al final de esta memoria y en el Excel de anexos de los Lineamientos).'));
   const archivos = M.ups.flatMap(u => u.archivos.map(a => ({ ...a, cod: u.cod })));
   if (archivos.length) {
     c.push(p('Sustento de la verificación en campo:', { bold: true, before: 120 }));
     c.push(tabla(['Código de local', 'Tipo', 'Archivo', 'Descripción'], archivos.map(a => [a.cod, { acta: 'Acta de verificación', foto: 'Foto', inventario_patrimonial: 'Inventario patrimonial', baja: 'Baja', otro: 'Otro' }[a.tipo] || a.tipo, a.nombre_archivo, a.descripcion || '']), { anchos: [14, 20, 36, 30], size: 15 }));
   } else c.push(vinieta('PENDIENTE: acta de verificación, fotos, inventario patrimonial y sustento de baja de cada local.'));
   c.push(nota('Fuentes: Padrón de ESCALE y Censo Educativo 2025 (Minedu), datos declarados por cada colegio; Lineamientos IOARR del MEF (9.ª versión, junio 2025). Los precios, los porcentajes y la UIT se revisan en la estructura de costos; los porcentajes dependen de la entidad convocante.'));
+  c.push(...anexoFichaActivos(M));
   return Packer.toBuffer(documento(M, 'Memoria descriptiva', c));
+}
+
+// ─── Anexo: estructura preliminar de costos (activos a reponer) ────────────
+// Con muchos lotes, el detalle va solo en el Excel y aquí un resumen por local y bien
+const MAX_LOTES_WORD = 800;
+function anexoFichaActivos(M) {
+  const F = M.fichaActivos;
+  if (!F) return [];
+  const out = [titulo('Anexo 1. Estructura preliminar de costos: activos a reponer')];
+  out.push(p(`Lotes de activos a reponer por ambiente (aula), bien y estado verificado: ${ent(F.totales.filas)} lotes, ${ent(F.totales.cantidad)} bienes (igual al metrado de la estructura de costos). ${F.totales.pendientes ? `${ent(F.totales.pendientes)} lotes están «PENDIENTE de verificación en campo»: no tienen el estado contado en campo, el código patrimonial o la antigüedad, y no se completan con valores supuestos.` : 'Todos los lotes tienen el dato de campo.'}`));
+  if (F.sinMant.length) out.push(p(`PENDIENTE: costo anual de mantenimiento de ${F.sinMant.join(', ')}.`));
+  if (F.filas.length <= MAX_LOTES_WORD) {
+    out.push(tabla(['Local', 'Ambiente', 'Bien existente → nuevo', 'Cód. patrimonial', 'Antig. (años)', 'Estado', 'Cant.', 'Mant. anual exist. / nuevo (S/)', 'Situación'],
+      F.filas.map(f => [f.cod, `${f.ambiente}${f.grado ? '\n' + f.grado + (f.seccion ? ' ' + f.seccion : '') : ''}`, `${f.denom_existente}\n→ ${f.denom_nueva}`,
+        { v: f.patrimonial || (f.ajuste ? '' : PEND) }, { v: f.antiguedad == null ? (f.ajuste ? '' : PEND) : String(f.antiguedad) }, f.estado ? `${f.estado}\n${f.origen}` : f.origen,
+        { v: ent(f.cantidad) }, `${f.mant_existente == null ? '—' : NS.format(f.mant_existente)} / ${f.mant_nuevo == null ? '—' : NS.format(f.mant_nuevo)}`,
+        { v: f.ajuste ? 'Ajuste' : f.pendiente ? 'PENDIENTE de verificación en campo' : 'Completa', pend: f.pendiente }]),
+      { num: [6], size: 13, anchos: [8, 15, 22, 11, 7, 12, 6, 10, 9] }));
+  } else {
+    const g = new Map();
+    for (const f of F.filas) { const k = f.cod + '|' + f.bien; const o = g.get(k) || { cod: f.cod, colegio: f.colegio, bien: f.denom_existente.split(' (')[0], q: 0, lotes: 0, pend: 0 }; o.q += f.cantidad; o.lotes += f.ajuste ? 0 : 1; o.pend += f.pendiente ? 1 : 0; g.set(k, o); }
+    out.push(nota(`Son ${ent(F.filas.length)} lotes: aquí va el resumen por local y bien; el detalle por aula, con el código patrimonial y la antigüedad, va en el Excel de anexos de los Lineamientos (hoja «Ficha de activos»).`));
+    out.push(tabla(['Local', 'Institución educativa', 'Bien', 'Cantidad a reponer', 'Lotes', 'Pendientes de verificación'],
+      [...g.values()].map(o => [o.cod, o.colegio, o.bien, { v: ent(o.q) }, { v: ent(o.lotes) }, { v: ent(o.pend), pend: o.pend > 0 }]), { num: [3, 4, 5], size: 15 }));
+  }
+  out.push(nota('El costo anual de mantenimiento de cada tipo de bien (Documentos) se prorratea entre sus lotes según la cantidad. Denominación nueva: el mobiliario de aula según el grupo de grado.'));
+  return out;
 }
 
 // ─── Lista de verificación ──────────────────────────────────────────────────

@@ -33,6 +33,8 @@
 //     GET    /proyectos/:id/documentos/formato-07c  Word del borrador del Formato 07-C
 //     GET    /proyectos/:id/documentos/memoria      Word de la memoria descriptiva
 //     GET    /proyectos/:id/documentos/verificacion Word de la lista de verificación (etapa 3)
+//   Lineamientos IOARR (lineamientos.js)
+//     GET    /proyectos/:id/lineamientos/anexos      Excel: ficha de activos a reponer…
 //   Oferta (uso interno, migración 027): NO entra al 07-C, a las fichas, a los Excel ni al ZIP
 //     GET    /proyectos/:id/oferta                  entradas guardadas + costo puesto en colegio y margen
 //     PUT    /proyectos/:id/oferta                  { datos }
@@ -73,6 +75,8 @@ import { generarExcelCostos } from './excel-costos.js';
 import { armarModelo, limpiarDatosDoc, ESTADOS_ACTIVO, MODALIDADES, FUENTES_FIN } from './documentos.js';
 import { generar07C, generarMemoria, generarVerificacion } from './word.js';
 import { leerDuplicidad, separarLocales, estadoDe, avisosDuplicidad } from './duplicidad.js';
+import { fichaActivos } from './lineamientos.js';
+import { generarExcelLineamientos } from './excel-lineamientos.js';
 import { porNivel, validarNiveles, inventarioNivel, inventarioUna, modoDe, sinNivel, nivelesDeLocal, vistaNivel, limpiarPorNivel, NOMBRE_NIVEL } from './niveles.js';
 import { modeloFicha, generarFichaExcel, generarFichaPdf, leerFicha, procesarFicha, requeridoFicha, ESTADO_VERIF } from './ficha.js';
 import archiver from 'archiver';
@@ -912,7 +916,9 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     const datosX = porNiv ? { ...datos, nombre_inversion: dn.nombre_inversion || '', cui: dn.cui || '' } : datos;
     const proyectoX = porNiv ? { ...p, nombre: `${p.nombre} — IOARR ${x.nombre}`, ioarr: p.ioarr && dn.cui && dn.cui === p.ioarr.cui ? p.ioarr : null } : p;
     const M = armarModelo({ R: x.R, D: x.D, list: x.list, proyecto: proyectoX, datos: datosX, precios: A.detalle, efectivos: A.efectivos, P: A.P, inv: A.inv, fecha: hoyLima() });
-    return Object.assign(M, { nivel: x.nivel, nombreIoarr: x.nombre });
+    // Estructura preliminar de costos: lotes de activos a reponer (anexo de la memoria y Excel)
+    const ficha = fichaActivos({ x, P: A.P, datos: datosX, anioRef: M.anioRef });
+    return Object.assign(M, { nivel: x.nivel, nombreIoarr: x.nombre, fichaActivos: ficha });
   }
   async function modelo(p, nivel) {
     const [A, { datos, sinMigracion }] = await Promise.all([armar(p), leerDatosDoc(p)]);
@@ -997,6 +1003,19 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     }).send(buffer);
   }));
 
+  // Anexos de los Lineamientos IOARR (ficha de activos a reponer…), por IOARR
+  api.get('/proyectos/:id/lineamientos/anexos', responder(async (req, res) => {
+    const p = await proyecto(req), { M } = await modelo(p, req.query.nivel);
+    if (!M.ups.length) return res.status(400).json({ error: 'Ningún local del proyecto tiene bienes a reponer' });
+    const buffer = await generarExcelLineamientos(anexosDe(M), { proyecto: p.nombre, nombreIoarr: M.nombreIoarr, region: p.region, fecha: M.fecha });
+    const archivo = `Anexos_Lineamientos_${slug(p.nombre)}${sufijo(M)}_${M.fecha}.xlsx`;
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="${archivo}"; filename*=UTF-8''${encodeURIComponent(archivo)}`,
+      'Cache-Control': 'no-store'
+    }).send(buffer);
+  }));
+
   // ─── Etapa 4: ZIP del expediente ──────────────────────────────────────────
   // Se arma en flujo (archiver): los archivos del bucket se agregan de a uno, así
   // la memoria no crece con el número de fotos. La oferta (uso interno) no se lee aquí:
@@ -1068,20 +1087,23 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
 export async function piezasExpediente({ A, datos, lista, meta, nombre }) {
   const porNiv = A.modo === 'por_nivel';
   const xs = await Promise.all(lista.map(async ({ x, M }, j) => {
+    M.fichaActivos ??= fichaActivos({ x, P: A.P, datos, anioRef: M.anioRef });
     const carpeta = porNiv ? `${String(j + 1).padStart(2, '0')}_IOARR_${nombreSeguro(x.nombre)}/` : '';
     const m = { ...meta, proyecto: porNiv ? `${nombre} — IOARR ${x.nombre}` : nombre };
     const fuera = x.nivel ? (A.excluidos || []).filter(i => x.D.locSvc[i].length) : (A.excluidos || []);
-    const [f07c, memoria, verificacion, costos, { buffer: seleccion }] = await Promise.all([
+    const [f07c, memoria, verificacion, costos, { buffer: seleccion }, anexos] = await Promise.all([
       generar07C(M), generarMemoria(M), generarVerificacion(M),
       generarExcelCostos(x.R, { ...m, criterios: textoCriterios(A.P), escenario: textoEscenario(A.P, regDato(x.R)), precios: A.detalle, efectivos: A.efectivos, inventario: x.inv }),
-      generarExcel(x.D, x.C, A.P, x.list, { ...m, duplicidad: A.dup, excluidos: fuera, revisiones: datos.situacional?.revisiones })
+      generarExcel(x.D, x.C, A.P, x.list, { ...m, duplicidad: A.dup, excluidos: fuera, revisiones: datos.situacional?.revisiones }),
+      generarExcelLineamientos(anexosDe(M), { ...m, nombreIoarr: M.nombreIoarr })
     ]);
     return [
       { nombre: carpeta + '01_Formato_07C_borrador.docx', contenido: f07c, descripcion: 'borrador del Formato 07-C' },
       { nombre: carpeta + '02_Memoria_descriptiva.docx', contenido: memoria },
       { nombre: carpeta + '03_Lista_de_verificacion.docx', contenido: verificacion },
       { nombre: carpeta + '04_Estructura_de_costos.xlsx', contenido: costos, descripcion: 'con fórmulas' },
-      { nombre: carpeta + '05_Seleccion_de_locales_y_metrado.xlsx', contenido: seleccion, descripcion: 'metrado por aula del Selector' }
+      { nombre: carpeta + '05_Seleccion_de_locales_y_metrado.xlsx', contenido: seleccion, descripcion: 'metrado por aula del Selector' },
+      { nombre: carpeta + '06_Anexos_Lineamientos.xlsx', contenido: anexos, descripcion: 'ficha de activos a reponer' }
     ];
   }));
   return xs.flat();
@@ -1116,6 +1138,9 @@ const LEEME_PAQUETE = (proyecto, paq, D, idxDe) => [
   '',
   ...paq.codigos.map((c, j) => { const i = idxDe.get(c); return `${String(j + 1).padStart(3, ' ')}. ${c} · ${D.locName[i]} · ${D.dists[D.locs[i][1]][0]}`; })
 ].join('\r\n');
+
+// Lo que va al Excel de anexos de los Lineamientos, desde el modelo de una IOARR
+export const anexosDe = M => ({ ficha: M.fichaActivos });
 
 export function textoCriterios(P) {
   const est = { b: 'Bueno', r: 'Regular', m: 'Malo' }[P.carpEstado];

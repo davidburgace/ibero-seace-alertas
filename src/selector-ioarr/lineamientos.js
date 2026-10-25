@@ -1,0 +1,139 @@
+// ============================================================================
+// src/selector-ioarr/lineamientos.js — Requisitos de los Lineamientos IOARR (MEF, 9.ª versión,
+// junio 2025) que se arman por colegio. Funciones puras: las usan la API, los Excel y los Word.
+//
+//   fichaActivos()  estructura preliminar de costos: un lote por aula, bien y estado a reponer,
+//                   con código patrimonial, denominación existente y nueva, antigüedad,
+//                   mantenimiento, ambiente y estado verificado. Lo que falta queda
+//                   «pendiente de verificación en campo»: no se inventan valores.
+// ============================================================================
+
+import { ITEMS, TALLAS, NIVN, tallasDeAula, regularAReponer } from './calculo.js';
+
+export const PENDIENTE_CAMPO = 'Pendiente de verificación en campo';
+const NOMBRE_BIEN = Object.fromEntries(ITEMS.map(x => [x.k, x.n]));
+
+// ─── Ficha de activos a reponer ──────────────────────────────────────────────
+// Talla del mobiliario nuevo de un aula: la de su grado; multigrado o sin grado, el nivel
+const tallaTexto = (nivel, grado) => {
+  const js = tallasDeAula(nivel, grado);
+  return js.length === 1 ? TALLAS[js[0]].n : `${NIVN[nivel]} (según el grado; aula multigrado o sin grado)`;
+};
+// Lo que el censo trae como mesa del estudiante en un aula (para la denominación existente)
+function mesasDelCenso(a, P, estado) {
+  const f = j => a[11 + j], ix = { r: 1, m: 2 }[estado], out = [];
+  if (f(ix)) out.push('mesa unipersonal');
+  if (f(3 + ix)) out.push('mesa múltiple');
+  if ((P?.carpEstado || 'r') === estado) { if (f(6)) out.push('carpeta unipersonal'); if (f(7)) out.push('carpeta bipersonal'); }
+  return out;
+}
+const textoAmbiente = a => `Aula ${[a[2] ? 'edif. ' + a[2] : '', a[3] !== '' && a[3] != null ? 'piso ' + a[3] : '', a[4] ? 'N.° ' + a[4] : ''].filter(Boolean).join(', ') || '(sin número en el censo)'}`;
+
+/**
+ * Lotes de activos a reponer de una IOARR (un nivel).
+ * @param {object} p
+ *   x        { nivel, D (vista del nivel), C (calc), list, R (costear), inv (inventario del nivel) }
+ *   P        criterios del proyecto (carpEstado)
+ *   datos    datos de Documentos: mant_actual y mant_nuevo por tipo (S/ anual de todo el tipo)
+ *   anioRef  año de referencia para la antigüedad según el año de adquisición
+ * @returns { filas, totales: { filas, pendientes, cantidad }, sinMant: [tipos], avisos }
+ *
+ * Por local y tipo, en este orden:
+ *   ficha de verificación → un lote por aula contada (Malo y, en «Malo + % de Regular», el Regular a
+ *     reponer); las aulas no contadas siguen con el censo
+ *   corrección a mano (sin ficha) → un lote por local y estado, con lo corregido
+ *   censo → un lote por aula y estado, pendiente de verificación en campo
+ * Si los lotes no suman lo que repone el costo (tope de matrícula, entregas previas descontadas…),
+ * se agrega una fila de ajuste para que la ficha cuadre con el metrado.
+ * El mantenimiento anual del tipo (Documentos) se prorratea entre sus lotes según la cantidad.
+ */
+export function fichaActivos({ x, P = {}, datos = {}, anioRef }) {
+  const { D, C, R, inv = {} } = x, base = D.base || D, esc = C.escenario || 'malo', umbral = C.umbralVida ?? 10;
+  const idx = new Map(D.locs.map((l, i) => [l[0], i]));
+  const filas = [];
+  for (const l of R.locales) {
+    const i = idx.get(l.cod); if (i == null) continue;
+    const fila = inv[l.cod], ficha = fila?.ficha, enVista = new Set(D.locAul[i]);
+    const nuevo = (t, nivel, grado) => (l.kit && t < 2 ? 'Kit de mobiliario (mesa + silla del estudiante)' : NOMBRE_BIEN[ITEMS[t].k]) + (t < 2 ? ' – ' + tallaTexto(nivel, grado) : '');
+    ITEMS.forEach((it, t) => {
+      const rep = l.rep[t];
+      if (!rep) return;
+      const lotes = [];
+      const push = o => { if (o.cantidad > 0) lotes.push({ cod: l.cod, colegio: l.nom, nivel: NIVN[x.nivel] || '', bien: it.k, unidad: it.u, ...o }); };
+      const corregido = fila?.bienes?.[it.k] && !fila?.verif?.[it.k];
+      if (corregido) {
+        // Corrección a mano por local: no hay lotes por aula ni código patrimonial
+        const v = fila.bienes[it.k], adq = fila.adquisicion?.[it.k];
+        const regular = esc === 'malo_regular' ? Math.max(0, rep - v.m) : 0;
+        for (const [estado, q] of [['Malo', Math.min(v.m, rep)], ['Regular', regular]]) push({
+          ambiente: 'Todo el local (inventario corregido a mano)', grado: '', seccion: '', denom_existente: NOMBRE_BIEN[it.k],
+          denom_nueva: nuevo(t, x.nivel || D.svcs[D.locSvc[i][0]]?.[2], ''), patrimonial: '', antiguedad: adq ? anioRef - adq : null, antig_origen: adq ? 'año de adquisición del local' : '',
+          estado, origen: 'Verificado en campo (corrección por local)', cantidad: q });
+      } else {
+        base.locAul[i].forEach((ai, j) => {
+          if (!enVista.has(ai)) return;
+          const a = base.aulas[ai], nivel = base.svcs[a[1]][2], pct = C.pctNiv?.[nivel] ?? C.pctRegular ?? 100;
+          const comun = { ambiente: textoAmbiente(a), grado: a[5] || '', seccion: a[6] || '', denom_nueva: nuevo(t, nivel, a[5]) };
+          const fk = (ficha?.aulas?.[j]?.filas || []).filter(f => f.k === it.k && f.b != null);
+          if (fk.length) {
+            const m = fk.reduce((s, f) => s + f.m, 0);
+            let reg = 0;
+            if (esc === 'malo_regular') {
+              const conVida = fk.filter(f => f.antig != null && f.antig >= umbral).reduce((s, f) => s + f.r, 0);
+              const sinAnt = fk.filter(f => f.antig == null).reduce((s, f) => s + f.r, 0);
+              reg = conVida + regularAReponer(sinAnt, pct);
+            }
+            const ants = fk.map(f => f.antig).filter(v => v != null), pat = [...new Set(fk.map(f => f.patrimonial).filter(Boolean))].join('; ');
+            const antiguedad = !ants.length ? null : Math.min(...ants) === Math.max(...ants) ? ants[0] : `${Math.min(...ants)} a ${Math.max(...ants)}`;
+            const dato = { ...comun, denom_existente: NOMBRE_BIEN[it.k], patrimonial: pat, antiguedad, antig_origen: ants.length ? (fk.some(f => f.estimada) ? 'ficha (rango, estimada)' : 'ficha') : '',
+              origen: 'Verificado en campo (ficha)', obs: [...new Set(fk.map(f => f.obs).filter(Boolean))].join('; '), baja: fk.map(f => f.baja).filter(Boolean)[0] || '' };
+            push({ ...dato, estado: 'Malo', cantidad: m });
+            push({ ...dato, estado: 'Regular', cantidad: reg });
+          } else {
+            const m = C.A.m[t][ai], reg = Math.max(0, C.A.rep[t][ai] - m);
+            const adq = fila?.adquisicion?.[it.k];
+            const den = st => it.k === 'mesa' && mesasDelCenso(a, P, st).length ? `${NOMBRE_BIEN.mesa} (censo: ${mesasDelCenso(a, P, st).join(', ')})` : NOMBRE_BIEN[it.k];
+            const dato = { ...comun, patrimonial: '', antiguedad: adq ? anioRef - adq : null, antig_origen: adq ? 'año de adquisición del local' : '', origen: 'Censo Educativo (sin verificar)' };
+            if (esc === 'capacidad') push({ ...dato, denom_existente: NOMBRE_BIEN[it.k], estado: 'No aplica (por capacidad)', cantidad: C.A.rep[t][ai] });
+            else { push({ ...dato, denom_existente: den('m'), estado: 'Malo', cantidad: m }); push({ ...dato, denom_existente: den('r'), estado: 'Regular', cantidad: reg }); }
+          }
+        });
+      }
+      // Que la ficha cuadre con el metrado del costo
+      const suma = lotes.reduce((s, f) => s + f.cantidad, 0);
+      if (suma !== rep) lotes.push({ cod: l.cod, colegio: l.nom, nivel: NIVN[x.nivel] || '', bien: it.k, unidad: it.u, ambiente: 'Ajuste al metrado del costo', grado: '', seccion: '',
+        denom_existente: NOMBRE_BIEN[it.k], denom_nueva: nuevo(t, x.nivel, ''), patrimonial: '', antiguedad: null, antig_origen: '', estado: '', origen: 'Ajuste',
+        cantidad: rep - suma, ajuste: true, obs: rep < suma ? 'Se descuenta del metrado: tope de matrícula o de capacidad de diseño, o entregas previas descontadas.' : 'Diferencia de redondeo del % de Regular.' });
+      filas.push(...lotes);
+    });
+  }
+  // Pendientes: lo que no tiene dato de campo (no se inventa)
+  for (const f of filas) {
+    const motivos = [];
+    if (f.ajuste) { f.pendiente = false; f.motivos = []; continue; }
+    if (/^Censo/.test(f.origen)) motivos.push('el estado sale del censo, falta contarlo en campo');
+    if (!f.patrimonial) motivos.push('falta el código patrimonial');
+    if (f.antiguedad == null) motivos.push('falta la antigüedad');
+    f.pendiente = motivos.length > 0; f.motivos = motivos;
+    f.situacion = f.pendiente ? PENDIENTE_CAMPO : 'Completa';
+  }
+  // Mantenimiento anual del tipo, prorrateado según la cantidad de cada lote
+  const totTipo = {};
+  for (const f of filas) totTipo[f.bien] = (totTipo[f.bien] || 0) + f.cantidad;
+  const sinMant = new Set();
+  for (const f of filas) {
+    const kNuevo = f.denom_nueva.startsWith('Kit') ? 'kit' : f.bien;
+    const ma = datos.mant_actual?.[f.bien], mn = datos.mant_nuevo?.[kNuevo] ?? datos.mant_nuevo?.[f.bien];
+    const parte = totTipo[f.bien] ? f.cantidad / totTipo[f.bien] : 0;
+    f.mant_existente = ma == null ? null : Math.round(ma * parte * 100) / 100;
+    f.mant_nuevo = mn == null ? null : Math.round(mn * parte * 100) / 100;
+    if (ma == null) sinMant.add(`${NOMBRE_BIEN[f.bien]} (existente)`);
+    if (mn == null) sinMant.add(`${kNuevo === 'kit' ? 'Kit de mobiliario' : NOMBRE_BIEN[f.bien]} (nuevo)`);
+  }
+  const reales = filas.filter(f => !f.ajuste);
+  const totales = { filas: reales.length, pendientes: reales.filter(f => f.pendiente).length, cantidad: filas.reduce((s, f) => s + f.cantidad, 0) };
+  const avisos = [];
+  if (totales.pendientes) avisos.push({ tipo: 'ficha_activos', texto: `${totales.pendientes} de ${totales.filas} lotes de activos a reponer están pendientes de verificación en campo (estado del censo, sin código patrimonial o sin antigüedad).` });
+  if (sinMant.size) avisos.push({ tipo: 'ficha_activos', texto: `Costo anual de mantenimiento vacío en: ${[...sinMant].join(', ')}. Cárgalo en Documentos (puede ser 0).` });
+  return { filas, totales, sinMant: [...sinMant], avisos };
+}
