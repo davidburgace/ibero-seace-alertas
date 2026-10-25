@@ -318,3 +318,9 @@ export const filasCapacidad = R => R.locales.map(l => ({
   existente: l.tope?.existente || [0, 0], antes: l.tope?.antes || [l.rep[0], l.rep[1]], recorte: l.tope?.recorte || [0, 0], kitsRecortados: l.tope?.kits || 0,
   rep: [l.rep[0], l.rep[1]], kits: l.kits, faltante: l.fal[0] + l.fal[1], inconsistente: !!l.tope?.inconsistente
 }));
+
+// ─── Consultas pendientes a la OPMI (anexo de la memoria; no se responden aquí) ─
+export const CONSULTAS_OPMI = [
+  { id: 'nivel', pregunta: 'Confirmar el criterio de formular una IOARR masiva por nivel educativo (Inicial, Primaria y Secundaria por separado), sin mezclar niveles en un mismo Formato 07-C, para el mobiliario escolar de las IE del ámbito.' },
+  { id: 'pmi_oxi', pregunta: 'Confirmar si la IOARR debe estar programada en la cartera del PMI (Formato 05-B) antes de iniciar un proceso de Obras por Impuestos, y en qué momento del proceso se exige.' }
+];

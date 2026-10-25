@@ -304,3 +304,12 @@ test('05-B: idea con tipo de IOARR + UP genérica + ámbito, y montos t, t+1, t+
   assert.match(t07, /mejor tecnología o conformes a la norma técnica vigente/);
   assert.match(await textoDocx(await generarMemoria(MP)), /Recuadro 14 y Aplicación 6/);
 });
+
+test('memoria: anexo «Consultas a la OPMI» con las dos preguntas, sin responder', async () => {
+  const { generarMemoria } = await import('../src/selector-ioarr/word.js');
+  const t = await textoDocx(await generarMemoria(paquete().M('P')));
+  const a = t.slice(t.indexOf('Anexo 2. Consultas a la OPMI'));
+  assert.ok(a.length > 30);
+  assert.match(a, /una IOARR masiva por nivel educativo/); assert.match(a, /programada en la cartera del PMI .* Obras por Impuestos/);
+  assert.equal((a.match(/\nPENDIENTE\n/g) || []).length, 2);   // ninguna respondida
+});

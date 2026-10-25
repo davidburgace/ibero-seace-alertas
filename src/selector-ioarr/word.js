@@ -13,7 +13,7 @@ import {
   Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, AlignmentType,
   HeadingLevel, ShadingType, Header, Footer, PageNumber, BorderStyle, PageOrientation
 } from 'docx';
-import { FUENTES_VIDA_UTIL, AVISO_BORRADOR } from './lineamientos.js';
+import { FUENTES_VIDA_UTIL, AVISO_BORRADOR, CONSULTAS_OPMI } from './lineamientos.js';
 import { NOTA_FALTANTE } from './costos.js';
 
 const AZUL = '3A63E0', GRIS = 'EEF0F4', AMARILLO = 'FFF3B0', TEXTO = '16181D', TENUE = '5C6270';
@@ -372,6 +372,7 @@ export async function generarMemoria(M) {
   c.push(vinieta('Estructura de costos en Excel (Selector IOARR → Expediente → Exportar costos a Excel).'));
   c.push(vinieta('Selección de locales y metrado por aula en Excel (Selector IOARR → Exportar a Excel).'));
   c.push(vinieta('Anexo 1: estructura preliminar de costos, activos a reponer (al final de esta memoria y en el Excel de anexos de los Lineamientos).'));
+  c.push(vinieta('Anexo 2: consultas a la OPMI, pendientes de respuesta.'));
   const archivos = M.ups.flatMap(u => u.archivos.map(a => ({ ...a, cod: u.cod })));
   if (archivos.length) {
     c.push(p('Sustento de la verificación en campo:', { bold: true, before: 120 }));
@@ -379,6 +380,7 @@ export async function generarMemoria(M) {
   } else c.push(vinieta('PENDIENTE: acta de verificación, fotos, inventario patrimonial y sustento de baja de cada local.'));
   c.push(nota('Fuentes: Padrón de ESCALE y Censo Educativo 2025 (Minedu), datos declarados por cada colegio; Lineamientos IOARR del MEF (9.ª versión, junio 2025). Los precios, los porcentajes y la UIT se revisan en la estructura de costos; los porcentajes dependen de la entidad convocante.'));
   c.push(...anexoFichaActivos(M));
+  c.push(...anexoConsultas(M));
   return Packer.toBuffer(documento(M, 'Memoria descriptiva', c));
 }
 
@@ -407,6 +409,14 @@ function anexoFichaActivos(M) {
   }
   out.push(nota('El costo anual de mantenimiento de cada tipo de bien (Documentos) se prorratea entre sus lotes según la cantidad. Denominación nueva: el mobiliario de aula según el grupo de grado.'));
   return out;
+}
+
+// ─── Anexo: consultas a la OPMI (sin responder) ─────────────────────────────
+function anexoConsultas(M) {
+  return [titulo('Anexo 2. Consultas a la OPMI'),
+    p(`Consultas que la Unidad Formuladora dirige a la OPMI${M.B?.opmi ? ' (' + M.B.opmi + ')' : ''} antes del registro. Quedan pendientes de respuesta: este expediente no las responde.`),
+    tabla(['N.°', 'Consulta', 'Respuesta de la OPMI'], CONSULTAS_OPMI.map((x, j) => [String(j + 1), x.pregunta, { v: 'PENDIENTE', pend: true }]), { anchos: [6, 64, 30] }),
+    nota('Anotar el documento con que responde la OPMI (oficio o informe, número y fecha).')];
 }
 
 // ─── Lista de verificación ──────────────────────────────────────────────────
