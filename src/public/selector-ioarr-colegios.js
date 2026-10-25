@@ -1,0 +1,199 @@
+// Selector IOARR — Expediente › Por colegio: lo que los Lineamientos IOARR piden por colegio
+// (checklist de inventario y baja…). El servidor guarda cada colegio en los datos de
+// Documentos (src/selector-ioarr/lineamientos.js) y decide quién entra al 07-C final.
+
+const NF = new Intl.NumberFormat('es-PE');
+const NS = new Intl.NumberFormat('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const ent = n => NF.format(Math.round(n || 0));
+const soles = n => n == null ? '—' : 'S/ ' + NS.format(n);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const norm = t => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+const PAGE = 40;
+const SINO = [['', 'Sin indicar'], ['si', 'Sí'], ['no', 'No']];
+
+let ctx = null, vista = null, version = 0, pag = 0, filtro = '', soloPend = false, editando = null;
+
+export async function renderColegios(c) {
+  ctx = c;
+  c.el.innerHTML = '<div class="panel vacio">Cargando los colegios…</div>';
+  const mio = ++version;
+  try {
+    const v = await c.api(`/proyectos/${c.proyecto.id}/colegios`);
+    if (mio !== version) return;
+    vista = v; pintar();
+  } catch (e) { if (mio === version) c.el.innerHTML = `<div class="panel vacio"><p class="err">${esc(e.message)}</p></div>`; }
+}
+
+// ─── Pintado ─────────────────────────────────────────────────────────────────
+// Chips de lo que falta o de lo que avisa (los demás puntos agregan los suyos en chipsDe)
+export function chipsDe(f) {
+  const out = [];
+  if (f.sin_uso) return `<span class="chip-est alerta">Fuera del monto: ${esc(vista.estados_uso[f.datos.uso].toLowerCase())}</span>`;
+  if (!f.datos.uso && !f.excluido_dup) out.push('<span class="chip-est pend">Uso sin registrar</span>');
+  out.push(f.checklist.completo ? '<span class="chip-est ok">Inventario y baja completos</span>'
+    : `<span class="chip-est alerta" title="${esc('Falta: ' + f.checklist.faltan.join('; '))}">No entra al 07-C final: checklist incompleto</span>`);
+  if (f.riesgo?.riesgo) out.push(`<span class="chip-est alerta" title="${esc(f.riesgo.motivos.join('; '))}">Riesgo de duplicación</span>`);
+  else if (f.datos.entregas.length) out.push('<span class="chip-est">Entregas previas registradas</span>');
+  if (f.costo?.inconsistente) out.push('<span class="chip-est alerta" title="El censo reporta más mesas o sillas que matrícula">Censo inconsistente</span>');
+  if (f.costo?.recortado) out.push(`<span class="chip-est" title="Lo que se repone se limitó a la matrícula o a la capacidad de diseño">Tope aplicado: −${ent(f.costo.recortado)}</span>`);
+  if (f.excluido_dup) out.push('<span class="chip-est">Excluido por otra inversión</span>');
+  return out.join(' ');
+}
+function pintar() {
+  const R = vista.resumen, K = vista.comparativo;
+  const q = norm(filtro).trim();
+  const filas = vista.filas.filter(f => (!q || f.cod.includes(q) || norm(f.nombre).includes(q) || norm(f.dist).includes(q)) && (!soloPend || !f.checklist.completo || f.riesgo?.riesgo || f.costo?.inconsistente || f.sin_uso || !f.datos.uso));
+  const pags = Math.max(1, Math.ceil(filas.length / PAGE)); pag = Math.min(pag, pags - 1);
+  const desde = pag * PAGE;
+  const rows = filas.slice(desde, desde + PAGE).map(f => `<tr>
+    <td class="mono">${esc(f.cod)}</td>
+    <td><span class="nm">${esc(f.nombre)}</span><span class="sub">${esc(f.dist)} · ${esc(f.niveles.join(', '))} · ${ent(f.est)} estudiantes</span></td>
+    <td class="num">${f.costo ? soles(f.costo.total) : '—'}${f.costo?.niveles.length > 1 ? `<br><span class="sub">${f.costo.niveles.map(n => `${esc(n.nombre)} ${soles(n.total)}`).join(' · ')}</span>` : ''}</td>
+    <td>${chipsDe(f)}</td>
+    <td><button class="x" type="button" data-col-editar="${esc(f.cod)}">Editar</button></td></tr>`).join('');
+  ctx.el.innerHTML = `
+    <div class="kpis kpis-montos">
+      <div class="kpi"><div class="v">${ent(R.colegios)}</div><div class="l">colegios en el paquete</div></div>
+      <div class="kpi"><div class="v">${ent(R.completos)}</div><div class="l">con el checklist de inventario y baja completo</div></div>
+      <div class="kpi${R.bloqueados ? ' destacado' : ''}"><div class="v">${ent(R.bloqueados)}</div><div class="l">no entran al 07-C final (checklist incompleto)</div></div>
+      <div class="kpi${R.riesgo ? ' destacado' : ''}"><div class="v">${ent(R.riesgo)}</div><div class="l">con riesgo de duplicación</div></div>
+      <div class="kpi${R.sin_uso ? ' destacado' : ''}"><div class="v">${ent(R.sin_uso)}</div><div class="l">fuera del monto: mobiliario sin uso (cerrado, inundado o en reconstrucción)</div></div>
+      <div class="kpi${R.inconsistentes ? ' destacado' : ''}"><div class="v">${ent(R.inconsistentes)}</div><div class="l">con datos inconsistentes del censo (mobiliario &gt; matrícula)</div></div>
+      <div class="kpi"><div class="v">${soles(K?.suma)}</div><div class="l">total del paquete · ${K?.niveles.length || 0} IOARR por nivel</div></div>
+    </div>
+    <div class="panel"><div class="panel-cab"><h3>Por nivel</h3></div>
+      <div class="tabla-wrap borde-0"><table class="tabla"><thead><tr><th>IOARR</th><th class="num">Colegios</th><th class="num">Monto</th></tr></thead>
+      <tbody>${(K?.niveles || []).map(x => `<tr><td>IOARR ${esc(x.nombre)}</td><td class="num">${ent(x.locales)}</td><td class="num">${soles(x.total)}</td></tr>`).join('')}</tbody>
+      <tfoot><tr><td>Total del paquete</td><td class="num">${ent(K?.colegios)}</td><td class="num">${soles(K?.suma)}</td></tr></tfoot></table></div></div>
+    <div class="panel"><div class="panel-cab"><h3>Colegios</h3><span class="sub">Lo que los Lineamientos IOARR piden por colegio</span></div>
+      <p class="sub pad">Un colegio sin el checklist de inventario y baja completo (registro en el inventario y la contabilidad, trámite de baja iniciado y documento de respaldo con fecha) no entra al Formato 07-C final. En Documentos puedes exportar un borrador con todos.</p>
+      <div class="pad acciones-fila"><input id="col-buscar" type="search" placeholder="Buscar por código de local, nombre o distrito" value="${esc(filtro)}" autocomplete="off" aria-label="Buscar colegio">
+        <label class="chk"><input type="checkbox" id="col-pend" ${soloPend ? 'checked' : ''}> Solo los que no entran al 07-C final o tienen avisos</label></div>
+      <div class="tabla-wrap borde-0"><table class="tabla"><thead><tr><th>Código de local</th><th>Colegio</th><th class="num">Monto</th><th>Lineamientos</th><th></th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="5" class="vacio">Ningún colegio coincide.</td></tr>'}</tbody></table></div>
+      ${pags > 1 ? `<div class="paginacion pad-pag"><span class="sub">${ent(desde + 1)}–${ent(Math.min(filas.length, desde + PAGE))} de ${ent(filas.length)}</span><div class="pg-btns"><button class="btn btn-ghost btn-sm" data-col-pag="-1" type="button" ${pag === 0 ? 'disabled' : ''}>Anterior</button><span class="mono">${pag + 1} / ${pags}</span><button class="btn btn-ghost btn-sm" data-col-pag="1" type="button" ${pag >= pags - 1 ? 'disabled' : ''}>Siguiente</button></div></div>` : ''}
+    </div>`;
+}
+
+// ─── Edición de un colegio ───────────────────────────────────────────────────
+const sel = (id, v, opciones) => `<select id="${id}">${opciones.map(([k, t]) => `<option value="${k}" ${String(v ?? '') === k ? 'selected' : ''}>${t}</option>`).join('')}</select>`;
+function modal() {
+  let m = document.getElementById('m-col');
+  if (m) return m;
+  m = document.createElement('div');
+  m.className = 'modal-overlay'; m.id = 'm-col';
+  m.setAttribute('role', 'dialog'); m.setAttribute('aria-modal', 'true'); m.setAttribute('aria-labelledby', 'm-col-tit');
+  m.innerHTML = `<form class="modal" id="f-col"><button class="cerrar" type="button" data-cerrar aria-label="Cerrar">×</button>
+    <h2 id="m-col-tit">Colegio</h2><div id="col-cuerpo"></div><p class="err" id="col-err" hidden></p>
+    <div class="modal-acts"><button class="btn btn-ghost" type="button" data-cerrar>Cancelar</button><button class="btn btn-primary" type="submit">Guardar</button></div></form>`;
+  document.body.appendChild(m);
+  m.addEventListener('click', e => { if (e.target === m || e.target.closest('[data-cerrar]')) m.classList.remove('open'); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') m.classList.remove('open'); });
+  m.querySelector('#f-col').addEventListener('submit', guardar);
+  m.addEventListener('click', e => {
+    if (e.target.closest('[data-ent-add]')) { const f = vista.filas.find(x => x.cod === editando); m.querySelector('#col-entregas').insertAdjacentHTML('beforeend', filaEntrega({}, f)); }
+    const del = e.target.closest('[data-ent-del]'); if (del) del.closest('tr').remove();
+  });
+  return m;
+}
+// Secciones del formulario: cada punto de los Lineamientos agrega la suya
+export const SECCIONES = [
+  {
+    html: f => `<h3>Mobiliario en uso</h3>
+      <p class="sub">Lineamientos 2.5.c: en una reposición masiva el mobiliario debe estar en uso. Un colegio cerrado, inundado o en reconstrucción no entra al monto.</p>
+      <div class="form-grid"><div class="campo"><label for="col-uso">Estado del colegio</label>${sel('col-uso', f.datos.uso, [['', 'Sin registrar'], ...Object.entries(vista.estados_uso)])}</div></div>`,
+    leer: m => ({ uso: m.querySelector('#col-uso').value })
+  },
+  {
+    html: f => {
+      const v = f.datos.inventario;
+      return `<h3>Inventario y baja</h3>
+      <p class="sub">Lineamientos 2.4.C.e y 2.4.C.f. Sin completar, el colegio no entra al Formato 07-C final.${f.checklist.completo ? '' : ` Falta: ${esc(f.checklist.faltan.join('; '))}.`}</p>
+      <div class="form-grid">
+        <div class="campo"><label for="col-reg">¿Registrado en el inventario?</label>${sel('col-reg', v.registrado, SINO)}</div>
+        <div class="campo"><label for="col-cont">¿Registrado en la contabilidad?</label>${sel('col-cont', v.contabilidad, SINO)}</div>
+        <div class="campo"><label for="col-baja">¿Trámite de baja iniciado?</label>${sel('col-baja', v.baja, SINO)}</div>
+        <div class="campo"><label for="col-doc">Documento de respaldo</label>${sel('col-doc', v.doc_tipo, [['', 'Sin indicar'], ...Object.entries(vista.docs_baja)])}</div>
+        <div class="campo"><label for="col-docnum">N.° del documento</label><input id="col-docnum" type="text" maxlength="120" value="${esc(v.doc_numero)}" placeholder="Ej.: Resolución Directoral N.° …"></div>
+        <div class="campo"><label for="col-docfecha">Fecha del documento</label><input id="col-docfecha" type="date" value="${esc(v.doc_fecha || '')}"></div>
+      </div>`;
+    },
+    leer: m => ({ inventario: { registrado: m.querySelector('#col-reg').value, contabilidad: m.querySelector('#col-cont').value, baja: m.querySelector('#col-baja').value,
+      doc_tipo: m.querySelector('#col-doc').value, doc_numero: m.querySelector('#col-docnum').value, doc_fecha: m.querySelector('#col-docfecha').value || null } })
+  },
+  {
+    html: f => `<h3>Capacidad de diseño</h3>
+      <p class="sub">Lo que se repone nunca supera la matrícula (padrón) ni la capacidad de diseño. El faltante (matrícula − mobiliario existente${f.costo ? ': ' + ent(f.costo.faltante) : ''}) es solo informativo: corresponde a ampliación marginal, no a reposición.</p>
+      <div class="form-grid">${f.niveles_k.map(n => { const nv = f.costo?.niveles.find(x => x.nivel === n);
+        return `<div class="campo"><label for="col-cap-${n}">Capacidad de diseño – ${NOMBRE_NIVEL[n]} (estudiantes)</label><input id="col-cap-${n}" data-cap="${n}" type="number" min="0" step="1" value="${f.datos.capacidad?.[n] ?? ''}" placeholder="Sin dato"><span class="sub">Matrícula: ${ent(nv?.matricula ?? 0)}</span></div>`; }).join('')}</div>`,
+    leer: m => ({ capacidad: Object.fromEntries([...m.querySelectorAll('[data-cap]')].filter(i => i.value !== '').map(i => [i.dataset.cap, Number(i.value)])) })
+  },
+  {
+    html: f => `<h3>Entregas previas de mobiliario (chequeo de duplicación)</h3>
+      <p class="sub">Pronied, Minedu, gobierno regional, UGEL o municipalidad. Una entrega desde ${vista.anio - vista.ventana} (últimos ${vista.ventana} años) se descuenta de lo que se repone si marcas «Descontar»; si no, el colegio queda con riesgo de duplicación.${f.niveles_k.length > 1 ? ' El colegio tiene varios niveles: indica el nivel de la entrega para descontarla.' : ''}</p>
+      <div class="tabla-wrap"><table class="tabla"><thead><tr><th>Año</th><th>Cantidad</th><th>Tipo</th><th>Fuente</th>${f.niveles_k.length > 1 ? '<th>Nivel</th>' : ''}<th>Descontar</th><th></th></tr></thead>
+      <tbody id="col-entregas">${f.datos.entregas.map(e => filaEntrega(e, f)).join('')}</tbody></table></div>
+      <button class="btn btn-ghost btn-sm" type="button" data-ent-add>Agregar entrega</button>
+      <div class="form-grid">
+        <div class="campo"><label class="chk"><input type="checkbox" id="col-inv-ej" ${f.datos.inversion_ejecucion ? 'checked' : ''}> Hay una inversión en ejecución que incluye mobiliario</label></div>
+        <div class="campo"><label for="col-inv-cod">Código de esa inversión (CUI)</label><input id="col-inv-cod" type="text" maxlength="30" value="${esc(f.datos.inversion_codigo)}"></div>
+      </div>`,
+    leer: m => ({
+      entregas: [...m.querySelectorAll('#col-entregas tr')].map(tr => ({ anio: Number(tr.querySelector('[data-e=anio]').value), cantidad: Number(tr.querySelector('[data-e=cantidad]').value),
+        tipo: tr.querySelector('[data-e=tipo]').value, fuente: tr.querySelector('[data-e=fuente]').value, nivel: tr.querySelector('[data-e=nivel]')?.value || '', restar: tr.querySelector('[data-e=restar]').checked }))
+        .filter(e => e.anio || e.cantidad),
+      inversion_ejecucion: m.querySelector('#col-inv-ej').checked, inversion_codigo: m.querySelector('#col-inv-cod').value
+    })
+  },
+  {
+    html: f => `<div class="form-grid"><div class="campo ancho"><label for="col-nota">Nota</label><textarea id="col-nota" maxlength="500" rows="2">${esc(f.datos.nota)}</textarea></div></div>`,
+    leer: m => ({ nota: m.querySelector('#col-nota').value })
+  }
+];
+const NOMBRE_NIVEL = { I: 'Inicial', P: 'Primaria', S: 'Secundaria', E: 'Básica Especial' };
+function filaEntrega(e, f) {
+  const opt = (obj, v) => Object.entries(obj).map(([k, t]) => `<option value="${k}" ${v === k ? 'selected' : ''}>${esc(t)}</option>`).join('');
+  return `<tr><td><input data-e="anio" type="number" min="1990" max="${vista.anio + 1}" step="1" value="${e.anio ?? ''}" aria-label="Año de la entrega" required></td>
+    <td><input data-e="cantidad" type="number" min="0" step="1" value="${e.cantidad ?? ''}" aria-label="Cantidad" required></td>
+    <td><select data-e="tipo" aria-label="Tipo">${opt(vista.tipos_entrega, e.tipo || 'kit')}</select></td>
+    <td><select data-e="fuente" aria-label="Fuente">${opt(vista.fuentes_entrega, e.fuente || 'pronied')}</select></td>
+    ${f.niveles_k.length > 1 ? `<td><select data-e="nivel" aria-label="Nivel"><option value="">Sin indicar</option>${f.niveles_k.map(n => `<option value="${n}" ${e.nivel === n ? 'selected' : ''}>${NOMBRE_NIVEL[n]}</option>`).join('')}</select></td>` : ''}
+    <td><label class="chk"><input data-e="restar" type="checkbox" ${e.restar ? 'checked' : ''}> Descontar</label></td>
+    <td><button class="x btn-peligro" type="button" data-ent-del>Quitar</button></td></tr>`;
+}
+function abrir(cod) {
+  const f = vista.filas.find(x => x.cod === cod); if (!f) return;
+  editando = cod;
+  const m = modal();
+  m.querySelector('#m-col-tit').textContent = `${f.cod} · ${f.nombre}`;
+  m.querySelector('#col-cuerpo').innerHTML = `<p class="sub">${esc(f.dist)} · ${esc(f.niveles.join(', '))} · ${ent(f.est)} estudiantes (padrón) · ${ent(f.aulas)} aulas (censo)</p>` + SECCIONES.map(s => s.html(f, vista)).join('');
+  m.querySelector('#col-err').hidden = true;
+  m.classList.add('open');
+}
+async function guardar(e) {
+  e.preventDefault();
+  const m = modal(), err = m.querySelector('#col-err'), f = vista.filas.find(x => x.cod === editando);
+  const datos = SECCIONES.reduce((a, s) => ({ ...a, ...s.leer(m, f) }), {});
+  try {
+    await ctx.api(`/proyectos/${ctx.proyecto.id}/colegios/${encodeURIComponent(editando)}`, { method: 'PUT', body: { datos } });
+    m.classList.remove('open');
+    ctx.toast('Colegio guardado.');
+    ctx.alCambiar?.();
+    await renderColegios(ctx);
+  } catch (x) { err.textContent = x.message; err.hidden = false; }
+}
+
+// Eventos delegados sobre el contenedor (se enganchan una vez)
+export function enlazarColegios(el) {
+  el.addEventListener('input', e => {
+    if (e.target.id !== 'col-buscar' || !vista) return;
+    filtro = e.target.value; pag = 0;
+    const pos = e.target.selectionStart; pintar();
+    const b = document.getElementById('col-buscar'); b.focus(); b.setSelectionRange(pos, pos);
+  });
+  el.addEventListener('change', e => { if (e.target.id === 'col-pend') { soloPend = e.target.checked; pag = 0; pintar(); } });
+  el.addEventListener('click', e => {
+    const ed = e.target.closest('[data-col-editar]'); if (ed) abrir(ed.dataset.colEditar);
+    const pg = e.target.closest('[data-col-pag]'); if (pg) { pag += +pg.dataset.colPag; pintar(); }
+  });
+}

@@ -86,6 +86,7 @@ h1 .accent{ background:linear-gradient(90deg,var(--accent),var(--accent2)); -web
 .campo-muebles{ grid-column:1 / -1; border:1px solid var(--border2); border-radius:8px; padding:6px 12px 8px; margin:0; display:flex; flex-wrap:wrap; gap:0 18px; align-items:center; }
 .campo-muebles legend{ font-size:12px; font-weight:600; padding:0 4px; }
 .campo-muebles .sub{ flex-basis:100%; }
+.campo-muebles .fila-nivel{ flex-basis:100%; display:flex; flex-wrap:wrap; gap:0 14px; align-items:center; font-size:13px; }
 
 /* Pestañas */
 .tabs{ display:flex; gap:6px; border-bottom:1px solid var(--border); overflow-x:auto; }

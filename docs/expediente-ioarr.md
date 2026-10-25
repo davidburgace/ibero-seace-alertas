@@ -97,7 +97,28 @@ Ejecuta `supabase/migrations/017_ioarr_selector_duplicidad.sql`, después de la 
 - Sin la migración 017, todo queda «Sin verificar» y la columna lo avisa.
 - **Mejora futura:** consultar el Banco de Inversiones en forma automática. Hoy la consulta la hace el usuario.
 
+## Lineamientos IOARR por colegio (9.ª versión, junio 2025)
+
+No hay migración nueva: los datos por colegio se guardan en `ioarr_expediente_documentos.datos.colegios` (migración 015).
+Código: `src/selector-ioarr/lineamientos.js` (reglas), `paquete.js` (armado del paquete por nivel), `excel-lineamientos.js` (anexos).
+Pantalla: **Expediente → Por colegio (Lineamientos)**.
+
+- **Una IOARR por nivel, siempre.** Cada 07-C es de un solo nivel. «Una IOARR» con todos los niveles queda solo como cifra de comparación en Costos y no se exporta. Cada nivel puede tener su propia composición de muebles (criterios del Selector, `mueblesNivel`); el precio del kit es el de la talla del nivel. `validarNiveles` comprueba que ningún aula ni servicio se cuente dos veces.
+- **Ficha de activos a reponer** (estructura preliminar de costos): un lote por aula, bien y estado, con código patrimonial, denominación existente y nueva, antigüedad, mantenimiento (prorrateado del costo anual del tipo), ambiente y estado verificado. Sin dato de campo, «pendiente de verificación en campo». Los lotes cuadran con el metrado (fila de ajuste si hubo tope o descuento). Va en el Excel de anexos y como anexo 1 de la memoria.
+- **Informe técnico de vida útil**, consolidado y por colegio (`GET …/documentos/vida-util[?cod=]`). Fuentes de la Directiva 005-2016-EF/51.01 (se marcan en Documentos); 10 años es referencial. El Regular solo se sustenta con antigüedad ≥ vida útil o daño documentado. Campos de firma de control patrimonial y visto bueno.
+- **Checklist de inventario y baja** por colegio: registro en inventario y contabilidad, trámite de baja y documento de respaldo con fecha. Sin completarlo, el colegio no entra al 07-C final ni a sus anexos. Con `?borrador=1` (casilla en Documentos) salen todos, con aviso.
+- **Chequeo de duplicación**: entregas previas (año, cantidad, tipo, fuente, nivel) e inversión en ejecución. Una entrega de los últimos 3 años se descuenta si se marca «Descontar»; si no, el colegio queda en «riesgo de duplicación». Hoja «Riesgo de duplicación».
+- **No aumentar capacidad**: mesas, sillas y kits a reponer por colegio no pasan de la matrícula del padrón ni de la capacidad de diseño (dato por colegio y nivel). El faltante es informativo: «corresponde a ampliación marginal, no a reposición». Contador de colegios con mobiliario > matrícula. Hoja «Capacidad y censo».
+- **Mobiliario en uso**: operativo, cerrado, inundado o en reconstrucción. Los que no lo tienen en uso salen del monto, con aviso. Hoja «Mobiliario en uso».
+- **Tabla 3.7**: A. costo directo (con IGV) + B. otros costos de inversión (documento equivalente, supervisión, liquidación y control concurrente de la Ley 31358 si corresponde: sí/no o umbral, con su %) = C. Una inversión masiva muestra siempre «Registro completo (masiva)» y el monto en UIT.
+- **Formato 05-B** (`GET …/documentos/formato-05b`): idea = tipo de IOARR + nombre genérico de las UP + ámbito, con montos t, t+1, t+2 por IOARR. El 07-C trae la cadena funcional y la contribución a calidad (no cobertura), y la justificación del Recuadro 14 / Aplicación 6.
+- **Consultas a la OPMI**: anexo 2 de la memoria, sin responder.
+
+Pruebas: `test/lineamientos.test.js` y `test/lineamientos-api.test.js` (rutas de punta a punta con 3 colegios y un Supabase en memoria; necesita Node 22.3 o más para `--experimental-test-module-mocks`).
+
 ## Una IOARR o una IOARR por nivel (migración 018)
+
+> Desde los Lineamientos por colegio, los documentos salen siempre por nivel: el modo «una» ya no cambia nada.
 
 Ejecuta `supabase/migrations/018_ioarr_por_nivel.sql` después de la 017. Agrega:
 - `modo_ioarr` al proyecto: `por_nivel` por defecto, o `una`.
@@ -519,13 +540,19 @@ No hay migración nueva.
 ```
 Expediente_IOARR_<proyecto>_<fecha>/
   00_LEEME.txt                              índice, monto, registro, avance y pendientes
-  01_Formato_07C_borrador.docx
-  02_Memoria_descriptiva.docx
-  03_Lista_de_verificacion.docx
-  04_Estructura_de_costos.xlsx              con fórmulas
-  05_Seleccion_de_locales_y_metrado.xlsx    el Excel del Selector, con la hoja Aulas
-  06_Sustento/<código de local> <nombre>/NN_<Tipo>_<archivo>
+  NN_IOARR_<nivel>/                         una carpeta por nivel con:
+    00_Formato_05B_idea.docx
+    01_Formato_07C_borrador.docx
+    02_Memoria_descriptiva.docx
+    03_Lista_de_verificacion.docx
+    04_Estructura_de_costos.xlsx            con fórmulas
+    05_Seleccion_de_locales_y_metrado.xlsx  el Excel del Selector, con la hoja Aulas
+    06_Anexos_Lineamientos.xlsx             ficha de activos, inventario y baja, duplicación, capacidad, uso
+    07_Informe_vida_util.docx               y 07_Informes_vida_util_por_colegio/
+  09_Sustento/<código de local> <nombre>/NN_<Tipo>_<archivo>
 ```
+
+Por defecto es la versión final (solo colegios con el checklist completo); `?borrador=1` incluye todos.
 
 - Se arma en flujo (`src/selector-ioarr/zip.js`, con archiver): los archivos del bucket se agregan de a uno, así la memoria no crece con el número de fotos.
 - Los Word y los Excel se generan antes de empezar el envío. Si un archivo del bucket no se puede bajar, el ZIP se entrega igual y `00_LEEME.txt` lo lista.

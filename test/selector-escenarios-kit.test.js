@@ -114,8 +114,8 @@ test('caso de control: el Excel recalculado con LibreOffice da S/ 4,864,528.32',
       'csv:Text - txt - csv (StarCalc):44,34,76,1,,0,false,true,false,false,false,-1', '--outdir', join(dir, 'out'), join(dir, 'c.xlsx')], { stdio: 'ignore', timeout: 120000 });
     const res = readFileSync(join(dir, 'out', readdirSync(join(dir, 'out')).find(f => /Resumen/.test(f))), 'utf8');
     const val = e => Number(res.split('\n').find(l => l.startsWith(e + ',')).split(',')[1]);
-    assert.equal(Math.round(val('MONTO DE INVERSIÓN') * 100), 486452832);
-    assert.equal(Math.round(val('Costo directo') * 100), 384883200);
+    assert.equal(Math.round(val('C = A + B. COSTO DE INVERSIÓN (MONTO DE INVERSIÓN)') * 100), 486452832);
+    assert.equal(Math.round(val('Costo directo sin IGV') * 100), 384883200);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -191,7 +191,7 @@ test('escenarios en los documentos: sustento según el método, Excel del Select
   assert.match(cap.M.E.sustento[0], /no usa el estado del mobiliario/);
   assert.ok(cap.M.E.condiciones.some(c => c.estado === 'no' && /capacidad de la UP/.test(c.texto)));
   // Ningún escenario presenta el faltante como reposición
-  for (const x of [malo, cap, mr]) assert.ok(x.M.E.sustento.some(s => /faltantes .*no son reposición/.test(s)));
+  for (const x of [malo, cap, mr]) assert.ok(x.M.E.sustento.some(s => /faltantes .*corresponde a ampliación marginal, no a reposición/.test(s)));
   // Los Word declaran el escenario
   assert.match(await textoDocx(await generar07C(mr.M)), /Escenario de cantidad: Malo \+ % de Regular/);
   assert.match(await textoDocx(await generarMemoria(cap.M)), /Por capacidad/);
@@ -269,7 +269,10 @@ test('la pestaña interna de oferta no sale en ninguna exportación (07-C, memor
   const A = { modo: 'una', P, detalle: {}, efectivos: preciosEfectivos({}, {}), excluidos: [], dup: {} };
   const x = { nivel: null, nombre: 'Todos los niveles', D, C, list, R, inv: {} };
   const piezas = await piezasExpediente({ A, datos, lista: [{ x, M }], meta: { region: 'Prueba', fecha: '2026-10-23' }, nombre: 'Control' });
-  assert.deepEqual(piezas.map(p => p.nombre), ['01_Formato_07C_borrador.docx', '02_Memoria_descriptiva.docx', '03_Lista_de_verificacion.docx', '04_Estructura_de_costos.xlsx', '05_Seleccion_de_locales_y_metrado.xlsx']);
+  assert.deepEqual(piezas.filter(p => !p.oculto).map(p => p.nombre), ['00_Formato_05B_idea.docx', '01_Formato_07C_borrador.docx', '02_Memoria_descriptiva.docx', '03_Lista_de_verificacion.docx', '04_Estructura_de_costos.xlsx', '05_Seleccion_de_locales_y_metrado.xlsx', '06_Anexos_Lineamientos.xlsx', '07_Informe_vida_util.docx']);
+  // Un informe de vida útil por colegio con bienes a reponer
+  assert.ok(piezas.filter(p => p.oculto).every(p => /^07_Informes_vida_util_por_colegio\/Informe_vida_util_\d+\.docx$/.test(p.nombre)));
+  assert.equal(piezas.filter(p => p.oculto).length, M.ups.length);
   // ZIP completo
   const salida = new PassThrough(), partes = []; salida.on('data', c => partes.push(c));
   const fin = new Promise(ok => salida.on('end', ok));
@@ -290,9 +293,9 @@ test('la pestaña interna de oferta no sale en ninguna exportación (07-C, memor
   assert.doesNotMatch(todo, /utilidad|gastos generales|imprevistos|gestión del proyecto/i);
   // Y en el código: ningún exportador importa oferta.js ni la ruta del ZIP la lee
   const src = f => readFileSync(new URL('../src/selector-ioarr/' + f, import.meta.url), 'utf8');
-  for (const f of ['word.js', 'excel-costos.js', 'excel.js', 'zip.js', 'documentos.js', 'ficha.js', 'ficha-digital.js']) assert.doesNotMatch(src(f), /oferta\.js|leerOferta|calcularOferta/, f);
+  for (const f of ['word.js', 'excel-costos.js', 'excel.js', 'zip.js', 'documentos.js', 'ficha.js', 'ficha-digital.js', 'lineamientos.js', 'excel-lineamientos.js']) assert.doesNotMatch(src(f), /oferta\.js|leerOferta|calcularOferta/, f);
   const exp = src('expediente.js');
-  const rutas = ['/documentos/formato-07c', '/documentos/memoria', '/documentos/verificacion', '/costos/excel', '/expediente-zip', '/fichas-zip'];
+  const rutas = ['/documentos/formato-07c', '/documentos/memoria', '/documentos/verificacion', '/costos/excel', '/expediente-zip', '/fichas-zip', '/lineamientos/anexos', '/documentos/vida-util', '/documentos/formato-05b'];
   for (const r of rutas) {
     const i = exp.indexOf(`'/proyectos/:id${r}'`), cuerpo = exp.slice(i, exp.indexOf('\n  }));', i));
     assert.ok(i > 0, r); assert.doesNotMatch(cuerpo, /leerOferta|calcularOferta|ioarr_expediente_oferta/, r);

@@ -84,7 +84,8 @@ async function guardar() {
 export async function bajarZip(c, btn) {
   btn.disabled = true; const txt = btn.textContent; btn.textContent = 'Armando el ZIP…';
   try {
-    const r = await fetch(`/api/selector-ioarr/proyectos/${c.proyecto.id}/expediente-zip`);
+    // c.borrador: con todos los colegios (también los que tienen el checklist de inventario y baja incompleto)
+    const r = await fetch(`/api/selector-ioarr/proyectos/${c.proyecto.id}/expediente-zip${c.borrador ? '?borrador=1' : ''}`);
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Error ' + r.status);
     const blob = await r.blob(), cd = r.headers.get('Content-Disposition') || '';
     const nombre = decodeURIComponent((cd.match(/filename\*=UTF-8''([^;]+)/) || [])[1] || 'Expediente_IOARR.zip');

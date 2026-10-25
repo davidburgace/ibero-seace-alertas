@@ -5,10 +5,11 @@
 // homogéneos y el servicio y la entidad son los mismos, pero no aclara si
 // Inicial, Primaria y Secundaria cuentan como un mismo servicio (pendiente de
 // confirmar con la OPMI). Un expediente de Huánuco (2023) presentó tres IOARR,
-// una por nivel. Por eso el proyecto elige:
-//   'por_nivel' (por defecto) · una IOARR por nivel, cada una con sus locales,
-//                               su metrado y su total
-//   'una'                     · una sola IOARR con todos los niveles
+// una por nivel, que es el criterio de las IOARR masivas publicadas. Por eso:
+//   cada IOARR (Formato 07-C) es de un solo nivel: Inicial, Primaria, Secundaria
+//   (o Básica Especial), con sus locales, su metrado y su total. Nunca se mezclan
+//   niveles en un mismo 07-C. «Una IOARR» con todos los niveles queda solo como
+//   cifra de comparación en Costos; no se exporta (modoDe siempre da 'por_nivel').
 //
 // Un local con varios niveles entra en cada IOARR solo con lo de ese nivel:
 // sus estudiantes (padrón) y sus aulas (censo) de los servicios de ese nivel.
@@ -29,7 +30,8 @@ export const MODOS = { por_nivel: 'Una IOARR por nivel', una: 'Una IOARR' };
 export const MODO_DEF = 'por_nivel';
 export const ORDEN = ['I', 'P', 'S', 'E'];
 export const NOMBRE_NIVEL = NIVN;   // { I: 'Inicial', P: 'Primaria', S: 'Secundaria', E: 'Básica Especial' }
-export const modoDe = p => p?.modo_ioarr === 'una' ? 'una' : MODO_DEF;
+// El modo guardado en proyectos viejos ('una') ya no cambia nada: los documentos son por nivel
+export const modoDe = () => MODO_DEF;
 export const ordenar = ns => [...new Set(ns)].sort((a, b) => ORDEN.indexOf(a) - ORDEN.indexOf(b));
 
 // Niveles de un local (según sus servicios en el padrón)
@@ -66,6 +68,30 @@ export function porNivel(D, P, list) {
     const V = vistaNivel(D, n);
     return { nivel: n, nombre: NOMBRE_NIVEL[n], D: V, C: calc(V, P, n), list: list.filter(i => V.locSvc[i].length) };
   });
+}
+
+/**
+ * Comprueba que ningún aula ni servicio se cuente dos veces entre las IOARR por nivel,
+ * y que no quede ninguno fuera. G = porNivel(D, P, list).
+ * @returns { ok, aulas, servicios, errores: [texto] }
+ */
+export function validarNiveles(D, list, G) {
+  const errores = [], aulas = new Map(), svcs = new Map();
+  for (const g of G) for (const i of g.list) {
+    for (const ai of g.D.locAul[i]) {
+      if (aulas.has(ai)) errores.push(`El aula ${ai} del local ${D.locs[i][0]} se cuenta en ${NOMBRE_NIVEL[aulas.get(ai)]} y en ${NOMBRE_NIVEL[g.nivel]}.`);
+      else aulas.set(ai, g.nivel);
+      if (D.svcs[D.aulas[ai][1]][2] !== g.nivel) errores.push(`El aula ${ai} del local ${D.locs[i][0]} es de ${NOMBRE_NIVEL[D.svcs[D.aulas[ai][1]][2]]} y se cuenta en ${NOMBRE_NIVEL[g.nivel]}.`);
+    }
+    for (const si of g.D.locSvc[i]) {
+      if (svcs.has(si)) errores.push(`El servicio ${D.svcs[si][0]} se cuenta en ${NOMBRE_NIVEL[svcs.get(si)]} y en ${NOMBRE_NIVEL[g.nivel]}.`);
+      else svcs.set(si, g.nivel);
+    }
+  }
+  const nA = list.reduce((a, i) => a + D.locAul[i].length, 0), nS = list.reduce((a, i) => a + D.locSvc[i].length, 0);
+  if (aulas.size !== nA) errores.push(`${nA - aulas.size} aulas de los locales seleccionados no entran en ninguna IOARR por nivel.`);
+  if (svcs.size !== nS) errores.push(`${nS - svcs.size} servicios de los locales seleccionados no entran en ninguna IOARR por nivel.`);
+  return { ok: !errores.length, aulas: nA, servicios: nS, errores };
 }
 
 // ─── Inventario verificado ───────────────────────────────────────────────────

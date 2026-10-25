@@ -5,12 +5,12 @@ import { readFileSync } from 'node:fs';
 import { PassThrough } from 'node:stream';
 import ExcelJS from 'exceljs';
 import JSZip from 'jszip';
-import { prep, calc, totals, filtrar, FILTRO_VACIO, DEF, totalesPorNivel } from '../src/selector-ioarr/calculo.js';
+import { prep, calc, totals, filtrar, FILTRO_VACIO, DEF, totalesPorNivel, limpiarParams, mueblesDe } from '../src/selector-ioarr/calculo.js';
 import { costear, censoLocal } from '../src/selector-ioarr/costos.js';
 import { armarModelo, limpiarDatosDoc } from '../src/selector-ioarr/documentos.js';
 import { generarExcel } from '../src/selector-ioarr/excel.js';
 import { escribirZip } from '../src/selector-ioarr/zip.js';
-import { porNivel, vistaNivel, nivelesDeLocal, inventarioNivel, inventarioUna, sinNivel, modoDe } from '../src/selector-ioarr/niveles.js';
+import { porNivel, validarNiveles, vistaNivel, nivelesDeLocal, inventarioNivel, inventarioUna, sinNivel, modoDe } from '../src/selector-ioarr/niveles.js';
 
 const DIR = new URL('../src/public/data/selector-ioarr/2025/', import.meta.url);
 const D = prep(JSON.parse(readFileSync(new URL('moquegua.json', DIR), 'utf8')));
@@ -23,8 +23,34 @@ const BASE = {
   estructura: { transporte_pieza: 10, igv: 18, doc_pct: 3, sup_pct: 5, liquidacion: 9000 }
 };
 
-test('por defecto el proyecto es una IOARR por nivel', () => {
-  assert.equal(modoDe({}), 'por_nivel'); assert.equal(modoDe({ modo_ioarr: 'una' }), 'una'); assert.equal(modoDe({ modo_ioarr: 'otro' }), 'por_nivel');
+test('cada 07-C es de un solo nivel: el modo guardado «una» ya no mezcla niveles', () => {
+  assert.equal(modoDe({}), 'por_nivel'); assert.equal(modoDe({ modo_ioarr: 'una' }), 'por_nivel'); assert.equal(modoDe({ modo_ioarr: 'otro' }), 'por_nivel');
+});
+
+test('ningún aula ni servicio se cuenta dos veces entre las IOARR por nivel', () => {
+  const G = porNivel(D, DEF, LISTA), v = validarNiveles(D, LISTA, G);
+  assert.ok(v.ok, v.errores.join(' '));
+  assert.equal(v.aulas, 104);
+  // Un aula metida en dos niveles se detecta
+  const malo = G.map(g => g.nivel === 'S' ? { ...g, D: Object.assign(Object.create(g.D), { locAul: g.D.locAul.map((as, i) => i === iI ? [...as, ...G[1].D.locAul[iI]] : as) }) } : g);
+  const x = validarNiveles(D, LISTA, malo);
+  assert.equal(x.ok, false); assert.match(x.errores[0], /se cuenta en Primaria y en Secundaria/);
+});
+
+test('composición por nivel: cada nivel cuenta solo sus muebles y el kit sale donde hay mesa y silla', () => {
+  const P = limpiarParams({ mueblesNivel: { I: ['mesa', 'silla'], S: ['mesa', 'silla', 'esc', 'sdoc', 'arm'] } });
+  assert.deepEqual(Object.keys(P.mueblesNivel), ['I']);   // la de Secundaria es igual a la general: no se guarda
+  assert.deepEqual(mueblesDe(P, 'I'), ['mesa', 'silla']); assert.deepEqual(mueblesDe(P, 'P').length, 5);
+  const G = porNivel(D, P, LISTA);
+  const gI = G.find(g => g.nivel === 'I');
+  assert.deepEqual(gI.C.incl, [true, true, false, false, false]);
+  assert.equal(totals(gI.D, gI.C, gI.list).t[2].rep, 0);   // Inicial no repone escritorios
+  const N = costear({ ...BASE, estructura: { ...BASE.estructura, kit: true }, grupos: G.map(g => ({ clave: g.nivel, D: g.D, C: g.C, list: g.list })) });
+  assert.ok(N.grupos.I.kit && N.grupos.P.kit);
+  assert.ok(N.grupos.I.partidas[2].excluido); assert.equal(N.grupos.P.partidas[2].excluido, false);
+  // La IOARR única de comparación usa en cada aula la composición de su nivel
+  const Cu = calc(D, P);
+  assert.equal(totals(D, Cu, LISTA).rep, G.reduce((a, g) => a + totals(g.D, g.C, g.list).rep, 0));
 });
 
 test('caso de control por nivel: Inicial, Primaria y Secundaria suman lo mismo que la IOARR única', () => {
@@ -108,7 +134,9 @@ test('documentos por nivel: cada IOARR con sus UP, su nombre y su CUI', () => {
   assert.equal(S.cui, '');
   assert.ok(P.ups.every(u => u.niveles.length === 1 && u.niveles[0] === 'P'));
   assert.equal(P.ups.find(u => u.cod === ICHUNA).est, 106);
-  assert.deepEqual(limpiarDatosDoc({ por_nivel: { P: { cui: 'abc', nombre_inversion: ' x ' }, X: { cui: '1234567' } } }).por_nivel, { P: { nombre_inversion: 'x', cui: '' } });
+  assert.deepEqual(limpiarDatosDoc({ por_nivel: { P: { cui: 'abc', nombre_inversion: ' x ' }, X: { cui: '1234567' } } }).por_nivel, { P: { nombre_inversion: 'x', cui: '', montos_05b: {} } });
+  // Montos del 05-B por año: solo números válidos
+  assert.deepEqual(limpiarDatosDoc({ por_nivel: { S: { montos_05b: { t: '1000', t1: -5, t2: 'x', t9: 3 } } } }).por_nivel, { S: { nombre_inversion: '', cui: '', montos_05b: { t: 1000 } } });
 });
 
 test('Excel del Selector: hoja «Por nivel»', async () => {

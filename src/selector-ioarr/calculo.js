@@ -14,7 +14,8 @@
 //               (Lineamientos IOARR 2.4.C: la reposición no puede ampliar la capacidad de la UP).
 //   Requerido: mesa y silla por estudiante; escritorio, silla docente y armario por aula.
 //   Muebles: P.muebles dice qué tipos entran a la IOARR (por ejemplo, solo mesa y silla);
-//            los demás quedan en 0 en todo el cálculo.
+//            los demás quedan en 0 en todo el cálculo. P.mueblesNivel ({ I: [...], P: [...] })
+//            cambia la composición en un nivel: cada aula usa la de su nivel (mueblesDe).
 //   Tallas: mesa y silla se costean por talla según el grado del aula (TALLAS, en costos.js).
 //   Mesa múltiple = kI puestos (Inicial y Especial) o kPS (Primaria y Secundaria);
 //   carpeta bipersonal = carpBip puestos; las carpetas no traen estado (carpEstado).
@@ -64,7 +65,11 @@ export const NIVN = { I: 'Inicial', P: 'Primaria', S: 'Secundaria', E: 'Básica 
 export const NIVS = { I: 'Inicial', P: 'Primaria', S: 'Secundaria', E: 'Especial' };
 export const NIVB = { I: 1, P: 2, S: 4, E: 8 };
 export const DEF = { kI: 4, kPS: 2, carpBip: 2, carpEstado: 'r', mesaEst: 1, sillaEst: 1, esc: 1, sdoc: 1, arm: 1, muebles: ITEMS.map(x => x.k),
-  escenario: 'malo', capOcup: 30, capPct: 80, pctRegular: 100, pctRegularNivel: {}, pctOrigen: { tipo: 'manual' }, umbralVida: 10 };
+  escenario: 'malo', capOcup: 30, capPct: 80, pctRegular: 100, pctRegularNivel: {}, pctOrigen: { tipo: 'manual' }, umbralVida: 10, mueblesNivel: {} };
+// Niveles que pueden tener su propia composición de muebles
+export const NIVELES_MUEBLES = ['I', 'P', 'S', 'E'];
+// Muebles que entran a la IOARR en un nivel: los del nivel o, si no tiene, los generales
+export const mueblesDe = (P, nivel) => (nivel && P?.mueblesNivel?.[nivel]) || P?.muebles || DEF.muebles;
 // Escenarios de cantidad a reponer (se guardan en los criterios del proyecto):
 //   malo          lo Malo del censo, por tipo de bien (base)
 //   malo_regular  Malo + % de Regular: por aula y tipo de bien,
@@ -161,8 +166,17 @@ export function limpiarParams(p) {
       const m = ITEMS.map(x => x.k).filter(k => p.muebles.includes(k));
       if (m.length) P.muebles = m;
     }
+    // Composición por nivel (solo si difiere de la general)
+    P.mueblesNivel = {};
+    for (const n of NIVELES_MUEBLES) {
+      const x = p.mueblesNivel?.[n];
+      if (!Array.isArray(x)) continue;
+      const m = ITEMS.map(y => y.k).filter(k => x.includes(k));
+      if (m.length && m.join() !== P.muebles.join()) P.mueblesNivel[n] = m;
+    }
   }
   P.muebles = [...P.muebles];
+  P.mueblesNivel = Object.fromEntries(Object.entries(P.mueblesNivel || {}).map(([n, m]) => [n, [...m]]));
   P.pctRegularNivel = { ...P.pctRegularNivel }; P.pctOrigen = { ...P.pctOrigen };
   return P;
 }
@@ -189,12 +203,14 @@ export function prep(D) {
 
 // Mobiliario por aula (A) y acumulado por local (L), según los criterios P.
 // Con nivel (I, P, S o E), solo cuentan las aulas de los servicios de ese nivel.
-// Los muebles que no entran a la IOARR (P.muebles) quedan en 0. incl[t] dice si el tipo t entra.
+// Los muebles que no entran a la IOARR (mueblesDe del nivel del aula) quedan en 0. incl[t] dice si
+// el tipo t entra: en el nivel pedido o, sin nivel, en alguno de los niveles.
 // A reponer según P.escenario (ver ESCENARIOS): Malo, Malo + % de Regular o por capacidad.
 // El faltante (Requerido − Existente) es siempre informativo y no entra a lo que se repone.
 export function calc(D, P, nivel = null) {
   const nA = D.aulas.length, nL = D.locs.length;
-  const incl = ITEMS.map(x => !P.muebles || P.muebles.includes(x.k));
+  const inclNiv = Object.fromEntries(NIVELES_MUEBLES.map(n => [n, ITEMS.map(x => mueblesDe(P, n).includes(x.k))]));
+  const incl = nivel ? inclNiv[nivel] : ITEMS.map((_, t) => NIVELES_MUEBLES.some(n => inclNiv[n][t]));
   const L = { b: new Float64Array(5 * nL), r: new Float64Array(5 * nL), m: new Float64Array(5 * nL), req: new Float64Array(5 * nL),
     fal: new Float64Array(5 * nL), rep: new Float64Array(5 * nL), repTot: new Float64Array(nL), falTot: new Float64Array(nL), reqTot: new Float64Array(nL) };
   const A = { b: [], r: [], m: [], req: [], fal: [], rep: [] };
@@ -210,14 +226,14 @@ export function calc(D, P, nivel = null) {
     const trip = [[mb, mr, mm], [sb, sr, sm], [f(11), f(12), f(13)], [f(14), f(15), f(16)], [f(17), f(18), f(19)]];
     const req = [Math.round(a[8] * P.mesaEst), Math.round(a[8] * P.sillaEst), P.esc, P.sdoc, P.arm];
     for (let t = 0; t < 5; t++) {
-      if (!incl[t]) continue;
+      if (!inclNiv[niv][t]) continue;
       const [b, r, m] = trip[t], ex = b + r + m, fal = Math.max(0, req[t] - ex), rep = repDe(esc, t, b, r, m, req[t], cap, pctNiv[niv]);
       A.b[t][i] = b; A.r[t][i] = r; A.m[t][i] = m; A.req[t][i] = req[t]; A.fal[t][i] = fal; A.rep[t][i] = rep;
       const o = t * nL + loc; L.b[o] += b; L.r[o] += r; L.m[o] += m; L.req[o] += req[t]; L.fal[o] += fal; L.rep[o] += rep;
       L.repTot[loc] += rep; L.falTot[loc] += fal; L.reqTot[loc] += req[t];
     }
   }
-  return { A, L, nL, incl, escenario: esc, capOcup: P.capOcup ?? DEF.capOcup, capPct: P.capPct ?? DEF.capPct,
+  return { A, L, nL, incl, mesaEst: P.mesaEst ?? DEF.mesaEst, sillaEst: P.sillaEst ?? DEF.sillaEst, escenario: esc, capOcup: P.capOcup ?? DEF.capOcup, capPct: P.capPct ?? DEF.capPct,
     pctRegular: P.pctRegular ?? DEF.pctRegular, pctRegularNivel: { ...(P.pctRegularNivel || {}) }, pctNiv, pctOrigen: { ...(P.pctOrigen || DEF.pctOrigen) }, umbralVida: P.umbralVida ?? DEF.umbralVida };
 }
 // A reponer en un aula, según el escenario (t: 0 mesa, 1 silla, 2-4 docente y armario)

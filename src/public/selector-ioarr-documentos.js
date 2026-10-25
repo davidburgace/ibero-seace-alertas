@@ -11,7 +11,9 @@ const soles = n => n == null ? '—' : 'S/ ' + NS.format(n);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 let ctx = null, vista = null, tGuardar = null, version = 0;
-const qn = () => ctx?.nivel ? `?nivel=${ctx.nivel}` : '';
+// Borrador: los documentos incluyen los colegios con el checklist de inventario y baja incompleto
+let modoBorrador = false;
+const qn = () => { const q = new URLSearchParams(ctx?.nivel ? { nivel: ctx.nivel } : {}); if (modoBorrador) q.set('borrador', '1'); return q.size ? '?' + q : ''; };
 
 export async function renderDocumentos(c) {
   ctx = c;
@@ -45,7 +47,7 @@ const campoNivel = (k, etiqueta, { area, ph = '', ayuda } = {}) => {
 
 function pintar() {
   const R = vista.resumen, d = vista.datos;
-  const reg = R.registro === 'completo' ? '<span class="chip-est alerta">Registro completo · secciones D, E y F</span>'
+  const reg = R.registro === 'completo' ? `<span class="chip-est alerta">${R.masiva ? 'Registro completo (masiva)' : 'Registro completo'} · secciones D, E y F</span>`
     : R.registro === 'abreviado' ? '<span class="chip-est ok">Registro abreviado · sección G</span>' : '<span class="chip-est pend">Falta la UIT</span>';
   const est = { cumple: '<span class="chip-est ok">Cumple</span>', no: '<span class="chip-est alerta">No cumple</span>', pendiente: '<span class="chip-est pend">Pendiente</span>' };
   // Mobiliario nuevo: vida útil y mantenimiento anual por meta (con kit, el kit; el costo puede ser 0)
@@ -72,9 +74,13 @@ function pintar() {
     </div>
     <div class="avisos"><div class="aviso">${esc(vista.escenario)}${vista.kit ? ' Mesas y sillas presentadas como kit.' : ''} Se cambia en Costos.</div></div>
     ${R.sin_rep.length ? `<div class="avisos"><div class="aviso">No se incluyen como UP ${R.sin_rep.length === 1 ? 'el local' : 'los locales'} sin bienes a reponer: ${R.sin_rep.map(esc).join(', ')}.</div></div>` : ''}
+    ${(vista.bloqueados || []).length ? `<div class="avisos"><div class="aviso alerta" role="alert">${modoBorrador
+      ? `Borrador con todos los colegios: ${vista.bloqueados.length === 1 ? '1 colegio tiene' : vista.bloqueados.length + ' colegios tienen'} el checklist de inventario y baja incompleto y no ${vista.bloqueados.length === 1 ? 'entraría' : 'entrarían'} al 07-C final.`
+      : `No ${vista.bloqueados.length === 1 ? 'entra' : 'entran'} al 07-C ${vista.bloqueados.length === 1 ? '1 colegio' : vista.bloqueados.length + ' colegios'} con el checklist de inventario y baja incompleto (${vista.bloqueados.slice(0, 15).map(b => esc(b.cod)).join(', ')}${vista.bloqueados.length > 15 ? '…' : ''}). Complétalo en «Por colegio» o marca «Borrador con todos los colegios».`}</div></div>` : ''}
     <div class="exportar">
-      <div><h3>Documentos en Word</h3><p>Borrador del Formato 07-C para preparar el registro en el Banco de Inversiones, y memoria descriptiva. Lo que falte sale marcado «PENDIENTE» en amarillo.</p></div>
-      <div class="acciones-fila"><button class="btn btn-primary" data-doc-bajar="formato-07c" type="button">Formato 07-C (Word)</button><button class="btn btn-ghost" data-doc-bajar="memoria" type="button">Memoria descriptiva (Word)</button><button class="btn btn-ghost" data-doc-zip type="button">Expediente completo (ZIP)</button></div>
+      <div><h3>Documentos en Word</h3><p>Borrador del Formato 07-C para preparar el registro en el Banco de Inversiones, y memoria descriptiva. Lo que falte sale marcado «PENDIENTE» en amarillo.</p>
+        <label class="chk"><input type="checkbox" id="doc-borrador" ${modoBorrador ? 'checked' : ''}> Borrador con todos los colegios (también los que tienen el checklist de inventario y baja incompleto)</label></div>
+      <div class="acciones-fila"><button class="btn btn-primary" data-doc-bajar="formato-07c" type="button">Formato 07-C (Word)</button><button class="btn btn-ghost" data-doc-bajar="memoria" type="button">Memoria descriptiva (Word)</button><button class="btn btn-ghost" data-doc-bajar="formato-05b" type="button">Formato 05-B (Word)</button><button class="btn btn-ghost" data-doc-bajar="lineamientos/anexos" type="button">Anexos de Lineamientos (Excel)</button><button class="btn btn-ghost" data-doc-zip type="button">Expediente completo (ZIP)</button></div>
     </div>
     <div class="cols">
       <div class="panel"><div class="panel-cab"><h3>Pendientes</h3><span class="guardado" id="doc-guardado"></span></div>
@@ -92,14 +98,22 @@ function pintar() {
           : campo('cui', 'Código único de inversión (CUI)', { ph: R.cui || 'Se asigna al registrar', max: 8 })}
       </div>
       <h3>A. Alineamiento a la brecha</h3>
-      <p class="sub">Función ${esc(R.funcion)} · división ${esc(R.division)} · grupo ${esc(R.grupos.join('; '))}. Vacío = se propone por nivel educativo. Verifícalo contra el PMI de la entidad.</p>
+      <p class="sub">Función ${esc(R.funcion)} · división ${esc(R.division)} · grupo ${esc(R.grupos.join('; '))}. Vacío = se propone por nivel educativo. Verifícalo contra el PMI de la entidad. ${esc(R.alineamiento.contribucion)}</p>
       <div class="form-grid">
+        ${campo('cadena_funcional', 'Cadena funcional', { ancho: true, ph: R.alineamiento.cadena, ayuda: 'Función / división funcional / grupo funcional del PMI.' })}
         ${campo('servicio_brecha', 'Servicio público con brecha', { ancho: true, ph: R.alineamiento.servicio })}
         ${campo('tipologia', 'Tipología de proyecto', { ancho: true, ph: R.alineamiento.tipologia })}
         ${campo('indicador_brecha', 'Indicador de brecha', { ancho: true, max: 500, ph: R.alineamiento.indicadores.map(x => x.nombre).join(' / '), ayuda: 'Verifícalo contra el PMI.' })}
         ${campo('unidad_indicador', 'Unidad de medida del indicador', { ph: 'Ej.: LOCAL EDUCATIVO', ayuda: 'Verifícala contra el PMI.' })}
         ${campo('contribucion_brecha', 'Contribución a la brecha', { tipo: 'number', min: 0, step: 1, ayuda: 'Vacía por defecto: escríbela cuando la confirmes con el PMI.' })}
       </div>
+      <h3>Formato 05-B: idea de la inversión</h3>
+      <p class="sub">Idea: <b>${esc(R.b05.idea)}</b> (tipo de IOARR + nombre genérico de las UP + ámbito geográfico). Montos por año para la programación en el PMI${vista.nivel ? ` de la IOARR ${esc(vista.nombre_ioarr)}` : ''}; vacíos = todo en el año t.</p>
+      <div class="form-grid">
+        ${campo('anio_t', 'Año t', { tipo: 'number', min: 2020, max: 2100, ph: String(R.b05.anioT) })}
+        ${R.b05.programacion.map(x => `<div class="campo"><label for="doc-05b-${x.k}">${x.rotulo} (${x.anio}), S/</label><input id="doc-05b-${x.k}" data-doc-05b="${x.k}" type="number" min="0" step="0.01" inputmode="decimal" value="${vista.datos.por_nivel?.[vista.nivel]?.montos_05b?.[x.k] ?? ''}" placeholder="${R.b05.propuesto ? x.monto : ''}"></div>`).join('')}
+      </div>
+      ${R.b05.cuadra ? '' : `<p class="sub aviso-linea">La programación suma ${soles(R.b05.suma)} y el monto de inversión es ${soles(R.total)}.</p>`}
       <h3>Unidades productoras</h3>
       <div class="form-grid">
         ${campo('up_por', 'Listar las UP por', { tipo: 'select', opciones: [['local', 'Código de local (solo los locales con bienes a reponer)'], ['modular', 'Código modular (todos los servicios, aunque el local no reponga)']], ayuda: `${R.ups} UP en el 07-C · ${R.locales_con_bienes} locales con bienes a reponer.` })}
@@ -138,8 +152,18 @@ function pintar() {
       <p class="sub">Mobiliario nuevo, por meta del 07-C: vida útil y costo anual de mantenimiento (puede ser 0).</p>
       <div class="tabla-wrap"><table class="tabla tabla-doc"><thead><tr><th>Meta</th><th>Vida útil del nuevo (años)</th><th>Mant. anual del nuevo (S/)</th></tr></thead><tbody>${metas || '<tr><td colspan="3" class="vacio">No hay metas.</td></tr>'}</tbody></table></div>
       <div class="form-grid">
-        ${campo('informe_vida_util', 'Informe técnico de vida útil estimada', { ancho: true, ph: 'Ej.: Informe N° …-2026-UGEL…/APP, control patrimonial', ayuda: 'Recomendable. Vacío = la antigüedad sale del año de adquisición registrado en cada local, si lo cargaste.' })}
+        ${campo('informe_vida_util', 'Documento de sustento de la vida útil', { ancho: true, ph: 'Ej.: Informe N° …-2026-UGEL…/APP, control patrimonial', ayuda: 'Va en el informe técnico de vida útil. Vacío = la antigüedad sale del año de adquisición registrado en cada local, si lo cargaste.' })}
       </div>
+      <h3>Informe técnico de vida útil</h3>
+      <p class="sub">Fuentes admitidas por la Directiva 005-2016-EF/51.01 (marca las que usa la entidad). 10 años para mobiliario es referencial, no automático: la vida útil estimada se carga por tipo de bien arriba. El Regular solo entra con antigüedad o daño documentado.</p>
+      <fieldset class="campo-muebles">${Object.entries(vista.fuentes_vida_util).map(([k, t]) => `<label class="chk"><input type="checkbox" data-doc-fuente="${k}" ${(d.fuentes_vida_util || []).includes(k) ? 'checked' : ''}> ${esc(t)}</label>`).join('')}</fieldset>
+      <div class="form-grid">
+        ${campo('patrimonial_nombre', 'Responsable de control patrimonial (firma)', { max: 200 })}
+        ${campo('patrimonial_cargo', 'Cargo', { max: 200 })}
+      </div>
+      ${vista.vida_util.faltan.length ? `<ul class="pendientes">${vista.vida_util.faltan.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+      <div class="acciones-fila"><button class="btn btn-ghost" data-doc-bajar="vida-util" type="button">Informe de vida útil consolidado (Word)</button>
+        ${vista.vida_util.colegios.length ? `<select id="doc-vida-cod" aria-label="Colegio">${vista.vida_util.colegios.map(x => `<option value="${esc(x.cod)}">${esc(x.cod)} · ${esc(x.colegio)}</option>`).join('')}</select><button class="btn btn-ghost" data-doc-bajar="vida-util" data-doc-cod type="button">De este colegio (Word)</button>` : ''}</div>
       <h3>Plazo de ejecución</h3>
       <div class="form-grid">
         ${campo('fecha_inicio', 'Mes de inicio', { tipo: 'month', ph: 'AAAA-MM' })}
@@ -161,8 +185,10 @@ function leer() {
   const datos = { antiguedad: {}, vida_util_estimada: {}, estado_actual: {}, mant_actual: {}, vida_util: {}, mant_nuevo: {} };
   ctx.el.querySelectorAll('[data-doc]').forEach(e => { datos[e.dataset.doc] = e.value; });
   ctx.el.querySelectorAll('[data-doc-t]').forEach(e => { if (e.value !== '') datos[e.dataset.docT][e.dataset.k] = e.value; });
+  datos.fuentes_vida_util = [...ctx.el.querySelectorAll('[data-doc-fuente]:checked')].map(e => e.dataset.docFuente);
   if (vista.nivel) {
     const propio = {}; ctx.el.querySelectorAll('[data-doc-niv]').forEach(e => { propio[e.dataset.docNiv] = e.value; });
+    propio.montos_05b = {}; ctx.el.querySelectorAll('[data-doc-05b]').forEach(e => { if (e.value !== '') propio.montos_05b[e.dataset.doc05b] = e.value; });
     datos.por_nivel = { ...(vista.datos.por_nivel || {}), [vista.nivel]: propio };
   }
   return datos;
@@ -176,7 +202,7 @@ async function guardar() {
     const v = await ctx.api(`/proyectos/${ctx.proyecto.id}/documentos${qn()}`, { method: 'PATCH', body: { datos: leer() } });
     if (mio !== version) return;
     // Se vuelve a pintar el resumen y los pendientes sin perder el foco del campo
-    const activo = document.activeElement, sel = activo?.dataset?.doc ? `[data-doc="${activo.dataset.doc}"]` : activo?.dataset?.docNiv ? `[data-doc-niv="${activo.dataset.docNiv}"]` : activo?.dataset?.docT ? `[data-doc-t="${activo.dataset.docT}"][data-k="${activo.dataset.k}"]` : null;
+    const activo = document.activeElement, sel = activo?.dataset?.doc ? `[data-doc="${activo.dataset.doc}"]` : activo?.dataset?.docNiv ? `[data-doc-niv="${activo.dataset.docNiv}"]` : activo?.dataset?.docT ? `[data-doc-t="${activo.dataset.docT}"][data-k="${activo.dataset.k}"]` : activo?.dataset?.doc05b ? `[data-doc-05b="${activo.dataset.doc05b}"]` : null;
     const pos = activo && 'selectionStart' in activo ? (() => { try { return activo.selectionStart; } catch { return null; } })() : null;
     vista = v; pintar();
     if (sel) { const e = ctx.el.querySelector(sel); if (e) { e.focus(); if (pos != null) try { e.setSelectionRange(pos, pos); } catch { /* inputs sin selección */ } } }
@@ -188,13 +214,18 @@ async function bajar(btn) {
   btn.disabled = true; const txt = btn.textContent; btn.textContent = 'Generando…';
   try {
     if (tGuardar) { clearTimeout(tGuardar); tGuardar = null; await guardar(); }
-    const r = await fetch(`/api/selector-ioarr/proyectos/${ctx.proyecto.id}/documentos/${btn.dataset.docBajar}${qn()}`);
+    // «formato-07c», «memoria»… van bajo /documentos; una ruta con «/» va directo bajo el proyecto
+    const ruta = btn.dataset.docBajar.includes('/') ? btn.dataset.docBajar : 'documentos/' + btn.dataset.docBajar;
+    const q = new URLSearchParams(ctx.nivel ? { nivel: ctx.nivel } : {});
+    if ('docCod' in btn.dataset) q.set('cod', document.getElementById('doc-vida-cod')?.value || '');
+    if (modoBorrador) q.set('borrador', '1');
+    const r = await fetch(`/api/selector-ioarr/proyectos/${ctx.proyecto.id}/${ruta}${q.size ? '?' + q : ''}`);
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Error ' + r.status);
     const blob = await r.blob(), cd = r.headers.get('Content-Disposition') || '';
     const nombre = decodeURIComponent((cd.match(/filename\*=UTF-8''([^;]+)/) || [])[1] || 'documento.docx');
     const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: nombre });
     document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 10000);
-    ctx.toast('Word descargado.');
+    ctx.toast(nombre.endsWith('.xlsx') ? 'Excel descargado.' : 'Word descargado.');
   } catch (e) { ctx.toast('No se pudo generar: ' + e.message); }
   finally { btn.disabled = false; btn.textContent = txt; }
 }
@@ -203,11 +234,15 @@ async function bajar(btn) {
 export function enlazarDocumentos(el) {
   const programar = (ms) => { clearTimeout(tGuardar); estado('Cambios sin guardar', 'pend'); tGuardar = setTimeout(() => { tGuardar = null; guardar(); }, ms); };
   el.addEventListener('input', e => { if (e.target.closest('#doc-form') && e.target.tagName !== 'SELECT') programar(900); });
-  el.addEventListener('change', e => { if (e.target.closest('#doc-form') && e.target.tagName === 'SELECT') programar(50); });
+  el.addEventListener('change', e => {
+    if (e.target.id === 'doc-borrador') { modoBorrador = e.target.checked; renderDocumentos(ctx); return; }
+    if (e.target.closest('#doc-form') && e.target.tagName === 'SELECT') programar(50);
+  });
   el.addEventListener('submit', e => { if (e.target.id === 'doc-form') e.preventDefault(); });
   el.addEventListener('click', e => {
     const b = e.target.closest('[data-doc-bajar]'); if (b) bajar(b);
     const z = e.target.closest('[data-doc-zip]');
-    if (z && ctx) { if (tGuardar) { clearTimeout(tGuardar); tGuardar = null; guardar().then(() => bajarZip(ctx, z)); } else bajarZip(ctx, z); }
+    const zc = { ...ctx, borrador: modoBorrador };
+    if (z && ctx) { if (tGuardar) { clearTimeout(tGuardar); tGuardar = null; guardar().then(() => bajarZip(zc, z)); } else bajarZip(zc, z); }
   });
 }

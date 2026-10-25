@@ -18,7 +18,8 @@
 // ============================================================================
 
 import { ITEMS, TALLAS, NIVN, textoEscenario, textoPct, textoOrigenPct, ROTULO_UMBRAL, DEF as DEF_CRIT } from './calculo.js';
-import { TIPOS, LIMITE_UIT } from './costos.js';
+import { TIPOS, LIMITE_UIT, NOTA_FALTANTE, REGISTRO_MASIVA } from './costos.js';
+import { FUENTES_VIDA_UTIL, limpiarColegios, colegioDe, checklistColegio } from './lineamientos.js';
 
 // Nota del material, dentro de la descripción técnica
 export const NOTA_MATERIAL = 'El material debe respetar la ficha técnica aplicable; la entidad convocante puede exigir madera.';
@@ -85,8 +86,15 @@ export function limpiarDatosDoc(b = {}) {
     nombre_inversion: texto(b.nombre_inversion, 500),
     cui: cuiValido(b.cui),
     // Con una IOARR por nivel: nombre y CUI de cada una ({ P: { nombre_inversion, cui } })
+    // y los montos de la idea del Formato 05-B por año (t, t+1, t+2), editables
     por_nivel: Object.fromEntries(['I', 'P', 'S', 'E'].map(n => [n, b.por_nivel?.[n]]).filter(([, v]) => v && typeof v === 'object')
-      .map(([n, v]) => [n, { nombre_inversion: texto(v.nombre_inversion, 500), cui: cuiValido(v.cui) }]).filter(([, v]) => v.nombre_inversion || v.cui)),
+      .map(([n, v]) => [n, { nombre_inversion: texto(v.nombre_inversion, 500), cui: cuiValido(v.cui),
+        montos_05b: Object.fromEntries(['t', 't1', 't2'].map(k => [k, numero(v.montos_05b?.[k], 0, 1e11)]).filter(([, x]) => x != null)) }])
+      .filter(([, v]) => v.nombre_inversion || v.cui || Object.keys(v.montos_05b).length)),
+    // Formato 05-B: año t de la programación (las IOARR por nivel usan el mismo)
+    anio_t: entero(b.anio_t, 2020, 2100),
+    // A. Alineamiento: cadena funcional (vacía = función, división y grupo propuestos)
+    cadena_funcional: texto(b.cadena_funcional, 300),
     // A. Alineamiento (se proponen por nivel; el usuario los ajusta al PMI)
     servicio_brecha: texto(b.servicio_brecha, 300),
     tipologia: texto(b.tipologia, 300),
@@ -113,6 +121,12 @@ export function limpiarDatosDoc(b = {}) {
     antiguedad: porTipo(b.antiguedad, v => numero(v, 0, 100)),
     vida_util_estimada: porTipo(b.vida_util_estimada, v => entero(v, 1, 50)),
     informe_vida_util: texto(b.informe_vida_util, 300),
+    // Informe técnico de vida útil: fuentes de la Directiva 005-2016-EF/51.01 y quien firma
+    fuentes_vida_util: Array.isArray(b.fuentes_vida_util) ? Object.keys(FUENTES_VIDA_UTIL).filter(k => b.fuentes_vida_util.includes(k)) : [],
+    patrimonial_nombre: texto(b.patrimonial_nombre, 200),
+    patrimonial_cargo: texto(b.patrimonial_cargo, 200),
+    // Por colegio: checklist de inventario y baja… (lineamientos.js); se guarda con PUT /colegios/:cod
+    colegios: limpiarColegios(b.colegios),
     // Cuadro de estado situacional: advertencias revisadas, con su explicación ({ clave: { nota, fecha } })
     situacional: { revisiones: Object.fromEntries(Object.entries(b.situacional?.revisiones || {}).slice(0, 200)
       .map(([k, v]) => [String(k).slice(0, 300), { nota: texto(v?.nota, 500), fecha: /^\d{4}-\d{2}-\d{2}$/.test(v?.fecha || '') ? v.fecha : null }]).filter(([, v]) => v.nota)) },
@@ -221,6 +235,8 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, efectivos = 
   const cod = CODIGOS_FUNCIONALES;
   const A = {
     funcion: `${cod.funcion} EDUCACIÓN`, division: `${cod.division} EDUCACIÓN BÁSICA`, sector: 'EDUCACIÓN',
+    // La reposición mantiene la calidad del servicio: contribuye a la brecha de calidad, no a la de cobertura
+    contribucion: 'Calidad: la reposición recupera la capacidad de producción del servicio existente; no contribuye al cierre de la brecha de cobertura.',
     grupos: niveles.map(k => `${cod.grupo[k] ? cod.grupo[k] + ' ' : ''}EDUCACIÓN ${NIVEL[k]}`),
     servicio: d.servicio_brecha || niveles.map(k => 'SERVICIO DE EDUCACIÓN ' + NIVEL[k]).join('; '),
     tipologia: d.tipologia || niveles.map(k => 'EDUCACIÓN ' + NIVEL[k]).join('; '),
@@ -229,6 +245,7 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, efectivos = 
       : niveles.map(k => ({ tipo: 'Calidad', nombre: `PORCENTAJE DE LOCALES EDUCATIVOS CON EDUCACIÓN ${NIVEL[k]} CON CAPACIDAD INSTALADA INADECUADA`, unidad: d.unidad_indicador || 'LOCAL EDUCATIVO', valor: d.contribucion_brecha })),
     espacio: !u0 ? '' : ambito === 'DISTRITAL' ? `${mayus(u0.dpto)}, ${mayus(u0.prov)}, ${mayus(u0.dist)}` : ambito === 'PROVINCIAL' ? `${mayus(u0.dpto)}, ${mayus(u0.prov)}` : mayus(u0.dpto),
     propuesto: !d.servicio_brecha || !d.tipologia || !d.indicador_brecha,
+    cadena: d.cadena_funcional || null,
     sinCodigo: niveles.filter(k => !cod.grupo[k]).map(k => NIVEL[k])
   };
 
@@ -238,8 +255,9 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, efectivos = 
   const metas = metasR.map(m => ({ k: m.k, nombre: m.n, plural: PLURAL[m.k], activo: 'MOBILIARIO DE AULA', unidad: UNIDAD_META[m.k] || 'Número de mobiliario',
     cantidad: m.cantidad, porTalla: m.porTalla, costo: r2(m.cd * (1 + igvPct / 100)) }));
   if (metas.length) metas[metas.length - 1].costo = r2(T.cdIgv - metas.slice(0, -1).reduce((a, m) => a + m.costo, 0));
+  // Tabla 3.7: A = costo directo (activos con IGV); B = documento equivalente + supervisión + liquidación + control concurrente
   const subtotalActivos = r2(T.cdIgv);
-  const expediente = T.doc, supervision = T.sup, liquidacion = T.liq;
+  const expediente = T.doc, supervision = T.sup, liquidacion = T.liq, control = T.cc || 0;
   const total = T.total;
 
   // ── Plazo y cronogramas (mensual a partir del plazo; en días, se cuentan meses de 30 días) ──
@@ -258,6 +276,7 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, efectivos = 
     expediente: { valores: [r2(expediente), ...Array(N - 1).fill(0)], total: r2(expediente) },
     supervision: { valores: repartir(r2(supervision), N), total: r2(supervision) },
     liquidacion: { valores: [...Array(N - 1).fill(0), liquidacion], total: liquidacion },
+    control: control ? { valores: repartir(r2(control), N), total: r2(control) } : null,
     metas: metas.map(m => ({ nombre: m.nombre, unidad: m.unidad, valores: repartirEnteros(m.cantidad, N), total: m.cantidad }))
   } : null;
   const plazoTexto = enDias ? (d.dias ? `${d.dias} días` : null) : (d.meses ? `${d.meses} ${d.meses === 1 ? 'mes' : 'meses'}` : null);
@@ -338,21 +357,40 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, efectivos = 
     ...(porCapacidad ? [] : [verificados.length
       ? `El estado del mobiliario sale del Censo Educativo 2025 (Minedu) y, en ${verificados.length === nLoc ? (nLoc > 1 ? 'todos los locales' : 'el local') : `${verificados.length} de los ${nLoc} locales`}, del inventario verificado en campo (${lista(verificados.map(u => fechaPe(new Date(u.verificado.fecha_visita + 'T00:00:00Z'))).filter((v, j, a) => a.indexOf(v) === j))}).`
       : 'El estado del mobiliario sale del Censo Educativo 2025 (Minedu), que es declarado por cada institución educativa.']),
-    T.fal > 0 ? `No se incluyen ${T.fal.toLocaleString('es-PE')} bienes faltantes (brecha de dotación, por encima de los existentes): no son reposición; ampliarían la capacidad de la UP (2.4.C.c) y corresponde evaluarlos como ampliación marginal.` : 'El metrado no incluye bienes faltantes por encima de los existentes.'
+    // Recuadro 14 / Aplicación 6 de los Lineamientos IOARR: carpetas que se reponen por mesa y silla
+    'Reposición de carpetas por mesa y silla (Lineamientos IOARR, Recuadro 14 y Aplicación 6): donde se reemplaza una carpeta (unipersonal o bipersonal) por una mesa y una silla, se da de baja la carpeta y la mesa y la silla nuevas se registran en el inventario como «mobiliario de aula».',
+    'La reposición puede hacerse con activos de mejor tecnología o conformes a la norma técnica vigente de mobiliario escolar, siempre que cumplan la misma función que los reemplazados y no aumenten la capacidad de la UP.',
+    T.fal > 0 ? `No se incluyen ${T.fal.toLocaleString('es-PE')} bienes faltantes (matrícula − mobiliario existente): ${NOTA_FALTANTE} Son solo informativos y no entran al monto, porque ampliarían la capacidad de la UP (2.4.C.c). Lo que se repone no supera la matrícula ni la capacidad de diseño de cada colegio.` : 'El metrado no incluye bienes faltantes por encima de los existentes. Lo que se repone no supera la matrícula ni la capacidad de diseño de cada colegio.'
   ];
   const condiciones = [
     { texto: 'El mobiliario nuevo cumple la misma función que el reemplazado (2.4.C.a).', estado: 'cumple', nota: 'Mesas, sillas, escritorios y armarios de aula reemplazan a los del mismo uso.' },
     { texto: 'No se sustenta en un incremento de la capacidad de la UP (2.4.C.c).', estado: porCapacidad ? 'no' : 'cumple', nota: porCapacidad ? 'El escenario «Por capacidad» calcula las cantidades por aulas y ocupación, no por el mobiliario existente: no sirve como sustento de reposición.' : T.fal > 0 ? 'El faltante (brecha de dotación, no reposición) se excluyó del metrado y del costo.' : 'No hay faltante.' },
-    { texto: masiva ? 'El mobiliario a reponer está en uso (2.5.c).' : 'El mobiliario a reponer está en uso: no lleva más de un año sin operar (2.4.C.d).', estado: d.en_uso === 'si' ? 'cumple' : d.en_uso === 'no' ? 'no' : 'pendiente', nota: d.en_uso === 'no' ? (masiva ? 'En una reposición masiva el mobiliario debe estar en uso.' : 'Si lleva más de un año sin operar, va como optimización o proyecto de inversión.') : '' },
-    { texto: 'Los bienes están registrados en la contabilidad e inventario de la entidad (2.4.C.e).', estado: d.inventario_registrado === 'si' ? 'cumple' : d.inventario_registrado === 'no' ? 'no' : 'pendiente', nota: d.codigo_inventario ? 'Código o documento: ' + d.codigo_inventario : '' },
+    condUso(ups, d, masiva),
+    condInventario(ups, d),
     escenario === 'malo'
       ? { texto: 'Vida útil: se repone solo mobiliario en estado malo, que ya no es útil ni operativo (vida útil efectiva, 2.4.B.e).', estado: 'cumple', nota: d.informe_vida_util ? 'Informe de vida útil: ' + d.informe_vida_util : 'El informe de vida útil estimada de la entidad (2.4.C.b) es recomendable como respaldo.' }
       : { texto: 'Vida útil: el mobiliario a reponer ya no es útil ni operativo (vida útil efectiva, 2.4.B.e) o cumplió su vida útil estimada (2.4.C.b).', estado: porCapacidad ? 'no' : 'pendiente',
         nota: porCapacidad ? 'El escenario «Por capacidad» no usa el estado del mobiliario.' : `El escenario «Malo + % de Regular» incluye ${pctTxt} del mobiliario regular, que todavía se puede usar: sustenta su reposición con la verificación en campo (antigüedad de ${Pesc.umbralVida} años o más, ${ROTULO_UMBRAL})${d.informe_vida_util ? ' y el informe de vida útil (' + d.informe_vida_util + ')' : ' o con el informe de vida útil estimada'}.` },
-    { texto: 'Los bienes reemplazados se darán de baja o se inició su trámite (2.4.C.f).', estado: conBaja.length === nLoc && nLoc ? 'cumple' : 'pendiente', nota: conBaja.length ? `Hay sustento de baja en ${conBaja.length} de ${nLoc} ${nLoc === 1 ? 'local' : 'locales'}.` : 'Adjunta la resolución o el trámite de baja en «Corregir inventario» de cada local.' },
+    condBaja(ups, d, conBaja),
     { texto: 'Verificación en campo con acta.', estado: nLoc && conActa.length === nLoc ? 'cumple' : 'pendiente', nota: `${conActa.length} de ${nLoc} ${nLoc === 1 ? 'local' : 'locales'} con acta adjunta.` }
   ];
   if (masiva) condiciones.push({ texto: 'Las UP prestan el mismo servicio y las administra la misma entidad, que adquiere los activos (2.5.b).', estado: 'pendiente', nota: ugels.length > 1 ? `Los locales son de ${ugels.length} UGEL (${lista(ugels)}): confirma que la entidad que adquiere es la misma.` : `Locales de ${ugels[0] || 'una misma UGEL'}.` });
+
+  // ── Formato 05-B: idea de la inversión (tipo de IOARR + nombre genérico de las UP + ámbito) ──
+  const nombrePropio = t => String(t || '').toLocaleLowerCase('es-PE').replace(/(^|[\s(«-])(\p{L})/gu, (m, a, b) => a + b.toLocaleUpperCase('es-PE')).replace(/\b(De|Del|La|Las|Los|Y|E)\b/g, w => w.toLowerCase());
+  const nivelesTxt = lista(niveles.map(k => 'Educación ' + NIVN[k]));
+  const lugar = !u0 ? '' : ambito === 'DISTRITAL' ? `en el distrito de ${nombrePropio(u0.dist)}, provincia de ${nombrePropio(u0.prov)}, departamento de ${nombrePropio(u0.dpto)}`
+    : ambito === 'PROVINCIAL' ? `en la provincia de ${nombrePropio(u0.prov)}, departamento de ${nombrePropio(u0.dpto)}` : `en el departamento de ${nombrePropio(u0.dpto)}`;
+  const anioT = d.anio_t || (Number(String(fecha || '').slice(0, 4)) || new Date().getFullYear()) + 1;
+  const m05 = d.por_nivel_actual?.montos_05b || {};
+  const hayMontos = ['t', 't1', 't2'].some(k => m05[k] != null);
+  const programacion = ['t', 't1', 't2'].map((k, j) => ({ k, anio: anioT + j, rotulo: j ? `t+${j}` : 't', monto: hayMontos ? m05[k] ?? 0 : j === 0 ? r2(total) : 0 }));
+  const sumaProg = r2(programacion.reduce((a, x) => a + x.monto, 0));
+  const B05 = {
+    idea: `Inversiones de reposición de mobiliario escolar de las IE de ${nivelesTxt} ${lugar}`.trim(),
+    tipo: 'Reposición', upGenerica: `Instituciones educativas de ${nivelesTxt}`, ambito, lugar, nUp: (porModular ? n : nLoc), monto: total,
+    programacion, suma: sumaProg, propuesto: !hayMontos, cuadra: Math.abs(sumaProg - r2(total)) < 0.01, anioT
+  };
 
   // ── Datos pendientes ──
   const faltan = [];
@@ -361,7 +399,8 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, efectivos = 
   falta(R.locales.length && !nLoc, 'Ningún local tiene bienes a reponer.');
   falta(!T.cd, 'No hay costo directo: carga los precios unitarios.');
   falta((R.lineas || []).some(y => y.rep > 0 && y.pu == null), 'Falta el precio unitario de algún bien.');
-  falta(!U.valor, 'Falta la UIT del año: no se sabe si el registro es abreviado o completo.');
+  falta(!U.valor, masiva ? 'Falta la UIT del año para expresar el monto en UIT (registro completo, masiva).' : 'Falta la UIT del año: no se sabe si el registro es abreviado o completo.');
+  falta(/PENDIENTE/.test((R.estructura?.filas || []).find(f => f.clave === 'cc')?.nombre || ''), 'Control concurrente (Ley 31358): indica si corresponde y su % (Costos → estructura).');
   falta(!d.uf || !d.uei, 'B. Institucionalidad: Unidad Formuladora y Unidad Ejecutora de Inversiones.');
   falta(!d.opmi, 'B. Institucionalidad: OPMI.');
   falta(!d.modalidad, 'Modalidad de ejecución.');
@@ -369,16 +408,20 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, efectivos = 
   falta(!d.fecha_inicio || !N, `F. Fecha prevista de inicio y plazo de ejecución (${enDias ? 'días' : 'meses'}).`);
   falta(metas.some(m => d.mant_nuevo[m.k] == null || d.vida_util[m.k] == null), 'Costo anual de mantenimiento (puede ser 0) y vida útil del mobiliario nuevo, por meta.');
   falta(!d.ue_mantenimiento || !d.ue_mantenimiento_codigo, 'Entidad responsable del mantenimiento: nombre y código.');
-  falta(!d.inventario_registrado, 'Si el mobiliario a reponer está registrado en el inventario de la entidad (Lineamientos 2.4.C.e).');
-  falta(!d.en_uso, 'Si el mobiliario a reponer está en uso.');
+  const sinCheck = ups.filter(u => !checklistColegio(colegioDe(d.colegios, u.cod), { registrado: d.inventario_registrado }).completo);
+  falta(sinCheck.length, `Checklist de inventario y baja incompleto en ${sinCheck.length === 1 ? '1 colegio' : sinCheck.length + ' colegios'} (${sinCheck.slice(0, 10).map(u => u.cod).join(', ')}${sinCheck.length > 10 ? '…' : ''}): no entra${sinCheck.length === 1 ? '' : 'n'} al 07-C final.`);
+  const sinUsoDato = ups.filter(u => !colegioDe(d.colegios, u.cod).uso).length;
+  falta(!d.en_uso && sinUsoDato, `Si el mobiliario está en uso (colegio operativo) en ${sinUsoDato === 1 ? '1 colegio' : sinUsoDato + ' colegios'}: márcalo en «Por colegio».`);
   if (supera && !masiva) falta(activos.some(a => a.antiguedad == null || !a.estado), 'E.3. Antigüedad y estado actual del mobiliario a reponer, por tipo.');
   falta(!d.ref_tecnica, 'Referencia técnica aplicable del mobiliario (descripción técnica).');
   falta(A.propuesto, 'A. Alineamiento a la brecha: indicador, unidad de medida y servicio propuestos; verifícalos contra el PMI.');
 
   return {
     fecha, proyecto: proyecto.nombre || '(sin nombre)', region: proyecto.region,
-    nombre: d.nombre_inversion || nombreSugerido, nombreSugerido, cui: d.cui || proyecto.ioarr?.cui || '',
-    masiva, supera, registro: supera == null ? 'pendiente' : supera ? 'completo' : 'abreviado',
+    nombre: d.nombre_inversion || nombreSugerido, nombreSugerido, cui: d.cui || proyecto.ioarr?.cui || '', B05,
+    // Una inversión masiva va siempre con registro completo; una individual, según las 75 UIT
+    masiva, supera, registro: masiva ? 'completo' : supera == null ? 'pendiente' : supera ? 'completo' : 'abreviado',
+    registroRotulo: masiva ? REGISTRO_MASIVA : supera == null ? 'Registro: PENDIENTE (falta la UIT)' : supera ? 'Registro completo (supera 75 UIT)' : 'Registro abreviado (hasta 75 UIT)',
     uit: U, limite: LIMITE_UIT, A,
     escenario, escenarioTexto: textoEscenario(Pesc, regDato), kit: !!R.kit,
     regular: escenario === 'malo_regular' ? { pct: pctTxt, origen: textoOrigenPct(Pesc, regDato), porDato, umbral: Pesc.umbralVida, observado: RC.observado ?? null, muestra: RC.conDato || 0 } : null,
@@ -388,7 +431,8 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, efectivos = 
     niveles: niveles.map(k => NIVEL[k]), ugels, ambito,
     D: { inventario: d.inventario_registrado, codigo_inventario: d.codigo_inventario, mantenimiento: d.ue_mantenimiento, mantenimiento_codigo: d.ue_mantenimiento_codigo },
     E: { sustento: [...sustentoAuto, ...(d.sustento ? d.sustento.split(/\n+/) : [])], activos, intervencion, condiciones, refTecnica: d.ref_tecnica },
-    F: { metas, subtotalActivos, expediente: r2(expediente), supervision: r2(supervision), liquidacion, total,
+    F: { metas, subtotalActivos, expediente: r2(expediente), supervision: r2(supervision), liquidacion, control: r2(control), otros: r2(T.b ?? (expediente + supervision + liquidacion + control)), total,
+      controlTexto: (R.estructura?.filas || []).find(f => f.clave === 'cc')?.nombre || '',
       inicio: inicio && fechaPe(inicio), fin: fin && fechaPe(fin), meses: N, plazo: plazoTexto, cronograma, mantenimiento },
     totales: T, estructura: R.estructura, partidas: R.partidas, lineas: R.lineas || R.partidas, distritos: R.distritos, excluidos: R.excluidos || [],
     faltante: { cantidad: T.fal, valor: T.falValor, partidas: R.partidas.filter(p => p.fal > 0).map(p => ({ nombre: p.n, cantidad: p.fal, valor: p.falValor })) },
@@ -398,6 +442,32 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, efectivos = 
     ioarr: proyecto.ioarr || null,
     verificacion: armarVerificacion({ R, ups, activos, condiciones, faltan, precios, efectivos, U, d, n: nLoc, ioarr: proyecto.ioarr, total, cantidades })
   };
+}
+
+// ─── Condiciones con el checklist por colegio ───────────────────────────────
+// Registro en el inventario y la contabilidad (2.4.C.e): por colegio; el sí/no de Documentos vale como
+// valor por defecto del registro en el inventario
+function condInventario(ups, d) {
+  const v = ups.map(u => { const c = colegioDe(d.colegios, u.cod).inventario; return { reg: c.registrado || d.inventario_registrado, cont: c.contabilidad }; });
+  const n = ups.length, ok = v.filter(x => x.reg === 'si' && x.cont === 'si').length, no = v.filter(x => x.reg === 'no' || x.cont === 'no').length;
+  return { texto: 'Los bienes están registrados en la contabilidad e inventario de la entidad (2.4.C.e).', estado: no ? 'no' : n && ok === n ? 'cumple' : 'pendiente',
+    nota: `Inventario y contabilidad «Sí» en ${ok} de ${n} ${n === 1 ? 'colegio' : 'colegios'}${no ? `; «No» en ${no}` : ''} (checklist por colegio).${d.codigo_inventario ? ' Código o documento: ' + d.codigo_inventario : ''}` };
+}
+// En uso (2.5.c / 2.4.C.d): por colegio (operativo); el sí/no de Documentos vale por defecto.
+// Los cerrados, inundados o en reconstrucción ya quedaron fuera del monto (paquete.js).
+function condUso(ups, d, masiva) {
+  const n = ups.length, op = ups.filter(u => (colegioDe(d.colegios, u.cod).uso || (d.en_uso === 'si' ? 'operativo' : '')) === 'operativo').length;
+  const texto = masiva ? 'El mobiliario a reponer está en uso (2.5.c).' : 'El mobiliario a reponer está en uso: no lleva más de un año sin operar (2.4.C.d).';
+  if (d.en_uso === 'no' && !ups.some(u => colegioDe(d.colegios, u.cod).uso)) return { texto, estado: 'no', nota: masiva ? 'En una reposición masiva el mobiliario debe estar en uso.' : 'Si lleva más de un año sin operar, va como optimización o proyecto de inversión.' };
+  return { texto, estado: n && op === n ? 'cumple' : 'pendiente', nota: `Colegio operativo en ${op} de ${n}${op < n ? '; el resto, sin registrar en «Por colegio»' : ''}. Los cerrados, inundados o en reconstrucción no entran al monto.` };
+}
+// Baja (2.4.C.f): trámite iniciado con documento de respaldo y fecha en el checklist, o archivo de baja adjunto
+function condBaja(ups, d, conBaja) {
+  const n = ups.length, arch = new Set(conBaja.map(u => u.cod));
+  const ok = ups.filter(u => { const c = colegioDe(d.colegios, u.cod).inventario; return (c.baja === 'si' && c.doc_tipo && c.doc_fecha) || arch.has(u.cod); }).length;
+  const no = ups.filter(u => colegioDe(d.colegios, u.cod).inventario.baja === 'no').length;
+  return { texto: 'Los bienes reemplazados se darán de baja o se inició su trámite (2.4.C.f).', estado: n && ok === n ? 'cumple' : 'pendiente',
+    nota: `Baja iniciada con documento de respaldo en ${ok} de ${n} ${n === 1 ? 'colegio' : 'colegios'}${no ? `; sin iniciar en ${no}` : ''}. Se marca en «Por colegio» (acta, resolución o compromiso, con fecha).` };
 }
 
 // ─── Lista de verificación del expediente ───────────────────────────────────

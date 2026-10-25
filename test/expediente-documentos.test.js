@@ -20,7 +20,7 @@ const cerca = (a, b, msg) => assert.ok(Math.abs(a - b) < 0.011, `${msg}: ${a} �
 // Valores de PRUEBA (no son reales)
 const PRECIOS = { mesa: 180, silla: 90, esc: 400, sdoc: 120, arm: 650 };
 const DESC = Object.fromEntries(Object.keys(PRECIOS).map(k => [k, { descripcion: 'Descripción de prueba de ' + k }]));
-const EST = { transporte_pieza: 15, igv: 18, doc_pct: 3, sup_pct: 5, liquidacion: 15000 };
+const EST = { transporte_pieza: 15, igv: 18, doc_pct: 3, sup_pct: 5, liquidacion: 15000, cc_aplica: 'no' };
 const COMPLETOS = { uf: 'UF de prueba', uei: 'UEI de prueba', opmi: 'OPMI de prueba', fecha_inicio: '2027-03', meses: 5, en_uso: 'si', inventario_registrado: 'si',
   servicio_brecha: 'S', tipologia: 'T', indicador_brecha: 'I', ue_mantenimiento: 'UGEL de prueba', ue_mantenimiento_codigo: '0123',
   modalidad: 'Administración indirecta – Obras por Impuestos', fuente_financiamiento: 'Recursos Determinados', ref_tecnica: 'Ficha técnica de prueba',
@@ -33,8 +33,11 @@ function chiclayo(uit = 5500, datos = {}) {
   const R = costear({ D, C, list, precios: PRECIOS, estructura: EST, uit: { anio: 2026, valor: uit }, inventario: inv });
   return { R, M: armarModelo({ R, D, list, proyecto: { nombre: 'Chiclayo', region: 'Lambayeque' }, datos: limpiarDatosDoc(datos), precios: DESC, inv, fecha: '2026-10-21' }) };
 }
+// Checklist de inventario y baja completo en cada colegio (datos de PRUEBA)
+const CHECK_OK = { inventario: { registrado: 'si', contabilidad: 'si', baja: 'si', doc_tipo: 'acta', doc_numero: 'Acta 1', doc_fecha: '2026-10-01' } };
 function mariscal(uit = 500, datos = COMPLETOS) {
   const D = region('moquegua'), C = calc(D, DEF), list = filtrar(D, C, { ...FILTRO_VACIO(), q: 'mariscal' });
+  if (datos === COMPLETOS) datos = { ...COMPLETOS, colegios: Object.fromEntries(list.map(i => [D.locs[i][0], CHECK_OK])) };
   const R = costear({ D, C, list, precios: PRECIOS, estructura: EST, uit: { anio: 2026, valor: uit } });
   return { R, M: armarModelo({ R, D, list, proyecto: { nombre: 'Mariscal', region: 'Moquegua' }, datos: limpiarDatosDoc(datos), precios: DESC, fecha: '2026-10-21' }) };
 }
@@ -61,7 +64,7 @@ test('Chiclayo 11124: IOARR individual, registro abreviado, el costo del 07-C cu
   cerca(M.F.subtotalActivos + M.F.expediente + M.F.supervision + M.F.liquidacion, R.totales.total, 'activos + documento equivalente + supervisión + liquidación');
   cerca(M.F.metas.reduce((a, m) => a + m.costo, 0), R.totales.cdIgv, 'las metas suman el costo directo + IGV');
   // Sin los datos del usuario, se listan como pendientes y no se inventan
-  for (const t of [/Institucionalidad/, /inicio y plazo/, /mantenimiento .*vida útil/, /inventario de la entidad/, /Modalidad de ejecución/, /Referencia técnica/]) assert.ok(M.faltan.some(x => t.test(x)), t);
+  for (const t of [/Institucionalidad/, /inicio y plazo/, /mantenimiento .*vida útil/, /Checklist de inventario y baja/, /Modalidad de ejecución/, /Referencia técnica/]) assert.ok(M.faltan.some(x => t.test(x)), t);
   assert.equal(M.F.cronograma, null);
   assert.equal(M.E.condiciones.find(c => /acta/.test(c.texto)).estado, 'cumple');
 });
@@ -237,11 +240,11 @@ test('ZIP: documentos, sustento por local, nombres repetidos, fallos e índice',
   const nombres = Object.keys(z.files).filter(n => !z.files[n].dir).sort();
   assert.deepEqual(nombres, [
     'Exp/00_LEEME.txt', 'Exp/01_Formato_07C_borrador.docx', 'Exp/02_Memoria_descriptiva.docx',
-    'Exp/06_Sustento/276008_11124_NUESTRA_SENORA_DE_LA_PAZ/01_Acta_Acta_de_visita.pdf',
-    'Exp/06_Sustento/276008_11124_NUESTRA_SENORA_DE_LA_PAZ/02_Foto_foto.jpg',
-    'Exp/06_Sustento/276008_11124_NUESTRA_SENORA_DE_LA_PAZ/03_Foto_foto.jpg'
+    'Exp/09_Sustento/276008_11124_NUESTRA_SENORA_DE_LA_PAZ/01_Acta_Acta_de_visita.pdf',
+    'Exp/09_Sustento/276008_11124_NUESTRA_SENORA_DE_LA_PAZ/02_Foto_foto.jpg',
+    'Exp/09_Sustento/276008_11124_NUESTRA_SENORA_DE_LA_PAZ/03_Foto_foto.jpg'
   ]);
-  assert.equal(await z.file('Exp/06_Sustento/276008_11124_NUESTRA_SENORA_DE_LA_PAZ/02_Foto_foto.jpg').async('string'), 'contenido r2');
+  assert.equal(await z.file('Exp/09_Sustento/276008_11124_NUESTRA_SENORA_DE_LA_PAZ/02_Foto_foto.jpg').async('string'), 'contenido r2');
   assert.deepEqual(r.fallidos, ['276008: baja.pdf (no existe)']);
   const leeme = await z.file('Exp/00_LEEME.txt').async('string');
   for (const s of ['EXPEDIENTE IOARR — Chiclayo', 'por yo@x.pe', 'registro: abreviado'.replace('registro', 'Registro'), '3 archivo(s) de sustento', 'ARCHIVOS QUE NO SE PUDIERON INCLUIR', 'DATOS PENDIENTES', 'borrador de trabajo'])

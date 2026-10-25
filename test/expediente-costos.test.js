@@ -82,7 +82,9 @@ test('factor por zona (para el transporte de la oferta interna): distrito antes 
 test('aviso de 75 UIT', () => {
   const bajo = casoMariscal(DEF, { uit: { anio: 2026, valor: 100000 } }).R;
   assert.equal(bajo.uit.supera, false);
-  assert.ok(!bajo.avisos.some(a => a.tipo === 'uit75'));
+  // «mariscal» es una inversión masiva: siempre registro completo, aunque no supere 75 UIT
+  assert.equal(bajo.uit.masiva, true); assert.equal(bajo.uit.registro, 'completo');
+  assert.ok(bajo.avisos.some(a => a.tipo === 'uit75' && /Registro completo \(masiva\)/.test(a.texto)));
   const alto = casoMariscal(DEF, { uit: { anio: 2026, valor: 100 } }).R;
   assert.equal(alto.uit.supera, true);
   assert.equal(alto.uit.limite, 7500);
@@ -97,9 +99,12 @@ test('sin precios: bienes en 0 y avisos (no se inventan precios dentro del cálc
   const R = costear({ D, C, list, precios: {}, estructura: {}, uit: null });
   assert.equal(R.totales.bienes, 0);
   assert.ok(R.partidas.every(p => p.pu === null));
-  assert.deepEqual(R.avisos.map(a => a.tipo).sort(), ['faltante', 'precio', 'uit']);
+  // «censo»: en «mariscal» hay colegios con más mesas o sillas que matrícula (no aumentar capacidad)
+  assert.deepEqual(R.avisos.map(a => a.tipo).sort(), ['censo', 'control_concurrente', 'faltante', 'precio', 'uit']);
   // La estructura por defecto: transporte 19.50 por pieza, IGV 18 %, 3 %, 5 % y 15,000
-  assert.deepEqual(R.estructura.params, { igv: 18, doc_pct: 3, sup_pct: 5, liquidacion: 15000, transporte_pieza: 19.5, kit_dist: [1, 1, 1] });
+  // Control concurrente (Ley 31358): vacío por defecto, no se inventa si corresponde ni su %
+  assert.deepEqual(R.estructura.params, { igv: 18, doc_pct: 3, sup_pct: 5, liquidacion: 15000, transporte_pieza: 19.5, kit_dist: [1, 1, 1], cc_aplica: '', cc_pct: null, cc_umbral: null, cc_corresponde: false });
+  assert.equal(R.totales.cc, 0);
 });
 
 test('limpiarEstructura: valores válidos y lo desconocido se descarta', () => {
@@ -116,9 +121,12 @@ test('Excel de costos: hojas, fórmulas y total igual a la pantalla', async () =
   const wb = new ExcelJS.Workbook(); await wb.xlsx.load(await generarExcelCostos(R, meta));
   assert.deepEqual(wb.worksheets.map(w => w.name), ['Resumen', 'Parámetros', 'Partidas', 'Metrado y costos por local', 'Por distrito']);
   const res = wb.getWorksheet('Resumen');
-  let total = null; res.eachRow(row => { if (row.getCell(1).value === 'MONTO DE INVERSIÓN') total = row.getCell(2).value; });
-  assert.match(total.formula, /^'Metrado y costos por local'!/);
+  // Tabla 3.7: C = A + B, y una fila de control con el total de la hoja de metrado
+  let total = null, control = null;
+  res.eachRow(row => { if (row.getCell(1).value === 'C = A + B. COSTO DE INVERSIÓN (MONTO DE INVERSIÓN)') total = row.getCell(2).value; if (/^Control: monto/.test(row.getCell(1).value || '')) control = row.getCell(2).value; });
+  assert.match(total.formula, /^B\d+\+B\d+$/);
   cerca(total.result, R.totales.total, 'total del Excel');
+  assert.match(control.formula, /^'Metrado y costos por local'!/);
   const m = wb.getWorksheet('Metrado y costos por local');
   assert.equal(m.rowCount, 11 + 2);  // cabecera + 11 locales + totales
   // Las cantidades de reposición del Excel suman lo mismo que la pantalla
@@ -150,7 +158,7 @@ test('Excel recalculado con LibreOffice: mismo total, y cambia al editar un par�
   const { R } = casoMariscal();
   const buf = await generarExcelCostos(R, meta);
   const h1 = recalcular(buf);
-  cerca(Math.round(valorResumen(h1.Resumen, 'MONTO DE INVERSIÓN') * 100), Math.round(R.totales.total * 100), 'total recalculado');
+  cerca(Math.round(valorResumen(h1.Resumen, 'C = A + B. COSTO DE INVERSIÓN (MONTO DE INVERSIÓN)') * 100), Math.round(R.totales.total * 100), 'total recalculado');
   assert.match(h1.Partidas, /Diferencia \(debe ser 0\),,,,0(,|\n)/);
 
   // Cambia el precio del escritorio y la UIT en el Excel, sin tocar los resultados guardados
@@ -164,9 +172,20 @@ test('Excel recalculado con LibreOffice: mismo total, y cambia al editar un par�
   const h2 = recalcular(Buffer.from(await wb.xlsx.writeBuffer()));
   const D = moquegua(), C = calc(D, DEF), list = filtrar(D, C, { ...FILTRO_VACIO(), q: 'mariscal' });
   const R2 = costear({ D, C, list, precios: { ...PRECIOS, esc: 200 }, estructura: EST, uit: { anio: 2026, valor: 500 } });
-  cerca(Math.round(valorResumen(h2.Resumen, 'MONTO DE INVERSIÓN') * 100), Math.round(R2.totales.total * 100), 'total tras cambiar el precio');
+  cerca(Math.round(valorResumen(h2.Resumen, 'C = A + B. COSTO DE INVERSIÓN (MONTO DE INVERSIÓN)') * 100), Math.round(R2.totales.total * 100), 'total tras cambiar el precio');
   assert.equal(R2.uit.supera, true);
-  assert.match(h2.Resumen, /Registro que corresponde,"COMPLETO/);
+  assert.match(h2.Resumen, /Registro que corresponde,"REGISTRO COMPLETO \(MASIVA\)/);   // «mariscal» es masiva
+});
+
+test('Excel con control concurrente (Ley 31358): A + B = C y LibreOffice da el mismo total', { skip: !soffice && 'LibreOffice no está instalado' }, async () => {
+  const D = moquegua(), C = calc(D, DEF), list = filtrar(D, C, { ...FILTRO_VACIO(), q: 'mariscal' });
+  const R = costear({ D, C, list, precios: PRECIOS, estructura: { ...EST, cc_aplica: 'si', cc_pct: 2 }, uit: { anio: 2026, valor: 5500 } });
+  assert.ok(R.totales.cc > 0);
+  const h = recalcular(await generarExcelCostos(R, meta));
+  const T = 'C = A + B. COSTO DE INVERSIÓN (MONTO DE INVERSIÓN)';
+  cerca(Math.round(valorResumen(h.Resumen, T) * 100), Math.round(R.totales.total * 100), 'total con control concurrente');
+  cerca(Math.round(valorResumen(h.Resumen, 'Control concurrente (Ley 31358)') * 100), Math.round(R.totales.cc * 100), 'control concurrente');
+  cerca(Math.round(valorResumen(h.Resumen, 'B. OTROS COSTOS DE INVERSIÓN') * 100), Math.round(R.totales.b * 100), 'B');
 });
 
 test('copiar de Radar IOARR: el tipo de bien se propone por la descripción', () => {

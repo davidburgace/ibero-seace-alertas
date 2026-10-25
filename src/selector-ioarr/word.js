@@ -4,6 +4,8 @@
 //   generar07C(M)      Borrador del Formato 07-C: Registro de IOARR
 //   generarMemoria(M)  Memoria descriptiva
 //   generarVerificacion(M)  Lista de verificación del expediente
+//   generarVidaUtil(M, V, cod?)  Informe técnico de vida útil (consolidado o de un colegio)
+//   generar05B(M)      Borrador del Formato 05-B: idea de la inversión con los montos por año
 // M es el modelo de armarModelo() (src/selector-ioarr/documentos.js).
 // ============================================================================
 
@@ -11,6 +13,8 @@ import {
   Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, AlignmentType,
   HeadingLevel, ShadingType, Header, Footer, PageNumber, BorderStyle, PageOrientation
 } from 'docx';
+import { FUENTES_VIDA_UTIL, AVISO_BORRADOR, CONSULTAS_OPMI } from './lineamientos.js';
+import { NOTA_FALTANTE } from './costos.js';
 
 const AZUL = '3A63E0', GRIS = 'EEF0F4', AMARILLO = 'FFF3B0', TEXTO = '16181D', TENUE = '5C6270';
 const FUENTE = 'Calibri';
@@ -86,7 +90,12 @@ function documento(M, nombre, children, { horizontal } = {}) {
     }]
   });
 }
+// Colegios con el checklist de inventario y baja incompleto: en el borrador van con aviso; en el final, fuera
+const avisoChecklist = M => !M.bloqueados?.length ? [] : M.borrador
+  ? [p(`${AVISO_BORRADOR} Colegios con el checklist incompleto (${M.bloqueados.length}): ${M.bloqueados.slice(0, 30).map(b => b.cod).join(', ')}${M.bloqueados.length > 30 ? '…' : ''}.`, { bold: true, size: 18, highlight: 'yellow', plano: true })]
+  : [nota(`No se incluyen ${M.bloqueados.length === 1 ? 'el colegio' : 'los ' + M.bloqueados.length + ' colegios'} con el checklist de inventario y baja incompleto (registro en inventario y contabilidad, trámite de baja y documento de respaldo): ${M.bloqueados.slice(0, 30).map(b => b.cod).join(', ')}${M.bloqueados.length > 30 ? '…' : ''}.`)];
 const aviso = M => [
+  ...avisoChecklist(M),
   p('BORRADOR DE TRABAJO. No reemplaza el registro en el aplicativo del Banco de Inversiones del MEF: sirve para preparar, revisar y sustentar lo que se va a registrar. Lo marcado como «PENDIENTE» (en amarillo) falta completar.', { italics: true, color: TENUE, size: 17, plano: true }),
   // El escenario de cantidad usado, en una línea
   p(M.escenarioTexto + (M.kit ? ' Mesas y sillas presentadas como kit (mesa + silla del estudiante).' : ''), { bold: true, size: 18, plano: true }),
@@ -109,12 +118,17 @@ const notaUPs = M => M.upPor === 'modular' ? [nota(`UP listadas por código modu
 // Activo de una meta: con kit, «MOBILIARIO DE AULA» en una línea
 const activoMeta = m => m.k === 'kit' ? m.activo : `${m.activo}\n(${m.nombre.toLowerCase()})`;
 
+// Metas y costo según la Tabla 3.7: A. costo directo (activos), B. otros costos de inversión, C = A + B
+const filaCosto = (txt, v, o = {}) => [{ v: txt, span: 6, gris: !o.bold, bold: o.bold }, { v: NS.format(v), gris: !o.bold, bold: o.bold }, { v: '', gris: !o.bold }, { v: '', gris: !o.bold }];
 const tablaMetas = M => tabla(['Tipo de IOARR', 'Acción', 'Activo', 'Tipo de factor productivo', 'Unidad de medida', 'Cantidad', 'Costo de inversión (S/)', 'Inicio', 'Término'], [
   ...M.F.metas.map(m => ['REPOSICIÓN', 'ADQUISICIÓN', activoMeta(m), 'MOBILIARIO', m.unidad, { v: ent(m.cantidad) }, { v: NS.format(m.costo) }, M.F.inicio || PEND, M.F.fin || PEND]),
-  [{ v: 'EXPEDIENTE TÉCNICO O DOCUMENTO EQUIVALENTE', span: 6, gris: true }, { v: NS.format(M.F.expediente), gris: true }, { v: '', gris: true }, { v: '', gris: true }],
-  [{ v: 'SUPERVISIÓN', span: 6, gris: true }, { v: NS.format(M.F.supervision), gris: true }, { v: '', gris: true }, { v: '', gris: true }],
-  [{ v: 'LIQUIDACIÓN', span: 6, gris: true }, { v: NS.format(M.F.liquidacion), gris: true }, { v: '', gris: true }, { v: '', gris: true }],
-  [{ v: 'TOTAL', span: 6, bold: true }, { v: NS.format(M.F.total), bold: true }, '', '']
+  filaCosto('A. COSTO DIRECTO (activos, con IGV)', M.F.subtotalActivos, { bold: true }),
+  filaCosto('EXPEDIENTE TÉCNICO O DOCUMENTO EQUIVALENTE', M.F.expediente),
+  filaCosto('SUPERVISIÓN', M.F.supervision),
+  filaCosto('LIQUIDACIÓN', M.F.liquidacion),
+  ...(M.F.control || /PENDIENTE/.test(M.F.controlTexto || '') ? [filaCosto(M.F.control ? 'CONTROL CONCURRENTE (LEY 31358)' : 'CONTROL CONCURRENTE (LEY 31358): PENDIENTE indicar si corresponde', M.F.control || 0)] : []),
+  filaCosto('B. OTROS COSTOS DE INVERSIÓN', M.F.otros ?? (M.F.expediente + M.F.supervision + M.F.liquidacion), { bold: true }),
+  filaCosto('C = A + B. COSTO DE INVERSIÓN (TOTAL)', M.F.total, { bold: true })
 ], { num: [5, 6], size: 15, anchos: [9, 11, 13, 10, 12, 7, 12, 13, 13] });
 
 function cronogramas(M) {
@@ -129,6 +143,7 @@ function cronogramas(M) {
       ['Documento equivalente', ...col(C.expediente.valores), ...(ultimo ? [NS.format(C.expediente.total)] : [])],
       ['Supervisión', ...col(C.supervision.valores), ...(ultimo ? [NS.format(C.supervision.total)] : [])],
       ['Liquidación', ...col(C.liquidacion.valores), ...(ultimo ? [NS.format(C.liquidacion.total)] : [])],
+      ...(C.control ? [['Control concurrente (Ley 31358)', ...col(C.control.valores), ...(ultimo ? [NS.format(C.control.total)] : [])]] : []),
       ...(ultimo ? [[{ v: 'TOTAL', bold: true }, ...per.map(() => ''), { v: NS.format(M.F.total), bold: true }]] : [])
     ], { num: Array.from({ length: per.length + 1 }, (_, j) => j + 1), size: 15 }), espacio());
   }
@@ -164,7 +179,7 @@ function mantenimiento(M, conInicio = true) {
 }
 
 // Cómo se arma el costo de las metas (estructura referencial de adquisición de bienes)
-const NOTA_ESTRUCTURA = 'Estructura referencial de adquisición de bienes: el costo de cada activo es su costo directo (bienes + transporte) más IGV. El documento equivalente y la supervisión son un porcentaje del costo directo sin IGV y la liquidación es un monto fijo; esos porcentajes dependen de la entidad convocante. Ver la estructura de costos en Excel.';
+const NOTA_ESTRUCTURA = 'Desglose de la Tabla 3.7 de los Lineamientos IOARR: A. costo directo = costo de los activos (bienes + transporte) más IGV; B. otros costos de inversión = documento equivalente y supervisión (porcentaje del costo directo sin IGV), liquidación (monto fijo) y, cuando corresponda, el control concurrente (Ley 31358); C = A + B, costo de inversión. Los porcentajes dependen de la entidad convocante. Ver la estructura de costos en Excel.';
 
 // ─── Formato 07-C ───────────────────────────────────────────────────────────
 export async function generar07C(M) {
@@ -177,12 +192,12 @@ export async function generar07C(M) {
     ['Código único de la inversión', M.cui || 'Se asigna al registrar'],
     ['¿Es una inversión en el marco de un Decreto Supremo?', 'No'],
     ['Tipo de registro', M.masiva ? 'Inversión masiva de reposición (varias UP, activo homogéneo: mobiliario de aula)' : 'IOARR de reposición'],
-    ['Monto de inversión y registro', M.registro === 'pendiente' ? `${soles(M.F.total)} · PENDIENTE: falta la UIT` : `${soles(M.F.total)} = ${NS.format(M.uit.enUit)} UIT (UIT ${M.uit.anio}: ${soles(M.uit.valor)}) → registro ${M.registro === 'completo' ? 'completo, secciones D, E y F' : 'abreviado, sección G'}`]
+    ['Monto de inversión y registro', `${soles(M.F.total)}${M.uit?.valor ? ` = ${NS.format(M.uit.enUit)} UIT (UIT ${M.uit.anio}: ${soles(M.uit.valor)})` : ' · PENDIENTE: falta la UIT para expresarlo en UIT'} → ${M.registroRotulo || M.registro}${M.registro === 'completo' ? ', secciones D, E y F' : M.registro === 'abreviado' ? ', sección G' : ''}`]
   ]));
 
   c.push(titulo('A. Alineamiento a una brecha prioritaria'));
-  c.push(kv([['Función', M.A.funcion], ['División funcional', M.A.division], ['Grupo funcional', M.A.grupos.join('; ')], ['Sector responsable', M.A.sector],
-    ['Servicios públicos con brecha identificada y priorizada', M.A.servicio], ['Tipología de proyecto asociada', M.A.tipologia]]));
+  c.push(kv([['Cadena funcional', M.A.cadena || `${M.A.funcion} / ${M.A.division} / ${M.A.grupos.join('; ')}`], ['Función', M.A.funcion], ['División funcional', M.A.division], ['Grupo funcional', M.A.grupos.join('; ')], ['Sector responsable', M.A.sector],
+    ['Servicios públicos con brecha identificada y priorizada', M.A.servicio], ['Tipología de proyecto asociada', M.A.tipologia], ['Tipo de brecha a la que contribuye', M.A.contribucion]]));
   c.push(espacio());
   c.push(tabla(['Tipo', 'Indicador de brecha', 'Unidad de medida', 'Contribución a la brecha del PMI'], M.A.indicadores.map(x => [x.tipo, x.nombre, x.unidad || PEND, { v: x.valor == null ? '' : ent(x.valor) }]), { num: [3], anchos: [12, 52, 18, 18] }));
   c.push(espacio());
@@ -343,7 +358,8 @@ export async function generarMemoria(M) {
   c.push(espacio());
   c.push(tabla(['Estructura de costos', 'Monto (S/)'], (M.estructura?.filas || []).map(f => [{ v: (f.fuerte || f.total ? '' : '   ') + f.nombre, bold: f.fuerte || f.total }, { v: NS.format(f.monto), bold: f.fuerte || f.total }]), { num: [1], anchos: [70, 30] }));
   c.push(nota(NOTA_ESTRUCTURA));
-  if (M.faltante.cantidad > 0) c.push(nota(`No se incluyen ${ent(M.faltante.cantidad)} bienes faltantes, valorizados como referencia en ${soles(M.faltante.valor)}: corresponde evaluarlos como ampliación marginal (Lineamientos IOARR 2.4.C.c).`));
+  if (M.faltante.cantidad > 0) c.push(nota(`No se incluyen ${ent(M.faltante.cantidad)} bienes faltantes (matrícula − mobiliario existente), valorizados solo como referencia en ${soles(M.faltante.valor)}: ${NOTA_FALTANTE} No entran al monto (Lineamientos IOARR 2.4.C.c).`));
+  if (M.capacidad?.some(f => f.inconsistente)) c.push(nota(`${M.capacidad.filter(f => f.inconsistente).length} colegios tienen datos inconsistentes del censo (más mesas o sillas que matrícula): lo que se repone se limitó a la matrícula y debe verificarse en campo.`));
 
   c.push(titulo('9. Cronograma de ejecución'));
   c.push(...cronogramas(M));
@@ -355,13 +371,52 @@ export async function generarMemoria(M) {
   c.push(titulo('11. Anexos'));
   c.push(vinieta('Estructura de costos en Excel (Selector IOARR → Expediente → Exportar costos a Excel).'));
   c.push(vinieta('Selección de locales y metrado por aula en Excel (Selector IOARR → Exportar a Excel).'));
+  c.push(vinieta('Anexo 1: estructura preliminar de costos, activos a reponer (al final de esta memoria y en el Excel de anexos de los Lineamientos).'));
+  c.push(vinieta('Anexo 2: consultas a la OPMI, pendientes de respuesta.'));
   const archivos = M.ups.flatMap(u => u.archivos.map(a => ({ ...a, cod: u.cod })));
   if (archivos.length) {
     c.push(p('Sustento de la verificación en campo:', { bold: true, before: 120 }));
     c.push(tabla(['Código de local', 'Tipo', 'Archivo', 'Descripción'], archivos.map(a => [a.cod, { acta: 'Acta de verificación', foto: 'Foto', inventario_patrimonial: 'Inventario patrimonial', baja: 'Baja', otro: 'Otro' }[a.tipo] || a.tipo, a.nombre_archivo, a.descripcion || '']), { anchos: [14, 20, 36, 30], size: 15 }));
   } else c.push(vinieta('PENDIENTE: acta de verificación, fotos, inventario patrimonial y sustento de baja de cada local.'));
   c.push(nota('Fuentes: Padrón de ESCALE y Censo Educativo 2025 (Minedu), datos declarados por cada colegio; Lineamientos IOARR del MEF (9.ª versión, junio 2025). Los precios, los porcentajes y la UIT se revisan en la estructura de costos; los porcentajes dependen de la entidad convocante.'));
+  c.push(...anexoFichaActivos(M));
+  c.push(...anexoConsultas(M));
   return Packer.toBuffer(documento(M, 'Memoria descriptiva', c));
+}
+
+// ─── Anexo: estructura preliminar de costos (activos a reponer) ────────────
+// Con muchos lotes, el detalle va solo en el Excel y aquí un resumen por local y bien
+const MAX_LOTES_WORD = 800;
+function anexoFichaActivos(M) {
+  const F = M.fichaActivos;
+  if (!F) return [];
+  const out = [titulo('Anexo 1. Estructura preliminar de costos: activos a reponer')];
+  out.push(p(`Lotes de activos a reponer por ambiente (aula), bien y estado verificado: ${ent(F.totales.filas)} lotes, ${ent(F.totales.cantidad)} bienes (igual al metrado de la estructura de costos). ${F.totales.pendientes ? `${ent(F.totales.pendientes)} lotes están «PENDIENTE de verificación en campo»: no tienen el estado contado en campo, el código patrimonial o la antigüedad, y no se completan con valores supuestos.` : 'Todos los lotes tienen el dato de campo.'}`));
+  if (F.sinMant.length) out.push(p(`PENDIENTE: costo anual de mantenimiento de ${F.sinMant.join(', ')}.`));
+  if (F.filas.length <= MAX_LOTES_WORD) {
+    out.push(tabla(['Local', 'Ambiente', 'Bien existente → nuevo', 'Cód. patrimonial', 'Antig. (años)', 'Estado', 'Cant.', 'Mant. anual exist. / nuevo (S/)', 'Situación'],
+      F.filas.map(f => [f.cod, `${f.ambiente}${f.grado ? '\n' + f.grado + (f.seccion ? ' ' + f.seccion : '') : ''}`, `${f.denom_existente}\n→ ${f.denom_nueva}`,
+        { v: f.patrimonial || (f.ajuste ? '' : PEND) }, { v: f.antiguedad == null ? (f.ajuste ? '' : PEND) : String(f.antiguedad) }, f.estado ? `${f.estado}\n${f.origen}` : f.origen,
+        { v: ent(f.cantidad) }, `${f.mant_existente == null ? '—' : NS.format(f.mant_existente)} / ${f.mant_nuevo == null ? '—' : NS.format(f.mant_nuevo)}`,
+        { v: f.ajuste ? 'Ajuste' : f.pendiente ? 'PENDIENTE de verificación en campo' : 'Completa', pend: f.pendiente }]),
+      { num: [6], size: 13, anchos: [8, 15, 22, 11, 7, 12, 6, 10, 9] }));
+  } else {
+    const g = new Map();
+    for (const f of F.filas) { const k = f.cod + '|' + f.bien; const o = g.get(k) || { cod: f.cod, colegio: f.colegio, bien: f.denom_existente.split(' (')[0], q: 0, lotes: 0, pend: 0 }; o.q += f.cantidad; o.lotes += f.ajuste ? 0 : 1; o.pend += f.pendiente ? 1 : 0; g.set(k, o); }
+    out.push(nota(`Son ${ent(F.filas.length)} lotes: aquí va el resumen por local y bien; el detalle por aula, con el código patrimonial y la antigüedad, va en el Excel de anexos de los Lineamientos (hoja «Ficha de activos»).`));
+    out.push(tabla(['Local', 'Institución educativa', 'Bien', 'Cantidad a reponer', 'Lotes', 'Pendientes de verificación'],
+      [...g.values()].map(o => [o.cod, o.colegio, o.bien, { v: ent(o.q) }, { v: ent(o.lotes) }, { v: ent(o.pend), pend: o.pend > 0 }]), { num: [3, 4, 5], size: 15 }));
+  }
+  out.push(nota('El costo anual de mantenimiento de cada tipo de bien (Documentos) se prorratea entre sus lotes según la cantidad. Denominación nueva: el mobiliario de aula según el grupo de grado.'));
+  return out;
+}
+
+// ─── Anexo: consultas a la OPMI (sin responder) ─────────────────────────────
+function anexoConsultas(M) {
+  return [titulo('Anexo 2. Consultas a la OPMI'),
+    p(`Consultas que la Unidad Formuladora dirige a la OPMI${M.B?.opmi ? ' (' + M.B.opmi + ')' : ''} antes del registro. Quedan pendientes de respuesta: este expediente no las responde.`),
+    tabla(['N.°', 'Consulta', 'Respuesta de la OPMI'], CONSULTAS_OPMI.map((x, j) => [String(j + 1), x.pregunta, { v: 'PENDIENTE', pend: true }]), { anchos: [6, 64, 30] }),
+    nota('Anotar el documento con que responde la OPMI (oficio o informe, número y fecha).')];
 }
 
 // ─── Lista de verificación ──────────────────────────────────────────────────
@@ -371,7 +426,7 @@ export async function generarVerificacion(M) {
   c.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 60 }, children: [run('LISTA DE VERIFICACIÓN DEL EXPEDIENTE IOARR', { bold: true, size: 28 })] }));
   c.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 200 }, children: [run(M.nombre, { bold: true, size: 20 })] }));
   c.push(kv([['Proyecto', M.proyecto], ['Tipo', M.masiva ? `Inversión masiva de reposición · ${(M.upsRegistro || M.ups).length} UP` : 'IOARR de reposición · 1 UP'], ['Escenario de cantidad', M.escenarioTexto.replace(/^Escenario de cantidad: /, '')],
-    ['Registro', M.registro === 'pendiente' ? null : M.registro === 'completo' ? 'Completo (más de 75 UIT)' : 'Abreviado (hasta 75 UIT)'], ['Monto', soles(M.F.total)],
+    ['Registro', M.registro === 'pendiente' ? null : M.registroRotulo || (M.registro === 'completo' ? 'Completo (más de 75 UIT)' : 'Abreviado (hasta 75 UIT)')], ['Monto', `${soles(M.F.total)}${M.uit?.enUit != null ? ` = ${NS.format(M.uit.enUit)} UIT` : ''}`],
     ['Avance', `${V.hechos} de ${V.total} puntos listos${V.bloqueos ? ` · ${V.bloqueos} no cumple${V.bloqueos === 1 ? '' : 'n'}` : ''}`], ['Fecha', M.fecha]]));
   for (const sec of V.secciones) {
     c.push(titulo(sec.titulo));
@@ -384,4 +439,80 @@ export async function generarVerificacion(M) {
     V.locales.map(u => [u.cod, u.nombre, u.visita ? u.visita.split('-').reverse().join('/') : PEND, sn(u.acta), u.fotos ? String(u.fotos) : PEND, sn(u.inventario), sn(u.baja), sn(u.anio)]), { size: 15, anchos: [11, 31, 12, 8, 8, 12, 8, 10] }));
   c.push(nota('Los puntos de «Documentos y coordinaciones» se marcan a mano en Selector IOARR → Expediente → Verificación. Esta lista no reemplaza la revisión de la UF ni la de la OPMI.'));
   return Packer.toBuffer(documento(M, 'Lista de verificación', c));
+}
+
+// ─── Informe técnico de vida útil ────────────────────────────────────────────
+// V = modeloVidaUtil() (lineamientos.js). Con cod, solo ese colegio.
+const lineaFirma = t => [new Paragraph({ spacing: { before: 600, after: 40 }, children: [run('_______________________________________', { color: TENUE })] }), p(t, { size: 18, after: 40 })];
+const tablaTipos = (tipos, umbral) => tabla(['Tipo de bien', 'A reponer: Malo', 'A reponer: Regular', 'Regular sin sustento', 'Antigüedad promedio (años)', 'Rango (años)', 'Vida útil estimada (años)'],
+  tipos.map(t => [t.nombre, { v: ent(t.malo) }, { v: ent(t.regular) }, { v: ent(t.regularSin), pend: t.regularSin > 0 }, { v: t.antiguedad == null ? PEND : NS.format(t.antiguedad) },
+    t.antMin == null ? '—' : t.antMin === t.antMax ? String(t.antMin) : `${t.antMin} a ${t.antMax}`, { v: t.vida == null ? `${PEND} (referencial ${umbral})` : String(t.vida) }]),
+  { num: [1, 2, 3, 4, 6], size: 16 });
+export async function generarVidaUtil(M, V, cod = null) {
+  const c = [], cols = cod ? V.colegios.filter(x => x.cod === cod) : V.colegios;
+  const uno = cols.length === 1 && cod;
+  c.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 60 }, children: [run('INFORME TÉCNICO DE VIDA ÚTIL DEL MOBILIARIO ESCOLAR A REPONER', { bold: true, size: 26 })] }));
+  c.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 200 }, children: [run(uno ? `${cols[0].colegio} (código de local ${cols[0].cod})` : `${M.nombre}${V.nombreIoarr ? ' — IOARR ' + V.nombreIoarr : ''}`, { bold: true, size: 20 })] }));
+  c.push(...avisoChecklist(M));
+  c.push(p('BORRADOR DE TRABAJO para revisión y firma de la oficina de control patrimonial. Lo marcado «PENDIENTE» falta completar.', { italics: true, color: TENUE, size: 17, plano: true }));
+  if (V.faltan.length) { c.push(p('Datos pendientes:', { bold: true, size: 18 })); V.faltan.forEach(x => c.push(vinieta(x))); }
+  c.push(titulo('1. Objeto'));
+  c.push(p(`Sustentar la vida útil del mobiliario escolar que se propone reponer mediante la IOARR${V.nombreIoarr ? ' de ' + V.nombreIoarr : ''} «${M.nombre}», en ${uno ? 'el local educativo ' + cols[0].cod : `${ent(cols.length)} locales educativos`}, conforme a los Lineamientos IOARR del MEF (9.ª versión, junio 2025, 2.4.B.e y 2.4.C.b).`));
+  c.push(titulo('2. Base normativa y fuentes de la vida útil'));
+  c.push(p('La Directiva N.° 005-2016-EF/51.01 admite como fuentes para estimar la vida útil de los activos:'));
+  for (const [k, t] of Object.entries(FUENTES_VIDA_UTIL)) c.push(vinieta(`${V.fuentes.includes(k) ? '[X]' : '[  ]'} ${t}.`));
+  if (!V.fuentes.length) c.push(p('PENDIENTE: marca la fuente usada en Documentos.'));
+  if (V.documento) c.push(p('Documento de sustento: ' + V.documento));
+  c.push(p(`Para el mobiliario, ${V.referencial} años es un valor referencial: no se aplica en forma automática. La vida útil de cada tipo de bien la fija la entidad con alguna de las fuentes anteriores.`));
+  c.push(titulo('3. Criterio de inclusión'));
+  c.push(vinieta('Estado Malo: el mobiliario ya no es útil ni operativo y no se recupera con mantenimiento correctivo (vida útil efectiva). Lo que sale del censo debe confirmarse en campo.'));
+  c.push(vinieta(`Estado Regular: solo entra si tiene antigüedad documentada mayor o igual a su vida útil estimada (o ${V.umbral} años si aún no se fijó) o un daño documentado en la ficha de verificación. Sin eso, no se sustenta su reposición.`));
+  c.push(titulo(uno ? '4. Resultado del local' : '4. Consolidado por tipo de bien'));
+  c.push(tablaTipos(uno ? cols[0].tipos : V.tipos, V.umbral));
+  if (!uno) {
+    c.push(titulo('5. Detalle por colegio'));
+    for (const x of cols) {
+      c.push(p(`${x.cod} — ${x.colegio}`, { bold: true, before: 160 }));
+      c.push(tablaTipos(x.tipos, V.umbral));
+    }
+  } else {
+    c.push(titulo('5. Lotes del local'));
+    c.push(tabla(['Ambiente', 'Bien', 'Cód. patrimonial', 'Estado', 'Cant.', 'Antig. (años)', 'Sustento'], cols[0].lotes.map(f => [f.ambiente + (f.grado ? ' · ' + f.grado : ''), f.denom_existente,
+      { v: f.patrimonial || PEND }, `${f.estado}\n${f.origen}`, { v: ent(f.cantidad) }, { v: f.antiguedad == null ? PEND : String(f.antiguedad) },
+      { v: f.sustento.motivo, pend: !f.sustento.ok }]), { num: [4], size: 15, anchos: [18, 18, 13, 15, 7, 8, 21] }));
+  }
+  c.push(titulo('6. Conclusión'));
+  const regSin = uno ? cols[0].tipos.reduce((a, t) => a + t.regularSin, 0) : V.regularSin;
+  c.push(p(`El mobiliario en estado Malo cumplió su vida útil efectiva.${regSin ? ` ${ent(regSin)} bienes en estado Regular no tienen antigüedad ni daño documentado: PENDIENTE documentarlos en campo; mientras tanto no se sustenta su reposición.` : ' El mobiliario en estado Regular que se repone tiene antigüedad o daño documentado.'} Las cantidades por lote están en el anexo de la memoria y en el Excel de anexos de los Lineamientos (hoja «Ficha de activos»).`));
+  c.push(titulo('7. Firmas'));
+  c.push(kv([['Responsable de control patrimonial', V.responsable.nombre || null], ['Cargo', V.responsable.cargo || null], ['Fecha', null]]));
+  c.push(...lineaFirma('Firma y sello del responsable de control patrimonial'));
+  c.push(...lineaFirma('Visto bueno: responsable de la Unidad Formuladora (nombre, firma y fecha)'));
+  return Packer.toBuffer(documento(M, 'Informe de vida útil', c));
+}
+
+// ─── Formato 05-B: idea de la IOARR (programación en el PMI) ────────────────
+export async function generar05B(M) {
+  const B = M.B05, c = [];
+  c.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 60 }, children: [run('FORMATO N° 05-B: REGISTRO DE LA IDEA DE IOARR', { bold: true, size: 28 })] }));
+  c.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 200 }, children: [run('Borrador para la programación en la cartera del PMI', { italics: true, size: 17, color: TENUE })] }));
+  c.push(...avisoChecklist(M));
+  c.push(p('BORRADOR DE TRABAJO. El registro de la idea se hace en el aplicativo del Banco de Inversiones; este documento sirve para prepararlo. Lo marcado «PENDIENTE» falta completar.', { italics: true, color: TENUE, size: 17, plano: true }));
+  c.push(titulo('1. Idea de la inversión'));
+  c.push(kv([['Nombre de la idea (tipo de IOARR + nombre genérico de las UP + ámbito geográfico)', B.idea], ['Tipo de IOARR', B.tipo], ['Nombre genérico de las UP', B.upGenerica],
+    ['Ámbito geográfico', `${B.ambito.toLowerCase()} · ${B.lugar.replace(/^en (el|la) /, '')}`], ['Número de UP', ent(B.nUp)], ['Activo', 'MOBILIARIO DE AULA']], [45, 55]));
+  c.push(titulo('2. Alineamiento a una brecha prioritaria'));
+  c.push(kv([['Cadena funcional', M.A.cadena || `${M.A.funcion} / ${M.A.division} / ${M.A.grupos.join('; ')}`], ['Servicio con brecha', M.A.servicio],
+    ['Indicador de brecha', M.A.indicadores.map(x => x.nombre).join('; ')], ['Tipo de brecha a la que contribuye', M.A.contribucion]]));
+  c.push(titulo('3. Monto y programación'));
+  c.push(kv([['Monto de inversión estimado (S/)', `${soles(B.monto)}${M.uit?.enUit != null ? ` = ${NS.format(M.uit.enUit)} UIT` : ''}`], ['Registro del Formato 07-C', M.registroRotulo || M.registro]]));
+  c.push(espacio());
+  c.push(tabla(['Año', 'Período', 'Monto programado (S/)'], [...B.programacion.map(x => [String(x.anio), x.rotulo, { v: NS.format(x.monto) }]),
+    [{ v: 'Total', bold: true }, '', { v: NS.format(B.suma), bold: true, pend: !B.cuadra }]], { num: [2], anchos: [25, 25, 50] }));
+  if (B.propuesto) c.push(nota('PENDIENTE: montos por año propuestos (todo en el año t). Edítalos en Documentos según la programación de la entidad.'));
+  if (!B.cuadra) c.push(p(`PENDIENTE: la programación suma ${soles(B.suma)} y el monto de inversión es ${soles(B.monto)}.`));
+  c.push(titulo('4. Institucionalidad'));
+  c.push(kv([['OPMI', M.B.opmi], ['Unidad Formuladora (UF)', M.B.uf], ['Unidad Ejecutora de Inversiones (UEI)', M.B.uei]]));
+  c.push(nota('Una idea por nivel educativo (una IOARR masiva por nivel). Ver el anexo «Consultas a la OPMI» de la memoria descriptiva.'));
+  return Packer.toBuffer(documento(M, 'Formato 05-B', c));
 }

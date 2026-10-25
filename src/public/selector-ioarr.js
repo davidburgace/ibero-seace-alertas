@@ -1,6 +1,6 @@
 // Selector IOARR — interfaz. Los datos y el cálculo viven en selector-ioarr-worker.js;
 // los proyectos se guardan en Supabase vía /api/selector-ioarr/* (sesión de sesion.js).
-import { CRIT, DEF, ITEMS, NIVN, NIVS, NIVB, FILTRO_VACIO, ESCENARIOS, AVISO_CAPACIDAD, limpiarParams, textoPct, coordValidas, urlGoogleMaps, urlMapaEmbed, piTexto } from '/selector-ioarr/calculo.js';
+import { CRIT, DEF, ITEMS, NIVN, NIVS, NIVB, FILTRO_VACIO, ESCENARIOS, AVISO_CAPACIDAD, limpiarParams, textoPct, mueblesDe, NIVELES_MUEBLES, coordValidas, urlGoogleMaps, urlMapaEmbed, piTexto } from '/selector-ioarr/calculo.js';
 import { renderExpediente, enlazarExpediente } from '/selector-ioarr-expediente.js';
 import { limitarN, MAX_PUNTOS } from '/selector-ioarr/cercania.js';
 import { crearMapa as crearMapaLocales, fmtKm } from '/selector-ioarr-mapa.js';
@@ -741,7 +741,9 @@ const incluido = t => !S.params.muebles || S.params.muebles.includes(ITEMS[t].k)
 function renderCrit() {
   const P = S.params;
   $('critGrid').innerHTML = `<fieldset class="campo-muebles"><legend>Muebles de la IOARR</legend>${ITEMS.map(x => `<label class="chk"><input type="checkbox" id="c_mueble_${x.k}" ${P.muebles.includes(x.k) ? 'checked' : ''}> ${x.n}</label>`).join('')}
-      <span class="sub">Mesa y silla se costean por talla según el grado del aula.</span></fieldset>` + CRIT.filter(([k]) => !['esc', 'sdoc', 'arm'].includes(k) || P.muebles.includes(k)).map(([k, l, mn, mx, st]) => `<div class="campo"><label for="c_${k}">${l}</label><input id="c_${k}" type="number" inputmode="decimal" min="${mn}" max="${mx}" step="${st}" value="${P[k]}"></div>`).join('') +
+      <span class="sub">Mesa y silla se costean por talla según el grado del aula.</span></fieldset>
+    <fieldset class="campo-muebles"><legend>Composición por nivel (cada nivel es su propia IOARR)</legend>${NIVELES_MUEBLES.map(n => `<span class="fila-nivel"><b>${NIVN[n]}:</b> ${ITEMS.map(x => `<label class="chk"><input type="checkbox" id="c_mnivel_${n}_${x.k}" ${mueblesDe(P, n).includes(x.k) ? 'checked' : ''}> ${x.n.replace(/ del estudiante| docente/, m => m === ' docente' ? ' doc.' : '')}</label>`).join('')}${P.mueblesNivel?.[n] ? ' <span class="chip-est">propia</span>' : ''}</span>`).join('')}
+      <span class="sub">Por defecto, la de arriba. El kit (mesa + silla) se arma en los niveles que tienen mesa y silla; su precio es el de la talla de cada nivel (Expediente → Costos).</span></fieldset>` + CRIT.filter(([k]) => !['esc', 'sdoc', 'arm'].includes(k) || P.muebles.includes(k)).map(([k, l, mn, mx, st]) => `<div class="campo"><label for="c_${k}">${l}</label><input id="c_${k}" type="number" inputmode="decimal" min="${mn}" max="${mx}" step="${st}" value="${P[k]}"></div>`).join('') +
     `<div class="campo"><label for="c_carpEstado">Estado de las carpetas (vienen sin estado)</label><select id="c_carpEstado"><option value="b">Bueno</option><option value="r">Regular</option><option value="m">Malo</option></select></div>
      <div class="campo"><label for="c_escenario">Escenario de cantidad a reponer</label><select id="c_escenario">${ESCENARIOS.map(x => `<option value="${x.k}" ${P.escenario === x.k ? 'selected' : ''}>${x.n}</option>`).join('')}</select>${P.escenario === 'capacidad' ? `<span class="sub aviso-linea">${AVISO_CAPACIDAD}</span>` : ''}</div>
      ${P.escenario === 'malo_regular' ? `<div class="campo"><label for="c_pctRegular">% de Regular que se repone</label><input id="c_pctRegular" type="number" min="0" max="100" step="1" value="${P.pctRegular}"><span class="sub">El % por nivel y el umbral de vida útil se ajustan en Expediente → Costos.</span></div>` : ''}
@@ -761,14 +763,18 @@ function onCrit(e) {
   const k = id.slice(2), P = { ...S.params };
   if (k === 'carpEstado') P.carpEstado = e.target.value;
   else if (k === 'escenario') P.escenario = e.target.value;
-  else if (k.startsWith('mueble_')) {
+  else if (k.startsWith('mnivel_')) {
+    const [, n, m] = k.split('_'), act = mueblesDe(P, n), resto = act.filter(x => x !== m);
+    if (!e.target.checked && !resto.length) { e.target.checked = true; toast('Deja al menos un mueble en cada nivel'); return; }
+    P.mueblesNivel = { ...(P.mueblesNivel || {}), [n]: e.target.checked ? [...act, m] : resto };
+  } else if (k.startsWith('mueble_')) {
     const m = k.slice(7), resto = P.muebles.filter(x => x !== m);
     if (!e.target.checked && !resto.length) { e.target.checked = true; toast('Deja al menos un mueble en la IOARR'); return; }
     P.muebles = e.target.checked ? [...P.muebles, m] : resto;
   } else { let v = parseFloat(e.target.value); if (!isFinite(v) || v < 0) return; P[k] = v; if (k === 'pctRegular') P.pctOrigen = { tipo: 'manual' }; }
   S.params = limpiarParams(P);
   // Al cambiar los muebles se muestran u ocultan sus criterios por aula
-  if (k.startsWith('mueble_') || k === 'escenario') renderCrit(); else critSum();
+  if (k.startsWith('mueble_') || k.startsWith('mnivel_') || k === 'escenario') renderCrit(); else critSum();
   clearTimeout(tCrit);
   tCrit = setTimeout(async () => { S.detalles.clear(); await w('params', { params: S.params }); persistirCrit(); refresh(); }, 150);
 }
