@@ -36,8 +36,10 @@ function pintar() {
 }
 
 // ─── Este proyecto ──────────────────────────────────────────────────────────
+// Fuentes publicadas del material elegido (todas, para que se vea por qué una no se puede usar)
+const fuentesDe = material => cat.registros.filter(r => !r.propio && (!material || material === 'todos' || r.material === material));
 function pintarProyecto() {
-  const S = proy.seleccion, fuentes = cat.registros.filter(r => r.comparable && !r.propio);
+  const S = proy.seleccion, fuentes = fuentesDe(S.material), comparables = fuentes.filter(r => r.comparable);
   const cards = proy.ioarrs.map(x => {
     const R = x.referencia, rg = x.riesgo;
     return `<div class="panel pr-ioarr"><div class="panel-cab"><h3>IOARR ${esc(x.nombre)}</h3><span class="sub">${x.kits ? x.kits.toLocaleString('es-PE') + ' kits' : 'sin kits'}</span></div>
@@ -55,13 +57,18 @@ function pintarProyecto() {
   }).join('');
   return `<div class="panel"><div class="panel-cab"><h3>Referencia de este proyecto</h3><span class="guardado" id="pr-guardado"></span></div>
     <div class="form-grid pad">
+      <div class="campo"><label>Material del mobiliario</label>${sel('id="pr-material"', { todos: 'Todos los materiales', ...O().materiales }, S.material)}</div>
       <div class="campo"><label>Precio de referencia</label>${sel('id="pr-modo"', { mediana: 'Mediana del catálogo', registro: 'Una fuente específica' }, S.modo)}</div>
       ${S.modo === 'registro'
-        ? `<div class="campo ancho"><label>Fuente</label><select id="pr-registro"><option value="">Elige una fuente comparable</option>${fuentes.map(r => `<option value="${r.id}" ${r.id === S.registro_id ? 'selected' : ''}>${esc(etiqueta(r))} · ${soles(r.precio_kit_sin_igv)}</option>`).join('')}</select></div>`
-        : `<div class="campo"><label>Material</label>${sel('id="pr-material"', { todos: 'Todos los materiales', ...O().materiales }, S.material)}</div>`}
-    </div></div>${cards || '<div class="panel vacio"><p>El proyecto no tiene IOARR calculadas.</p></div>'}`;
+        ? `<div class="campo ancho"><label>Fuente${S.material !== 'todos' ? ' de ' + esc(O().materiales[S.material].toLowerCase()) : ''}</label><select id="pr-registro"><option value="">${comparables.length ? 'Elige una fuente' : 'No hay fuentes comparables de este material'}</option>
+            ${fuentes.map(r => `<option value="${r.id}" ${r.id === S.registro_id ? 'selected' : ''} ${r.comparable ? '' : 'disabled'}>${esc(etiqueta(r))} · ${r.comparable ? soles(r.precio_kit_sin_igv) : 'no comparable: ' + esc(r.motivo)}</option>`).join('')}</select>
+            ${fuentes.some(r => !r.comparable) ? '<span class="sub">Las fuentes en gris no se pueden usar todavía: corrígelas con «Editar» en la tabla de registros (por ejemplo, indica si el monto incluye IGV).</span>' : ''}</div>`
+        : ''}
+    </div>
+    ${S.modo === 'registro' && !S.registro_id ? `<div class="avisos pad"><div class="aviso alerta" role="alert">${comparables.length ? 'Elige la fuente.' : `No hay fuentes comparables${S.material !== 'todos' ? ' de ' + esc(O().materiales[S.material].toLowerCase()) : ''}. Mientras tanto, la estimación usa la mediana de ese material, si la hay.`}</div></div>` : ''}
+    </div>${cards || '<div class="panel vacio"><p>El proyecto no tiene IOARR calculadas.</p></div>'}`;
 }
-const etiqueta = r => [r.entidad || r.region || 'Precio propio', r.anio, O().tipos[r.tipo_documento], O().niveles[r.nivel], r.cui ? 'CUI ' + r.cui : ''].filter(Boolean).join(' · ');
+const etiqueta = r => [r.entidad || r.region || 'Precio propio', r.anio, O().materiales[r.material], O().tipos[r.tipo_documento], O().niveles[r.nivel], r.cui ? 'CUI ' + r.cui : ''].filter(Boolean).join(' · ');
 
 // ─── Estadísticos ───────────────────────────────────────────────────────────
 function pintarEstadisticos() {
@@ -160,15 +167,29 @@ async function guardarSeleccion(cambios) {
   try { proy = await ctx.api(`/proyectos/${ctx.proyecto.id}/precios-ref`, { method: 'PUT', body: { ...proy.seleccion, ...cambios } }); document.getElementById('pr-proyecto').innerHTML = pintarProyecto(); }
   catch (e) { if (s) { s.className = 'guardado error'; s.textContent = 'No se pudo guardar: ' + e.message; } }
 }
+// Fuente específica del material elegido: la que ya estaba si sigue siendo de ese material; si hay
+// una sola comparable, esa; si no, queda por elegir (la estimación sigue con la mediana hasta guardarla)
+async function elegirFuente(material) {
+  const comp = fuentesDe(material).filter(r => r.comparable), actual = comp.find(r => r.id === proy.seleccion.registro_id);
+  const id = actual?.id || (comp.length === 1 ? comp[0].id : null);
+  if (id) return guardarSeleccion({ modo: 'registro', registro_id: id, material });
+  // Sin fuente elegida, se guarda la mediana de ese material (no queda guardada una fuente de otro material)
+  await guardarSeleccion({ modo: 'mediana', registro_id: null, material });
+  proy.seleccion = { ...proy.seleccion, modo: 'registro', registro_id: null, material };
+  document.getElementById('pr-proyecto').innerHTML = pintarProyecto();
+}
 export function enlazarPreciosRef(el) {
   el.addEventListener('change', async e => {
     const t = e.target;
     if (t.id === 'pr-modo') {
-      if (t.value === 'registro') { proy.seleccion = { ...proy.seleccion, modo: 'registro' }; document.getElementById('pr-proyecto').innerHTML = pintarProyecto(); }
+      if (t.value === 'registro') await elegirFuente(proy.seleccion.material);
       else await guardarSeleccion({ modo: 'mediana', registro_id: null });
     }
     if (t.id === 'pr-registro' && t.value) await guardarSeleccion({ modo: 'registro', registro_id: t.value });
-    if (t.id === 'pr-material') await guardarSeleccion({ material: t.value });
+    if (t.id === 'pr-material') {
+      if (proy.seleccion.modo === 'registro') await elegirFuente(t.value);
+      else await guardarSeleccion({ material: t.value });
+    }
     if (t.dataset.prF) { filtro[t.dataset.prF] = t.value; document.getElementById('pr-registros').innerHTML = pintarRegistros(); }
     if (t.dataset.prSubir && t.files[0]) {
       const fd = new FormData(); fd.append('archivo', t.files[0]);

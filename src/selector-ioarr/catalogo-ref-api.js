@@ -184,6 +184,7 @@ export function crearApiPreciosRef({ expediente, proyectoDelUsuario }) {
       const r = deFila(await uno(b.registro_id));
       if (r.tipo_documento === 'propio') throw error(400, 'El precio propio no puede ser la referencia');
       if (!normalizar(r).comparable) throw error(400, 'Esa fuente no es comparable: ' + normalizar(r).motivo);
+      if (material !== 'todos' && r.material !== material) throw error(400, `Esa fuente es de ${MATERIALES[r.material].toLowerCase()}, no de ${MATERIALES[material].toLowerCase()}`);
       registro_id = r.id;
     }
     ok(await supabase.from('ioarr_precios_ref_proyecto').upsert({ proyecto_id: p.id, modo, registro_id, material, actualizado_en: new Date().toISOString() }, { onConflict: 'proyecto_id' }));

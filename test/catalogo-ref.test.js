@@ -86,13 +86,18 @@ test('referencia: mediana del nivel (con los de nivel por confirmar), aviso con 
   assert.equal(referencia(R, { nivel: 'P', sel: { modo: 'registro', registro_id: 'p' } }).precio, null);
   assert.equal(referencia(R, { nivel: 'P', sel: { modo: 'registro', registro_id: 'c' } }).precio, 900);
   assert.equal(referencia(R, { nivel: 'P', sel: { material: 'metal-polipropileno' } }).n, 0);
+  // Fuente de otro material: avisa
+  assert.ok(referencia(R, { nivel: 'P', sel: { modo: 'registro', registro_id: 'a', material: 'madera' } }).avisos.some(a => /metal y madera; el material elegido es madera/.test(a)));
+  // Madera es un material válido
+  assert.deepEqual(limpiarRegistro({ ...base, material: 'madera' }).errores, []);
 });
 
 // ─── Precarga ───────────────────────────────────────────────────────────────
-test('precarga: 5 registros, material por confirmar y confianza media; solo Loreto es comparable', () => {
+test('precarga: 5 registros con confianza media y el material indicado; solo Loreto es comparable', () => {
   assert.equal(PRECARGA.length, 5);
+  assert.deepEqual(PRECARGA.map(r => r.material), ['madera', 'metal-madera', 'metal-madera', 'metal-polipropileno', 'por_confirmar']);
   for (const r of PRECARGA) {
-    assert.equal(r.material, 'por_confirmar'); assert.equal(r.confianza, 'media');
+    assert.equal(r.confianza, 'media');
     assert.deepEqual(limpiarRegistro(r).errores, [], r.id);
   }
   const N = PRECARGA.map(r => ({ id: r.id, ...normalizar(r) }));
@@ -101,10 +106,15 @@ test('precarga: 5 registros, material por confirmar y confianza media; solo Lore
   assert.match(N[1].motivo, /composición/);   // Huánuco 2023: por mobiliario
   assert.match(N[2].motivo, /IGV/);           // Huánuco 2025: rango sin IGV declarado
   const E = estadisticos(PRECARGA);
-  assert.deepEqual(E.map(g => [g.n, g.mediana, g.pocas]), [[1, 624, true]]);
+  assert.deepEqual(E.map(g => [g.material, g.n, g.mediana, g.pocas]), [['madera', 1, 624, true]]);
   // La migración tiene los mismos ids y montos
   const sql = readFileSync(new URL('../supabase/migrations/029_ioarr_catalogo_precios_ref.sql', import.meta.url), 'utf8');
   for (const r of PRECARGA) assert.match(sql, new RegExp(`'${r.id}', '${r.tipo_documento}'[^\\n]*${r.monto.toFixed(2).replace('.', '\\.')}`));
+  // y la 030 les pone el material (solo si siguen por confirmar)
+  const sql30 = readFileSync(new URL('../supabase/migrations/030_ioarr_precios_ref_material.sql', import.meta.url), 'utf8');
+  for (const r of PRECARGA.filter(x => x.material !== 'por_confirmar'))
+    assert.match(sql30, new RegExp(`set material = '${r.material}'\\s+where id[^;]*'${r.id}'[^;]*material = 'por_confirmar'`), r.id);
+  assert.match(sql30, /'madera', 'metal-madera', 'metal-polipropileno', 'por_confirmar'/);
 });
 
 // ─── Estimación y riesgo ────────────────────────────────────────────────────
@@ -134,7 +144,7 @@ test('CSV: la plantilla se valida; con errores no se importa nada y se reporta p
   assert.equal(normalizar(p.registros[1]).precio_kit_sin_igv, sinIgv(350 + 200));
   const csv = [COLUMNAS_CSV.join(','),
     'bases,2512345,GR Ejemplo,Ejemplo,2026,,Primaria,kit,metal-madera,600,,no,,,,,,alta,ok',
-    'bases,,GR Ejemplo,Ejemplo,20x6,,Primaria,kit,madera,600,,no,,,,,,alta,mal',
+    'bases,,GR Ejemplo,Ejemplo,20x6,,Primaria,kit,plastico,600,,no,,,,,,alta,mal',
     'bases,2512345,GR Ejemplo,Ejemplo,2026,,Primaria,kit,metal-madera,600,,no,,,,,,alta,duplicada',
     '"07-C",,"Entidad, con coma",Ejemplo,2025,,Inicial,mesa,metal-madera,300,,si,,,,"mesa:1;silla:1:150",,media,"nota con ""comillas"""'].join('\n');
   const v = validarCsv(csv);
