@@ -459,7 +459,9 @@ export function precargar({ M, radar = null, datosDoc = {}, gore = null }) {
     const lima = gore.region === 'Lima' ? ' Ojo: los colegios de Lima Metropolitana (UGEL 01 a 07) no dependen del Gobierno Regional de Lima.' : '';
     poner('ENTIDAD', gore.entidad, `Gobierno Regional de la región del proyecto.${lima}`);
     poner('ENTIDAD_RUC', gore.ruc, `${FUENTE_GORE} (sede central, ${gore.estado.toLowerCase()} y ${gore.condicion.toLowerCase()}). Verifícalo en SUNAT antes de exportar.`);
-    poner('ENTIDAD_DOMICILIO', gore.domicilio, `Domicilio fiscal de la sede central (${FUENTE_GORE}). Confirma que es el domicilio legal que usa la entidad.`);
+    poner('ENTIDAD_DOMICILIO', gore.domicilio, gore.fuente ? `Domicilio legal publicado por la entidad (${gore.fuente}). Confirma que sigue vigente.`
+      : `Domicilio fiscal de la sede central (${FUENTE_GORE}). Confirma que es el domicilio legal que usa la entidad.`);
+    poner('ENTIDAD_TELEFONO', gore.telefono, `Teléfono publicado por la entidad (${gore.fuente}). Confirma que sigue vigente.`);
     poner('PROVINCIA_NOTIFICACION', gore.provincia, 'Provincia de la sede del Gobierno Regional.');
     poner('CIUDAD_JURISDICCION', gore.ciudad, 'Ciudad de la sede del Gobierno Regional.');
   }

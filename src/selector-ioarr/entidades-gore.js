@@ -11,6 +11,8 @@
 // comercio ni representante. El domicilio fiscal suele ser el domicilio legal,
 // pero la ficha pide verificarlo.
 // Para actualizar: volver a filtrar el padrón y reemplazar las filas.
+// DE_BASES: datos que la propia entidad publicó en sus bases (domicilio legal
+// completo, teléfono). Reemplazan a los del padrón y citan su fuente.
 // ============================================================================
 
 export const FUENTE_GORE = 'Padrón reducido de RUC de SUNAT, 25-10-2026';
@@ -43,7 +45,16 @@ export const GOBIERNOS_REGIONALES = [
   {"region":"Ucayali","ruc":"20393066386","entidad":"Gobierno Regional de Ucayali","razon_sunat":"GOBIERNO REGIONAL DE UCAYALI","estado":"ACTIVO","condicion":"HABIDO","ubigeo":"250101","domicilio":"JR. RAYMONDI N° 220, distrito de Callería, provincia de Coronel Portillo, departamento de Ucayali","provincia":"Coronel Portillo","ciudad":"Pucallpa"}
 ];
 
-const POR_REGION = new Map(GOBIERNOS_REGIONALES.map(g => [g.region, g]));
+export const DE_BASES = {
+  'La Libertad': {
+    // El padrón corta la vía («BAQUIJANO Y CARRILLO ALTU»)
+    domicilio: 'Calle Baquíjano y Carrillo Altura Cuadra 18 Nro. 00, Parte Alta Esperanza (I.E.S.T.P. Nueva Esperanza), distrito de La Esperanza, provincia de Trujillo, departamento de La Libertad',
+    telefono: '044-604000',
+    fuente: 'Bases del Proceso de Selección N° 015-2026-GRLL-CE-EF-OXI (numeral 1.2), setiembre de 2026'
+  }
+};
+
+const POR_REGION = new Map(GOBIERNOS_REGIONALES.map(g => [g.region, DE_BASES[g.region] ? { ...g, ...DE_BASES[g.region] } : g]));
 /** Gobierno Regional de una región del selector (nombre como en index.json, ej. «Áncash») */
 export const goreDe = region => POR_REGION.get(region) || null;
 /** La entidad es un Gobierno Regional (o no se sabe todavía) */
