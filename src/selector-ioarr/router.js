@@ -16,6 +16,7 @@
 // Cuadro de estado situacional: advertencias revisadas, en ioarr_expediente_documentos (015)
 //   PUT  /api/selector-ioarr/proyectos/:id/situacional/revisiones  { clave, nota } (nota vacía la quita)
 // Generador de bases OxI (fichas, Word y versiones): src/selector-ioarr/bases-api.js, migración 028
+// Catálogo de precios referenciales (registros, CSV, PDF, estimación y riesgo): src/selector-ioarr/catalogo-ref-api.js, migración 029
 // ============================================================================
 
 import express from 'express';
@@ -31,6 +32,7 @@ import { generarExcelVisitas } from './excel-visitas.js';
 import { agruparVisitas, puntosVisita, limitarPorDia } from './visitas.js';
 import { crearApiExpediente, borrarArchivosProyecto } from './expediente.js';
 import { crearApiBases } from './bases-api.js';
+import { crearApiPreciosRef } from './catalogo-ref-api.js';
 import { MODOS } from './niveles.js';
 import { limpiarDatosDoc } from './documentos.js';
 import { leerDuplicidad, limpiarDuplicidad, aFila, deFila, esVacia, separarLocales, AVISO_DUP } from './duplicidad.js';
@@ -395,7 +397,10 @@ api.post('/visitas.xlsx', async (req, res, next) => {
 const expediente = crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegion, leerIndice });
 api.use(expediente);
 // Generador de bases OxI (bases-api.js): supabase/migrations/028_ioarr_bases_oxi.sql
-api.use(crearApiBases({ expediente }));
+// Catálogo de precios referenciales de IOARR publicadas (catalogo-ref-api.js): migración 029
+const preciosRef = crearApiPreciosRef({ expediente, proyectoDelUsuario });
+api.use(preciosRef);
+api.use(crearApiBases({ expediente, preciosRef }));
 
 // Visitas de campo (src/selector-ioarr/campo.js): el ZIP de fichas de un proyecto, sin validar al dueño
 // (campo.js ya validó que el supervisor tiene colegios asignados o que el proveedor es el dueño)

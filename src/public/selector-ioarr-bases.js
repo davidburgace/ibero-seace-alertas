@@ -155,7 +155,10 @@ function pintarCantidades() {
       <td class="num">${soles(f.pu)}</td><td class="num">${soles(f.parcial)}</td></tr>`).join('');
   // Las cantidades de la UGEL tienen foco mientras se escriben: no se repinta esa tabla
   if (ugel && el.contains(document.activeElement)) { el.querySelector('tfoot .num:last-child').textContent = soles(Q.total); return; }
-  el.innerHTML = `<p class="sub">${esc(Q.texto)}</p>
+  const R = vista.app.precio_ref;
+  const ref = R ? `<div class="aviso" role="note"><b>Catálogo de precios referenciales:</b> ${R.precio != null ? `${soles(R.precio)} por kit sin IGV · ${esc(R.fuente || '')}` : 'sin referencia comparable para este nivel'}.
+      ${vista.datos.precio_kit_origen === 'catalogo' ? 'Se usa en el Anexo 3-A.' : 'No se usa: el Anexo 3-A toma la estructura de costos.'} La referencia se elige en «Precios referenciales». En el Word solo figura «catálogo de IOARR publicadas», sin nombres de entidades.</div>` : '';
+  el.innerHTML = `${ref}<p class="sub">${esc(Q.texto)}</p>
     <div class="tabla-wrap borde-0"><table class="tabla"><thead><tr><th>Bien</th><th class="num">Cantidad</th><th class="num">Precio unitario con IGV</th><th class="num">Parcial</th></tr></thead>
     <tbody>${filas || '<tr><td colspan="4" class="vacio">Sin bienes calculados en esta IOARR.</td></tr>'}</tbody>
     <tfoot><tr><td colspan="3">Total de bienes (Anexo 3-A)</td><td class="num">${soles(Q.total)}</td></tr></tfoot></table></div>`;

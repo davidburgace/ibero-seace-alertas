@@ -1129,6 +1129,11 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
   // Generador de bases OxI (bases-api.js): las IOARR del proyecto y el modelo de una (por nivel).
   // Toma los colegios del 07-C final; si ninguno tiene el checklist completo, los del borrador.
   api.ioarrsBases = async (p) => (await armar(p)).ioarrs.map(x => ({ nivel: x.nivel, nombre: x.nombre }));
+  // Catálogo de precios referenciales (catalogo-ref-api.js): lo necesario para recalcular cada IOARR con otro precio por kit
+  api.costosPorNivel = async (p) => (await armar(p)).ioarrs.map(x => ({
+    nivel: x.nivel, nombre: x.nombre, kit: !!x.R.kit, T: x.R.totales, params: x.R.estructura.params,
+    kits: x.R.kit ? x.R.totales.kits : 0, kitBienes: (x.R.lineasKit || []).reduce((a, y) => a + y.parcial, 0)
+  }));
   api.modeloBases = async (p, nivel) => {
     let r = await modelo(p, nivel, { final: true });
     if (!r.M.ups.length) r = await modelo(p, nivel, { final: false });

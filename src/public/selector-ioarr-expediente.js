@@ -9,6 +9,7 @@ import { renderVerificacion, enlazarVerificacion } from '/selector-ioarr-verific
 import { renderFichas, enlazarFichas } from '/selector-ioarr-fichas.js';
 import { renderColegios, enlazarColegios } from '/selector-ioarr-colegios.js';
 import { renderBases, enlazarBases } from '/selector-ioarr-bases.js';
+import { renderPreciosRef, enlazarPreciosRef } from '/selector-ioarr-precios-ref.js';
 
 const NF = new Intl.NumberFormat('es-PE');
 const NS = new Intl.NumberFormat('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -23,7 +24,7 @@ let ctx = null;        // { el, proyecto, api, toast, guardarYa }
 let datos = null;      // respuesta de /costos
 let catalogo = null;   // precios del catálogo por tipo
 let pagLoc = 0, tGuardar = null, version = 0, filtroLoc = '';
-let vistaExp = 'costos';   // sub-pestaña: 'costos' | 'colegios' | 'fichas' | 'docs' | 'verif' | 'bases' | 'oferta'
+let vistaExp = 'costos';   // sub-pestaña: 'costos' | 'colegios' | 'fichas' | 'docs' | 'verif' | 'precios' | 'bases' | 'oferta'
 let costosViejos = false;  // se importaron fichas: al volver a Costos se recalcula
 let nivelExp = null;       // IOARR (nivel) a la vista: 'I' | 'P' | 'S' | 'E'
 let proyectoExp = null;    // al cambiar de proyecto se vuelve a la primera IOARR
@@ -68,6 +69,7 @@ function pintar() {
       <button type="button" role="tab" data-exp-vista="fichas" aria-selected="${vistaExp === 'fichas'}">Fichas de verificación</button>
       <button type="button" role="tab" data-exp-vista="docs" aria-selected="${vistaExp === 'docs'}">Documentos: Formato 07-C y memoria</button>
       <button type="button" role="tab" data-exp-vista="verif" aria-selected="${vistaExp === 'verif'}">Verificación</button>
+      <button type="button" role="tab" data-exp-vista="precios" aria-selected="${vistaExp === 'precios'}">Precios referenciales</button>
       <button type="button" role="tab" data-exp-vista="bases" aria-selected="${vistaExp === 'bases'}">Bases OxI</button>
       <button type="button" role="tab" data-exp-vista="oferta" aria-selected="${vistaExp === 'oferta'}" class="tab-interna">Oferta (uso interno)</button>
     </div>
@@ -77,6 +79,7 @@ function pintar() {
     <div id="exp-v-docs" ${vistaExp === 'docs' ? '' : 'hidden'}></div>
     <div id="exp-v-verif" ${vistaExp === 'verif' ? '' : 'hidden'}></div>
     <div id="exp-v-bases" ${vistaExp === 'bases' ? '' : 'hidden'}></div>
+    <div id="exp-v-precios" ${vistaExp === 'precios' ? '' : 'hidden'}></div>
     <div id="exp-v-costos" ${vistaExp === 'costos' ? '' : 'hidden'}>
     <div id="exp-kpis"></div>
     <div id="exp-avisos"></div>
@@ -98,6 +101,7 @@ function pintar() {
   if (vistaExp === 'docs') abrirDocumentos();
   if (vistaExp === 'verif') abrirVerificacion();
   if (vistaExp === 'bases') abrirBases();
+  if (vistaExp === 'precios') abrirPrecios();
 }
 
 // ─── Una IOARR por nivel ─────────────────────────────────────────────────────
@@ -319,6 +323,10 @@ function abrirDocumentos() {
   return renderDocumentos({ ...ctx, el: document.getElementById('exp-v-docs') });
 }
 // Bases OxI: la ficha toma los montos y cantidades de los costos al abrirse
+// Precios referenciales: el catálogo es compartido; la estimación usa los costos actuales
+function abrirPrecios() {
+  return renderPreciosRef({ ...ctx, el: document.getElementById('exp-v-precios') });
+}
 function abrirBases() {
   return renderBases({ ...ctx, el: document.getElementById('exp-v-bases') });
 }
@@ -347,6 +355,7 @@ function cambiarVista(v) {
   document.getElementById('exp-v-colegios').hidden = v !== 'colegios';
   document.getElementById('exp-v-oferta').hidden = v !== 'oferta';
   document.getElementById('exp-v-bases').hidden = v !== 'bases';
+  document.getElementById('exp-v-precios').hidden = v !== 'precios';
   if (v === 'costos' && costosViejos) { costosViejos = false; renderExpediente(ctx); return; }
   if (v === 'oferta') abrirOferta();
   if (v === 'fichas') abrirFichas();
@@ -354,6 +363,7 @@ function cambiarVista(v) {
   if (v === 'docs') abrirDocumentos();
   if (v === 'verif') abrirVerificacion();
   if (v === 'bases') abrirBases();
+  if (v === 'precios') abrirPrecios();
 }
 
 // ─── Cambios ────────────────────────────────────────────────────────────────
@@ -459,6 +469,7 @@ export function enlazarExpediente(el, abrirNuevo) {
   enlazarFichas(el);
   enlazarColegios(el);
   enlazarBases(el);
+  enlazarPreciosRef(el);
   el.addEventListener('click', e => {
     const sv = e.target.closest('[data-exp-vista]');
     if (sv) cambiarVista(sv.dataset.expVista);
