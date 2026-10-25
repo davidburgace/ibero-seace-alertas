@@ -74,7 +74,9 @@ test('exportar bloquea con errores (422) y la vista previa sí sale', async () =
   assert.ok(r.json.errores.length > 10);
   const v = await pedir('GET', `/bases/${fid}/vista-previa`, null, { binario: true });
   assert.equal(v.status, 200);
-  assert.match(await textoDocx(v.buf), /\{\{ENTIDAD_RUC\}\}/);
+  const texto = await textoDocx(v.buf);
+  assert.match(texto, /\{\{ENTIDAD_TELEFONO\}\}/, "lo que falta queda marcado");
+  assert.match(texto, /RUC N° : 20519752604/, "el RUC del Gobierno Regional de Moquegua se precarga");
   assert.equal((await pedir('GET', `/bases/${fid}/versiones`)).json.length, 0, 'la vista previa no guarda versión');
 });
 

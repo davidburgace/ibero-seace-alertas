@@ -27,6 +27,7 @@ import {
 } from './bases.js';
 import { ESPECIFICACIONES, NORMAS_SUGERIDAS } from './bases-especificaciones.js';
 import { generarBasesDocx } from './word-bases.js';
+import { goreDe } from './entidades-gore.js';
 
 export const AVISO_BASES = 'Falta ejecutar supabase/migrations/028_ioarr_bases_oxi.sql en Supabase para guardar las fichas de bases';
 const faltaMigracion = e => e?.code === 'PGRST204' || e?.code === 'PGRST205' || e?.code === '42P01' || /schema cache|does not exist/i.test(e?.message || '');
@@ -82,7 +83,8 @@ export function crearApiBases({ expediente, preciosRef = null }) {
   }
   async function precargaDe(p, nivel) {
     const [{ r, ctx, aviso }, radar] = await Promise.all([appDe(p, nivel), entidadRadar(p)]);
-    return { ...(r ? precargar({ M: r.M, radar, datosDoc: r.datos }) : precargar({ M: null, radar })), ctx, aviso };
+    const gore = goreDe(p.region);
+    return { ...(r ? precargar({ M: r.M, radar, datosDoc: r.datos, gore }) : precargar({ M: null, radar, gore })), ctx, aviso };
   }
   const numVersiones = async fid => ok(await supabase.from('ioarr_bases_versiones').select('version').eq('ficha_id', fid)).length;
 
