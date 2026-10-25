@@ -10,6 +10,10 @@ const fechaHora = s => s ? new Date(s).toLocaleString('es-PE', { timeZone: 'Amer
 const NOMBRE_NIVEL = { I: 'Inicial', P: 'Primaria', S: 'Secundaria', E: 'Básica Especial' };
 
 let ctx = null, lista = null, vista = null, fichaId = null, proyectoBases = null, versiones = [], comparacion = null;
+const AYUDA_ORIGEN = {
+  copiar: 'Copia la ficha actual. Lo propio del nivel (nombre, CUI, montos y plazo de ejecución) se vuelve a tomar de la app.',
+  app: 'Ficha nueva con lo que la app ya conoce de ese nivel (nombre, CUI, entidad, montos y cantidades); lo demás queda vacío.'
+};
 let tGuardar = null, version = 0, pendientes = {};
 
 export async function renderBases(c) {
@@ -34,6 +38,9 @@ async function abrir(id, mio = ++version) {
 // ─── Pintado ─────────────────────────────────────────────────────────────────
 
 const opcionesNivel = (sel) => lista.niveles.map(n => `<option value="${n.nivel}" ${n.nivel === sel ? 'selected' : ''}>IOARR ${esc(n.nombre)}</option>`).join('');
+// Nivel sugerido para una ficha nueva: el primero que aún no tiene ficha; si todos tienen, otro distinto del actual
+const nivelSugerido = (actual) => (lista.niveles.find(n => !lista.fichas.some(f => f.nivel === n.nivel))
+  || lista.niveles.find(n => n.nivel !== actual) || lista.niveles[0])?.nivel;
 
 function pintar() {
   const L = lista;
@@ -41,26 +48,38 @@ function pintar() {
     <div class="avisos"><div class="aviso" role="note"><b>Generador de bases de Obras por Impuestos.</b> Arma el borrador de bases con las plantillas estandarizadas (${esc(L.reglamento)}): la Sección II y los formatos son texto fijo; solo se reemplazan los datos de la ficha. El Word lleva como primera página una hoja de transparencia: <i>«${esc(L.declaracion)}»</i></div>
     ${L.sin_migracion ? '<div class="aviso alerta" role="alert">Falta ejecutar supabase/migrations/028_ioarr_bases_oxi.sql en Supabase: las fichas no se pueden guardar.</div>' : ''}</div>`;
   if (!L.niveles.length) { ctx.el.innerHTML = cab + '<div class="panel vacio"><p>El proyecto no tiene IOARR calculadas todavía: elige locales con mobiliario a reponer.</p></div>'; return; }
-  const nueva = `<div class="bx-nueva"><select id="bx-nivel" aria-label="Nivel de la IOARR">${opcionesNivel(lista.niveles[0]?.nivel)}</select><button class="btn btn-primary btn-sm" id="bx-crear" type="button">Nueva ficha</button></div>`;
   if (!L.fichas.length || !vista) {
-    ctx.el.innerHTML = cab + `<div class="panel vacio"><h3 class="vacio-tit">Crea la ficha de bases</h3><p>Una ficha por IOARR, es decir, por nivel. Se precarga con lo que la app ya conoce (nombre, CUI, entidad, montos y cantidades).</p>${nueva}</div>`;
+    // Sin fichas: un solo selector, el del nivel de la primera ficha
+    ctx.el.innerHTML = cab + `<div class="panel vacio"><h3 class="vacio-tit">Crea la ficha de bases</h3><p>Una ficha por IOARR, es decir, por nivel. Se precarga con lo que la app ya conoce (nombre, CUI, entidad, montos y cantidades).</p>
+      <div class="bx-nueva"><label for="bx-nivel" class="lbl">Nivel</label><select id="bx-nivel">${opcionesNivel(nivelSugerido())}</select>
+      <button class="btn btn-primary btn-sm" id="bx-crear" type="button">Crear ficha</button></div></div>`;
     return;
   }
   const f = vista.ficha;
+  // El nivel de la ficha abierta es fijo (una ficha = una IOARR). El único selector de nivel
+  // está en «Nueva ficha para otro nivel», junto con el origen de los datos.
   ctx.el.innerHTML = cab + `
     <div class="panel"><div class="panel-cab">
       <div class="bx-sel"><label for="bx-ficha" class="lbl">Ficha</label>
-        <select id="bx-ficha">${L.fichas.map(x => `<option value="${x.id}" ${x.id === f.id ? 'selected' : ''}>${esc(x.nombre)} · ${NOMBRE_NIVEL[x.nivel]}</option>`).join('')}</select></div>
+        <select id="bx-ficha">${L.fichas.map(x => `<option value="${x.id}" ${x.id === f.id ? 'selected' : ''}>${esc(x.nombre)} · ${NOMBRE_NIVEL[x.nivel]}</option>`).join('')}</select>
+        <span class="bx-nivel-fijo" title="Cada ficha es de una sola IOARR: su nivel no cambia">IOARR ${esc(NOMBRE_NIVEL[f.nivel])}</span></div>
       <div class="bx-acc">
         <input id="bx-nombre" type="text" maxlength="200" value="${esc(f.nombre)}" aria-label="Nombre de la ficha">
         <button class="btn btn-ghost btn-sm" id="bx-precargar" type="button" title="Llena con datos de la app solo los campos vacíos">Tomar datos de la app</button>
-        <select id="bx-dup-nivel" aria-label="Nivel de la copia">${opcionesNivel(f.nivel)}</select>
-        <button class="btn btn-ghost btn-sm" id="bx-duplicar" type="button">Duplicar</button>
         <button class="btn btn-ghost btn-sm btn-peligro" id="bx-borrar" type="button">Borrar</button>
-        ${nueva}
       </div>
       <span class="guardado" id="bx-guardado"></span>
-    </div></div>
+    </div>
+    <details class="bx-otra"><summary>Nueva ficha para otro nivel</summary>
+      <div class="bx-nueva">
+        <label for="bx-nivel" class="lbl">Nivel</label><select id="bx-nivel">${opcionesNivel(nivelSugerido(f.nivel))}</select>
+        <label for="bx-origen" class="lbl">Datos</label><select id="bx-origen">
+          <option value="copiar">Copiar los datos de esta ficha</option>
+          <option value="app">Empezar desde la app</option></select>
+        <button class="btn btn-primary btn-sm" id="bx-crear" type="button">Crear ficha</button>
+      </div>
+      <p class="sub" id="bx-origen-ayuda">${AYUDA_ORIGEN.copiar}</p>
+    </details></div>
     <div id="bx-estado"></div>
     <form class="panel doc-form" id="bx-form" autocomplete="off">${L.campos.map(seccion).join('')}${tecnico()}</form>
     <div id="bx-versiones"></div>`;
@@ -234,6 +253,7 @@ export function enlazarBases(el) {
   el.addEventListener('change', async e => {
     const t = e.target;
     if (t.id === 'bx-ficha') { await accion(() => abrir(t.value)); return; }
+    if (t.id === 'bx-origen') { document.getElementById('bx-origen-ayuda').textContent = AYUDA_ORIGEN[t.value]; return; }
     if (t.id === 'bx-nombre') { await accion(async () => { vista = await ctx.api(`/bases/${fichaId}`, { method: 'PATCH', body: { nombre: t.value } }); lista.fichas.find(f => f.id === fichaId).nombre = vista.ficha.nombre; pintar(); }, 'Nombre guardado.'); return; }
     if (t.closest('#bx-form') && (t.type === 'checkbox' || t.tagName === 'SELECT')) { const [k, v] = leer(t); pendientes[k] = v; programar(50); }
   });
@@ -243,12 +263,14 @@ export function enlazarBases(el) {
     if (!t) return;
     if (t.id === 'bx-crear') {
       const nivel = document.getElementById('bx-nivel').value;
-      await accion(async () => { const v = await ctx.api(`/proyectos/${ctx.proyecto.id}/bases`, { method: 'POST', body: { nivel } }); fichaId = v.ficha.id; await renderBases(ctx); }, 'Ficha creada con los datos de la app.');
-    }
-    if (t.id === 'bx-duplicar') {
-      const nivel = document.getElementById('bx-dup-nivel').value;
-      await accion(async () => { const v = await ctx.api(`/bases/${fichaId}/duplicar`, { method: 'POST', body: { nivel } }); fichaId = v.ficha.id; await renderBases(ctx);
-        if (v.recargados?.length) ctx.toast('Copia creada. Lo propio del nivel (nombre, CUI, montos y plazo de ejecución) se volvió a tomar de la app.'); }, null);
+      // Con una ficha abierta se puede copiar; sin fichas solo existe «desde la app»
+      const copiar = fichaId && document.getElementById('bx-origen')?.value === 'copiar';
+      if (copiar) {
+        await accion(async () => { const v = await ctx.api(`/bases/${fichaId}/duplicar`, { method: 'POST', body: { nivel } }); fichaId = v.ficha.id; await renderBases(ctx);
+          ctx.toast(v.recargados?.length ? 'Copia creada. Lo propio del nivel (nombre, CUI, montos y plazo de ejecución) se volvió a tomar de la app.' : 'Copia creada.'); }, null);
+      } else {
+        await accion(async () => { const v = await ctx.api(`/proyectos/${ctx.proyecto.id}/bases`, { method: 'POST', body: { nivel } }); fichaId = v.ficha.id; await renderBases(ctx); }, 'Ficha creada con los datos de la app.');
+      }
     }
     if (t.id === 'bx-borrar' && confirm('¿Borrar esta ficha y sus versiones exportadas? No se puede deshacer.')) {
       await accion(async () => { await ctx.api(`/bases/${fichaId}`, { method: 'DELETE' }); fichaId = null; vista = null; await renderBases(ctx); }, 'Ficha borrada.');
