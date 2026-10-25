@@ -398,3 +398,29 @@ test('cotizaciones: promedio sin IGV, mínimo 3 proveedores y alerta de viabilid
   assert.ok(txt.some(t => /Promedio \(precio referencial\)/.test(t)));
   assert.ok(!txt.join(' ').match(/nuestro costo|viabilidad|fabricación/i));
 });
+
+test('los exportables de una IOARR no arrastran referencias de otros proyectos, regiones ni niveles', async () => {
+  const W = await import('../src/selector-ioarr/word.js');
+  const { generarExcelCostos } = await import('../src/selector-ioarr/excel-costos.js');
+  const { generarExcelPaquete } = await import('../src/selector-ioarr/excel-paquete.js');
+  const { anexosDe } = await import('../src/selector-ioarr/expediente.js');
+  const { preciosEfectivos: pe } = await import('../src/selector-ioarr/costos.js');
+  const { A, M } = paquete(), x = elegirIoarr(A, 'P'), MP = M('P');
+  const textoXlsx = async buf => { const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buf); const t = []; wb.eachSheet(ws => { t.push(ws.name); ws.eachRow(r => r.eachCell(c => t.push(String(c.value?.result ?? c.value?.text ?? c.value ?? '')))); }); return t.join('\n'); };
+  const textos = {
+    '07-C': await textoDocx(await W.generar07C(MP)), memoria: await textoDocx(await W.generarMemoria(MP)), verificacion: await textoDocx(await W.generarVerificacion(MP)),
+    vida: await textoDocx(await W.generarVidaUtil(MP, MP.vidaUtil)), '05-B': await textoDocx(await W.generar05B(MP)), sustento: await textoDocx(await W.generarSustento(MP)),
+    opinion: await textoDocx(await W.generarCartas(MP, 'opinion')), compromiso: await textoDocx(await W.generarCartas(MP, 'compromiso')), oficio: await textoDocx(await W.generarCartas(MP, 'oficio')),
+    costos: await textoXlsx(await generarExcelCostos(x.R, { proyecto: 'Prueba — IOARR Primaria', region: 'Moquegua', fecha: '2026-10-25', efectivos: pe({}, {}), cotizaciones: MP.cotizaciones })),
+    anexos: await textoXlsx(await excelL(anexosDe(MP), { nombreIoarr: 'Primaria' })), paquete: await textoXlsx(await generarExcelPaquete(MP.paquete, { nombreIoarr: 'Primaria' }))
+  };
+  const regiones = JSON.parse(readFileSync(new URL('index.json', DIR), 'utf8')).regiones.map(r => r.nombre).filter(n => n !== 'Moquegua');
+  const prohibido = [...regiones, 'Loreto', 'Huánuco', 'Huanuco', 'Chiclayo'].map(n => new RegExp(`\\b${n}\\b`, 'i'));
+  // La consulta a la OPMI sobre el criterio por nivel nombra los tres niveles a propósito
+  const { CONSULTAS_OPMI } = await import('../src/selector-ioarr/lineamientos.js');
+  for (const [doc, t0] of Object.entries(textos)) {
+    const t = CONSULTAS_OPMI.reduce((a, c) => a.replace(c.pregunta, ''), t0);
+    for (const re of prohibido) assert.doesNotMatch(t, re, `${doc}: ${re}`);
+    assert.doesNotMatch(t, /\b(inicial|secundaria)\b/i, `${doc}: otro nivel en la IOARR de Primaria`);
+  }
+});

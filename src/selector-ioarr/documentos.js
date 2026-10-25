@@ -523,7 +523,7 @@ function armarVerificacion({ R, ups, activos, condiciones, faltan, precios, efec
   const secciones = [
     { titulo: 'Costos', items: [
       it('Precio unitario de mercado de cada bien a reponer.', !sinPrecio.length, sinPrecio.length ? 'Falta: ' + sinPrecio.join(', ') : ''),
-      it('Precios revisados: ninguno se queda en la referencia precargada.', !deReferencia.length, deReferencia.length ? `${deReferencia.length} ${deReferencia.length === 1 ? 'precio usa' : 'precios usan'} la referencia (Loreto 2026): reemplázalos por tus cotizaciones.` : ''),
+      it('Precios revisados: ninguno se queda en la referencia precargada.', !deReferencia.length, deReferencia.length ? `${deReferencia.length} ${deReferencia.length === 1 ? 'precio usa' : 'precios usan'} la referencia precargada: reemplázalos por tus cotizaciones.` : ''),
       it('Referencia técnica aplicable en la descripción técnica.', !!d.ref_tecnica, d.ref_tecnica ? '' : 'Escríbela en Documentos (no se inventan normas).'),
       it('Valor de la UIT del año.', !!U.valor, U.valor ? `UIT ${U.anio}: S/ ${U.valor.toLocaleString('es-PE')}` : ''),
       ...(ioarr ? [montoCui(ioarr, total)] : [])

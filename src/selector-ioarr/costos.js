@@ -57,7 +57,8 @@ export const NOTA_FALTANTE = 'corresponde a ampliación marginal, no a reposici�
 // por grupo de grado, y el transporte por pieza. Son de una convocatoria de Loreto (2026).
 export const PRECIOS_REFERENCIA = { mesa_p12: 385, mesa_p34: 393, mesa_p56: 398, silla_p12: 188, silla_p34: 193, silla_p56: 198 };
 export const TRANSPORTE_REFERENCIA = 19.5;
-export const LEYENDA_REFERENCIA = 'Referencia Loreto 2026; edítalo con tus precios';
+// Lo que sale en los exportables: sin el nombre de la convocatoria de donde vienen (otro proyecto)
+export const LEYENDA_REFERENCIA = 'Precio de referencia precargado; reemplázalo por tus cotizaciones';
 export const NOTA_PORCENTAJES = 'Los porcentajes (IGV, documento equivalente, supervisión) y la liquidación dependen de la entidad convocante: revísalos con sus bases.';
 // Grupos de grado de Primaria para repartir los kits
 export const GRUPOS_PRIMARIA = TALLAS.filter(z => z.nivel === 'P').map(z => z.k);   // ['p12', 'p34', 'p56']

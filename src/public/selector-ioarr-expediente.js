@@ -196,7 +196,7 @@ function panelRegular(act) {
 }
 
 // ─── Precios unitarios de mercado (tabla editable) ──────────────────────────
-const ORIGEN = { editado: '<span class="chip-est ok">Editado</span>', catalogo: '<span class="chip-est">Catálogo</span>', referencia: '<span class="chip-est pend">Referencia Loreto 2026</span>' };
+const ORIGEN = { editado: '<span class="chip-est ok">Editado</span>', catalogo: '<span class="chip-est">Catálogo</span>', referencia: '<span class="chip-est pend">Referencia precargada</span>' };
 function pintarPrecios() {
   const lt = datos.lineasTalla || [], kit = datos.estructura?.kit, tallasKit = (datos.lineasKit || []).map(x => x.talla);
   const fila = (k, nombre, cant, general) => {
