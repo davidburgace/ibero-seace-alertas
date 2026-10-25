@@ -1126,6 +1126,15 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     const conUps = lista.filter(y => y.M.ups.length).map(y => y.M);
     return resumenDe(conUps.length ? conUps : [lista[0].M], A.modo);
   };
+  // Generador de bases OxI (bases-api.js): las IOARR del proyecto y el modelo de una (por nivel).
+  // Toma los colegios del 07-C final; si ninguno tiene el checklist completo, los del borrador.
+  api.ioarrsBases = async (p) => (await armar(p)).ioarrs.map(x => ({ nivel: x.nivel, nombre: x.nombre }));
+  api.modeloBases = async (p, nivel) => {
+    let r = await modelo(p, nivel, { final: true });
+    if (!r.M.ups.length) r = await modelo(p, nivel, { final: false });
+    if (nivel && r.x.nivel !== nivel) { const e = new Error('Ese nivel no tiene IOARR en el proyecto'); e.status = 400; throw e; }
+    return { M: r.M, nivel: r.x.nivel, nombre: r.x.nombre, datos: r.datos };
+  };
 
   return api;
 }
