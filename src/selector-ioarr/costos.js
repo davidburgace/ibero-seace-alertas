@@ -275,19 +275,22 @@ export function costear({ D, C, list, precios, estructura, uit, inventario, grup
     return m == null || s == null ? null : m + s;
   });
   const fuentes = grupos || [{ clave: null, D, C, list, inventario }];
-  const incl = fuentes[0]?.C?.incl || TIPOS.map(() => true);
+  // Muebles que entran: cada IOARR (nivel) tiene su composición; en el total, los de alguna
+  const inclDe = g => g.C?.incl || TIPOS.map(() => true);
+  const incl = TIPOS.map((_, t) => fuentes.some(g => inclDe(g)[t]));
   const escenario = fuentes[0]?.C?.escenario || 'malo';
-  // El kit necesita mesa y silla en la IOARR
-  const kit = E.kit && incl[0] && incl[1];
 
   // ── Por local: metrado, kits y costo directo ──────────────────────────────
+  // El kit necesita mesa y silla en la composición del nivel (de la IOARR)
   const locales = [];
   for (const g of fuentes) {
+    const kitG = E.kit && inclDe(g)[0] && inclDe(g)[1];
     const ls = g.list.map(i => localDe(g, i));
-    if (kit) repartirPrimaria(ls, E.kit_dist);
-    for (const l of ls) costoLocal(l, { kit, pu, puKit, E });
+    if (kitG) repartirPrimaria(ls, E.kit_dist);
+    for (const l of ls) { l.kit = kitG; costoLocal(l, { kit: kitG, pu, puKit, E }); }
     locales.push(...ls);
   }
+  const kit = locales.length ? locales.some(l => l.kit) : E.kit && incl[0] && incl[1];
   // IGV, documento equivalente, supervisión y liquidación por local (la liquidación, según el CD)
   const cdTodos = locales.reduce((a, l) => a + l.cd, 0), n = locales.length;
   for (const l of locales) {
@@ -299,7 +302,10 @@ export function costear({ D, C, list, precios, estructura, uit, inventario, grup
   const C0 = fuentes[0]?.C || {};
   const P = { pu, puGeneral, propio, incl, puKit, kit, E, escenario, pctRegular: C0.pctRegular ?? 100, umbralVida: C0.umbralVida ?? 10 };
   const res = resumir(locales, P, uit);
-  if (grupos) res.grupos = Object.fromEntries(grupos.map(g => [g.clave, resumir(locales.filter(l => l.grupo === g.clave), P, uit)]));
+  if (grupos) res.grupos = Object.fromEntries(grupos.map(g => {
+    const ls = locales.filter(l => l.grupo === g.clave), ig = inclDe(g);
+    return [g.clave, resumir(ls, { ...P, incl: ig, kit: ls.length ? ls.some(l => l.kit) : E.kit && ig[0] && ig[1] }, uit)];
+  }));
   return res;
 }
 
@@ -439,15 +445,17 @@ function resumir(locales, { pu, puGeneral, propio, incl, puKit, kit, E, escenari
   T.porEstudiante = T.est ? T.total / T.est : null;
 
   // Líneas de mesa y silla por talla y de los demás (diagnóstico y, sin kit, costo)
+  // Con kit, el costo de mesa y silla va en el kit: su línea solo cuesta en los locales sin kit
+  const cuesta = (l, x) => !l.kit || x.t >= 2;
   const lineasTalla = LINEAS.map((x, j) => {
     const [rep, fal, b, r, m, req] = ['rep', 'fal', 'b', 'r', 'm', 'req'].map(c => sum(l => l.lin[c][j]));
     return { k: x.k, ix: j, tipo: x.tipo, t: x.t, talla: x.talla, n: x.n, u: x.u, b, r, m, ex: b + r + m, req, rep, fal,
-      pu: pu[j], pu_propio: propio[j], parcial: sum(l => l.cdLinea[j]), falValor: fal * (pu[j] ?? 0) };
+      pu: pu[j], pu_propio: propio[j], parcial: sum(l => cuesta(l, x) ? l.cdLinea[j] : 0), falValor: fal * (pu[j] ?? 0) };
   }).filter(x => incl[x.t] && (!x.talla || x.rep || x.fal || x.ex || x.req));
   // Kits por talla (solo las que tienen kits)
   const lineasKit = LINEAS_KIT.map((x, j) => ({ ...x, ix: j, rep: sum(l => l.kitTalla[j]), pu: puKit[j], parcial: sum(l => l.cdKit[j]) })).filter(x => x.rep > 0);
   // Líneas de costo: con kit, los kits y luego escritorio, silla docente y armario
-  const lineas = kit ? [...lineasKit, ...lineasTalla.filter(x => x.t >= 2)] : lineasTalla;
+  const lineas = kit ? [...lineasKit, ...lineasTalla.filter(x => x.t >= 2 || locales.some(l => !l.kit))] : lineasTalla;
   // Partidas por tipo de bien (suma de sus tallas). pu: null si a alguna talla que se repone
   // le falta precio; si las tallas tienen precios distintos, el promedio (pu_varia)
   const partidas = ITEMS.map((x, t) => {

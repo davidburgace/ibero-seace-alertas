@@ -23,7 +23,7 @@ let catalogo = null;   // precios del catálogo por tipo
 let pagLoc = 0, tGuardar = null, version = 0, filtroLoc = '';
 let vistaExp = 'costos';   // sub-pestaña: 'costos' | 'fichas' | 'docs' | 'verif' | 'oferta'
 let costosViejos = false;  // se importaron fichas: al volver a Costos se recalcula
-let nivelExp = null;       // IOARR a la vista con «Una IOARR por nivel»: 'I' | 'P' | 'S' | 'E'
+let nivelExp = null;       // IOARR (nivel) a la vista: 'I' | 'P' | 'S' | 'E'
 let proyectoExp = null;    // al cambiar de proyecto se vuelve a la primera IOARR
 const qn = () => nivelExp ? `?nivel=${nivelExp}` : '';
 const norm = t => String(t || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
@@ -92,33 +92,25 @@ function pintar() {
   if (vistaExp === 'verif') abrirVerificacion();
 }
 
-// ─── Una IOARR o una por nivel ──────────────────────────────────────────────
+// ─── Una IOARR por nivel ─────────────────────────────────────────────────────
+// Cada 07-C es de un solo nivel. «Una IOARR» con todos los niveles es solo una cifra de comparación.
 const REG = r => r == null ? '<span class="chip-est pend">UIT sin cargar</span>' : r === 'completo' ? '<span class="chip-est alerta">Registro completo · supera 75 UIT</span>' : '<span class="chip-est ok">Registro abreviado · hasta 75 UIT</span>';
 function pintarIoarr() {
-  const K = datos.comparativo, porNiv = datos.modo === 'por_nivel', U = K.uit;
-  const fila = (txt, x, activa) => `<tr class="${activa ? 'activa' : ''}"><td>${txt}</td><td class="num">${ent(x.locales)}</td><td class="num">${ent(x.rep)}</td><td class="num"><b>${soles(x.total)}</b></td><td class="num">${x.en_uit == null ? '—' : dec(x.en_uit) + ' UIT'}</td><td>${REG(x.registro)}</td></tr>`;
-  const pestanas = porNiv && datos.ioarrs.length ? `<div class="subtabs ioarr-tabs" role="tablist" aria-label="IOARR por nivel">${datos.ioarrs.map(x =>
+  const K = datos.comparativo, U = K.uit;
+  const fila = (txt, x, o = {}) => `<tr class="${o.activa ? 'activa' : ''}${o.tenue ? ' sub' : ''}"><td>${txt}</td><td class="num">${ent(x.locales)}</td><td class="num">${ent(x.rep)}</td><td class="num"><b>${soles(x.total)}</b></td><td class="num">${x.en_uit == null ? '—' : dec(x.en_uit) + ' UIT'}</td><td>${o.reg ?? REG(x.registro)}</td></tr>`;
+  const pestanas = datos.ioarrs.length > 1 ? `<div class="subtabs ioarr-tabs" role="tablist" aria-label="IOARR por nivel">${datos.ioarrs.map(x =>
     `<button type="button" role="tab" data-exp-nivel="${x.nivel}" aria-selected="${x.nivel === datos.nivel}">IOARR ${esc(x.nombre)} <span class="sub">${soles(x.total)}</span></button>`).join('')}</div>` : '';
+  const ctrl = K.control && !K.control.ok ? `<div class="avisos pad"><div class="aviso alerta" role="alert">${esc(K.control.errores.slice(0, 3).join(' '))}</div></div>` : '';
   document.getElementById('exp-ioarr').innerHTML = `
-    <div class="panel"><div class="panel-cab"><h3>Una IOARR o una por nivel</h3>
-      <div class="seg" role="radiogroup" aria-label="Organización del proyecto">
-        <label class="chk"><input type="radio" name="exp-modo" value="por_nivel" ${porNiv ? 'checked' : ''}> Una IOARR por nivel</label>
-        <label class="chk"><input type="radio" name="exp-modo" value="una" ${porNiv ? '' : 'checked'}> Una IOARR</label></div></div>
-      <p class="sub pad">La norma permite una reposición masiva en varias UP si los activos son homogéneos y el servicio y la entidad son los mismos, pero no aclara si Inicial, Primaria y Secundaria cuentan como un mismo servicio: confírmalo con la OPMI. Un expediente de Huánuco (2023) presentó una IOARR por nivel. Compara los totales con el límite de 75 UIT${U ? ` (S/ ${NF.format(U.limite)}, UIT ${U.anio})` : ''}:</p>
-      <div class="tabla-wrap borde-0"><table class="tabla tabla-ioarr"><thead><tr><th>Opción</th><th class="num">Locales</th><th class="num">A reponer</th><th class="num">Total</th><th class="num">En UIT</th><th>Registro del 07-C</th></tr></thead><tbody>
-        ${fila('<b>Una IOARR</b> (todos los niveles)', K.una, !porNiv)}
-        ${K.niveles.map(x => fila(`IOARR ${esc(x.nombre)}`, x, porNiv)).join('')}
-      </tbody>${K.niveles.length > 1 ? `<tfoot><tr><td>Suma de las IOARR por nivel</td><td></td><td class="num">${ent(K.niveles.reduce((a, x) => a + x.rep, 0))}</td><td class="num">${soles(K.suma)}</td><td colspan="2"></td></tr></tfoot>` : ''}</table></div>
-      ${K.niveles.length > 1 ? '<p class="sub pad">Un local con varios niveles entra en cada IOARR con sus estudiantes, aulas y mobiliario de ese nivel. Los rubros en monto fijo se reparten entre las IOARR según su base, así la suma da el total del proyecto.</p>' : ''}
+    <div class="panel"><div class="panel-cab"><h3>Una IOARR por nivel</h3><span class="sub">${ent(K.colegios || 0)} colegios en el paquete</span></div>
+      <p class="sub pad">Cada Formato 07-C es de un solo nivel (Inicial, Primaria o Secundaria), como en las IOARR masivas publicadas: nunca se mezclan niveles. Un colegio con varios niveles entra en una IOARR por nivel, con sus estudiantes, aulas y mobiliario de ese nivel (cada aula cuenta en un solo nivel). Límite de 75 UIT${U ? `: S/ ${NF.format(U.limite)} (UIT ${U.anio})` : ''}.</p>
+      ${ctrl}
+      <div class="tabla-wrap borde-0"><table class="tabla tabla-ioarr"><thead><tr><th>IOARR</th><th class="num">Colegios</th><th class="num">A reponer</th><th class="num">Monto</th><th class="num">En UIT</th><th>Registro del 07-C</th></tr></thead><tbody>
+        ${K.niveles.map(x => fila(`IOARR ${esc(x.nombre)}`, x, { activa: x.nivel === datos.nivel })).join('')}
+      </tbody><tfoot><tr><td>Total del paquete${K.niveles.length > 1 ? ` (${K.niveles.length} IOARR)` : ''}</td><td class="num">${ent(K.colegios || 0)}</td><td class="num">${ent(K.niveles.reduce((a, x) => a + x.rep, 0))}</td><td class="num">${soles(K.suma)}</td><td colspan="2"></td></tr>
+        ${fila('Solo comparación: una IOARR con todos los niveles (no se exporta)', K.una, { tenue: true, reg: '<span class="sub">—</span>' })}</tfoot></table></div>
+      ${K.niveles.length > 1 ? '<p class="sub pad">Un colegio con varios niveles se cuenta una vez en el total del paquete y una vez en cada IOARR de sus niveles. Los rubros en monto fijo se reparten entre las IOARR según su base, así la suma da el total del paquete.</p>' : ''}
     </div>${pestanas}`;
-}
-async function cambiarModo(modo) {
-  try {
-    await ctx.api(`/proyectos/${ctx.proyecto.id}`, { method: 'PATCH', body: { modo_ioarr: modo } });
-    ctx.proyecto.modo_ioarr = modo; nivelExp = null;
-    ctx.toast(modo === 'una' ? 'El proyecto es ahora una sola IOARR.' : 'El proyecto es ahora una IOARR por nivel.');
-  } catch (e) { ctx.toast('No se pudo cambiar: ' + e.message); }
-  await renderExpediente(ctx);
 }
 async function cambiarNivel(n) {
   if (n === nivelExp) return;
@@ -429,7 +421,6 @@ export function enlazarExpediente(el, abrirNuevo) {
     }
   });
   el.addEventListener('change', e => {
-    if (e.target.name === 'exp-modo') { cambiarModo(e.target.value); return; }
     if (e.target.name === 'exp-esc') { cambiarEscenario({ escenario: e.target.value }); return; }
     if (e.target.id === 'est-kit') { clearTimeout(tGuardar); guardar({ estructura: { kit: e.target.checked } }); }
   });

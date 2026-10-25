@@ -73,7 +73,7 @@ import { generarExcelCostos } from './excel-costos.js';
 import { armarModelo, limpiarDatosDoc, ESTADOS_ACTIVO, MODALIDADES, FUENTES_FIN } from './documentos.js';
 import { generar07C, generarMemoria, generarVerificacion } from './word.js';
 import { leerDuplicidad, separarLocales, estadoDe, avisosDuplicidad } from './duplicidad.js';
-import { porNivel, inventarioNivel, inventarioUna, modoDe, sinNivel, nivelesDeLocal, vistaNivel, limpiarPorNivel, NOMBRE_NIVEL } from './niveles.js';
+import { porNivel, validarNiveles, inventarioNivel, inventarioUna, modoDe, sinNivel, nivelesDeLocal, vistaNivel, limpiarPorNivel, NOMBRE_NIVEL } from './niveles.js';
 import { modeloFicha, generarFichaExcel, generarFichaPdf, leerFicha, procesarFicha, requeridoFicha, ESTADO_VERIF } from './ficha.js';
 import archiver from 'archiver';
 import { asignacionesProyecto, paquetesFichas } from './campo.js';
@@ -350,8 +350,8 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     });
     const Rniv = costear({ ...comun, grupos: G.map(g => ({ clave: g.nivel, D: g.D, C: g.C, list: g.list, inventario: inventarioNivel(inv, D, g.nivel) })) });
     const modo = modoDe(p);
-    // Sin locales no hay niveles: se muestra la IOARR única (vacía)
-    const ioarrs = modo === 'una' || !G.length
+    // Cada 07-C es de un solo nivel. Sin locales no hay niveles: se muestra una IOARR vacía
+    const ioarrs = !G.length
       ? [{ nivel: null, nombre: 'Todos los niveles', R: Runa, D, C, list, inv: inventarioUna(inv, D, Cn) }]
       : G.map(g => ({ nivel: g.nivel, nombre: g.nombre, R: Rniv.grupos[g.nivel], D: g.D, C: g.C, list: g.list, inv: inventarioNivel(inv, D, g.nivel) }));
 
@@ -369,10 +369,15 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
       const sn = sinNiv.filter(c => R.locales.some(l => l.cod === c));
       if (sn.length) R.avisos.push({ tipo: 'inventario', alerta: true, texto: `El inventario verificado de ${sn.length === 1 ? 'el local' : 'los locales'} ${sn.join(', ')} se cargó sin nivel y el local tiene varios niveles: en esta IOARR se usa el censo. Vuelve a cargarlo por nivel en «Corregir inventario».` });
     }
+    // Ningún aula ni servicio se cuenta dos veces entre las IOARR por nivel
+    const control = validarNiveles(D, list, G);
+    if (!control.ok) for (const x of ioarrs) x.R.avisos.push({ tipo: 'niveles', alerta: true, texto: 'Control por nivel: ' + control.errores.slice(0, 5).join(' ') });
     const fila_ = R => ({ total: R.totales.total, rep: R.totales.rep, locales: R.totales.locales, est: R.totales.est, en_uit: R.uit.enUit, supera: R.uit.supera, registro: R.uit.valor == null ? null : R.uit.supera ? 'completo' : 'abreviado' });
     const comparativo = {
       modo, uit: Runa.uit.valor ? { anio: Runa.uit.anio, valor: Runa.uit.valor, limite: Runa.uit.limite } : null,
-      una: fila_(Runa), niveles: G.map(g => ({ nivel: g.nivel, nombre: g.nombre, ...fila_(Rniv.grupos[g.nivel]) })), suma: Rniv.totales.total
+      una: fila_(Runa), niveles: G.map(g => ({ nivel: g.nivel, nombre: g.nombre, ...fila_(Rniv.grupos[g.nivel]) })), suma: Rniv.totales.total,
+      // Paquete: colegios distintos (un colegio con varios niveles cuenta una vez) y control de doble conteo
+      colegios: list.length, control
     };
     return { modo, niveles: G.map(g => g.nivel), ioarrs, comparativo, Runa, P, detalle, efectivos, estructura, escenarios, factores, anioUit, uit, D, C, list, inv, dup: dup.mapa, excluidos, sinMigracionEst: !!fila && !('estructura' in fila) };
   }
@@ -1115,7 +1120,8 @@ const LEEME_PAQUETE = (proyecto, paq, D, idxDe) => [
 export function textoCriterios(P) {
   const est = { b: 'Bueno', r: 'Regular', m: 'Malo' }[P.carpEstado];
   const muebles = ITEMS.filter(x => !P.muebles || P.muebles.includes(x.k)).map(x => x.n.toLowerCase()).join(', ');
-  return `${textoEscenario(P)} · Muebles de la IOARR: ${muebles} · ` + CRIT.map(([k, l]) => `${l}: ${P[k]}`).join(' · ') + ` · Estado asignado a las carpetas: ${est}`
+  const porNivel = Object.entries(P.mueblesNivel || {}).map(([n, m]) => `${NOMBRE_NIVEL[n]}: ${ITEMS.filter(x => m.includes(x.k)).map(x => x.n.toLowerCase()).join(', ')}`);
+  return `${textoEscenario(P)} · Muebles de la IOARR: ${muebles}${porNivel.length ? ` (composición propia en ${porNivel.join('; ')})` : ''} · ` + CRIT.map(([k, l]) => `${l}: ${P[k]}`).join(' · ') + ` · Estado asignado a las carpetas: ${est}`
     + ' · Mesa y silla por talla según el grado del aula (multigrado: en partes iguales entre las tallas del nivel)';
 }
 
