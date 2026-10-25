@@ -5,12 +5,17 @@
 //
 // Un solo .docx por proceso:
 //   1. Hoja de transparencia (primera página, separable: sección aparte).
-//   2. Las plantillas 00 a 19 en orden, con los marcadores sustituidos. Cada
+//   2. Portada y contenido (índice), como en las bases del proceso de origen. El
+//      índice es un campo de Word con los títulos ya escritos: Word le pone los
+//      números de página al abrir el archivo (pregunta si actualiza los campos).
+//      Entran las secciones, los capítulos, los anexos y los numerales 1.1, 1.2…
+//      de las secciones I y II; los demás títulos en mayúsculas no.
+//   3. Las plantillas 00 a 19 en orden, con los marcadores sustituidos. Cada
 //      plantilla empieza en página nueva. El texto no se cambia: solo se le da
 //      formato (títulos, tablas, numeración de páginas) y se resalta:
 //        amarillo  marcadores sin dato y avisos [VERIFICAR …] / [NO APLICA …]
 //        turquesa  texto fijo con datos del proceso de origen (RESIDUOS_ORIGEN)
-//   3. Anexo 3-A (lo propio del proyecto): cronograma de prestaciones, cantidades
+//   4. Anexo 3-A (lo propio del proyecto): cronograma de prestaciones, cantidades
 //      y precios del cálculo de la app, y especificaciones técnicas neutrales.
 //
 // Las plantillas vienen del texto de un PDF (columnas con espacios): las filas
@@ -20,7 +25,7 @@
 
 import {
   Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, AlignmentType,
-  HeadingLevel, ShadingType, Header, Footer, PageNumber, BorderStyle
+  HeadingLevel, ShadingType, Header, Footer, PageNumber, BorderStyle, TableOfContents
 } from 'docx';
 import {
   armarTexto, transparencia, cuadroCantidades, especificacionDe, calcularMontos, formatoMonto, esResiduo,
@@ -48,8 +53,9 @@ function runs(t, o = {}) {
 // **negrita** de las tablas de la Sección I
 const runsMd = (t, o = {}) => String(t).split(/(\*\*[^*]+\*\*)/).filter(Boolean).flatMap(x => x.startsWith('**') ? runs(x.slice(2, -2), { ...o, bold: true }) : runs(x, o));
 const p = (t, o = {}) => new Paragraph({ children: runs(t, o), alignment: o.align, spacing: { after: o.after ?? 100, before: o.before ?? 0 }, heading: o.heading, indent: o.indent, pageBreakBefore: o.salto, bullet: o.bullet ? { level: 0 } : undefined });
+// o.indice: entra al contenido (Título 1 o 2); sin él, solo el formato
 const titulo = (t, nivel = 1, o = {}) => new Paragraph({
-  heading: nivel === 1 ? HeadingLevel.HEADING_1 : HeadingLevel.HEADING_2, alignment: o.align ?? AlignmentType.CENTER, pageBreakBefore: o.salto,
+  heading: o.indice ? (nivel === 1 ? HeadingLevel.HEADING_1 : HeadingLevel.HEADING_2) : undefined, alignment: o.align ?? AlignmentType.CENTER, pageBreakBefore: o.salto,
   spacing: { before: 200, after: 140 }, children: runs(t, { bold: true, size: nivel === 1 ? 24 : 21, color: AZUL })
 });
 const borde = { style: BorderStyle.SINGLE, size: 4, color: '9AA1AE' };
@@ -78,21 +84,33 @@ const esMayus = s => { const t = s.trim(); return !/\s:\s/.test(t) && t.length >
 // Fila con columnas alineadas por espacios (después del número del ítem, si lo hay)
 const esFilaColumnas = l => { const m = l.match(RE_ITEM), resto = m ? l.slice(m[0].length) : l.trimStart(); return /\S {4,}\S/.test(resto.trimEnd()); };
 
-/** Convierte el texto de una plantilla (ya sustituido) en elementos del Word */
-export function elementosDeTexto(texto, { salto = false } = {}) {
+// Títulos del contenido. Nivel 1: secciones, capítulos y anexos; nivel 2: numerales 1.1, 2.3… (solo en las secciones)
+const RE_ROTULO = /^(SECCIÓN\s+[IVX]+|CAPÍTULO\s+[IVX]+|ANEXO\s+N°\s*\d+(?:-[A-Z])?):$/;   // «SECCIÓN I:» sola: sigue en la línea siguiente
+const RE_INDICE_1 = /^(SECCIÓN\s+[IVX]+:|CAPÍTULO\s+(?:[IVX]+:|ÚNICO\b)|ANEXOS$|ANEXO\s+N°\s*\d+(?:-[A-Z])?:)/;
+const RE_INDICE_2 = /^\d+\.\d+\.\s/;
+export const nivelIndice = (txt, { numerales = false } = {}) => RE_INDICE_1.test(txt) ? 1 : numerales && RE_INDICE_2.test(txt) ? 2 : 0;
+
+/**
+ * Convierte el texto de una plantilla (ya sustituido) en elementos del Word.
+ * indice: lista donde se anotan los títulos del contenido ({ title, level });
+ * numerales: los 1.1, 1.2… también entran (Secciones I y II).
+ */
+export function elementosDeTexto(texto, { salto = false, indice = null, numerales = false } = {}) {
   const lineas = texto.replace(/\r/g, '').split('\n');
   const col = lineas.map(l => !!l.trim() && !/^\s*\|/.test(l) && esFilaColumnas(l));
   // Ancho típico de una línea de párrafo (percentil 80): una línea así de larga sigue en la siguiente
   const largos = lineas.filter((l, i) => l.trim() && !col[i]).map(l => l.trimEnd().length).sort((a, b) => a - b);
   const ancho = Math.max(50, largos[Math.floor(largos.length * 0.8)] || 0);
   const out = [];
-  let par = null, tablaMd = null, primerTitulo = true;
+  let par = null, tablaMd = null;
   const conSalto = () => { const s = salto && !out.length; return s; };
   const cerrar = () => {
     if (!par) return;
     const txt = par.lineas.join(' ');
-    const heading = par.titulo ? (primerTitulo ? HeadingLevel.HEADING_1 : HeadingLevel.HEADING_3) : undefined;
-    if (par.titulo) primerTitulo = false;
+    // Los títulos que no van al contenido quedan como Título 3 (fuera del índice)
+    const nivel = par.titulo ? nivelIndice(txt, { numerales }) : 0;
+    const heading = !par.titulo ? undefined : nivel === 1 ? HeadingLevel.HEADING_1 : nivel === 2 ? HeadingLevel.HEADING_2 : HeadingLevel.HEADING_3;
+    if (nivel && indice) indice.push({ title: txt, level: nivel });
     const indent = par.titulo && par.centrado ? undefined : { left: Math.min(par.cont, 40) * TW_CAR, hanging: Math.max(0, Math.min(par.cont, 40) - par.ini) * TW_CAR };
     out.push(new Paragraph({
       heading, pageBreakBefore: conSalto(), indent, alignment: par.centrado ? AlignmentType.CENTER : par.titulo ? AlignmentType.LEFT : AlignmentType.JUSTIFIED,
@@ -130,7 +148,10 @@ export function elementosDeTexto(texto, { salto = false } = {}) {
     const sigue = par && !par.titulo && !item && largaPrevia && Math.abs(ini - par.cont) <= 4;
     const titulo = !sigue && esMayus(l);
     if (sigue) { par.lineas.push(l.trim()); par.residuo ||= residuo; }
-    else if (par && par.titulo && titulo && !item && !par.numerado && !/[.:;]$/.test(previa.trimEnd()) && Math.abs(ini - par.ini) <= 30) { par.lineas.push(l.trim()); }   // título en dos líneas
+    else if (par && par.titulo && titulo && !item && (
+      (par.lineas.length === 1 && RE_ROTULO.test(par.lineas[0]))                                              // «ANEXO N° 1:» + su nombre
+      || (!par.numerado && !/[.:;]$/.test(previa.trimEnd()) && Math.abs(ini - par.ini) <= 30)                 // título en dos líneas
+      || (par.numerado && par.lineas.length === 1 && nivelIndice(par.lineas[0], { numerales }) === 2 && !/[.:;]$/.test(previa.trimEnd()) && Math.abs(ini - par.cont) <= 2))) { par.lineas.push(l.trim()); }   // numeral largo: la 2.ª línea se alinea con su texto
     else {
       cerrar();
       par = { lineas: [item ? (item[2] + ' ' + l.slice(item[0].length).trim()) : l.trim()], ini, cont: textoIni, titulo, numerado: !!item, residuo,
@@ -163,8 +184,32 @@ function hojaTransparencia(d, ctx, armado, { version, fecha, usuario, vistaPrevi
     ...T.supuestos.map(t => p(t, { bullet: true, size: 16, after: 20 })),
     titulo('Campos pendientes y revisiones de la entidad', 2, { align: AlignmentType.LEFT }),
     ...T.pendientes.map(t => p(t, { bullet: true, size: 16, after: 20 })),
+    p('Contenido: los números de página los pone Word al abrir el archivo (acepta «actualizar los campos», o clic derecho en el contenido › Actualizar campos).', { bullet: true, size: 16, after: 20 }),
     titulo('Neutralidad', 2, { align: AlignmentType.LEFT }),
     p('Las especificaciones técnicas no indican marcas, modelos ni fabricantes, y remiten a las normas técnicas aplicables. La entidad debe verificar que ningún requisito favorezca a un postor antes de aprobar las bases.', { size: 16 })
+  ];
+}
+
+// ─── Portada y contenido ────────────────────────────────────────────────────
+// Texto de la portada de las bases del proceso de origen (015-2026, San Juan)
+const PORTADA_LEY = 'PARA EL FINANCIAMIENTO Y EJECUCIÓN DE INVERSIONES O ACTIVIDADES DE OPERACIÓN Y MANTENIMIENTO EN EL MARCO DE LA LEY N° 29230, LEY QUE IMPULSA LA INVERSIÓN PÚBLICA REGIONAL Y LOCAL CON PARTICIPACIÓN DEL SECTOR PRIVADO Y POR EL REGLAMENTO DE LA LEY N° 29230, APROBADO POR DECRETO SUPREMO N° 038-2026-EF, LEY QUE IMPULSA LA INVERSIÓN PÚBLICA REGIONAL Y LOCAL CON PARTICIPACIÓN DEL SECTOR PRIVADO.';
+const TITULO_3A = 'ANEXO N° 3-A: TÉRMINOS DE REFERENCIA – ELEMENTOS DEL PROYECTO';
+function portada(d) {
+  const c = (t, o = {}) => p(t, { align: AlignmentType.CENTER, bold: true, color: AZUL, ...o });
+  return [
+    c('BASES DEL PROCESO DE SELECCIÓN DE LA EMPRESA PRIVADA', { size: 26, before: 1800, after: 240 }),
+    c(PORTADA_LEY, { size: 20, after: 360 }),
+    c(`PROCESO DE SELECCIÓN N° ${d.N_PROCESO || '{{N_PROCESO}}'}`, { size: 22, after: 720 }),
+    c('CONTRATACIÓN DE LA EJECUCIÓN Y FINANCIAMIENTO DE LA IOARR:', { size: 22, after: 240 }),
+    c(`“${d.NOMBRE_IOARR || '{{NOMBRE_IOARR}}'}” CON CÓDIGO ÚNICO DE INVERSIÓN N° ${d.CUI || '{{CUI}}'}`, { size: 22, after: 1800 }),
+    p('[Firmas de los miembros titulares del Comité Especial]', { align: AlignmentType.CENTER, italics: true, color: TENUE, size: 18 })
+  ];
+}
+// Contenido: campo de índice de Word (títulos 1 y 2) con las entradas ya escritas, sin página
+function contenido(entradas) {
+  return [
+    titulo('CONTENIDO', 1, { salto: true }),
+    new TableOfContents('Contenido', { hyperlink: true, headingStyleRange: '1-2', cachedEntries: entradas })
   ];
 }
 
@@ -174,7 +219,7 @@ function anexo3A(d, ctx) {
   const sol = n => n == null ? '' : formatoMonto(n);
   const bienes = [...new Set(Q.filas.map(f => f.k))];
   return [
-    titulo('ANEXO N° 3-A: TÉRMINOS DE REFERENCIA – ELEMENTOS DEL PROYECTO', 1, { salto: true }),
+    titulo(TITULO_3A, 1, { salto: true, indice: true }),
     p('[COMPLETAR POR LA ENTIDAD: este anexo reúne solo el cronograma, las cantidades y las especificaciones técnicas del proyecto. Los requisitos habilitantes, los entregables, el perfil del personal y las demás condiciones de los términos de referencia los define la entidad.]', { size: 18 }),
     titulo('1. Objeto', 2, { align: AlignmentType.LEFT }),
     p(`Financiamiento y ejecución de la IOARR «${d.NOMBRE_IOARR || '{{NOMBRE_IOARR}}'}», CUI N° ${d.CUI || '{{CUI}}'}, nivel ${ctx.nivel_nombre || '—'}, componente ${d.COMPONENTE || '{{COMPONENTE}}'}, y financiamiento de su supervisión, en el marco de la Ley N° 29230 y su Reglamento.`),
@@ -212,8 +257,10 @@ function anexo3A(d, ctx) {
  * @returns Buffer del .docx
  */
 export async function generarBasesDocx({ datos: d, ctx = {}, version = null, fecha = '', usuario = '', vistaPrevia = false }) {
-  const armado = armarTexto(d);
-  const cuerpo = armado.bloques.flatMap((b, i) => elementosDeTexto(b.texto, { salto: i > 0 }));
+  const armado = armarTexto(d), indice = [];
+  // Secciones I y II (plantillas 00 a 03): sus numerales 1.1, 1.2… van al contenido
+  const cuerpo = armado.bloques.flatMap(b => elementosDeTexto(b.texto, { salto: true, indice, numerales: /^0[0-3]_/.test(b.file) }));
+  indice.push({ title: TITULO_3A, level: 1 });
   const rotulo = vistaPrevia ? 'VISTA PREVIA CON DATOS PENDIENTES – NO PUBLICAR' : `Borrador de bases · Proceso N° ${d.N_PROCESO || '—'} · Versión ${version} · ${fecha}`;
   const pie = () => new Footer({ children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ children: ['Página ', PageNumber.CURRENT], font: FUENTE, size: 16, color: TENUE })] })] });
   const cab = t => new Header({ children: [new Paragraph({ alignment: AlignmentType.RIGHT, children: [run(t, { size: 16, color: vistaPrevia ? 'C00000' : TENUE, bold: vistaPrevia })] })] });
@@ -221,13 +268,16 @@ export async function generarBasesDocx({ datos: d, ctx = {}, version = null, fec
   const doc = new Document({
     creator: 'Generador de bases OxI (borrador)', lastModifiedBy: 'Generador de bases OxI (borrador)',
     title: `Bases – Proceso ${d.N_PROCESO || ''}`.trim(), description: `Borrador de bases. ${REGLAMENTO_PLANTILLAS}.`,
-    styles: { default: { document: { run: { font: FUENTE, size: 20 } } } },
-    features: { updateFields: false },
+    styles: { default: { document: { run: { font: FUENTE, size: 20 } } },
+      // Líneas del contenido: los numerales (nivel 2) con sangría
+      paragraphStyles: [1, 2].map(n => ({ id: `TOC${n}`, name: `toc ${n}`, basedOn: 'Normal', next: 'Normal', run: { size: 17, bold: n === 1 },
+        paragraph: { indent: { left: (n - 1) * 360 }, spacing: { before: 0, after: 0, line: 240 } } })) },
+    features: { updateFields: true },   // Word pone las páginas del contenido al abrir
     sections: [
       { properties: { page: { margin: margen } }, headers: { default: cab('Hoja de transparencia (separable)') }, footers: { default: pie() },
         children: hojaTransparencia(d, ctx, armado, { version, fecha, usuario, vistaPrevia }) },
       { properties: { page: { margin: margen, pageNumbers: { start: 1 } } }, headers: { default: cab(rotulo) }, footers: { default: pie() },
-        children: [...cuerpo, ...anexo3A(d, ctx)] }
+        children: [...portada(d), ...contenido(indice), ...cuerpo, ...anexo3A(d, ctx)] }
     ]
   });
   return Packer.toBuffer(doc);
