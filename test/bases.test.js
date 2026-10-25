@@ -268,14 +268,28 @@ test('.docx de ejemplo con datos de prueba: transparencia primero, sin marcadore
   // XML válido para Word: sin caracteres de control (los saltos de página del PDF)
   assert.doesNotMatch(xml, /[\x00-\x08\x0B\x0C\x0E-\x1F]/);
   // Hoja de transparencia: primera página, en su propia sección, con la declaración
-  const iT = t.indexOf('HOJA DE TRANSPARENCIA'), iS = t.indexOf('SECCIÓN I:\nCONDICIONES ESPECIALES');
-  assert.ok(iT >= 0 && iS > iT, 'la transparencia va antes de la Sección I');
-  assert.ok(t.slice(iT, iS).includes(DECLARACION));
-  assert.match(t.slice(iT, iS), /Datos tomados de la aplicación[\s\S]*Supuestos[\s\S]*Campos pendientes/);
+  // Orden: transparencia, portada, contenido y la Sección I (la 2.ª vez que aparece: la 1.ª es su línea del contenido)
+  const SEC_I = 'SECCIÓN I: CONDICIONES ESPECIALES DEL PROCESO DE SELECCIÓN';
+  const iT = t.indexOf('HOJA DE TRANSPARENCIA'), iP = t.indexOf('BASES DEL PROCESO DE SELECCIÓN DE LA EMPRESA PRIVADA'),
+    iC = t.indexOf('CONTENIDO\n'), iS = t.indexOf(SEC_I, t.indexOf(SEC_I) + 1);
+  assert.ok(iT >= 0 && iP > iT && iC > iP && iS > iC, `orden transparencia ${iT}, portada ${iP}, contenido ${iC}, Sección I ${iS}`);
+  assert.ok(t.slice(iT, iP).includes(DECLARACION));
+  assert.match(t.slice(iT, iP), /Datos tomados de la aplicación[\s\S]*Supuestos[\s\S]*Campos pendientes/);
   assert.equal((xml.match(/<w:sectPr/g) || []).length, 2, 'dos secciones: transparencia y bases');
+  // Portada con los datos del proceso
+  const port = t.slice(iP, iC);
+  assert.match(port, /PROCESO DE SELECCIÓN N° 001-2026-CE-PRUEBA/);
+  assert.match(port, /CONTRATACIÓN DE LA EJECUCIÓN Y FINANCIAMIENTO DE LA IOARR:\n“[^”]+” CON CÓDIGO ÚNICO DE INVERSIÓN N° \d{7}/);
+  // Contenido: campo de índice (títulos 1 y 2) ya escrito, y Word actualiza los campos al abrir
+  assert.match(xml, /TOC \\h \\o &quot;1-2&quot;/);
+  assert.match(await z.file('word/settings.xml').async('string'), /<w:updateFields(?: w:val="(?:true|1)")?\/>/);
+  const indice = t.slice(iC, iS);
+  for (const x of [SEC_I, 'CAPÍTULO ÚNICO: GENERALIDADES', '1.12. PRESENTACIÓN DE LAS PROPUESTAS, APERTURA DE LOS SOBRES N°01, N°02 Y N° 03, Y EVALUACIÓN DE SOBRES N° 1, N° 2:',
+    'CAPÍTULO III: DEL CONVENIO DE INVERSIÓN', 'ANEXO N° 1: DEFINICIONES', 'ANEXO N° 6: FORMATO DE CONVENIO', 'ANEXO N° 3-A: TÉRMINOS DE REFERENCIA']) assert.ok(indice.includes(x), 'en el contenido: ' + x);
+  for (const x of ['IMPORTANTE:', 'HOJA DE TRANSPARENCIA', 'Supuestos', '1.5.1.', '[INDICAR LUGAR Y FECHA]', '1. Objeto']) assert.ok(!indice.includes(x), 'fuera del contenido: ' + x);
   // Sin marcadores y con todo en orden
   assert.doesNotMatch(t, RE_MARCADOR);
-  const orden = ['SECCIÓN I', 'SECCIÓN II', 'ANEXO N° 1', 'ANEXO N° 4-A', 'ANEXO N° 4-E', 'ANEXO N° 6', 'ANEXO N° 2', 'ANEXO N° 3-A: TÉRMINOS'].map(x => t.indexOf(x, iS));
+  const orden = ['SECCIÓN I:', 'SECCIÓN II:', 'ANEXO N° 1', 'ANEXO N° 4-A', 'ANEXO N° 4-E', 'ANEXO N° 6', 'ANEXO N° 2', 'ANEXO N° 3-A: TÉRMINOS'].map(x => t.indexOf(x, iS));
   assert.ok(orden.every((x, i) => x > (orden[i - 1] ?? -1)), 'plantillas en orden: ' + orden.join(', '));
   // Documento equivalente: tabla 1.5, 1.5.1 y cronograma del Anexo 3-A
   assert.match(t, /Prestación N° 1: Elaboración de documento equivalente \[OBLIGATORIO\]/);
