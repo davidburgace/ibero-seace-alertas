@@ -39,7 +39,7 @@ const error = (status, msg) => Object.assign(new Error(msg), { status });
 // Campos que dependen del nivel (al duplicar a otro nivel o proyecto se vuelven a tomar de la app)
 const PROPIOS_NIVEL = ['NOMBRE_IOARR', 'CUI', 'MONTO_DOC_EQUIVALENTE', 'MONTO_EJECUCION', 'MONTO_SUP_EJECUCION', 'MONTO_SUP_DOC_EQUIVALENTE', 'PLAZO_EJECUCION_DIAS', 'sustento_ugel'];
 
-export function crearApiBases({ expediente }) {
+export function crearApiBases({ expediente, preciosRef = null }) {
   const api = express.Router();
   const responder = fn => async (req, res, next) => {
     try { await fn(req, res); }
@@ -72,7 +72,9 @@ export function crearApiBases({ expediente }) {
   async function appDe(p, nivel) {
     try {
       const r = await expediente.modeloBases(p, nivel);
-      return { r, ctx: contextoApp(r.M, r.nivel, r.nombre), aviso: null };
+      // Precio por kit del catálogo de precios referenciales (nunca el precio propio)
+      const precioRef = preciosRef ? await preciosRef.referenciaBases(p, r.nivel) : null;
+      return { r, ctx: { ...contextoApp(r.M, r.nivel, r.nombre), precio_ref: precioRef }, aviso: null };
     } catch (e) {
       if (e.status && e.status < 500) return { r: null, ctx: { nivel, metas: [] }, aviso: e.message };
       throw e;
@@ -95,7 +97,8 @@ export function crearApiBases({ expediente }) {
         propuesta: { min: M.min_bases, max: M.max_bases } },
       validacion: validarFicha(d, ctx),
       cantidades: cuadroCantidades(d, ctx),
-      app: { nivel_nombre: ctx.nivel_nombre || null, escenario: ctx.escenario_texto || '', total_07c: ctx.total_07c ?? null, colegios: ctx.colegios ?? 0, borrador: !!ctx.borrador, aviso },
+      app: { nivel_nombre: ctx.nivel_nombre || null, escenario: ctx.escenario_texto || '', total_07c: ctx.total_07c ?? null, colegios: ctx.colegios ?? 0, borrador: !!ctx.borrador, aviso,
+        precio_ref: ctx.precio_ref || null },
       versiones: await numVersiones(f.id),
       ...extra.respuesta
     };

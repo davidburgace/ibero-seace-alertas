@@ -193,7 +193,8 @@ function anexo3A(d, ctx) {
       ...Q.filas.map(f => [f.nombre, f.unidad, f.cantidad == null ? '[COMPLETAR cantidad]' : f.cantidad.toLocaleString('es-PE'), sol(f.pu), sol(f.parcial)]),
       [{ v: 'Total de bienes', bold: true, span: 4 }, { v: sol(Q.total), bold: true }]
     ], { num: [2, 3, 4], anchos: [36, 16, 12, 20, 16], size: 17 }) : p('[COMPLETAR: el proyecto no tiene bienes calculados para este nivel]'),
-    p('Precios referenciales de la estructura de costos del expediente (costo puesto en la institución educativa, con IGV). No son el precio de ningún postor.', { size: 16, italics: true, color: TENUE }),
+    p(Q.precio_catalogo ? 'Precios referenciales con IGV: el kit, del catálogo de precios de IOARR publicadas (sin transporte); los demás bienes, de la estructura de costos del expediente. No son el precio de ningún postor.'
+      : 'Precios referenciales de la estructura de costos del expediente (costo puesto en la institución educativa, con IGV). No son el precio de ningún postor.', { size: 16, italics: true, color: TENUE }),
     titulo('4. Especificaciones técnicas', 2, { align: AlignmentType.LEFT }),
     p(`Normas técnicas aplicables: ${d.normas_tecnicas || '[COMPLETAR normas técnicas]'}${d.normas_verificadas ? ' (verificadas por el usuario)' : ' [VERIFICAR normas técnicas]'}.`, { bold: true, size: 19 }),
     ...(bienes.length ? bienes : Object.keys(ESPECIFICACIONES).filter(k => k !== 'kit')).flatMap(k => [

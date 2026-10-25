@@ -151,6 +151,8 @@ export const SECCIONES = [
   ] },
   { id: 'tecnico', titulo: 'Cantidades y especificaciones técnicas (Anexo 3-A)', campos: [
     C('metodo_cantidades', { tipo: 'opcion', etiqueta: 'Cantidades', opciones: { app: 'Cálculo de la app (escenario del expediente)', malo_ugel: 'Mobiliario en estado Malo declarado por la UGEL' } }),
+    C('precio_kit_origen', { tipo: 'opcion', etiqueta: 'Precio por kit en el Anexo 3-A', opciones: { app: 'Estructura de costos del expediente', catalogo: 'Catálogo de precios referenciales (IOARR publicadas)' },
+      ayuda: 'El del catálogo es el precio sin IGV elegido en «Precios referenciales» (mediana o una fuente), sin transporte.' }),
     C('sustento_ugel', { si: 'malo_ugel', etiqueta: 'Documento de la UGEL que declara las cantidades', ayuda: 'Ej.: Oficio N° 123-2026-UGEL-X' }),
     C('normas_tecnicas', { tipo: 'parrafo', etiqueta: 'Normas técnicas aplicables', ayuda: `Ej.: ${NORMAS_SUGERIDAS.join('; ')}. Revísalas antes de exportar.` }),
     C('normas_verificadas', { tipo: 'confirmacion', etiqueta: 'Verifiqué que las normas técnicas están vigentes y aplican a este nivel' })
@@ -295,15 +297,20 @@ export const sinComentario = t => sinControl(t).replace(/^\s*<!--[\s\S]*?-->\s*\
  */
 export function cuadroCantidades(d, ctx = {}) {
   const ugel = d.metodo_cantidades === 'malo_ugel';
+  // Kit con el precio del catálogo de precios referenciales (sin IGV → con IGV, sin transporte)
+  const cat = d.precio_kit_origen === 'catalogo', ref = ctx.precio_ref;
   const filas = (ctx.metas || []).map(m => {
-    const pu = m.cantidad > 0 ? r2(m.costo / m.cantidad) : null;
+    const desdeCat = cat && m.k === 'kit';
+    const pu = desdeCat ? (ref?.precio != null ? r2(ref.precio * 1.18) : null) : m.cantidad > 0 ? r2(m.costo / m.cantidad) : null;
     const cantidad = ugel ? (d.cantidades_ugel?.[m.k] ?? null) : m.cantidad;
-    return { k: m.k, nombre: m.nombre, unidad: m.unidad, cantidad, cantidad_app: m.cantidad, pu, parcial: cantidad != null && pu != null ? (ugel ? r2(cantidad * pu) : r2(m.costo)) : null };
+    return { k: m.k, nombre: m.nombre, unidad: m.unidad, cantidad, cantidad_app: m.cantidad, pu, catalogo: desdeCat,
+      parcial: cantidad != null && pu != null ? (ugel || desdeCat ? r2(cantidad * pu) : r2(m.costo)) : null };
   });
   const total = filas.every(f => f.parcial != null) ? r2(filas.reduce((a, f) => a + f.parcial, 0)) : null;
-  return { metodo: ugel ? 'malo_ugel' : 'app', filas, total,
-    texto: ugel ? `Cantidades: mobiliario en estado Malo declarado por la UGEL${d.sustento_ugel ? ' (' + d.sustento_ugel + ')' : ''}. Precio unitario referencial con IGV de la estructura de costos de la app.`
-      : `Cantidades del cálculo de la app. ${ctx.escenario_texto || ''}`.trim() };
+  const textoCat = cat && filas.some(f => f.catalogo) ? ` Kit: precio del catálogo de precios referenciales de IOARR publicadas (${ref?.precio != null ? `S/ ${formatoMonto(ref.precio)} sin IGV, ${ref.modo === 'registro' ? 'una fuente' : `mediana de ${ref.n} ${ref.n === 1 ? 'fuente' : 'fuentes'}`}` : 'sin referencia comparable'}), con IGV y sin transporte.` : '';
+  return { metodo: ugel ? 'malo_ugel' : 'app', filas, total, precio_catalogo: cat,
+    texto: (ugel ? `Cantidades: mobiliario en estado Malo declarado por la UGEL${d.sustento_ugel ? ' (' + d.sustento_ugel + ')' : ''}. Precio unitario referencial con IGV de la estructura de costos de la app.`
+      : `Cantidades del cálculo de la app. ${ctx.escenario_texto || ''}`.trim()) + textoCat };
 }
 export const especificacionDe = (d, k) => d.especificaciones?.[k] || ESPECIFICACIONES[k]?.texto || '';
 
@@ -368,6 +375,11 @@ export function validarFicha(d, ctx = {}) {
     const Q = cuadroCantidades(d, ctx);
     if (!Q.filas.length) err('metodo_cantidades', 'No hay bienes en el cálculo de la app para tomar los precios unitarios.');
     else if (Q.filas.some(f => f.cantidad == null)) err('metodo_cantidades', 'Con «Malo declarado por la UGEL», escribe la cantidad de cada bien.');
+  }
+  if (d.precio_kit_origen === 'catalogo') {
+    if (!(ctx.metas || []).some(m => m.k === 'kit')) err('precio_kit_origen', 'El precio del catálogo es por kit: activa «kit» en Costos o usa la estructura de costos.');
+    else if (ctx.precio_ref?.precio == null) err('precio_kit_origen', 'No hay precio de referencia comparable en el catálogo para este nivel: elige otra referencia en «Precios referenciales» o usa la estructura de costos.');
+    else for (const a of ctx.precio_ref.avisos || []) adv('precio_kit_origen', `Precio del catálogo: ${a}`);
   }
   if (!d.normas_verificadas) err('normas_verificadas', 'Verifica las normas técnicas aplicables y marca la confirmación.');
   for (const k of TIPOS_BIEN.filter(k => d.especificaciones?.[k]).concat('normas_tecnicas')) {
@@ -452,6 +464,9 @@ export function transparencia(d, ctx = {}, armado = armarTexto(d)) {
   const app = Object.entries(d._precarga || {}).filter(([k, v]) => !vacio(v) && d[k] === v)
     .map(([k, v]) => ({ campo: etiquetaDe(k), valor: POR_K[k]?.tipo === 'monto' ? 'S/ ' + formatoMonto(v) : String(v), fuente: d._precarga_notas?.[k] || 'Cálculo de la app' }));
   const Q = cuadroCantidades(d, ctx);
+  if (Q.precio_catalogo && ctx.precio_ref?.precio != null)
+    app.push({ campo: 'Precio por kit (Anexo 3-A)', valor: `S/ ${formatoMonto(ctx.precio_ref.precio)} sin IGV`,
+      fuente: `Catálogo de precios referenciales de IOARR publicadas: ${ctx.precio_ref.modo === 'registro' ? 'una fuente' : `mediana de ${ctx.precio_ref.n} ${ctx.precio_ref.n === 1 ? 'fuente' : 'fuentes'}`}.` });
   if (Q.filas.length) app.push({ campo: 'Cantidades y precios unitarios (Anexo 3-A)', valor: Q.filas.map(f => `${f.nombre}: ${f.cantidad ?? '—'}`).join('; '), fuente: Q.texto });
   const supuestos = [
     `Las plantillas provienen de las bases del proceso 015-2026 (I.E. San Juan, La Libertad) y aplican el ${REGLAMENTO_PLANTILLAS}. Deben revisarse contra el documento original antes de publicar.`,
