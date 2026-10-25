@@ -22,7 +22,7 @@ import express from 'express';
 import { randomUUID } from 'node:crypto';
 import { supabase } from '../ioarr/db.js';
 import {
-  limpiarFicha, validarFicha, calcularMontos, montoEnLetras, cuadroCantidades, precargar, contextoApp, compararFichas,
+  limpiarFicha, validarFicha, descuadreFicha, calcularMontos, montoEnLetras, cuadroCantidades, precargar, contextoApp, compararFichas,
   SECCIONES, HASH_PLANTILLAS, DECLARACION, REGLAMENTO_PLANTILLAS, PROPUESTA_MIN, PROPUESTA_MAX, OBLIGATORIOS_DE
 } from './bases.js';
 import { ESPECIFICACIONES, NORMAS_SUGERIDAS } from './bases-especificaciones.js';
@@ -143,6 +143,9 @@ export function crearApiBases({ expediente, preciosRef = null }) {
     if (req.body?.datos && typeof req.body.datos === 'object') {
       const { _precarga, _precarga_notas, ...nuevos } = req.body.datos;   // lo precargado solo lo cambia el servidor
       cambios.datos = limpiarFicha({ ...f.datos, ...nuevos, _precarga: f.datos?._precarga, _precarga_notas: f.datos?._precarga_notas });
+      // Los componentes deben sumar el total declarado: si no, no se guarda
+      const d = descuadreFicha(cambios.datos);
+      if (d) throw error(400, 'No se guardó: ' + d);
     }
     if ('nombre' in (req.body || {})) {
       cambios.nombre = String(req.body.nombre || '').trim().slice(0, 200);

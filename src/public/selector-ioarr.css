@@ -514,3 +514,4 @@ tr.fila-alerta td{ background:rgba(214,69,58,0.06); }
 .btn-link{ background:none; border:0; padding:0; color:var(--accent); text-decoration:underline; cursor:pointer; font:inherit; }
 #exp-v-precios .tabla td .sub{ display:block; }
 #exp-v-precios .tabla td:nth-child(2){ min-width:170px; }
+#exp-v-precios .pr-formula{ max-width:240px; white-space:normal; overflow-wrap:anywhere; text-align:left; margin-left:auto; }

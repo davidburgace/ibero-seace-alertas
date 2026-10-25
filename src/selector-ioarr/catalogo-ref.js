@@ -19,8 +19,13 @@
 // Rutas: catalogo-ref-api.js
 // ============================================================================
 
+import { descuadre, soles } from './montos.js';
+
 export const IGV = 18;
-export const TIPOS_DOC = { '07-C': 'Formato 07-C', bases: 'Bases', estudio_mercado: 'Estudio de mercado', propio: 'Precio propio (uso interno)', por_confirmar: 'Por confirmar' };
+export const TIPOS_DOC = { '07-C': 'Formato 07-C', bases: 'Bases', estudio_mercado: 'Estudio de mercado', estimado_derivado: 'Estimado derivado (de los montos de un 07-C)',
+  propio: 'Precio propio (uso interno)', por_confirmar: 'Por confirmar' };
+// Componentes del monto total de una IOARR (07-C o bases): deben sumar exactamente el total declarado
+export const COMPONENTES = { ejecucion: 'Ejecución física', doc_equivalente: 'Documento equivalente', sup_doc_equivalente: 'Supervisión del documento equivalente', sup_ejecucion: 'Supervisión de la ejecución física' };
 export const NIVELES = { Inicial: 'Inicial', Primaria: 'Primaria', Secundaria: 'Secundaria', por_confirmar: 'Por confirmar' };
 export const UNIDADES = { kit: 'Kit (mesa + silla)', mesa: 'Mesa', silla: 'Silla', carpeta: 'Carpeta', pieza: 'Pieza de mobiliario (sin especificar)' };
 export const MATERIALES = { madera: 'Madera', 'metal-madera': 'Metal y madera', 'metal-polipropileno': 'Metal y polipropileno', por_confirmar: 'Por confirmar' };
@@ -47,6 +52,7 @@ const bool = v => v === true || v === false ? v : v == null || v === '' ? null
  * @returns { r, errores: [texto] } r es null si hay errores
  */
 export function limpiarRegistro(b = {}) {
+  b = b || {};
   const errores = [], err = t => errores.push(t);
   const enumDe = (v, E, nombre, req = true) => { const s = texto(v); if (!s) { if (req) err(`Falta ${nombre}`); return null; } if (!(s in E)) { err(`${nombre} no válido: «${s}» (${Object.keys(E).join(', ')})`); return null; } return s; };
   const r = {};
@@ -64,6 +70,38 @@ export function limpiarRegistro(b = {}) {
   r.nivel = enumDe(b.nivel, NIVELES, 'nivel');
   r.unidad = enumDe(b.unidad, UNIDADES, 'unidad');
   r.material = enumDe(b.material, MATERIALES, 'material');
+  // Componentes del total (07-C o bases): opcionales, pero si se dan deben sumar exactamente el total
+  r.componentes = null;
+  const cb = b.componentes && typeof b.componentes === 'object' ? b.componentes : null;
+  if (cb && [...Object.keys(COMPONENTES), 'total'].some(k => cb[k] !== '' && cb[k] != null)) {
+    const c = {};
+    for (const [k, et] of [...Object.entries(COMPONENTES), ['total', 'Total declarado']]) {
+      const v = numero(cb[k]);
+      if (v == null) err(`Componentes: falta «${et}»`); else if (Number.isNaN(v) || v < 0 || v > 1e11) err(`Componentes: «${et}» no válido`); else c[k] = r2(v);
+    }
+    if (Object.keys(c).length === 5) {
+      const d = descuadre(Object.fromEntries(Object.entries(COMPONENTES).map(([k, et]) => [et, c[k]])), c.total);
+      if (d) err('Los componentes no suman el total declarado: ' + d); else r.componentes = c;
+    }
+  }
+  // Estimado derivado: el monto sale de una fórmula (ejecución física / cantidad), no se escribe a mano
+  const dv = b.derivacion && typeof b.derivacion === 'object' ? b.derivacion : null;
+  const div = numero(dv?.divisor), divAlt = numero(dv?.divisor_alternativo);
+  r.derivacion = null; r.formula = null; r.monto_alternativo = null;
+  if (r.tipo_documento === 'estimado_derivado') {
+    if (!cb) err('Estimado derivado: indica los componentes del 07-C (al menos la ejecución física y el total)');
+    if (!Number.isInteger(div) || div < 1) err('Estimado derivado: indica la cantidad entre la que se divide la ejecución física');
+    if (divAlt != null && (!Number.isInteger(divAlt) || divAlt < 1)) err('Estimado derivado: la cantidad alternativa no es válida');
+    if (r.componentes && Number.isInteger(div) && div >= 1) {
+      const ej = r.componentes.ejecucion, detalle = texto(dv.detalle, 300) || null;
+      r.derivacion = { base: 'ejecucion', divisor: div, divisor_alternativo: Number.isInteger(divAlt) && divAlt >= 1 ? divAlt : null, detalle };
+      b = { ...b, monto: r2(ej / div) };
+      r.monto_alternativo = r.derivacion.divisor_alternativo ? r2(ej / r.derivacion.divisor_alternativo) : null;
+      r.formula = `Ejecución física ${soles(ej)} / ${div.toLocaleString('es-PE')} = ${soles(b.monto)}`
+        + (r.monto_alternativo ? `; alternativa: / ${r.derivacion.divisor_alternativo.toLocaleString('es-PE')} = ${soles(r.monto_alternativo)}` : '')
+        + (detalle ? ` (${detalle})` : '');
+    }
+  } else if (dv && (div != null || divAlt != null)) err('La fórmula de derivación solo vale para el tipo «estimado derivado»');
   const monto = numero(b.monto);
   if (monto == null) err('Falta el monto'); else if (Number.isNaN(monto) || monto <= 0 || monto > 1e6) err('Monto no válido (mayor que 0)');
   r.monto = monto > 0 && monto <= 1e6 ? r2(monto) : null;
@@ -127,6 +165,7 @@ export function normalizar(r) {
   if (r.incluye_igv == null) { out.motivo = 'No se sabe si el monto incluye IGV'; return out; }
   const aSinIgv = v => r.incluye_igv ? sinIgv(v) : r2(v);
   out.precio_sin_igv = aSinIgv(base);
+  if (r.monto_alternativo != null) out.precio_alternativo_sin_igv = aSinIgv(r.monto_alternativo);
   if (r.unidad === 'kit') { out.precio_kit_sin_igv = out.precio_sin_igv; out.comparable = true; return out; }
   const comp = r.composicion || [];
   if (!comp.length) { out.motivo = `Unidad «${r.unidad}»: falta la composición del kit para convertir`; return out; }
@@ -293,6 +332,12 @@ export const PRECARGA = [
   { id: 'c0a7a10e-0000-4000-8000-000000000001', tipo_documento: 'por_confirmar', entidad: null, region: 'Loreto', anio: 2026, nivel: 'por_confirmar', unidad: 'kit', material: 'madera', monto: 624, monto_hasta: null, incluye_igv: false, cotizaciones: null, composicion: [], confianza: 'media' },
   { id: 'c0a7a10e-0000-4000-8000-000000000002', tipo_documento: 'por_confirmar', entidad: null, region: 'Huánuco', anio: 2023, nivel: 'por_confirmar', unidad: 'pieza', material: 'metal-madera', monto: 267.5, monto_hasta: null, incluye_igv: true, cotizaciones: { valores: [], n: 4, promedio: 267.5 }, composicion: [], confianza: 'media' },
   { id: 'c0a7a10e-0000-4000-8000-000000000003', tipo_documento: 'por_confirmar', entidad: null, region: 'Huánuco', anio: 2025, nivel: 'por_confirmar', unidad: 'kit', material: 'metal-madera', monto: 455, monto_hasta: 480, incluye_igv: null, cotizaciones: null, composicion: [], confianza: 'media' },
-  { id: 'c0a7a10e-0000-4000-8000-000000000004', tipo_documento: 'por_confirmar', entidad: 'Gobierno Regional de La Libertad', region: 'La Libertad', anio: 2026, nivel: 'por_confirmar', unidad: 'kit', material: 'metal-polipropileno', monto: 700, monto_hasta: null, incluye_igv: null, cotizaciones: null, composicion: [], confianza: 'media' },
+  // San Juan: corregido con el Formato 07-C (migración 031)
+  { id: 'c0a7a10e-0000-4000-8000-000000000004', tipo_documento: 'estimado_derivado', cui: '2711098', entidad: 'Gobierno Regional de La Libertad', region: 'La Libertad', anio: 2026, nivel: 'por_confirmar', unidad: 'kit', material: 'metal-polipropileno',
+    monto: 707.53, monto_hasta: null, incluye_igv: true, cotizaciones: null, composicion: [], confianza: 'media',
+    componentes: { ejecucion: 739373.42, doc_equivalente: 43144.10, sup_doc_equivalente: 41219.36, sup_ejecucion: 96178.51, total: 919915.39 },
+    derivacion: { divisor: 1045, divisor_alternativo: 1087, detalle: '1,045 mesas y 1,045 sillas de alumno (420 + 420 + 205); alternativa con 42 escritorios: 1,087' },
+    notas: 'Estimado a partir del 07-C; el precio unitario real está en la memoria de costos, pendiente' },
+
   { id: 'c0a7a10e-0000-4000-8000-000000000005', tipo_documento: 'propio', entidad: null, region: null, anio: 2026, nivel: 'por_confirmar', unidad: 'kit', material: 'por_confirmar', monto: 850, monto_hasta: null, incluye_igv: false, cotizaciones: null, composicion: [], confianza: 'media' }
 ];

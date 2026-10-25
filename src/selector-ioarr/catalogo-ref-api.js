@@ -28,19 +28,19 @@ import { supabase } from '../ioarr/db.js';
 import { BUCKET_EXPEDIENTE, mimeDe, nombreUtf8, nombreSeguro } from './archivos.js';
 import {
   limpiarRegistro, normalizar, estadisticos, posicion, referencia, estimarConvenio, riesgo, validarCsv, plantillaCsv,
-  TIPOS_DOC, NIVELES, UNIDADES, MATERIALES, CONFIANZAS, MIN_FUENTES, RANGO_MIN, RANGO_MAX, IGV, NIVEL_DE
+  TIPOS_DOC, NIVELES, UNIDADES, MATERIALES, CONFIANZAS, COMPONENTES, MIN_FUENTES, RANGO_MIN, RANGO_MAX, IGV, NIVEL_DE
 } from './catalogo-ref.js';
 
-export const AVISO_REF = 'Falta ejecutar supabase/migrations/029_ioarr_catalogo_precios_ref.sql en Supabase para el catálogo de precios referenciales';
+export const AVISO_REF = 'Faltan migraciones del catálogo de precios referenciales en Supabase (029 a 031: supabase/migrations/)';
 const faltaMigracion = e => e?.code === 'PGRST204' || e?.code === 'PGRST205' || e?.code === '42P01' || /schema cache|does not exist/i.test(e?.message || '');
 const esUuid = s => /^[0-9a-f-]{36}$/i.test(String(s || ''));
 const error = (status, msg, extra) => Object.assign(new Error(msg), { status, extra });
 const MAX_PDF = 15 * 1024 * 1024, MAX_CSV = 2 * 1024 * 1024;
 const subida = (max) => multer({ storage: multer.memoryStorage(), limits: { fileSize: max, files: 1 } });
-const COLS = 'id, tipo_documento, cui, entidad, region, anio, url, archivo_nombre, nivel, unidad, material, monto, monto_hasta, incluye_igv, cotizaciones, composicion, flete_transporte, confianza, notas, creado_en, actualizado_en';
+const COLS = 'id, tipo_documento, cui, entidad, region, anio, url, archivo_nombre, nivel, unidad, material, monto, monto_hasta, incluye_igv, cotizaciones, composicion, flete_transporte, confianza, notas, componentes, derivacion, formula, monto_alternativo, creado_en, actualizado_en';
 const num = v => v == null ? null : Number(v);
 // numeric de Postgres llega como texto
-const deFila = f => ({ ...f, monto: num(f.monto), monto_hasta: num(f.monto_hasta), flete_transporte: num(f.flete_transporte), composicion: f.composicion || [], tiene_archivo: !!f.archivo_nombre });
+const deFila = f => ({ ...f, monto: num(f.monto), monto_hasta: num(f.monto_hasta), flete_transporte: num(f.flete_transporte), monto_alternativo: num(f.monto_alternativo), composicion: f.composicion || [], tiene_archivo: !!f.archivo_nombre });
 
 /**
  * Referencia, estimación y riesgo de cada IOARR del proyecto.
@@ -96,7 +96,7 @@ export function crearApiPreciosRef({ expediente, proyectoDelUsuario }) {
       estadisticos: est.map(g => ({ ...g, propio: propio ? posicion(propio.precio_kit_sin_igv, g) : null })),
       propio: propio ? { id: propio.id, precio_kit_sin_igv: propio.precio_kit_sin_igv } : null,
       opciones: { tipos: TIPOS_DOC, niveles: NIVELES, unidades: UNIDADES, materiales: MATERIALES, confianzas: CONFIANZAS },
-      min_fuentes: MIN_FUENTES, igv: IGV
+      componentes: COMPONENTES, min_fuentes: MIN_FUENTES, igv: IGV
     });
   }));
 
@@ -109,7 +109,7 @@ export function crearApiPreciosRef({ expediente, proyectoDelUsuario }) {
 
   api.patch('/precios-ref/:id', responder(async (req, res) => {
     const actual = deFila(await uno(req.params.id));
-    const { id: _, archivo_ruta: _r, archivo_nombre: _n, creado_por: _c, ...cambios } = req.body || {};
+    const { id: _, archivo_ruta: _r, archivo_nombre: _n, creado_por: _c, formula: _f, monto_alternativo: _m, ...cambios } = req.body || {};   // fórmula y alternativo los calcula el servidor
     const { r, errores } = limpiarRegistro({ ...actual, ...cambios });
     if (!r) throw error(400, errores[0], { errores });
     const f = ok(await supabase.from('ioarr_precios_ref').update(r).eq('id', actual.id).select(COLS).single());
