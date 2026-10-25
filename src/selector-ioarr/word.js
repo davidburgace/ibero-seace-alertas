@@ -5,6 +5,7 @@
 //   generarMemoria(M)  Memoria descriptiva
 //   generarVerificacion(M)  Lista de verificación del expediente
 //   generarVidaUtil(M, V, cod?)  Informe técnico de vida útil (consolidado o de un colegio)
+//   generar05B(M)      Borrador del Formato 05-B: idea de la inversión con los montos por año
 // M es el modelo de armarModelo() (src/selector-ioarr/documentos.js).
 // ============================================================================
 
@@ -195,8 +196,8 @@ export async function generar07C(M) {
   ]));
 
   c.push(titulo('A. Alineamiento a una brecha prioritaria'));
-  c.push(kv([['Función', M.A.funcion], ['División funcional', M.A.division], ['Grupo funcional', M.A.grupos.join('; ')], ['Sector responsable', M.A.sector],
-    ['Servicios públicos con brecha identificada y priorizada', M.A.servicio], ['Tipología de proyecto asociada', M.A.tipologia]]));
+  c.push(kv([['Cadena funcional', M.A.cadena || `${M.A.funcion} / ${M.A.division} / ${M.A.grupos.join('; ')}`], ['Función', M.A.funcion], ['División funcional', M.A.division], ['Grupo funcional', M.A.grupos.join('; ')], ['Sector responsable', M.A.sector],
+    ['Servicios públicos con brecha identificada y priorizada', M.A.servicio], ['Tipología de proyecto asociada', M.A.tipologia], ['Tipo de brecha a la que contribuye', M.A.contribucion]]));
   c.push(espacio());
   c.push(tabla(['Tipo', 'Indicador de brecha', 'Unidad de medida', 'Contribución a la brecha del PMI'], M.A.indicadores.map(x => [x.tipo, x.nombre, x.unidad || PEND, { v: x.valor == null ? '' : ent(x.valor) }]), { num: [3], anchos: [12, 52, 18, 18] }));
   c.push(espacio());
@@ -478,4 +479,30 @@ export async function generarVidaUtil(M, V, cod = null) {
   c.push(...lineaFirma('Firma y sello del responsable de control patrimonial'));
   c.push(...lineaFirma('Visto bueno: responsable de la Unidad Formuladora (nombre, firma y fecha)'));
   return Packer.toBuffer(documento(M, 'Informe de vida útil', c));
+}
+
+// ─── Formato 05-B: idea de la IOARR (programación en el PMI) ────────────────
+export async function generar05B(M) {
+  const B = M.B05, c = [];
+  c.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 60 }, children: [run('FORMATO N° 05-B: REGISTRO DE LA IDEA DE IOARR', { bold: true, size: 28 })] }));
+  c.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 200 }, children: [run('Borrador para la programación en la cartera del PMI', { italics: true, size: 17, color: TENUE })] }));
+  c.push(...avisoChecklist(M));
+  c.push(p('BORRADOR DE TRABAJO. El registro de la idea se hace en el aplicativo del Banco de Inversiones; este documento sirve para prepararlo. Lo marcado «PENDIENTE» falta completar.', { italics: true, color: TENUE, size: 17, plano: true }));
+  c.push(titulo('1. Idea de la inversión'));
+  c.push(kv([['Nombre de la idea (tipo de IOARR + nombre genérico de las UP + ámbito geográfico)', B.idea], ['Tipo de IOARR', B.tipo], ['Nombre genérico de las UP', B.upGenerica],
+    ['Ámbito geográfico', `${B.ambito.toLowerCase()} · ${B.lugar.replace(/^en (el|la) /, '')}`], ['Número de UP', ent(B.nUp)], ['Activo', 'MOBILIARIO DE AULA']], [45, 55]));
+  c.push(titulo('2. Alineamiento a una brecha prioritaria'));
+  c.push(kv([['Cadena funcional', M.A.cadena || `${M.A.funcion} / ${M.A.division} / ${M.A.grupos.join('; ')}`], ['Servicio con brecha', M.A.servicio],
+    ['Indicador de brecha', M.A.indicadores.map(x => x.nombre).join('; ')], ['Tipo de brecha a la que contribuye', M.A.contribucion]]));
+  c.push(titulo('3. Monto y programación'));
+  c.push(kv([['Monto de inversión estimado (S/)', `${soles(B.monto)}${M.uit?.enUit != null ? ` = ${NS.format(M.uit.enUit)} UIT` : ''}`], ['Registro del Formato 07-C', M.registroRotulo || M.registro]]));
+  c.push(espacio());
+  c.push(tabla(['Año', 'Período', 'Monto programado (S/)'], [...B.programacion.map(x => [String(x.anio), x.rotulo, { v: NS.format(x.monto) }]),
+    [{ v: 'Total', bold: true }, '', { v: NS.format(B.suma), bold: true, pend: !B.cuadra }]], { num: [2], anchos: [25, 25, 50] }));
+  if (B.propuesto) c.push(nota('PENDIENTE: montos por año propuestos (todo en el año t). Edítalos en Documentos según la programación de la entidad.'));
+  if (!B.cuadra) c.push(p(`PENDIENTE: la programación suma ${soles(B.suma)} y el monto de inversión es ${soles(B.monto)}.`));
+  c.push(titulo('4. Institucionalidad'));
+  c.push(kv([['OPMI', M.B.opmi], ['Unidad Formuladora (UF)', M.B.uf], ['Unidad Ejecutora de Inversiones (UEI)', M.B.uei]]));
+  c.push(nota('Una idea por nivel educativo (una IOARR masiva por nivel). Ver el anexo «Consultas a la OPMI» de la memoria descriptiva.'));
+  return Packer.toBuffer(documento(M, 'Formato 05-B', c));
 }

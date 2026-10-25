@@ -80,7 +80,7 @@ function pintar() {
     <div class="exportar">
       <div><h3>Documentos en Word</h3><p>Borrador del Formato 07-C para preparar el registro en el Banco de Inversiones, y memoria descriptiva. Lo que falte sale marcado «PENDIENTE» en amarillo.</p>
         <label class="chk"><input type="checkbox" id="doc-borrador" ${modoBorrador ? 'checked' : ''}> Borrador con todos los colegios (también los que tienen el checklist de inventario y baja incompleto)</label></div>
-      <div class="acciones-fila"><button class="btn btn-primary" data-doc-bajar="formato-07c" type="button">Formato 07-C (Word)</button><button class="btn btn-ghost" data-doc-bajar="memoria" type="button">Memoria descriptiva (Word)</button><button class="btn btn-ghost" data-doc-bajar="lineamientos/anexos" type="button">Anexos de Lineamientos (Excel)</button><button class="btn btn-ghost" data-doc-zip type="button">Expediente completo (ZIP)</button></div>
+      <div class="acciones-fila"><button class="btn btn-primary" data-doc-bajar="formato-07c" type="button">Formato 07-C (Word)</button><button class="btn btn-ghost" data-doc-bajar="memoria" type="button">Memoria descriptiva (Word)</button><button class="btn btn-ghost" data-doc-bajar="formato-05b" type="button">Formato 05-B (Word)</button><button class="btn btn-ghost" data-doc-bajar="lineamientos/anexos" type="button">Anexos de Lineamientos (Excel)</button><button class="btn btn-ghost" data-doc-zip type="button">Expediente completo (ZIP)</button></div>
     </div>
     <div class="cols">
       <div class="panel"><div class="panel-cab"><h3>Pendientes</h3><span class="guardado" id="doc-guardado"></span></div>
@@ -98,14 +98,22 @@ function pintar() {
           : campo('cui', 'Código único de inversión (CUI)', { ph: R.cui || 'Se asigna al registrar', max: 8 })}
       </div>
       <h3>A. Alineamiento a la brecha</h3>
-      <p class="sub">Función ${esc(R.funcion)} · división ${esc(R.division)} · grupo ${esc(R.grupos.join('; '))}. Vacío = se propone por nivel educativo. Verifícalo contra el PMI de la entidad.</p>
+      <p class="sub">Función ${esc(R.funcion)} · división ${esc(R.division)} · grupo ${esc(R.grupos.join('; '))}. Vacío = se propone por nivel educativo. Verifícalo contra el PMI de la entidad. ${esc(R.alineamiento.contribucion)}</p>
       <div class="form-grid">
+        ${campo('cadena_funcional', 'Cadena funcional', { ancho: true, ph: R.alineamiento.cadena, ayuda: 'Función / división funcional / grupo funcional del PMI.' })}
         ${campo('servicio_brecha', 'Servicio público con brecha', { ancho: true, ph: R.alineamiento.servicio })}
         ${campo('tipologia', 'Tipología de proyecto', { ancho: true, ph: R.alineamiento.tipologia })}
         ${campo('indicador_brecha', 'Indicador de brecha', { ancho: true, max: 500, ph: R.alineamiento.indicadores.map(x => x.nombre).join(' / '), ayuda: 'Verifícalo contra el PMI.' })}
         ${campo('unidad_indicador', 'Unidad de medida del indicador', { ph: 'Ej.: LOCAL EDUCATIVO', ayuda: 'Verifícala contra el PMI.' })}
         ${campo('contribucion_brecha', 'Contribución a la brecha', { tipo: 'number', min: 0, step: 1, ayuda: 'Vacía por defecto: escríbela cuando la confirmes con el PMI.' })}
       </div>
+      <h3>Formato 05-B: idea de la inversión</h3>
+      <p class="sub">Idea: <b>${esc(R.b05.idea)}</b> (tipo de IOARR + nombre genérico de las UP + ámbito geográfico). Montos por año para la programación en el PMI${vista.nivel ? ` de la IOARR ${esc(vista.nombre_ioarr)}` : ''}; vacíos = todo en el año t.</p>
+      <div class="form-grid">
+        ${campo('anio_t', 'Año t', { tipo: 'number', min: 2020, max: 2100, ph: String(R.b05.anioT) })}
+        ${R.b05.programacion.map(x => `<div class="campo"><label for="doc-05b-${x.k}">${x.rotulo} (${x.anio}), S/</label><input id="doc-05b-${x.k}" data-doc-05b="${x.k}" type="number" min="0" step="0.01" inputmode="decimal" value="${vista.datos.por_nivel?.[vista.nivel]?.montos_05b?.[x.k] ?? ''}" placeholder="${R.b05.propuesto ? x.monto : ''}"></div>`).join('')}
+      </div>
+      ${R.b05.cuadra ? '' : `<p class="sub aviso-linea">La programación suma ${soles(R.b05.suma)} y el monto de inversión es ${soles(R.total)}.</p>`}
       <h3>Unidades productoras</h3>
       <div class="form-grid">
         ${campo('up_por', 'Listar las UP por', { tipo: 'select', opciones: [['local', 'Código de local (solo los locales con bienes a reponer)'], ['modular', 'Código modular (todos los servicios, aunque el local no reponga)']], ayuda: `${R.ups} UP en el 07-C · ${R.locales_con_bienes} locales con bienes a reponer.` })}
@@ -180,6 +188,7 @@ function leer() {
   datos.fuentes_vida_util = [...ctx.el.querySelectorAll('[data-doc-fuente]:checked')].map(e => e.dataset.docFuente);
   if (vista.nivel) {
     const propio = {}; ctx.el.querySelectorAll('[data-doc-niv]').forEach(e => { propio[e.dataset.docNiv] = e.value; });
+    propio.montos_05b = {}; ctx.el.querySelectorAll('[data-doc-05b]').forEach(e => { if (e.value !== '') propio.montos_05b[e.dataset.doc05b] = e.value; });
     datos.por_nivel = { ...(vista.datos.por_nivel || {}), [vista.nivel]: propio };
   }
   return datos;
@@ -193,7 +202,7 @@ async function guardar() {
     const v = await ctx.api(`/proyectos/${ctx.proyecto.id}/documentos${qn()}`, { method: 'PATCH', body: { datos: leer() } });
     if (mio !== version) return;
     // Se vuelve a pintar el resumen y los pendientes sin perder el foco del campo
-    const activo = document.activeElement, sel = activo?.dataset?.doc ? `[data-doc="${activo.dataset.doc}"]` : activo?.dataset?.docNiv ? `[data-doc-niv="${activo.dataset.docNiv}"]` : activo?.dataset?.docT ? `[data-doc-t="${activo.dataset.docT}"][data-k="${activo.dataset.k}"]` : null;
+    const activo = document.activeElement, sel = activo?.dataset?.doc ? `[data-doc="${activo.dataset.doc}"]` : activo?.dataset?.docNiv ? `[data-doc-niv="${activo.dataset.docNiv}"]` : activo?.dataset?.docT ? `[data-doc-t="${activo.dataset.docT}"][data-k="${activo.dataset.k}"]` : activo?.dataset?.doc05b ? `[data-doc-05b="${activo.dataset.doc05b}"]` : null;
     const pos = activo && 'selectionStart' in activo ? (() => { try { return activo.selectionStart; } catch { return null; } })() : null;
     vista = v; pintar();
     if (sel) { const e = ctx.el.querySelector(sel); if (e) { e.focus(); if (pos != null) try { e.setSelectionRange(pos, pos); } catch { /* inputs sin selección */ } } }

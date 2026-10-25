@@ -36,6 +36,7 @@
 //   Lineamientos IOARR (lineamientos.js)
 //     GET    /proyectos/:id/lineamientos/anexos      Excel: ficha de activos a reponer…
 //     GET    /proyectos/:id/documentos/vida-util     Word del informe técnico de vida útil (?cod= un colegio)
+//     GET    /proyectos/:id/documentos/formato-05b   Word del borrador del Formato 05-B (idea, montos t, t+1, t+2)
 //     GET    /proyectos/:id/colegios                 por colegio: checklist de inventario y baja… y su costo
 //     PUT    /proyectos/:id/colegios/:cod            { datos } (en ioarr_expediente_documentos.datos.colegios)
 //   Documentos, anexos y ZIP salen en versión final: solo los colegios con el checklist completo.
@@ -78,7 +79,7 @@ import { limpiarEstructura, preciosEfectivos, limpiarInventario, limpiarAdquisic
 import { limpiarOferta, calcularOferta } from './oferta.js';
 import { generarExcelCostos } from './excel-costos.js';
 import { armarModelo, limpiarDatosDoc, ESTADOS_ACTIVO, MODALIDADES, FUENTES_FIN } from './documentos.js';
-import { generar07C, generarMemoria, generarVerificacion, generarVidaUtil } from './word.js';
+import { generar07C, generarMemoria, generarVerificacion, generarVidaUtil, generar05B } from './word.js';
 import { leerDuplicidad, separarLocales } from './duplicidad.js';
 import { fichaActivos, modeloVidaUtil, FUENTES_VIDA_UTIL, limpiarColegio, colegioVacio, colegioDe, checklistColegio, DOCS_BAJA, FUENTES_ENTREGA, TIPOS_ENTREGA, VENTANA_DUP, ESTADOS_USO } from './lineamientos.js';
 import { generarExcelLineamientos } from './excel-lineamientos.js';
@@ -894,7 +895,8 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
       ups: M.upsRegistro.length, up_por: M.upPor, locales_con_bienes: M.ups.length, sin_rep: M.sinRep.map(x => x.cod), ugels: M.ugels, mantenimiento_sugerido: M.ugels.join(', '),
       metas: M.F.metas.map(m => ({ k: m.k, nombre: m.nombre, cantidad: m.cantidad, unidad: m.unidad })), grupos: M.A.grupos, funcion: M.A.funcion, division: M.A.division, plazo: M.F.plazo,
       tipos: M.E.activos.map(a => ({ k: a.k, nombre: a.nombre, cantidad: a.cantidad, descripcion: a.descripcion, antiguedad_inventario: a.antiguedad_inventario })),
-      alineamiento: { servicio: M.A.servicio, tipologia: M.A.tipologia, indicadores: M.A.indicadores },
+      alineamiento: { servicio: M.A.servicio, tipologia: M.A.tipologia, indicadores: M.A.indicadores, cadena: `${M.A.funcion} / ${M.A.division} / ${M.A.grupos.join('; ')}`, contribucion: M.A.contribucion },
+      b05: M.B05,
       inicio: M.F.inicio, fin: M.F.fin, condiciones: M.E.condiciones
     },
     faltan: M.faltan
@@ -982,6 +984,13 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     const p = await proyecto(req), { M } = await modelo(p, req.query.nivel, opcionesDe(req));
     if (!M.ups.length) return res.status(400).json({ error: sinUps(M) });
     enviarWord(res, await generarVerificacion(M), `Lista_verificacion_${slug(p.nombre)}${sufijo(M)}_${M.fecha}.docx`);
+  }));
+
+  // Formato 05-B: idea de la IOARR del nivel, con los montos por año
+  api.get('/proyectos/:id/documentos/formato-05b', responder(async (req, res) => {
+    const p = await proyecto(req), { M } = await modelo(p, req.query.nivel, opcionesDe(req));
+    if (!M.ups.length) return res.status(400).json({ error: sinUps(M) });
+    enviarWord(res, await generar05B(M), `Formato_05B_idea_${slug(p.nombre)}${sufijo(M)}_${M.fecha}.docx`);
   }));
 
   // Informe técnico de vida útil: consolidado de la IOARR o de un colegio (?cod=)
@@ -1101,14 +1110,16 @@ export async function piezasExpediente({ A, datos, lista, meta, nombre }) {
     const vidaPorColegio = await Promise.all(M.vidaUtil.colegios.map(async y => ({ nombre: `${carpeta}07_Informes_vida_util_por_colegio/Informe_vida_util_${y.cod}.docx`, contenido: await generarVidaUtil(M, M.vidaUtil, y.cod), oculto: true })));
 
     const fuera = x.nivel ? (A.excluidos || []).filter(i => x.D.locSvc[i].length) : (A.excluidos || []);
-    const [f07c, memoria, verificacion, costos, { buffer: seleccion }, anexos, vida] = await Promise.all([
+    const [f07c, memoria, verificacion, costos, { buffer: seleccion }, anexos, vida, f05b] = await Promise.all([
       generar07C(M), generarMemoria(M), generarVerificacion(M),
       generarExcelCostos(x.R, { ...m, criterios: textoCriterios(A.P), escenario: textoEscenario(A.P, regDato(x.R)), precios: A.detalle, efectivos: A.efectivos, inventario: x.inv }),
       generarExcel(x.D, x.C, A.P, x.list, { ...m, duplicidad: A.dup, excluidos: fuera, revisiones: datos.situacional?.revisiones }),
       generarExcelLineamientos(anexosDe(M), { ...m, nombreIoarr: M.nombreIoarr }),
-      generarVidaUtil(M, M.vidaUtil)
+      generarVidaUtil(M, M.vidaUtil),
+      generar05B(M)
     ]);
     return [
+      { nombre: carpeta + '00_Formato_05B_idea.docx', contenido: f05b, descripcion: 'idea de la IOARR con los montos por año' },
       { nombre: carpeta + '01_Formato_07C_borrador.docx', contenido: f07c, descripcion: 'borrador del Formato 07-C' },
       { nombre: carpeta + '02_Memoria_descriptiva.docx', contenido: memoria },
       { nombre: carpeta + '03_Lista_de_verificacion.docx', contenido: verificacion },

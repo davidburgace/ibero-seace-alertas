@@ -119,7 +119,7 @@ export function calcularPaquete({ D, P, codigos, dup = {}, inv = {}, comun, dato
 export function modeloIoarr(A, x, datos, p, fecha) {
   const porNiv = A.modo === 'por_nivel';
   const dn = porNiv ? datos.por_nivel?.[x.nivel] || {} : null;
-  const datosX = porNiv ? { ...datos, nombre_inversion: dn.nombre_inversion || '', cui: dn.cui || '' } : datos;
+  const datosX = porNiv ? { ...datos, nombre_inversion: dn.nombre_inversion || '', cui: dn.cui || '', por_nivel_actual: dn } : datos;
   const proyectoX = porNiv ? { ...p, nombre: `${p.nombre} — IOARR ${x.nombre}`, ioarr: p.ioarr && dn.cui && dn.cui === p.ioarr.cui ? p.ioarr : null } : p;
   const M = armarModelo({ R: x.R, D: x.D, list: x.list, proyecto: proyectoX, datos: datosX, precios: A.detalle, efectivos: A.efectivos, P: A.P, inv: A.inv, fecha });
   // Estructura preliminar de costos: lotes de activos a reponer (anexo de la memoria y Excel)

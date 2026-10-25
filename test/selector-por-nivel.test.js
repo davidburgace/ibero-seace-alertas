@@ -134,7 +134,9 @@ test('documentos por nivel: cada IOARR con sus UP, su nombre y su CUI', () => {
   assert.equal(S.cui, '');
   assert.ok(P.ups.every(u => u.niveles.length === 1 && u.niveles[0] === 'P'));
   assert.equal(P.ups.find(u => u.cod === ICHUNA).est, 106);
-  assert.deepEqual(limpiarDatosDoc({ por_nivel: { P: { cui: 'abc', nombre_inversion: ' x ' }, X: { cui: '1234567' } } }).por_nivel, { P: { nombre_inversion: 'x', cui: '' } });
+  assert.deepEqual(limpiarDatosDoc({ por_nivel: { P: { cui: 'abc', nombre_inversion: ' x ' }, X: { cui: '1234567' } } }).por_nivel, { P: { nombre_inversion: 'x', cui: '', montos_05b: {} } });
+  // Montos del 05-B por año: solo números válidos
+  assert.deepEqual(limpiarDatosDoc({ por_nivel: { S: { montos_05b: { t: '1000', t1: -5, t2: 'x', t9: 3 } } } }).por_nivel, { S: { nombre_inversion: '', cui: '', montos_05b: { t: 1000 } } });
 });
 
 test('Excel del Selector: hoja «Por nivel»', async () => {

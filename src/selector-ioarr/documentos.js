@@ -86,8 +86,15 @@ export function limpiarDatosDoc(b = {}) {
     nombre_inversion: texto(b.nombre_inversion, 500),
     cui: cuiValido(b.cui),
     // Con una IOARR por nivel: nombre y CUI de cada una ({ P: { nombre_inversion, cui } })
+    // y los montos de la idea del Formato 05-B por año (t, t+1, t+2), editables
     por_nivel: Object.fromEntries(['I', 'P', 'S', 'E'].map(n => [n, b.por_nivel?.[n]]).filter(([, v]) => v && typeof v === 'object')
-      .map(([n, v]) => [n, { nombre_inversion: texto(v.nombre_inversion, 500), cui: cuiValido(v.cui) }]).filter(([, v]) => v.nombre_inversion || v.cui)),
+      .map(([n, v]) => [n, { nombre_inversion: texto(v.nombre_inversion, 500), cui: cuiValido(v.cui),
+        montos_05b: Object.fromEntries(['t', 't1', 't2'].map(k => [k, numero(v.montos_05b?.[k], 0, 1e11)]).filter(([, x]) => x != null)) }])
+      .filter(([, v]) => v.nombre_inversion || v.cui || Object.keys(v.montos_05b).length)),
+    // Formato 05-B: año t de la programación (las IOARR por nivel usan el mismo)
+    anio_t: entero(b.anio_t, 2020, 2100),
+    // A. Alineamiento: cadena funcional (vacía = función, división y grupo propuestos)
+    cadena_funcional: texto(b.cadena_funcional, 300),
     // A. Alineamiento (se proponen por nivel; el usuario los ajusta al PMI)
     servicio_brecha: texto(b.servicio_brecha, 300),
     tipologia: texto(b.tipologia, 300),
@@ -228,6 +235,8 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, efectivos = 
   const cod = CODIGOS_FUNCIONALES;
   const A = {
     funcion: `${cod.funcion} EDUCACIÓN`, division: `${cod.division} EDUCACIÓN BÁSICA`, sector: 'EDUCACIÓN',
+    // La reposición mantiene la calidad del servicio: contribuye a la brecha de calidad, no a la de cobertura
+    contribucion: 'Calidad: la reposición recupera la capacidad de producción del servicio existente; no contribuye al cierre de la brecha de cobertura.',
     grupos: niveles.map(k => `${cod.grupo[k] ? cod.grupo[k] + ' ' : ''}EDUCACIÓN ${NIVEL[k]}`),
     servicio: d.servicio_brecha || niveles.map(k => 'SERVICIO DE EDUCACIÓN ' + NIVEL[k]).join('; '),
     tipologia: d.tipologia || niveles.map(k => 'EDUCACIÓN ' + NIVEL[k]).join('; '),
@@ -236,6 +245,7 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, efectivos = 
       : niveles.map(k => ({ tipo: 'Calidad', nombre: `PORCENTAJE DE LOCALES EDUCATIVOS CON EDUCACIÓN ${NIVEL[k]} CON CAPACIDAD INSTALADA INADECUADA`, unidad: d.unidad_indicador || 'LOCAL EDUCATIVO', valor: d.contribucion_brecha })),
     espacio: !u0 ? '' : ambito === 'DISTRITAL' ? `${mayus(u0.dpto)}, ${mayus(u0.prov)}, ${mayus(u0.dist)}` : ambito === 'PROVINCIAL' ? `${mayus(u0.dpto)}, ${mayus(u0.prov)}` : mayus(u0.dpto),
     propuesto: !d.servicio_brecha || !d.tipologia || !d.indicador_brecha,
+    cadena: d.cadena_funcional || null,
     sinCodigo: niveles.filter(k => !cod.grupo[k]).map(k => NIVEL[k])
   };
 
@@ -347,6 +357,9 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, efectivos = 
     ...(porCapacidad ? [] : [verificados.length
       ? `El estado del mobiliario sale del Censo Educativo 2025 (Minedu) y, en ${verificados.length === nLoc ? (nLoc > 1 ? 'todos los locales' : 'el local') : `${verificados.length} de los ${nLoc} locales`}, del inventario verificado en campo (${lista(verificados.map(u => fechaPe(new Date(u.verificado.fecha_visita + 'T00:00:00Z'))).filter((v, j, a) => a.indexOf(v) === j))}).`
       : 'El estado del mobiliario sale del Censo Educativo 2025 (Minedu), que es declarado por cada institución educativa.']),
+    // Recuadro 14 / Aplicación 6 de los Lineamientos IOARR: carpetas que se reponen por mesa y silla
+    'Reposición de carpetas por mesa y silla (Lineamientos IOARR, Recuadro 14 y Aplicación 6): donde se reemplaza una carpeta (unipersonal o bipersonal) por una mesa y una silla, se da de baja la carpeta y la mesa y la silla nuevas se registran en el inventario como «mobiliario de aula».',
+    'La reposición puede hacerse con activos de mejor tecnología o conformes a la norma técnica vigente de mobiliario escolar, siempre que cumplan la misma función que los reemplazados y no aumenten la capacidad de la UP.',
     T.fal > 0 ? `No se incluyen ${T.fal.toLocaleString('es-PE')} bienes faltantes (matrícula − mobiliario existente): ${NOTA_FALTANTE} Son solo informativos y no entran al monto, porque ampliarían la capacidad de la UP (2.4.C.c). Lo que se repone no supera la matrícula ni la capacidad de diseño de cada colegio.` : 'El metrado no incluye bienes faltantes por encima de los existentes. Lo que se repone no supera la matrícula ni la capacidad de diseño de cada colegio.'
   ];
   const condiciones = [
@@ -362,6 +375,22 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, efectivos = 
     { texto: 'Verificación en campo con acta.', estado: nLoc && conActa.length === nLoc ? 'cumple' : 'pendiente', nota: `${conActa.length} de ${nLoc} ${nLoc === 1 ? 'local' : 'locales'} con acta adjunta.` }
   ];
   if (masiva) condiciones.push({ texto: 'Las UP prestan el mismo servicio y las administra la misma entidad, que adquiere los activos (2.5.b).', estado: 'pendiente', nota: ugels.length > 1 ? `Los locales son de ${ugels.length} UGEL (${lista(ugels)}): confirma que la entidad que adquiere es la misma.` : `Locales de ${ugels[0] || 'una misma UGEL'}.` });
+
+  // ── Formato 05-B: idea de la inversión (tipo de IOARR + nombre genérico de las UP + ámbito) ──
+  const nombrePropio = t => String(t || '').toLocaleLowerCase('es-PE').replace(/(^|[\s(«-])(\p{L})/gu, (m, a, b) => a + b.toLocaleUpperCase('es-PE')).replace(/\b(De|Del|La|Las|Los|Y|E)\b/g, w => w.toLowerCase());
+  const nivelesTxt = lista(niveles.map(k => 'Educación ' + NIVN[k]));
+  const lugar = !u0 ? '' : ambito === 'DISTRITAL' ? `en el distrito de ${nombrePropio(u0.dist)}, provincia de ${nombrePropio(u0.prov)}, departamento de ${nombrePropio(u0.dpto)}`
+    : ambito === 'PROVINCIAL' ? `en la provincia de ${nombrePropio(u0.prov)}, departamento de ${nombrePropio(u0.dpto)}` : `en el departamento de ${nombrePropio(u0.dpto)}`;
+  const anioT = d.anio_t || (Number(String(fecha || '').slice(0, 4)) || new Date().getFullYear()) + 1;
+  const m05 = d.por_nivel_actual?.montos_05b || {};
+  const hayMontos = ['t', 't1', 't2'].some(k => m05[k] != null);
+  const programacion = ['t', 't1', 't2'].map((k, j) => ({ k, anio: anioT + j, rotulo: j ? `t+${j}` : 't', monto: hayMontos ? m05[k] ?? 0 : j === 0 ? r2(total) : 0 }));
+  const sumaProg = r2(programacion.reduce((a, x) => a + x.monto, 0));
+  const B05 = {
+    idea: `Inversiones de reposición de mobiliario escolar de las IE de ${nivelesTxt} ${lugar}`.trim(),
+    tipo: 'Reposición', upGenerica: `Instituciones educativas de ${nivelesTxt}`, ambito, lugar, nUp: (porModular ? n : nLoc), monto: total,
+    programacion, suma: sumaProg, propuesto: !hayMontos, cuadra: Math.abs(sumaProg - r2(total)) < 0.01, anioT
+  };
 
   // ── Datos pendientes ──
   const faltan = [];
@@ -389,7 +418,7 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, efectivos = 
 
   return {
     fecha, proyecto: proyecto.nombre || '(sin nombre)', region: proyecto.region,
-    nombre: d.nombre_inversion || nombreSugerido, nombreSugerido, cui: d.cui || proyecto.ioarr?.cui || '',
+    nombre: d.nombre_inversion || nombreSugerido, nombreSugerido, cui: d.cui || proyecto.ioarr?.cui || '', B05,
     // Una inversión masiva va siempre con registro completo; una individual, según las 75 UIT
     masiva, supera, registro: masiva ? 'completo' : supera == null ? 'pendiente' : supera ? 'completo' : 'abreviado',
     registroRotulo: masiva ? REGISTRO_MASIVA : supera == null ? 'Registro: PENDIENTE (falta la UIT)' : supera ? 'Registro completo (supera 75 UIT)' : 'Registro abreviado (hasta 75 UIT)',

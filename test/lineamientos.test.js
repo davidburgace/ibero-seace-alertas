@@ -275,3 +275,32 @@ test('Tabla 3.7: A costo directo, B otros costos (con control concurrente si cor
   assert.match(t, /A\. COSTO DIRECTO \(activos, con IGV\)/); assert.match(t, /CONTROL CONCURRENTE \(LEY 31358\)/);
   assert.match(t, /B\. OTROS COSTOS DE INVERSIÓN/); assert.match(t, /C = A \+ B\. COSTO DE INVERSIÓN \(TOTAL\)/);
 });
+
+test('05-B: idea con tipo de IOARR + UP genérica + ámbito, y montos t, t+1, t+2 editables; 07-C con alineamiento y Recuadro 14', async () => {
+  const { generar05B, generarMemoria } = await import('../src/selector-ioarr/word.js');
+  const { M } = paquete();
+  const MP = M('P');
+  // «mariscal» toma colegios de varias provincias: el ámbito es departamental
+  assert.equal(MP.ambito, 'DEPARTAMENTAL');
+  assert.equal(MP.B05.idea, 'Inversiones de reposición de mobiliario escolar de las IE de Educación Primaria en el departamento de Moquegua');
+  // Sin montos cargados: todo en el año t, marcado como propuesto
+  assert.equal(MP.B05.propuesto, true); assert.deepEqual(MP.B05.programacion.map(x => x.rotulo), ['t', 't+1', 't+2']);
+  assert.equal(MP.B05.programacion[0].monto, MP.F.total); assert.ok(MP.B05.cuadra);
+  // Con montos por año (de esta IOARR) que no suman el total: aviso
+  const C2 = paquete({ anio_t: 2027, por_nivel: { P: { montos_05b: { t: 100000, t1: 50000 } } } }), M2 = C2.M('P');
+  assert.deepEqual(M2.B05.programacion.map(x => [x.anio, x.monto]), [[2027, 100000], [2028, 50000], [2029, 0]]);
+  assert.equal(M2.B05.propuesto, false); assert.equal(M2.B05.cuadra, false);
+  const t05 = await textoDocx(await generar05B(M2));
+  assert.match(t05, /FORMATO N° 05-B/); assert.match(t05, /Inversiones de reposición de mobiliario escolar de las IE de Educación Primaria/);
+  assert.match(t05, /PENDIENTE: la programación suma/);
+  // Secundaria tiene su propia idea y sus montos
+  assert.match(C2.M('S').B05.idea, /Educación Secundaria/); assert.equal(C2.M('S').B05.propuesto, true);
+  // 07-C: cadena funcional, servicio con brecha, indicador y contribución a calidad (no cobertura)
+  const t07 = await textoDocx(await generar07C(MP));
+  assert.match(t07, /Cadena funcional/); assert.match(t07, /Servicios públicos con brecha identificada y priorizada/);
+  assert.match(t07, /no contribuye al cierre de la brecha de cobertura/);
+  // Justificación de la masiva: Recuadro 14 / Aplicación 6 y mejor tecnología o norma técnica vigente
+  assert.match(t07, /Recuadro 14 y Aplicación 6\): donde se reemplaza una carpeta .*se da de baja la carpeta y la mesa y la silla nuevas se registran en el inventario como «mobiliario de aula»/);
+  assert.match(t07, /mejor tecnología o conformes a la norma técnica vigente/);
+  assert.match(await textoDocx(await generarMemoria(MP)), /Recuadro 14 y Aplicación 6/);
+});
