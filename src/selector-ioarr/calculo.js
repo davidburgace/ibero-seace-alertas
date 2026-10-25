@@ -233,7 +233,7 @@ export function calc(D, P, nivel = null) {
       L.repTot[loc] += rep; L.falTot[loc] += fal; L.reqTot[loc] += req[t];
     }
   }
-  return { A, L, nL, incl, escenario: esc, capOcup: P.capOcup ?? DEF.capOcup, capPct: P.capPct ?? DEF.capPct,
+  return { A, L, nL, incl, mesaEst: P.mesaEst ?? DEF.mesaEst, sillaEst: P.sillaEst ?? DEF.sillaEst, escenario: esc, capOcup: P.capOcup ?? DEF.capOcup, capPct: P.capPct ?? DEF.capPct,
     pctRegular: P.pctRegular ?? DEF.pctRegular, pctRegularNivel: { ...(P.pctRegularNivel || {}) }, pctNiv, pctOrigen: { ...(P.pctOrigen || DEF.pctOrigen) }, umbralVida: P.umbralVida ?? DEF.umbralVida };
 }
 // A reponer en un aula, según el escenario (t: 0 mesa, 1 silla, 2-4 docente y armario)

@@ -97,7 +97,8 @@ test('sin precios: bienes en 0 y avisos (no se inventan precios dentro del cálc
   const R = costear({ D, C, list, precios: {}, estructura: {}, uit: null });
   assert.equal(R.totales.bienes, 0);
   assert.ok(R.partidas.every(p => p.pu === null));
-  assert.deepEqual(R.avisos.map(a => a.tipo).sort(), ['faltante', 'precio', 'uit']);
+  // «censo»: en «mariscal» hay colegios con más mesas o sillas que matrícula (no aumentar capacidad)
+  assert.deepEqual(R.avisos.map(a => a.tipo).sort(), ['censo', 'faltante', 'precio', 'uit']);
   // La estructura por defecto: transporte 19.50 por pieza, IGV 18 %, 3 %, 5 % y 15,000
   assert.deepEqual(R.estructura.params, { igv: 18, doc_pct: 3, sup_pct: 5, liquidacion: 15000, transporte_pieza: 19.5, kit_dist: [1, 1, 1] });
 });

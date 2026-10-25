@@ -197,3 +197,31 @@ test('duplicación en el paquete: se descuenta en la IOARR del nivel, se avisa y
   ws.eachRow((r, n) => { if (n > 4) filas.push([r.getCell(1).value, r.getCell(3).value, r.getCell(10).value]); });
   assert.deepEqual(filas.sort(), [[l.cod, 'Entrega reciente descontada', 'Sí'], [otro.cod, 'Riesgo de duplicación', 'No']].sort());
 });
+
+test('no aumentar capacidad: lo repuesto no pasa de la matrícula ni de la capacidad de diseño; faltante informativo', async () => {
+  const { A } = paquete(), x = elegirIoarr(A, 'P');
+  // En «mariscal» hay colegios con más mobiliario que matrícula: se cuentan y se avisa
+  assert.ok(A.comparativo.inconsistentes > 0);
+  assert.ok(x.R.locales.every(l => l.rep[0] <= l.tope.matricula && l.rep[1] <= l.tope.matricula && l.kits <= l.tope.matricula));
+  const inc = x.R.locales.find(l => l.tope.inconsistente);
+  if (inc) assert.ok(x.R.avisos.some(a => a.tipo === 'censo' && a.texto.includes(inc.cod)));
+  // Con capacidad de diseño menor que la matrícula, el tope es la capacidad
+  const l = x.R.locales.find(y => y.rep[1] > 2), cap = Math.floor(l.rep[1] / 2);
+  const C2 = paquete({ colegios: { [l.cod]: { capacidad: { P: cap } } } }), l2 = elegirIoarr(C2.A, 'P').R.locales.find(y => y.cod === l.cod);
+  assert.equal(l2.tope.capacidad, cap); assert.equal(l2.rep[1], cap); assert.equal(l2.tope.recorte[1], l.rep[1] - cap);
+  assert.ok(elegirIoarr(C2.A, 'P').R.avisos.some(a => a.tipo === 'tope' && a.texto.includes(l.cod)));
+  // La capacidad de Primaria no toca Secundaria
+  assert.equal(elegirIoarr(C2.A, 'S').R.totales.rep, elegirIoarr(A, 'S').R.totales.rep);
+  // El faltante nunca entra al monto y lleva la nota
+  assert.ok(x.R.totales.fal > 0);
+  assert.ok(x.R.avisos.some(a => a.tipo === 'faltante' && a.texto.includes('corresponde a ampliación marginal, no a reposición')));
+  const M = C2.M('P');
+  assert.ok(M.E.sustento.some(t => t.includes('corresponde a ampliación marginal, no a reposición')));
+  // Hoja «Capacidad y censo»
+  const wb = new ExcelJS.Workbook(); await wb.xlsx.load(await excelL({ ficha: M.fichaActivos, capacidad: M.capacidad }));
+  const ws = wb.getWorksheet('Capacidad y censo');
+  assert.match(ws.getCell('A3').value, /\d+ colegios? con datos inconsistentes del censo/);
+  let fila = null; ws.eachRow((r, n) => { if (n > 5 && r.getCell(1).value === l.cod) fila = r; });
+  assert.equal(fila.getCell(4).value, cap); assert.equal(fila.getCell(12).value, cap);
+  ws.eachRow((r, n) => { if (n > 5 && r.getCell(1).value !== l.cod) assert.match(String(r.getCell(4).value), /sin dato/); });
+});

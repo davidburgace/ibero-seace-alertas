@@ -13,6 +13,7 @@ import {
   HeadingLevel, ShadingType, Header, Footer, PageNumber, BorderStyle, PageOrientation
 } from 'docx';
 import { FUENTES_VIDA_UTIL, AVISO_BORRADOR } from './lineamientos.js';
+import { NOTA_FALTANTE } from './costos.js';
 
 const AZUL = '3A63E0', GRIS = 'EEF0F4', AMARILLO = 'FFF3B0', TEXTO = '16181D', TENUE = '5C6270';
 const FUENTE = 'Calibri';
@@ -350,7 +351,8 @@ export async function generarMemoria(M) {
   c.push(espacio());
   c.push(tabla(['Estructura de costos', 'Monto (S/)'], (M.estructura?.filas || []).map(f => [{ v: (f.fuerte || f.total ? '' : '   ') + f.nombre, bold: f.fuerte || f.total }, { v: NS.format(f.monto), bold: f.fuerte || f.total }]), { num: [1], anchos: [70, 30] }));
   c.push(nota(NOTA_ESTRUCTURA));
-  if (M.faltante.cantidad > 0) c.push(nota(`No se incluyen ${ent(M.faltante.cantidad)} bienes faltantes, valorizados como referencia en ${soles(M.faltante.valor)}: corresponde evaluarlos como ampliación marginal (Lineamientos IOARR 2.4.C.c).`));
+  if (M.faltante.cantidad > 0) c.push(nota(`No se incluyen ${ent(M.faltante.cantidad)} bienes faltantes (matrícula − mobiliario existente), valorizados solo como referencia en ${soles(M.faltante.valor)}: ${NOTA_FALTANTE} No entran al monto (Lineamientos IOARR 2.4.C.c).`));
+  if (M.capacidad?.some(f => f.inconsistente)) c.push(nota(`${M.capacidad.filter(f => f.inconsistente).length} colegios tienen datos inconsistentes del censo (más mesas o sillas que matrícula): lo que se repone se limitó a la matrícula y debe verificarse en campo.`));
 
   c.push(titulo('9. Cronograma de ejecución'));
   c.push(...cronogramas(M));

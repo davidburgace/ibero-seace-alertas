@@ -42,7 +42,9 @@ export const TIPOS_ARCHIVO = {
   acta: 'Acta de verificación', foto: 'Foto', inventario_patrimonial: 'Inventario patrimonial',
   baja: 'Resolución o trámite de baja', otro: 'Otro'
 };
-export const LIMITE_UIT = 75;   // registro completo del Formato 07-C si la inversión supera 75 UIT
+export const LIMITE_UIT = 75;
+// Nota del faltante en todos los documentos
+export const NOTA_FALTANTE = 'corresponde a ampliación marginal, no a reposición.';   // registro completo del Formato 07-C si la inversión supera 75 UIT
 
 // ─── Estructura de costos del 07-C ──────────────────────────────────────────
 // Precios de referencia (sin IGV) que se precargan si no hay otro: mesa y silla de Primaria
@@ -250,6 +252,7 @@ export function regularFicha(D, C, i, ficha, t, k, umbral) {
  *   uit          { anio, valor } | null
  *   inventario   { [codLocal]: { bienes: { mesa: { b, r, m } }, fecha_visita, observacion } } verificado en campo
  *   ajustes      { [codLocal]: { kit, mesa, silla, esc, sdoc, arm } } entregas previas a descontar (lineamientos.js)
+ *   capacidades  { [codLocal]: estudiantes } capacidad de diseño del colegio en el nivel (tope junto con la matrícula)
  *   grupos       opcional: [{ clave, D, C, list, inventario, ajustes }] varias IOARR que se costean juntas
  *                (una por nivel, ver niveles.js). Reemplaza a D, C, list e inventario.
  *
@@ -263,7 +266,7 @@ export function regularFicha(D, C, i, ficha, t, k, umbral) {
  * Con grupos, los % se aplican igual en cada IOARR y la liquidación se reparte entre
  * todos los locales de todas, según su costo directo: la suma de las IOARR es el total.
  */
-export function costear({ D, C, list, precios, estructura, uit, inventario, ajustes, grupos }) {
+export function costear({ D, C, list, precios, estructura, uit, inventario, ajustes, capacidades, grupos }) {
   const E = limpiarEstructura(estructura);
   const val = k => precios?.[k] != null && Number(precios[k]) >= 0 ? Number(precios[k]) : null;
   // Precio por línea: el de la talla o, si no tiene, el de su tipo
@@ -275,7 +278,7 @@ export function costear({ D, C, list, precios, estructura, uit, inventario, ajus
     const m = pu[LINEAS.findIndex(x => x.k === `mesa_${z.k}`)], s = pu[LINEAS.findIndex(x => x.k === `silla_${z.k}`)];
     return m == null || s == null ? null : m + s;
   });
-  const fuentes = grupos || [{ clave: null, D, C, list, inventario, ajustes }];
+  const fuentes = grupos || [{ clave: null, D, C, list, inventario, ajustes, capacidades }];
   // Muebles que entran: cada IOARR (nivel) tiene su composición; en el total, los de alguna
   const inclDe = g => g.C?.incl || TIPOS.map(() => true);
   const incl = TIPOS.map((_, t) => fuentes.some(g => inclDe(g)[t]));
@@ -360,6 +363,20 @@ function localDe(g, i) {
     verificado = { tipos, adquisicion: inv.adquisicion || {}, adq_estimada: inv.adq_estimada || [], fecha_visita: inv.fecha_visita, responsable: inv.responsable || null, observacion: inv.observacion,
       ficha: inv.ficha ? { archivo: inv.ficha.archivo, importado_en: inv.ficha.importado_en, verificador: inv.ficha.verificador } : null };
   }
+  // No aumentar capacidad (Lineamientos 2.4.C.c): mesas y sillas a reponer no pasan de la matrícula del
+  // padrón (por mesas y sillas por estudiante) ni de la capacidad de diseño del colegio, si se cargó.
+  // Por capacidad (solo para comparar) no se limita. Mobiliario existente > matrícula = inconsistencia del censo.
+  const matricula = D.locEst[i], capacidad = g.capacidades?.[l[0]] ?? null;
+  const topeEst = capacidad != null ? Math.min(matricula, capacidad) : matricula;
+  const ratio = [C.mesaEst ?? 1, C.sillaEst ?? 1];
+  const tope = { matricula, capacidad, estudiantes: topeEst, antes: [rep[0], rep[1]], recorte: [0, 0], kits: 0,
+    existente: [0, 1].map(t => diag[t].b + diag[t].r + diag[t].m), inconsistente: false };
+  tope.inconsistente = [0, 1].some(t => incl[t] && tope.existente[t] > Math.round(matricula * ratio[t]));
+  if (esc !== 'capacidad') [0, 1].forEach(t => {
+    if (!incl[t]) return;
+    const max = Math.round(topeEst * ratio[t]);
+    if (rep[t] > max) { tope.recorte[t] = rep[t] - max; rep[t] = max; repVerif[t] = Math.min(repVerif[t], max); }
+  });
   // Entregas previas de los últimos 3 años marcadas «restar» (lineamientos.js): se descuentan de lo que se
   // repone. El kit descuenta mesa y silla; mesa y silla sueltas, cada una lo suyo.
   const aj = g.ajustes?.[l[0]], descuento = { tipos: TIPOS.map(() => 0), kits: 0 };
@@ -394,17 +411,19 @@ function localDe(g, i) {
   // o silla (que es por local), MAX del local, repartido entre tallas como los kits del censo.
   const mat = D.locAul[i].reduce((a, ai) => a + D.aulas[ai][8], 0);
   let kits = !incl[0] || !incl[1] ? 0 : kitLocal ? (esc === 'capacidad' ? Math.max(rep[0], rep[1]) : Math.min(mat, Math.max(rep[0], rep[1]))) : W.kits;
+  // Los kits tampoco pasan de la matrícula ni de la capacidad de diseño
+  if (esc !== 'capacidad' && kits > topeEst) { tope.kits = kits - topeEst; kits = topeEst; }
   // Kits entregados (o mesa y silla entregadas juntas) se descuentan de los kits
   if (aj && !kitLocal) { const q = Math.min(kits, aj.kit + Math.min(aj.mesa, aj.silla)); kits -= q; descuento.kits = q; }
   else if (aj && kits) {   // con inventario por local, los kits ya salen de mesa y silla descontadas
-    const antes = esc === 'capacidad' ? Math.max(rep[0] + descuento.tipos[0], rep[1] + descuento.tipos[1]) : Math.min(mat, Math.max(rep[0] + descuento.tipos[0], rep[1] + descuento.tipos[1]));
+    const antes = esc === 'capacidad' ? Math.max(rep[0] + descuento.tipos[0], rep[1] + descuento.tipos[1]) : Math.min(mat, topeEst, Math.max(rep[0] + descuento.tipos[0], rep[1] + descuento.tipos[1]));
     descuento.kits = Math.max(0, antes - kits);
   }
   const w0 = W[0];
   const kitTalla = repartirCon(kits, W.kit, w0.est, w0.aul, w0.niv);
   return {
     i, grupo: g.clave, cod: l[0], nom: D.locName[i], dist: d[0], prov: D.provs[d[2]], ubigeo: d[1], rural: !!l[4],
-    est: D.locEst[i], aul: D.locAul[i].length, rep, repVerif, fal, diag, verificado, lin, kits, kitTalla, kitPorLocal: kitLocal, regular, descuento
+    est: D.locEst[i], aul: D.locAul[i].length, rep, repVerif, fal, diag, verificado, lin, kits, kitTalla, kitPorLocal: kitLocal, regular, descuento, tope
   };
 }
 
@@ -452,7 +471,10 @@ function resumir(locales, { pu, puGeneral, propio, incl, puKit, kit, E, escenari
     rep: sum(l => l.rep.reduce((a, b) => a + b, 0)), repVerif: sum(l => l.repVerif.reduce((a, b) => a + b, 0)), fal: sum(l => l.fal.reduce((a, b) => a + b, 0)), falValor: sum(l => l.falValor),
     kits: sum(l => l.kits),
     // Descontado por entregas previas de los últimos 3 años (no entra a lo que se repone)
-    descontado: sum(l => l.descuento?.tipos.reduce((a, b) => a + b, 0) || 0), kitsDescontados: sum(l => l.descuento?.kits || 0)
+    descontado: sum(l => l.descuento?.tipos.reduce((a, b) => a + b, 0) || 0), kitsDescontados: sum(l => l.descuento?.kits || 0),
+    // No aumentar capacidad: lo recortado por el tope de matrícula o capacidad y los colegios con mobiliario > matrícula
+    recortado: sum(l => (l.tope?.recorte[0] || 0) + (l.tope?.recorte[1] || 0)), kitsRecortados: sum(l => l.tope?.kits || 0),
+    inconsistentes: locales.filter(l => l.tope?.inconsistente).length
   };
   T.transporte = r2(T.piezas * E.transporte_pieza);
   T.bienes = r2(T.bienes); T.cd = r2(T.bienes + T.transporte);
@@ -548,7 +570,10 @@ function resumir(locales, { pu, puGeneral, propio, incl, puKit, kit, E, escenari
   const sinPrecio = lineas.filter(y => y.rep > 0 && y.pu == null).map(y => y.n);
   if (sinPrecio.length) avisos.push({ tipo: 'precio', texto: `Falta el precio unitario de: ${sinPrecio.join(', ')}. Se calcula con 0 hasta que lo cargues.` });
   if (E.kit && !kit) avisos.push({ tipo: 'kit', texto: 'Para presentar como kit, la mesa y la silla del estudiante deben entrar a la IOARR (criterios del Selector).' });
-  if (T.fal > 0) avisos.push({ tipo: 'faltante', texto: 'El faltante (brecha de dotación, no reposición) es lo que falta para llegar a lo requerido. No entra a lo que se repone, al costo de inversión ni al Formato 07-C: amplía la capacidad de la UP y una IOARR de reposición no se puede sustentar en eso (Lineamientos IOARR del MEF, 2.4.C). Se muestra valorizado aparte, como referencia.' });
+  if (T.fal > 0) avisos.push({ tipo: 'faltante', texto: `El faltante (matrícula − mobiliario existente: ${T.fal.toLocaleString('es-PE')}) ${NOTA_FALTANTE} Es solo informativo: no entra a lo que se repone, al costo de inversión ni al Formato 07-C, porque amplía la capacidad de la UP (Lineamientos IOARR del MEF, 2.4.C.c). Se muestra valorizado aparte, como referencia.` });
+  const recortados = locales.filter(l => l.tope?.recorte.some(q => q > 0) || l.tope?.kits > 0);
+  if (recortados.length) avisos.push({ tipo: 'tope', texto: `En ${recortados.length === 1 ? '1 colegio' : recortados.length + ' colegios'} lo que se repone se limitó a la matrícula o a la capacidad de diseño (${(T.recortado + T.kitsRecortados).toLocaleString('es-PE')} bienes menos): la reposición no aumenta la capacidad (${recortados.slice(0, 15).map(l => l.cod).join(', ')}${recortados.length > 15 ? '…' : ''}).` });
+  if (T.inconsistentes) avisos.push({ tipo: 'censo', alerta: true, texto: `${T.inconsistentes === 1 ? '1 colegio tiene' : T.inconsistentes + ' colegios tienen'} datos inconsistentes del censo: más mesas o sillas que matrícula (${locales.filter(l => l.tope?.inconsistente).slice(0, 15).map(l => l.cod).join(', ')}). Verifícalo en campo.` });
   if (!valorUit) avisos.push({ tipo: 'uit', texto: `Carga el valor de la UIT${U.anio ? ' de ' + U.anio : ''} para saber si el registro del Formato 07-C es abreviado o completo.` });
   else if (U.supera) avisos.push({ tipo: 'uit75', texto: `El monto de inversión supera las ${LIMITE_UIT} UIT (UIT ${U.anio}): corresponde el registro completo del Formato 07-C (secciones D, E y F).` });
   const conDesc = locales.filter(l => l.descuento?.tipos.some(q => q > 0) || l.descuento?.kits > 0);

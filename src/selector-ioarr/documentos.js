@@ -18,7 +18,7 @@
 // ============================================================================
 
 import { ITEMS, TALLAS, NIVN, textoEscenario, textoPct, textoOrigenPct, ROTULO_UMBRAL, DEF as DEF_CRIT } from './calculo.js';
-import { TIPOS, LIMITE_UIT } from './costos.js';
+import { TIPOS, LIMITE_UIT, NOTA_FALTANTE } from './costos.js';
 import { FUENTES_VIDA_UTIL, limpiarColegios, colegioDe, checklistColegio } from './lineamientos.js';
 
 // Nota del material, dentro de la descripción técnica
@@ -345,7 +345,7 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, efectivos = 
     ...(porCapacidad ? [] : [verificados.length
       ? `El estado del mobiliario sale del Censo Educativo 2025 (Minedu) y, en ${verificados.length === nLoc ? (nLoc > 1 ? 'todos los locales' : 'el local') : `${verificados.length} de los ${nLoc} locales`}, del inventario verificado en campo (${lista(verificados.map(u => fechaPe(new Date(u.verificado.fecha_visita + 'T00:00:00Z'))).filter((v, j, a) => a.indexOf(v) === j))}).`
       : 'El estado del mobiliario sale del Censo Educativo 2025 (Minedu), que es declarado por cada institución educativa.']),
-    T.fal > 0 ? `No se incluyen ${T.fal.toLocaleString('es-PE')} bienes faltantes (brecha de dotación, por encima de los existentes): no son reposición; ampliarían la capacidad de la UP (2.4.C.c) y corresponde evaluarlos como ampliación marginal.` : 'El metrado no incluye bienes faltantes por encima de los existentes.'
+    T.fal > 0 ? `No se incluyen ${T.fal.toLocaleString('es-PE')} bienes faltantes (matrícula − mobiliario existente): ${NOTA_FALTANTE} Son solo informativos y no entran al monto, porque ampliarían la capacidad de la UP (2.4.C.c). Lo que se repone no supera la matrícula ni la capacidad de diseño de cada colegio.` : 'El metrado no incluye bienes faltantes por encima de los existentes. Lo que se repone no supera la matrícula ni la capacidad de diseño de cada colegio.'
   ];
   const condiciones = [
     { texto: 'El mobiliario nuevo cumple la misma función que el reemplazado (2.4.C.a).', estado: 'cumple', nota: 'Mesas, sillas, escritorios y armarios de aula reemplazan a los del mismo uso.' },

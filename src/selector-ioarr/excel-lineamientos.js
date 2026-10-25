@@ -5,11 +5,13 @@
 //   Ficha de activos   estructura preliminar de costos: un lote por aula, bien y estado a reponer
 //   Inventario y baja  checklist por colegio; sin completar, el colegio no entra al 07-C final
 //   Riesgo de duplicación  entregas previas de mobiliario (3 años) e inversiones en ejecución
+//   Capacidad y censo  lo que se repone no pasa de la matrícula ni de la capacidad de diseño
 // Las filas «pendiente de verificación en campo» van en amarillo. La oferta (uso interno) no entra.
 // ============================================================================
 
 import ExcelJS from 'exceljs';
-import { PENDIENTE_CAMPO, DOCS_BAJA, SI_NO, FUENTES_ENTREGA, TIPOS_ENTREGA, VENTANA_DUP } from './lineamientos.js';
+import { PENDIENTE_CAMPO, DOCS_BAJA, SI_NO, FUENTES_ENTREGA, TIPOS_ENTREGA, VENTANA_DUP, PENDIENTE_CAPACIDAD } from './lineamientos.js';
+import { NOTA_FALTANTE } from './costos.js';
 import { NIVN } from './calculo.js';
 
 const AZUL = 'FF3A63E0', AMARILLO = 'FFFFF3B0', GRIS = 'FFF1F3F7';
@@ -114,8 +116,32 @@ function hojaRiesgos(wb, riesgos, anioRef) {
   ws.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: cols.length } };
 }
 
+// ─── No aumentar capacidad ───────────────────────────────────────────────────
+function hojaCapacidad(wb, filas) {
+  const ws = wb.addWorksheet('Capacidad y censo', { views: [{ state: 'frozen', ySplit: 5, xSplit: 2 }] });
+  const cols = [['Código de local', 11], ['Institución educativa', 34], ['Matrícula (padrón)', 11], ['Capacidad de diseño', 14], ['Tope (estudiantes)', 11],
+    ['Mesas existentes', 11], ['Sillas existentes', 11], ['Mesas a reponer antes del tope', 12], ['Sillas a reponer antes del tope', 12], ['Recortado por el tope (mesas + sillas + kits)', 14],
+    ['Mesas a reponer', 11], ['Sillas a reponer', 11], ['Kits', 10], ['Faltante (informativo, no se repone)', 14], ['Datos del censo', 26]];
+  ws.columns = cols.map(([, width]) => ({ width }));
+  const n = filas.filter(f => f.inconsistente).length;
+  titulo(ws, 'Regla de no aumentar capacidad (Lineamientos IOARR 2.4.C.c)',
+    `Lo que se repone nunca supera la matrícula ni la capacidad de diseño. El faltante (matrícula − mobiliario existente) es solo informativo y no entra al monto: ${NOTA_FALTANTE}`);
+  ws.getCell('A3').value = `${n} ${n === 1 ? 'colegio' : 'colegios'} con datos inconsistentes del censo (mobiliario > matrícula).`; ws.getCell('A3').font = { bold: true };
+  ws.getRow(5).values = cols.map(([t]) => t); cabecera(ws, 5, cols.length);
+  filas.forEach((f, j) => {
+    const r = ws.getRow(6 + j);
+    r.values = [f.cod, f.nombre, f.matricula, f.capacidad ?? PENDIENTE_CAPACIDAD, f.tope, f.existente[0], f.existente[1], f.antes[0], f.antes[1], f.recorte[0] + f.recorte[1] + f.kitsRecortados,
+      f.rep[0], f.rep[1], f.kits, f.faltante, f.inconsistente ? 'Inconsistente: mobiliario > matrícula' : 'Consistente'];
+    for (let c = 3; c <= 14; c++) if (c !== 4 || f.capacidad != null) r.getCell(c).numFmt = ENTERO;
+    if (f.capacidad == null) r.getCell(4).fill = relleno(AMARILLO);
+    if (f.inconsistente) r.getCell(15).fill = relleno(AMARILLO);
+    r.getCell(14).font = { color: { argb: 'FF5C6270' } };
+  });
+  ws.autoFilter = { from: { row: 5, column: 1 }, to: { row: 5, column: cols.length } };
+}
+
 /**
- * @param {object} L  { ficha: fichaActivos(), checklist: [filas], riesgos: [filas], anioRef, borrador }
+ * @param {object} L  { ficha: fichaActivos(), checklist: [filas], riesgos: [filas], capacidad: [filas], anioRef, borrador }
  * @param {object} meta { proyecto, nombreIoarr, region, fecha }
  * @returns {Promise<Buffer>}
  */
@@ -126,5 +152,6 @@ export async function generarExcelLineamientos(L, meta = {}) {
   hojaFicha(wb, L.ficha, meta);
   if (L.checklist) hojaChecklist(wb, L.checklist, L.borrador);
   if (L.riesgos) hojaRiesgos(wb, L.riesgos, L.anioRef || new Date().getFullYear());
+  if (L.capacidad) hojaCapacidad(wb, L.capacidad);
   return Buffer.from(await wb.xlsx.writeBuffer());
 }

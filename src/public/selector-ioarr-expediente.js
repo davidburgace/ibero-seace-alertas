@@ -290,7 +290,7 @@ function pintarResultados() {
         <div class="tabla-wrap borde-0"><table class="tabla tabla-estructura"><tbody>${estructura}</tbody></table></div>
         <p class="sub pad">Sin gastos generales, utilidad, gestión ni imprevistos. ${esc(datos.referencia.nota_porcentajes)}</p></div>
       <div class="panel"><div class="panel-cab"><h3>Faltante (brecha de dotación, no reposición)</h3></div>
-        <p class="sub pad">Lo que falta para llegar a lo requerido. No suma a lo que se repone, al costo ni al Formato 07-C, en ningún escenario. Amplía la capacidad de la UP: no se sustenta como reposición (Lineamientos IOARR del MEF, 2.4.C). Se valoriza con los mismos precios, solo como referencia.</p>
+        <p class="sub pad">Matrícula − mobiliario existente: <b>corresponde a ampliación marginal, no a reposición</b>. Es solo informativo: no suma a lo que se repone, al costo ni al Formato 07-C, en ningún escenario (Lineamientos IOARR del MEF, 2.4.C.c). Lo que se repone tampoco pasa de la matrícula ni de la capacidad de diseño de cada colegio. Se valoriza con los mismos precios, solo como referencia.</p>
         <div class="tabla-wrap borde-0"><table class="tabla"><thead><tr><th>Tipo</th><th class="num">Faltante</th><th class="num">Valor referencial</th></tr></thead><tbody>${falt}</tbody>
         <tfoot><tr><td>Total</td><td class="num">${ent(T.fal)}</td><td class="num">${soles(T.falValor)}</td></tr></tfoot></table></div>
       </div>

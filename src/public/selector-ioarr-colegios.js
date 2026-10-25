@@ -32,13 +32,15 @@ export function chipsDe(f) {
     : `<span class="chip-est alerta" title="${esc('Falta: ' + f.checklist.faltan.join('; '))}">No entra al 07-C final: checklist incompleto</span>`);
   if (f.riesgo?.riesgo) out.push(`<span class="chip-est alerta" title="${esc(f.riesgo.motivos.join('; '))}">Riesgo de duplicación</span>`);
   else if (f.datos.entregas.length) out.push('<span class="chip-est">Entregas previas registradas</span>');
+  if (f.costo?.inconsistente) out.push('<span class="chip-est alerta" title="El censo reporta más mesas o sillas que matrícula">Censo inconsistente</span>');
+  if (f.costo?.recortado) out.push(`<span class="chip-est" title="Lo que se repone se limitó a la matrícula o a la capacidad de diseño">Tope aplicado: −${ent(f.costo.recortado)}</span>`);
   if (f.excluido_dup) out.push('<span class="chip-est">Excluido por otra inversión</span>');
   return out.join(' ');
 }
 function pintar() {
   const R = vista.resumen, K = vista.comparativo;
   const q = norm(filtro).trim();
-  const filas = vista.filas.filter(f => (!q || f.cod.includes(q) || norm(f.nombre).includes(q) || norm(f.dist).includes(q)) && (!soloPend || !f.checklist.completo || f.riesgo?.riesgo));
+  const filas = vista.filas.filter(f => (!q || f.cod.includes(q) || norm(f.nombre).includes(q) || norm(f.dist).includes(q)) && (!soloPend || !f.checklist.completo || f.riesgo?.riesgo || f.costo?.inconsistente));
   const pags = Math.max(1, Math.ceil(filas.length / PAGE)); pag = Math.min(pag, pags - 1);
   const desde = pag * PAGE;
   const rows = filas.slice(desde, desde + PAGE).map(f => `<tr>
@@ -53,6 +55,7 @@ function pintar() {
       <div class="kpi"><div class="v">${ent(R.completos)}</div><div class="l">con el checklist de inventario y baja completo</div></div>
       <div class="kpi${R.bloqueados ? ' destacado' : ''}"><div class="v">${ent(R.bloqueados)}</div><div class="l">no entran al 07-C final (checklist incompleto)</div></div>
       <div class="kpi${R.riesgo ? ' destacado' : ''}"><div class="v">${ent(R.riesgo)}</div><div class="l">con riesgo de duplicación</div></div>
+      <div class="kpi${R.inconsistentes ? ' destacado' : ''}"><div class="v">${ent(R.inconsistentes)}</div><div class="l">con datos inconsistentes del censo (mobiliario &gt; matrícula)</div></div>
       <div class="kpi"><div class="v">${soles(K?.suma)}</div><div class="l">total del paquete · ${K?.niveles.length || 0} IOARR por nivel</div></div>
     </div>
     <div class="panel"><div class="panel-cab"><h3>Por nivel</h3></div>
@@ -62,7 +65,7 @@ function pintar() {
     <div class="panel"><div class="panel-cab"><h3>Colegios</h3><span class="sub">Lo que los Lineamientos IOARR piden por colegio</span></div>
       <p class="sub pad">Un colegio sin el checklist de inventario y baja completo (registro en el inventario y la contabilidad, trámite de baja iniciado y documento de respaldo con fecha) no entra al Formato 07-C final. En Documentos puedes exportar un borrador con todos.</p>
       <div class="pad acciones-fila"><input id="col-buscar" type="search" placeholder="Buscar por código de local, nombre o distrito" value="${esc(filtro)}" autocomplete="off" aria-label="Buscar colegio">
-        <label class="chk"><input type="checkbox" id="col-pend" ${soloPend ? 'checked' : ''}> Solo los que no entran al 07-C final o tienen riesgo</label></div>
+        <label class="chk"><input type="checkbox" id="col-pend" ${soloPend ? 'checked' : ''}> Solo los que no entran al 07-C final o tienen avisos</label></div>
       <div class="tabla-wrap borde-0"><table class="tabla"><thead><tr><th>Código de local</th><th>Colegio</th><th class="num">Monto</th><th>Lineamientos</th><th></th></tr></thead>
       <tbody>${rows || '<tr><td colspan="5" class="vacio">Ningún colegio coincide.</td></tr>'}</tbody></table></div>
       ${pags > 1 ? `<div class="paginacion pad-pag"><span class="sub">${ent(desde + 1)}–${ent(Math.min(filas.length, desde + PAGE))} de ${ent(filas.length)}</span><div class="pg-btns"><button class="btn btn-ghost btn-sm" data-col-pag="-1" type="button" ${pag === 0 ? 'disabled' : ''}>Anterior</button><span class="mono">${pag + 1} / ${pags}</span><button class="btn btn-ghost btn-sm" data-col-pag="1" type="button" ${pag >= pags - 1 ? 'disabled' : ''}>Siguiente</button></div></div>` : ''}
@@ -108,6 +111,13 @@ export const SECCIONES = [
     },
     leer: m => ({ inventario: { registrado: m.querySelector('#col-reg').value, contabilidad: m.querySelector('#col-cont').value, baja: m.querySelector('#col-baja').value,
       doc_tipo: m.querySelector('#col-doc').value, doc_numero: m.querySelector('#col-docnum').value, doc_fecha: m.querySelector('#col-docfecha').value || null } })
+  },
+  {
+    html: f => `<h3>Capacidad de diseño</h3>
+      <p class="sub">Lo que se repone nunca supera la matrícula (padrón) ni la capacidad de diseño. El faltante (matrícula − mobiliario existente${f.costo ? ': ' + ent(f.costo.faltante) : ''}) es solo informativo: corresponde a ampliación marginal, no a reposición.</p>
+      <div class="form-grid">${f.niveles_k.map(n => { const nv = f.costo?.niveles.find(x => x.nivel === n);
+        return `<div class="campo"><label for="col-cap-${n}">Capacidad de diseño – ${NOMBRE_NIVEL[n]} (estudiantes)</label><input id="col-cap-${n}" data-cap="${n}" type="number" min="0" step="1" value="${f.datos.capacidad?.[n] ?? ''}" placeholder="Sin dato"><span class="sub">Matrícula: ${ent(nv?.matricula ?? 0)}</span></div>`; }).join('')}</div>`,
+    leer: m => ({ capacidad: Object.fromEntries([...m.querySelectorAll('[data-cap]')].filter(i => i.value !== '').map(i => [i.dataset.cap, Number(i.value)])) })
   },
   {
     html: f => `<h3>Entregas previas de mobiliario (chequeo de duplicación)</h3>

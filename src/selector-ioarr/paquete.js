@@ -12,7 +12,7 @@ import { costear } from './costos.js';
 import { porNivel, validarNiveles, inventarioNivel, inventarioUna, sinNivel, nivelesDeLocal } from './niveles.js';
 import { separarLocales, estadoDe, avisosDuplicidad } from './duplicidad.js';
 import { armarModelo } from './documentos.js';
-import { fichaActivos, modeloVidaUtil, checklistColegio, colegioDe, riesgoDuplicacion, ajusteTotal, VENTANA_DUP } from './lineamientos.js';
+import { fichaActivos, modeloVidaUtil, checklistColegio, colegioDe, riesgoDuplicacion, ajusteTotal, VENTANA_DUP, capacidadDe, filasCapacidad } from './lineamientos.js';
 
 /**
  * @param {object} p
@@ -37,6 +37,8 @@ export function calcularPaquete({ D, P, codigos, dup = {}, inv = {}, comun, dato
   // Chequeo de duplicación: entregas previas en los últimos 3 años, inversión en ejecución, otra inversión
   const riesgos = Object.fromEntries(sep.list.map(i => { const cod = D.locs[i][0];
     return [cod, riesgoDuplicacion(colegios[cod], { anioRef, niveles: nivelesDeLocal(D, i), dupEstado: estadoDe(dup, cod).estado })]; }));
+  // Capacidad de diseño por colegio en el nivel (con la matrícula, el tope de lo que se repone)
+  const capacidadesDe = nivel => Object.fromEntries(sep.list.map(i => [D.locs[i][0], capacidadDe(colegios[D.locs[i][0]], nivel, nivelesDeLocal(D, i))]).filter(([, v]) => v != null));
   const ajustesDe = nivel => Object.fromEntries(Object.entries(riesgos).map(([cod, r]) => [cod, nivel ? r.ajuste[nivel] : (Object.keys(r.ajuste).length ? ajusteTotal(r.ajuste) : null)]).filter(([, a]) => a));
 
   const C = calc(D, P);
@@ -44,18 +46,18 @@ export function calcularPaquete({ D, P, codigos, dup = {}, inv = {}, comun, dato
   // Niveles de toda la selección: en el 07-C final, un nivel con todos sus colegios bloqueados queda vacío
   const enList = new Set(list);
   const G = porNivel(D, P, sep.list).map(g => ({ ...g, list: g.list.filter(i => enList.has(i)) })), Cn = Object.fromEntries(G.map(g => [g.nivel, g.C]));
-  const Runa = costear({ D, C, list, ...comun, inventario: inventarioUna(inv, D, Cn), ajustes: ajustesDe(null) });
+  const Runa = costear({ D, C, list, ...comun, inventario: inventarioUna(inv, D, Cn), ajustes: ajustesDe(null), capacidades: capacidadesDe(null) });
   // Los tres escenarios de cantidad lado a lado (IOARR única, con la misma estructura y precios)
   const escenarios = ESCENARIOS.map(e => {
     const Pe = { ...P, escenario: e.k };
     const R = e.k === P.escenario ? Runa : (() => {
       const Ce = calc(D, Pe), Gn = Object.fromEntries(porNivel(D, Pe, list).map(g => [g.nivel, g.C]));
-      return costear({ D, C: Ce, list, ...comun, inventario: inventarioUna(inv, D, Gn), ajustes: ajustesDe(null) });
+      return costear({ D, C: Ce, list, ...comun, inventario: inventarioUna(inv, D, Gn), ajustes: ajustesDe(null), capacidades: capacidadesDe(null) });
     })();
     return { k: e.k, n: e.n, pct: e.k === 'malo_regular' ? textoPct(P, G.map(g => g.nivel)) : null, actual: e.k === P.escenario, rep: R.totales.rep, kits: R.totales.kits, cd: R.totales.cd, total: R.totales.total,
       partidas: Object.fromEntries(R.partidas.map(x => [x.k, x.excluido ? null : x.rep])), aulas: R.totales.aul };
   });
-  const Rniv = costear({ ...comun, grupos: G.map(g => ({ clave: g.nivel, D: g.D, C: g.C, list: g.list, inventario: inventarioNivel(inv, D, g.nivel), ajustes: ajustesDe(g.nivel) })) });
+  const Rniv = costear({ ...comun, grupos: G.map(g => ({ clave: g.nivel, D: g.D, C: g.C, list: g.list, inventario: inventarioNivel(inv, D, g.nivel), ajustes: ajustesDe(g.nivel), capacidades: capacidadesDe(g.nivel) })) });
   // Cada 07-C es de un solo nivel. Sin locales no hay niveles: se muestra una IOARR vacía
   const ioarrs = !G.length
     ? [{ nivel: null, nombre: 'Todos los niveles', R: Runa, D, C, list, inv: inventarioUna(inv, D, Cn) }]
@@ -94,7 +96,9 @@ export function calcularPaquete({ D, P, codigos, dup = {}, inv = {}, comun, dato
     modo, uit: Runa.uit.valor ? { anio: Runa.uit.anio, valor: Runa.uit.valor, limite: Runa.uit.limite } : null,
     una: fila_(Runa), niveles: G.map(g => ({ nivel: g.nivel, nombre: g.nombre, ...fila_(Rniv.grupos[g.nivel]) })), suma: Rniv.totales.total,
     // Paquete: colegios distintos (un colegio con varios niveles cuenta una vez) y control de doble conteo
-    colegios: list.length, control
+    colegios: list.length, control,
+    // Colegios con datos inconsistentes del censo (mobiliario > matrícula) en algún nivel
+    inconsistentes: new Set(Rniv.locales.filter(l => l.tope?.inconsistente).map(l => l.cod)).size
   };
   return { final, colegios, checklist, bloqueados, riesgos, anioRef, modo, niveles: G.map(g => g.nivel), ioarrs, comparativo, Runa, P, escenarios, D, C, list, inv, dup, excluidos };
 }
@@ -125,8 +129,11 @@ export function modeloIoarr(A, x, datos, p, fecha) {
     .filter(r => r.riesgo || r.recientes.length || r.antiguas.length);
   const enRiesgo = riesgos.filter(r => r.riesgo);
   if (enRiesgo.length) M.faltan.push(`Riesgo de duplicación en ${enRiesgo.length === 1 ? '1 colegio' : enRiesgo.length + ' colegios'} (${enRiesgo.slice(0, 10).map(r => r.cod).join(', ')}${enRiesgo.length > 10 ? '…' : ''}): descuenta las entregas de los últimos ${VENTANA_DUP} años o explica por qué no hay duplicación.`);
+  // No aumentar capacidad: matrícula, capacidad de diseño y existente por colegio
+  const capacidad = filasCapacidad(x.R);
+  if (capacidad.some(f => f.inconsistente)) M.faltan.push(`Datos inconsistentes del censo en ${capacidad.filter(f => f.inconsistente).length} colegios (más mesas o sillas que matrícula): verifícalos en campo.`);
   return Object.assign(M, { nivel: x.nivel, nombreIoarr: x.nombre, fichaActivos: ficha, vidaUtil: vida, completo: !M.faltan.length,
-    borrador: !A.final, bloqueados: x.bloqueados || [], checklist, riesgos, anioRef: A.anioRef ?? M.anioRef });
+    borrador: !A.final, bloqueados: x.bloqueados || [], checklist, riesgos, capacidad, anioRef: A.anioRef ?? M.anioRef });
 }
 
 // La IOARR pedida (nivel); sin nivel o si no está, la primera

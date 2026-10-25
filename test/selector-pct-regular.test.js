@@ -76,12 +76,14 @@ test('% = 0 es idéntico a «Solo Malo» y % = 100 a «Malo + Regular» (con el 
     assert.equal(p0.totales.kits, malo.totales.kits); assert.equal(p0.totales.total, malo.totales.total);
     assert.deepEqual(p0.locales.map(l => l.kits), malo.locales.map(l => l.kits));
 
-    // Referencia independiente de «Malo + Regular»: M + R por aula; kit = MIN(matrícula, MAX(mesas, sillas))
+    // Referencia independiente de «Malo + Regular»: M + R por aula; kit = MIN(matrícula, MAX(mesas, sillas)).
+    // Mesas, sillas y kits del local no pasan de la matrícula del padrón (no aumentar capacidad, 2.4.C.c)
     const P100 = limpiarParams({ escenario: 'malo_regular', pctRegular: 100 }), C = calc(D, P100);
     const p100 = costo(D, P100, list);
-    const ref = [0, 1, 2, 3, 4].map(t => list.reduce((a, i) => a + D.locAul[i].reduce((s, ai) => s + C.A.m[t][ai] + C.A.r[t][ai], 0), 0));
+    const deLocal = (t, i) => D.locAul[i].reduce((s, ai) => s + C.A.m[t][ai] + C.A.r[t][ai], 0);
+    const ref = [0, 1, 2, 3, 4].map(t => list.reduce((a, i) => a + (t < 2 ? Math.min(deLocal(t, i), D.locEst[i]) : deLocal(t, i)), 0));
     assert.deepEqual(p100.partidas.map(x => x.rep), ref, nombre);
-    const kits = list.reduce((a, i) => a + D.locAul[i].reduce((s, ai) => s + Math.min(D.aulas[ai][8], Math.max(C.A.m[0][ai] + C.A.r[0][ai], C.A.m[1][ai] + C.A.r[1][ai])), 0), 0);
+    const kits = list.reduce((a, i) => a + Math.min(D.locEst[i], D.locAul[i].reduce((s, ai) => s + Math.min(D.aulas[ai][8], Math.max(C.A.m[0][ai] + C.A.r[0][ai], C.A.m[1][ai] + C.A.r[1][ai])), 0)), 0);
     assert.equal(p100.totales.kits, kits, nombre);
     // El faltante es el mismo en todos: informativo
     assert.equal(p0.totales.fal, malo.totales.fal); assert.equal(p100.totales.fal, malo.totales.fal);

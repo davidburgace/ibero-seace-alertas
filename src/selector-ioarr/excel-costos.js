@@ -16,7 +16,7 @@
 
 import ExcelJS from 'exceljs';
 import { ITEMS, TALLAS } from './calculo.js';
-import { FUENTES_PRECIO, LIMITE_UIT, TIPOS_ARCHIVO, NOTA_PORCENTAJES, LEYENDA_REFERENCIA } from './costos.js';
+import { FUENTES_PRECIO, LIMITE_UIT, TIPOS_ARCHIVO, NOTA_PORCENTAJES, LEYENDA_REFERENCIA, NOTA_FALTANTE } from './costos.js';
 
 const FALTANTE = 'Faltante (brecha de dotación, no reposición)', FALTANTE_MIN = 'faltante (brecha de dotación)';
 const AZUL = 'FF3A63E0', AMARILLO = 'FFFFF3B0', GRIS = 'FFF1F3F7';
@@ -287,7 +287,7 @@ export async function generarExcelCostos(R, meta) {
     add([]);
     add([FALTANTE + ', no incluido en el total'], sub);
     add(['Faltante valorizado, referencial', f(MT('fv'), T.falValor), 'Bienes por encima de los existentes × precio unitario'], soles);
-    add(['El faltante es lo que falta para llegar a lo requerido: brecha de dotación, no reposición. Amplía la capacidad de la UP. Según los Lineamientos IOARR del MEF (2.4.C), una reposición no puede sustentarse en un incremento de capacidad: corresponde evaluarlo como ampliación marginal.']);
+    add([`El faltante (matrícula − mobiliario existente) ${NOTA_FALTANTE} Es solo informativo: amplía la capacidad de la UP y, según los Lineamientos IOARR del MEF (2.4.C.c), una reposición no puede sustentarse en un incremento de capacidad. Lo que se repone no supera la matrícula ni la capacidad de diseño de cada colegio.`]);
     add([]);
     add(['Criterios del metrado'], sub);
     add([meta.criterios || '']);

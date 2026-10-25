@@ -905,8 +905,9 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
   function vistaColegios(A) {
     const { D } = A, porCod = {};
     for (const x of A.ioarrs) for (const l of x.R.locales) {
-      const o = porCod[l.cod] ??= { rep: 0, kits: 0, total: 0, niveles: [] };
-      o.rep += l.rep.reduce((a, b) => a + b, 0); o.kits += l.kits; o.total += l.total; if (x.nivel) o.niveles.push({ nivel: x.nivel, nombre: x.nombre, total: l.total });
+      const o = porCod[l.cod] ??= { rep: 0, kits: 0, total: 0, niveles: [], inconsistente: false, recortado: 0, faltante: 0 };
+      o.rep += l.rep.reduce((a, b) => a + b, 0); o.kits += l.kits; o.total += l.total; if (x.nivel) o.niveles.push({ nivel: x.nivel, nombre: x.nombre, total: l.total, matricula: l.tope?.matricula ?? l.est, capacidad: l.tope?.capacidad ?? null });
+      o.inconsistente ||= !!l.tope?.inconsistente; o.recortado += (l.tope?.recorte[0] || 0) + (l.tope?.recorte[1] || 0) + (l.tope?.kits || 0); o.faltante += l.fal[0] + l.fal[1];
     }
     const fila = (i, excluido) => {
       const cod = D.locs[i][0], c = colegioDe(A.colegios, cod);
@@ -918,7 +919,7 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     return {
       filas, docs_baja: DOCS_BAJA, fuentes_entrega: FUENTES_ENTREGA, tipos_entrega: TIPOS_ENTREGA, ventana: VENTANA_DUP, anio: A.anioRef,
       resumen: { colegios: A.list.length, bloqueados: A.bloqueados.length, completos: A.list.length - A.bloqueados.length, excluidos_dup: A.excluidos.length,
-        riesgo: Object.values(A.riesgos || {}).filter(r => r.riesgo).length },
+        riesgo: Object.values(A.riesgos || {}).filter(r => r.riesgo).length, inconsistentes: A.comparativo.inconsistentes },
       comparativo: A.comparativo
     };
   }
@@ -1152,7 +1153,7 @@ const LEEME_PAQUETE = (proyecto, paq, D, idxDe) => [
 ].join('\r\n');
 
 // Lo que va al Excel de anexos de los Lineamientos, desde el modelo de una IOARR
-export const anexosDe = M => ({ ficha: M.fichaActivos, checklist: M.checklist || [], riesgos: M.riesgos || [], anioRef: M.anioRef, borrador: !!M.borrador });
+export const anexosDe = M => ({ ficha: M.fichaActivos, checklist: M.checklist || [], riesgos: M.riesgos || [], capacidad: M.capacidad || [], anioRef: M.anioRef, borrador: !!M.borrador });
 
 export function textoCriterios(P) {
   const est = { b: 'Bueno', r: 'Regular', m: 'Malo' }[P.carpEstado];

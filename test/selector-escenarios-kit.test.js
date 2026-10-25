@@ -191,7 +191,7 @@ test('escenarios en los documentos: sustento según el método, Excel del Select
   assert.match(cap.M.E.sustento[0], /no usa el estado del mobiliario/);
   assert.ok(cap.M.E.condiciones.some(c => c.estado === 'no' && /capacidad de la UP/.test(c.texto)));
   // Ningún escenario presenta el faltante como reposición
-  for (const x of [malo, cap, mr]) assert.ok(x.M.E.sustento.some(s => /faltantes .*no son reposición/.test(s)));
+  for (const x of [malo, cap, mr]) assert.ok(x.M.E.sustento.some(s => /faltantes .*corresponde a ampliación marginal, no a reposición/.test(s)));
   // Los Word declaran el escenario
   assert.match(await textoDocx(await generar07C(mr.M)), /Escenario de cantidad: Malo \+ % de Regular/);
   assert.match(await textoDocx(await generarMemoria(cap.M)), /Por capacidad/);

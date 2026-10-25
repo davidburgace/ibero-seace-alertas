@@ -231,6 +231,8 @@ export function limpiarColegio(b = {}, anioMax = new Date().getFullYear() + 1) {
     // Entregas previas de mobiliario e inversión en ejecución (chequeo de duplicación)
     entregas: (Array.isArray(x.entregas) ? x.entregas : []).slice(0, 30).map(e => limpiarEntrega(e, anioMax)).filter(Boolean),
     inversion_ejecucion: x.inversion_ejecucion === true, inversion_codigo: txt(x.inversion_codigo, 30),
+    // Capacidad de diseño por nivel (estudiantes): con la matrícula, el tope de lo que se repone
+    capacidad: Object.fromEntries(NIVELES.map(n => [n, x.capacidad?.[n]]).filter(([, v]) => v !== '' && v != null && Number.isInteger(Number(v)) && Number(v) >= 0 && Number(v) <= 1e5).map(([n, v]) => [n, Number(v)])),
     // Inventario y baja (Lineamientos 2.4.C.e y 2.4.C.f)
     inventario: {
       registrado: sino(inv.registrado), contabilidad: sino(inv.contabilidad), baja: sino(inv.baja),
@@ -240,7 +242,7 @@ export function limpiarColegio(b = {}, anioMax = new Date().getFullYear() + 1) {
   };
 }
 // Sin nada cargado: no hace falta guardar la fila
-export const colegioVacio = c => !c.nota && !Object.values(c.inventario).some(Boolean) && !c.entregas.length && !c.inversion_ejecucion && !c.inversion_codigo;
+export const colegioVacio = c => !c.nota && !Object.values(c.inventario).some(Boolean) && !c.entregas.length && !c.inversion_ejecucion && !c.inversion_codigo && !Object.keys(c.capacidad).length;
 export function limpiarColegios(obj) {
   const out = {};
   for (const [cod, v] of Object.entries(obj && typeof obj === 'object' ? obj : {}).slice(0, 50000)) {
@@ -296,3 +298,18 @@ export function riesgoDuplicacion(c, { anioRef, niveles = [], dupEstado = 'sin_v
 }
 // Suma de los ajustes de todos los niveles (para la IOARR única de comparación)
 export const ajusteTotal = aj => Object.values(aj || {}).reduce((a, o) => { for (const k in o) a[k] += o[k]; return a; }, vacioAj());
+
+// ─── No aumentar capacidad ───────────────────────────────────────────────────
+// Capacidad de diseño del colegio en un nivel; sin nivel (IOARR única de comparación), la suma si están todos
+export function capacidadDe(c, nivel, niveles = []) {
+  const cap = c?.capacidad || {};
+  if (nivel) return cap[nivel] ?? null;
+  return niveles.length && niveles.every(n => cap[n] != null) ? niveles.reduce((a, n) => a + cap[n], 0) : null;
+}
+export const PENDIENTE_CAPACIDAD = 'sin dato (pendiente de verificación en campo)';
+// Filas de la hoja «Capacidad y censo»: matrícula, capacidad, existente, lo que se repone antes y después del tope
+export const filasCapacidad = R => R.locales.map(l => ({
+  cod: l.cod, nombre: l.nom, matricula: l.tope?.matricula ?? l.est, capacidad: l.tope?.capacidad ?? null, tope: l.tope?.estudiantes ?? l.est,
+  existente: l.tope?.existente || [0, 0], antes: l.tope?.antes || [l.rep[0], l.rep[1]], recorte: l.tope?.recorte || [0, 0], kitsRecortados: l.tope?.kits || 0,
+  rep: [l.rep[0], l.rep[1]], kits: l.kits, faltante: l.fal[0] + l.fal[1], inconsistente: !!l.tope?.inconsistente
+}));
