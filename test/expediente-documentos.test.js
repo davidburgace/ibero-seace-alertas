@@ -21,7 +21,7 @@ const cerca = (a, b, msg) => assert.ok(Math.abs(a - b) < 0.011, `${msg}: ${a} �
 const PRECIOS = { mesa: 180, silla: 90, esc: 400, sdoc: 120, arm: 650 };
 const DESC = Object.fromEntries(Object.keys(PRECIOS).map(k => [k, { descripcion: 'Descripción de prueba de ' + k }]));
 const EST = { transporte_pieza: 15, igv: 18, doc_pct: 3, sup_pct: 5, liquidacion: 15000, cc_aplica: 'no' };
-const COMPLETOS = { uf: 'UF de prueba', uei: 'UEI de prueba', opmi: 'OPMI de prueba', fecha_inicio: '2027-03', meses: 5, en_uso: 'si', inventario_registrado: 'si',
+const COMPLETOS = { grupo_funcional: { I: '9991', P: '9992', S: '0105' }, unidad_indicador: 'UNIDAD DE PRUEBA', uf: 'UF de prueba', uei: 'UEI de prueba', opmi: 'OPMI de prueba', fecha_inicio: '2027-03', meses: 5, en_uso: 'si', inventario_registrado: 'si',
   servicio_brecha: 'S', tipologia: 'T', indicador_brecha: 'I', ue_mantenimiento: 'UGEL de prueba', ue_mantenimiento_codigo: '0123',
   modalidad: 'Administración indirecta – Obras por Impuestos', fuente_financiamiento: 'Recursos Determinados', ref_tecnica: 'Ficha técnica de prueba',
   vida_util: { mesa: 10, silla: 10, esc: 10, sdoc: 10, arm: 12 }, mant_nuevo: { mesa: 2000, silla: 800, esc: 300, sdoc: 100, arm: 500 },
@@ -86,7 +86,9 @@ test('Moquegua «mariscal»: inversión masiva, cronogramas que suman exacto y s
   for (const a of C.activos) cerca(a.valores.reduce((x, y) => x + y, 0), a.total, 'cronograma de ' + a.nombre);
   for (const m of C.metas) assert.equal(m.valores.reduce((x, y) => x + y, 0), m.total);
   assert.equal(M.F.inicio, '01/03/2027'); assert.equal(M.F.fin, '31/07/2027');
-  assert.equal(M.F.mantenimiento.anios, 12);
+  // Cronograma de mantenimiento: 3 años por defecto, con el monto anual de cada meta
+  assert.equal(M.F.mantenimiento.anios, 3);
+  assert.ok(M.F.mantenimiento.filas.every(f => f.valores.length === 3 && f.valores.every(v => v === f.anual)));
   assert.ok(!M.faltan.length, 'pendientes: ' + M.faltan.join(' | '));
 });
 

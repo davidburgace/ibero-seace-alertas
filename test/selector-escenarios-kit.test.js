@@ -88,14 +88,15 @@ test('caso de control en el 07-C, el Excel y el ZIP: sin gastos generales ni uti
   assert.equal(M.F.subtotalActivos, 3848832.00 + 692789.76);
   assert.deepEqual([M.F.expediente, M.F.supervision, M.F.liquidacion], [115464.96, 192441.60, 15000]);
   assert.equal(M.F.metas.length, 1);
-  assert.equal(M.F.metas[0].unidad, 'Kit de mobiliario');
+  // Meta física en «número de mobiliario»: un kit cuenta como 2 (mesa y silla)
+  assert.equal(M.F.metas[0].unidad, 'Número de mobiliario'); assert.equal(M.F.metas[0].numero, 2 * M.F.metas[0].cantidad);
   assert.equal(M.F.metas[0].costo, 4541621.76);
   const t07 = await textoDocx(await generar07C(M)), tMem = await textoDocx(await generarMemoria(M));
   for (const t of [t07, tMem]) {
     assert.doesNotMatch(t, /utilidad|gastos generales|imprevistos|gestión del proyecto/i);
     assert.match(t, /4\.864\.528,32|4,864,528\.32/);
   }
-  assert.match(t07, /Kit de mobiliario/);
+  assert.match(t07, /kits: mesa \+ silla/);
   const x = await textoXlsx(await generarExcelCostos(R, { proyecto: 'Control', region: 'Prueba', fecha: '2026-10-23', escenario: M.escenarioTexto, efectivos: preciosEfectivos({}, {}) }));
   assert.match(x, /MONTO DE INVERSIÓN/);
   assert.match(x, /4864528\.32/);
@@ -144,12 +145,12 @@ test('kit por aula: el mayor entre mesas y sillas en cada aula, sumado en el loc
   assert.equal(costear({ D, C, list: [0], precios: precioNum(), estructura: { kit: true }, uit: null, inventario: inv }).totales.kits, 10);
 });
 
-test('kit en el 07-C: una línea «MOBILIARIO DE AULA» con unidad «Kit de mobiliario»; los demás aparte', async () => {
+test('kit en el 07-C: una línea «MOBILIARIO DE AULA» en «número de mobiliario» (kit = 2); los demás aparte', async () => {
   const D = region([[{ grado: '2° Primaria', f: { 2: 10, 10: 2, 13: 1 } }, { grado: '5° Primaria', f: { 2: 1, 10: 8, 19: 1 } }]]);
   const C = calc(D, DEF), R = costear({ D, C, list: [0], precios: precioNum({ precios: { esc: 300, arm: 400 } }), estructura: { kit: true }, uit: { anio: 2026, valor: 1 } });
   const M = armarModelo({ R, D, list: [0], proyecto: { nombre: 'Kit', region: 'Prueba' }, datos: limpiarDatosDoc({}), precios: {}, P: DEF, fecha: '2026-10-23' });
   const t = await textoDocx(await generar07C(M));
-  assert.match(t, /MOBILIARIO DE AULA\nMOBILIARIO\nKit de mobiliario\n18\n/);
+  assert.match(t, /MOBILIARIO DE AULA\n\(18 kits: mesa \+ silla\)\nMOBILIARIO\nNúmero de mobiliario\n36\n/);
   assert.match(t, /MOBILIARIO DE AULA\n\(escritorio docente\)/);
   assert.match(t, /MOBILIARIO DE AULA\n\(armario \/ estante\)/);
   assert.doesNotMatch(t, /\(silla docente\)/);
@@ -223,7 +224,11 @@ test('07-C: descripción por nivel y grupo de grado, referencia técnica, códig
   assert.match(desc, /Referencia técnica aplicable: Ficha técnica de la entidad\./);
   assert.match(armarModelo({ R, D, list: [0, 1], proyecto: { nombre: 'X', region: 'Prueba' }, datos: limpiarDatosDoc({}), precios, P: DEF, fecha: '2026-10-23' }).E.intervencion[0].descripcion, /Referencia técnica aplicable: PENDIENTE/);
   // Códigos de la clasificación funcional; contribución a la brecha vacía por defecto
-  assert.equal(M.A.funcion, '22 EDUCACIÓN'); assert.equal(M.A.division, '047 EDUCACIÓN BÁSICA'); assert.deepEqual(M.A.grupos, ['0104 EDUCACIÓN PRIMARIA']);
+  assert.equal(M.A.funcion, '22 EDUCACIÓN'); assert.equal(M.A.division, '047 EDUCACIÓN BÁSICA'); assert.deepEqual(M.A.grupos, ['PENDIENTE (código) EDUCACIÓN PRIMARIA']);
+  // No se propone un código que no se conoce: Primaria queda pendiente; Secundaria es 0105; lo escrito manda
+  assert.ok(M.faltan.some(x => /Código del grupo funcional de primaria/.test(x)));
+  assert.equal(M.A.indicadores[0].nombre, 'PORCENTAJE DE INSTALACIONES EDUCATIVAS QUE BRINDAN EL SERVICIO EN CONDICIONES INADECUADAS');
+  assert.match(M.A.espacio, /^DEPARTAMENTO DE /);
   assert.equal(M.A.indicadores[0].valor, null);
   // Por código modular: todas las UP, también el local sin bienes a reponer
   assert.equal(M.ups.length, 1);
@@ -232,7 +237,7 @@ test('07-C: descripción por nivel y grupo de grado, referencia técnica, códig
   assert.equal(M.F.meses, 3); assert.equal(M.F.cronograma.periodos.length, 3);
   assert.ok(!M.faltan.some(x => /mantenimiento \(puede ser 0\)|Modalidad|Fuente de financiamiento|Referencia técnica|mantenimiento: nombre/.test(x)), M.faltan.join(' | '));
   const t = await textoDocx(await generar07C(M));
-  for (const s of ['22 EDUCACIÓN', '047 EDUCACIÓN BÁSICA', '0104 EDUCACIÓN PRIMARIA', 'verifícalos contra el PMI', 'Código modular (UP)', 'Administración indirecta – Obras por Impuestos', 'Recursos Determinados', '75 días'])
+  for (const s of ['22 EDUCACIÓN', '047 EDUCACIÓN BÁSICA', 'PENDIENTE (código) EDUCACIÓN PRIMARIA', 'verifícalos contra el PMI', 'Código modular (UP)', 'Administración indirecta – Obras por Impuestos', 'Recursos Determinados', '75 días'])
     assert.ok(t.includes(s), s);
   // Sin datos no se inventan valores por defecto
   const V = armarModelo({ R, D, list: [0, 1], proyecto: { nombre: 'X', region: 'Prueba' }, datos: limpiarDatosDoc({}), precios, P: DEF, fecha: '2026-10-23' });
@@ -269,7 +274,8 @@ test('la pestaña interna de oferta no sale en ninguna exportación (07-C, memor
   const A = { modo: 'una', P, detalle: {}, efectivos: preciosEfectivos({}, {}), excluidos: [], dup: {} };
   const x = { nivel: null, nombre: 'Todos los niveles', D, C, list, R, inv: {} };
   const piezas = await piezasExpediente({ A, datos, lista: [{ x, M }], meta: { region: 'Prueba', fecha: '2026-10-23' }, nombre: 'Control' });
-  assert.deepEqual(piezas.filter(p => !p.oculto).map(p => p.nombre), ['00_Formato_05B_idea.docx', '01_Formato_07C_borrador.docx', '02_Memoria_descriptiva.docx', '03_Lista_de_verificacion.docx', '04_Estructura_de_costos.xlsx', '05_Seleccion_de_locales_y_metrado.xlsx', '06_Anexos_Lineamientos.xlsx', '07_Informe_vida_util.docx']);
+  assert.deepEqual(piezas.filter(p => !p.oculto).map(p => p.nombre), ['00_Formato_05B_idea.docx', '01_Formato_07C_borrador.docx', '02_Memoria_descriptiva.docx', '03_Lista_de_verificacion.docx', '04_Estructura_de_costos.xlsx', '05_Seleccion_de_locales_y_metrado.xlsx', '06_Anexos_Lineamientos.xlsx', '07_Informe_vida_util.docx', '10_Informe_sustento_masiva.docx',
+    '11_Cartas/Carta_opinion_favorable_por_UGEL.docx', '11_Cartas/Carta_compromiso_O_y_M_por_UGEL.docx', '11_Cartas/Oficio_remision_por_UGEL.docx']);
   // Un informe de vida útil por colegio con bienes a reponer
   assert.ok(piezas.filter(p => p.oculto).every(p => /^07_Informes_vida_util_por_colegio\/Informe_vida_util_\d+\.docx$/.test(p.nombre)));
   assert.equal(piezas.filter(p => p.oculto).length, M.ups.length);
@@ -295,7 +301,7 @@ test('la pestaña interna de oferta no sale en ninguna exportación (07-C, memor
   const src = f => readFileSync(new URL('../src/selector-ioarr/' + f, import.meta.url), 'utf8');
   for (const f of ['word.js', 'excel-costos.js', 'excel.js', 'zip.js', 'documentos.js', 'ficha.js', 'ficha-digital.js', 'lineamientos.js', 'excel-lineamientos.js']) assert.doesNotMatch(src(f), /oferta\.js|leerOferta|calcularOferta/, f);
   const exp = src('expediente.js');
-  const rutas = ['/documentos/formato-07c', '/documentos/memoria', '/documentos/verificacion', '/costos/excel', '/expediente-zip', '/fichas-zip', '/lineamientos/anexos', '/documentos/vida-util', '/documentos/formato-05b'];
+  const rutas = ['/documentos/formato-07c', '/documentos/memoria', '/documentos/verificacion', '/costos/excel', '/expediente-zip', '/fichas-zip', '/lineamientos/anexos', '/documentos/vida-util', '/documentos/formato-05b', '/documentos/sustento', '/paquete/up-activos', '/documentos/cartas'];
   for (const r of rutas) {
     const i = exp.indexOf(`'/proyectos/:id${r}'`), cuerpo = exp.slice(i, exp.indexOf('\n  }));', i));
     assert.ok(i > 0, r); assert.doesNotMatch(cuerpo, /leerOferta|calcularOferta|ioarr_expediente_oferta/, r);

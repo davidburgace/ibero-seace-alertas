@@ -196,7 +196,7 @@ function panelRegular(act) {
 }
 
 // ─── Precios unitarios de mercado (tabla editable) ──────────────────────────
-const ORIGEN = { editado: '<span class="chip-est ok">Editado</span>', catalogo: '<span class="chip-est">Catálogo</span>', referencia: '<span class="chip-est pend">Referencia Loreto 2026</span>' };
+const ORIGEN = { editado: '<span class="chip-est ok">Editado</span>', catalogo: '<span class="chip-est">Catálogo</span>', referencia: '<span class="chip-est pend">Referencia precargada</span>' };
 function pintarPrecios() {
   const lt = datos.lineasTalla || [], kit = datos.estructura?.kit, tallasKit = (datos.lineasKit || []).map(x => x.talla);
   const fila = (k, nombre, cant, general) => {
@@ -244,9 +244,10 @@ function pintarEstructura() {
     <div class="form-grid pad">
       ${num('est-tp', 'Transporte por pieza (S/)', g.transporte_pieza, { k: 'transporte_pieza' })}
       ${num('est-igv', 'IGV (%)', g.igv, { k: 'igv', max: 100 })}
-      ${num('est-doc', 'Documento equivalente (% del costo directo sin IGV)', g.doc_pct, { k: 'doc_pct', max: 100 })}
+      ${num('est-doc', 'Expediente técnico o documento equivalente (% del costo directo sin IGV)', g.doc_pct, { k: 'doc_pct', max: 100 })}
       ${num('est-sup', 'Supervisión (% del costo directo sin IGV)', g.sup_pct, { k: 'sup_pct', max: 100 })}
-      ${num('est-liq', 'Liquidación (S/, monto fijo)', g.liquidacion, { k: 'liquidacion' })}
+      <div class="campo"><label for="est-liqmodo">Liquidación como</label><select id="est-liqmodo"><option value="monto" ${g.liq_modo !== 'pct' ? 'selected' : ''}>Monto fijo (S/)</option><option value="pct" ${g.liq_modo === 'pct' ? 'selected' : ''}>% del costo directo sin IGV</option></select></div>
+      ${g.liq_modo === 'pct' ? num('est-liqpct', 'Liquidación (% del costo directo sin IGV)', g.liq_pct, { k: 'liq_pct', max: 100 }) : num('est-liq', 'Liquidación (S/, monto fijo)', g.liquidacion, { k: 'liquidacion' })}
     </div>
     <div class="form-grid pad">
       <div class="campo"><label for="est-cc">Control concurrente (Ley 31358)</label><select id="est-cc"><option value="" ${!g.cc_aplica ? 'selected' : ''}>Según el umbral / sin indicar</option><option value="si" ${g.cc_aplica === 'si' ? 'selected' : ''}>Corresponde</option><option value="no" ${g.cc_aplica === 'no' ? 'selected' : ''}>No corresponde</option></select><span class="sub">Va en B. Otros costos de inversión.</span></div>
@@ -439,6 +440,7 @@ export function enlazarExpediente(el, abrirNuevo) {
   el.addEventListener('change', e => {
     if (e.target.name === 'exp-esc') { cambiarEscenario({ escenario: e.target.value }); return; }
     if (e.target.id === 'est-kit') { clearTimeout(tGuardar); guardar({ estructura: { kit: e.target.checked } }); }
+    if (e.target.id === 'est-liqmodo') { clearTimeout(tGuardar); guardar({ estructura: { liq_modo: e.target.value } }); }
     if (e.target.id === 'est-cc') { clearTimeout(tGuardar); guardar({ estructura: { cc_aplica: e.target.value } }); }
   });
   enlazarDocumentos(el);

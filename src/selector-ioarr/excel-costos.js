@@ -111,9 +111,10 @@ export async function generarExcelCostos(R, meta) {
     const filas = [
       ['tp', 'Transporte por pieza', 'S/ por pieza', E.transporte_pieza, SOLES, kit ? 'Cada kit cuenta 2 piezas (mesa y silla); escritorio, silla docente y armario, 1 pieza cada uno.' : 'Una pieza por bien (la mesa, por puesto).'],
       ['igv', 'IGV', '%', E.igv / 100, PCT, 'Sobre el costo directo.'],
-      ['doc', 'Documento equivalente', '%', E.doc_pct / 100, PCT, 'Sobre el costo directo sin IGV.'],
+      ['doc', 'Expediente técnico o documento equivalente', '%', E.doc_pct / 100, PCT, 'Sobre el costo directo sin IGV.'],
       ['sup', 'Supervisión', '%', E.sup_pct / 100, PCT, 'Sobre el costo directo sin IGV.'],
-      ['liq', 'Liquidación', 'S/', T.liq, SOLES, R.grupos ? 'Monto fijo.' : 'Monto fijo; se reparte entre los locales según su costo directo.'],
+      E.liq_modo === 'pct' ? ['liq', 'Liquidación', '%', E.liq_pct / 100, PCT, 'Sobre el costo directo sin IGV.']
+        : ['liq', 'Liquidación', 'S/', T.liq, SOLES, R.grupos ? 'Monto fijo.' : 'Monto fijo; se reparte entre los locales según su costo directo.'],
       ['cc', 'Control concurrente (Ley 31358)', '%', E.cc_corresponde ? (E.cc_pct ?? 0) / 100 : 0, PCT,
         `Sobre costo directo + IGV + documento equivalente + supervisión + liquidación. ${E.cc_corresponde ? (E.cc_pct == null ? 'Corresponde: PENDIENTE el %.' : 'Corresponde.') : E.cc_aplica === 'no' ? 'No corresponde (0 %).' : 'PENDIENTE indicar si corresponde (0 % por ahora).'}`]
     ];
@@ -153,7 +154,7 @@ export async function generarExcelCostos(R, meta) {
   col('transporte', 'Transporte (S/)', 15);
   col('cd', 'Costo directo (S/)', 16);
   col('igv', 'IGV (S/)', 15);
-  col('doc', 'Documento equivalente (S/)', 15);
+  col('doc', 'Expediente técnico o documento equivalente (S/)', 15);
   col('sup', 'Supervisión (S/)', 15);
   col('liq', 'Liquidación (S/)', 15);
   col('cc', 'Control concurrente (S/)', 15);
@@ -186,7 +187,7 @@ export async function generarExcelCostos(R, meta) {
     v[C.igv] = f(`${A('cd', r)}*${cel.igv}`, l.igv);
     v[C.doc] = f(`${A('cd', r)}*${cel.doc}`, l.doc);
     v[C.sup] = f(`${A('cd', r)}*${cel.sup}`, l.sup);
-    v[C.liq] = f(`IF(${totDe('cd')}=0,${cel.liq}/${nLoc},${cel.liq}*${A('cd', r)}/${totDe('cd')})`, l.liq);
+    v[C.liq] = f(E.liq_modo === 'pct' ? `${A('cd', r)}*${cel.liq}` : `IF(${totDe('cd')}=0,${cel.liq}/${nLoc},${cel.liq}*${A('cd', r)}/${totDe('cd')})`, l.liq);
     v[C.cc] = f(`(${A('cd', r)}+${A('igv', r)}+${A('doc', r)}+${A('sup', r)}+${A('liq', r)})*${cel.cc}`, l.cc || 0);
     v[C.total] = f(`${A('cd', r)}+${A('igv', r)}+${A('doc', r)}+${A('sup', r)}+${A('liq', r)}+${A('cc', r)}`, l.total);
     LF.forEach((x, j) => { v[C['fq' + j]] = l.lin.fal[idxF[j]]; });
@@ -271,10 +272,10 @@ export async function generarExcelCostos(R, meta) {
     const fT = linea('Transporte', MT('transporte'), T.transporte, `Piezas × transporte por pieza`);
     const fCD = linea('Costo directo sin IGV', `B${fB}+B${fT}`, T.cd, 'Bienes + transporte');
     const fI = linea('IGV', MT('igv'), T.igv, `${E.igv} % del costo directo`);
-    const fA = linea('A. COSTO DIRECTO (con IGV)', `B${fCD}+B${fI}`, T.cdIgv, 'Costo de los activos: metas del 07-C', true);
-    const fDoc = linea('Documento equivalente', MT('doc'), T.doc, `${E.doc_pct} % del costo directo sin IGV`);
+    const fA = linea('A. ADQUISICIÓN DE MOBILIARIO (costo directo con IGV)', `B${fCD}+B${fI}`, T.cdIgv, 'Costo de los activos: metas del 07-C', true);
+    const fDoc = linea('Expediente técnico o documento equivalente', MT('doc'), T.doc, `${E.doc_pct} % del costo directo sin IGV`);
     linea('Supervisión', MT('sup'), T.sup, `${E.sup_pct} % del costo directo sin IGV`);
-    linea('Liquidación', MT('liq'), T.liq, 'Monto fijo');
+    linea('Liquidación', MT('liq'), T.liq, E.liq_modo === 'pct' ? `${E.liq_pct} % del costo directo sin IGV` : 'Monto fijo');
     const fCC = linea('Control concurrente (Ley 31358)', MT('cc'), T.cc || 0, E.cc_corresponde ? `${E.cc_pct ?? 'PENDIENTE'} % (Parámetros)` : E.cc_aplica === 'no' ? 'No corresponde' : 'PENDIENTE indicar si corresponde');
     const fBB = linea('B. OTROS COSTOS DE INVERSIÓN', `SUM(B${fDoc}:B${fCC})`, T.b ?? (T.doc + T.sup + T.liq), 'Documento equivalente + supervisión + liquidación + control concurrente', true);
     const filaTot = add(['C = A + B. COSTO DE INVERSIÓN (MONTO DE INVERSIÓN)', f(`B${fA}+B${fBB}`, T.total), 'Tabla 3.7 de los Lineamientos IOARR'], r => { soles(r); r.font = { bold: true, size: 12 }; }).number;
@@ -370,6 +371,30 @@ export async function generarExcelCostos(R, meta) {
         if (!arch.some(a => a.tipo === 'acta')) resaltar(ws.getCell(r, 16), AMARILLO);
         r++;
       }
+    }
+  }
+
+  // ── Cuadro comparativo de cotizaciones (sustento de los precios) ────────────
+  if (meta.cotizaciones?.bienes?.length) {
+    const ws = wb.addWorksheet('Cotizaciones', { views: [{ state: 'frozen', ySplit: 3 }] });
+    ws.columns = [30, 30, 15, 15, 22, 46, 12, 12].map(width => ({ width }));
+    ws.getCell('A1').value = 'Cuadro comparativo de cotizaciones'; ws.getCell('A1').font = { bold: true, size: 14 };
+    ws.getCell('A2').value = 'Precio sin IGV: el cotizado o, si solo hay precio con IGV, con IGV ÷ (1 + IGV). Precio referencial: promedio sin IGV. Se piden al menos 3 proveedores por nivel.';
+    ws.getCell('A2').font = { italic: true, color: { argb: 'FF5C6270' } };
+    let r = 3;
+    for (const b of meta.cotizaciones.bienes) {
+      ws.getRow(r).values = [b.nombre, 'Proveedor', 'Precio con IGV (S/)', 'Precio sin IGV (S/)', 'Material', 'Especificación técnica', 'Transporte incluido', 'Fecha']; cabecera(ws, r, 8); r++;
+      const desde = r;
+      for (const x of b.filas) {
+        ws.getRow(r).values = ['', x.proveedor, x.con ?? '', x.sin ?? '', x.material, x.especificacion, x.transporte_incluido ? 'Sí' : 'No', fechaPe(x.fecha)];
+        for (const c of [3, 4]) ws.getCell(r, c).numFmt = SOLES;
+        if (!x.fecha || !x.especificacion) for (const c of [6, 8]) if (!ws.getCell(r, c).value) resaltar(ws.getCell(r, c), AMARILLO);
+        r++;
+      }
+      ws.getRow(r).values = ['', `Promedio (precio referencial)${b.suficiente ? '' : ' · PENDIENTE: menos de 3 proveedores'}`, f(`IFERROR(AVERAGE(C${desde}:C${r - 1}),0)`, b.promedio_con_igv ?? 0), f(`IFERROR(AVERAGE(D${desde}:D${r - 1}),0)`, b.promedio_sin_igv ?? 0)];
+      ws.getRow(r).font = { bold: true }; for (const c of [3, 4]) ws.getCell(r, c).numFmt = SOLES;
+      if (!b.suficiente) resaltar(ws.getCell(r, 2), AMARILLO);
+      r += 2;
     }
   }
 

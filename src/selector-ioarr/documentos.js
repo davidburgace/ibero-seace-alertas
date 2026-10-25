@@ -20,6 +20,7 @@
 import { ITEMS, TALLAS, NIVN, textoEscenario, textoPct, textoOrigenPct, ROTULO_UMBRAL, DEF as DEF_CRIT } from './calculo.js';
 import { TIPOS, LIMITE_UIT, NOTA_FALTANTE, REGISTRO_MASIVA } from './costos.js';
 import { FUENTES_VIDA_UTIL, limpiarColegios, colegioDe, checklistColegio } from './lineamientos.js';
+import { limpiarCotizaciones } from './cotizaciones.js';
 
 // Nota del material, dentro de la descripción técnica
 export const NOTA_MATERIAL = 'El material debe respetar la ficha técnica aplicable; la entidad convocante puede exigir madera.';
@@ -47,10 +48,16 @@ function descripcionMeta(m, precios, refTecnica) {
 
 // ─── Datos que carga el usuario ─────────────────────────────────────────────
 export const ESTADOS_ACTIVO = ['REGULAR', 'MALO', 'MUY MALO', 'IRRECUPERABLE'];
-const UNIDAD_META = { kit: 'Kit de mobiliario', mesa: 'Número de mobiliario (puestos)', silla: 'Número de mobiliario', esc: 'Número de mobiliario', sdoc: 'Número de mobiliario', arm: 'Número de mobiliario' };
+// Meta física en «número de mobiliario»: un kit cuenta como 2 (mesa y silla)
+export const PIEZAS_KIT = 2;
+export const MANT_ANIOS = 3;   // años del cronograma de mantenimiento (precedente de IOARR masivas aprobadas)
+const UNIDAD_META = { kit: 'Número de mobiliario', mesa: 'Número de mobiliario (puestos)', silla: 'Número de mobiliario', esc: 'Número de mobiliario', sdoc: 'Número de mobiliario', arm: 'Número de mobiliario' };
 const PLURAL = { kit: 'kits de mobiliario (mesa + silla del estudiante)', mesa: 'mesas del estudiante', silla: 'sillas del estudiante', esc: 'escritorios del docente', sdoc: 'sillas del docente', arm: 'armarios o estantes' };
-// Clasificación funcional (verificar contra el PMI). Solo el grupo de Primaria lleva código aquí.
-export const CODIGOS_FUNCIONALES = { funcion: '22', division: '047', grupo: { P: '0104' } };
+// Clasificación funcional (verificar contra el PMI). Solo se conoce el grupo de Secundaria (0105);
+// los demás se escriben en Documentos (grupo_funcional) y, mientras falten, quedan pendientes.
+export const CODIGOS_FUNCIONALES = { funcion: '22', division: '047', grupo: { S: '0105' } };
+// Indicador de brecha por defecto (precedente de las IOARR masivas aprobadas), a nivel departamental
+export const INDICADOR_BRECHA = 'PORCENTAJE DE INSTALACIONES EDUCATIVAS QUE BRINDAN EL SERVICIO EN CONDICIONES INADECUADAS';
 // Sugerencias (el usuario escribe lo que corresponda)
 export const MODALIDADES = ['Administración directa', 'Administración indirecta – Por contrata', 'Administración indirecta – Obras por Impuestos', 'Administración indirecta – Núcleo ejecutor'];
 export const FUENTES_FIN = ['Recursos Ordinarios', 'Recursos Directamente Recaudados', 'Recursos por Operaciones Oficiales de Crédito', 'Donaciones y Transferencias', 'Recursos Determinados'];
@@ -95,6 +102,8 @@ export function limpiarDatosDoc(b = {}) {
     anio_t: entero(b.anio_t, 2020, 2100),
     // A. Alineamiento: cadena funcional (vacía = función, división y grupo propuestos)
     cadena_funcional: texto(b.cadena_funcional, 300),
+    // Código del grupo funcional por nivel (solo dígitos; vacío = el conocido o pendiente)
+    grupo_funcional: Object.fromEntries(['I', 'P', 'S', 'E'].map(n => [n, String(b.grupo_funcional?.[n] ?? '').trim()]).filter(([, v]) => /^\d{3,5}$/.test(v))),
     // A. Alineamiento (se proponen por nivel; el usuario los ajusta al PMI)
     servicio_brecha: texto(b.servicio_brecha, 300),
     tipologia: texto(b.tipologia, 300),
@@ -127,6 +136,8 @@ export function limpiarDatosDoc(b = {}) {
     patrimonial_cargo: texto(b.patrimonial_cargo, 200),
     // Por colegio: checklist de inventario y baja… (lineamientos.js); se guarda con PUT /colegios/:cod
     colegios: limpiarColegios(b.colegios),
+    // Cuadro comparativo de cotizaciones por nivel (cotizaciones.js)
+    cotizaciones: limpiarCotizaciones(b.cotizaciones),
     // Cuadro de estado situacional: advertencias revisadas, con su explicación ({ clave: { nota, fecha } })
     situacional: { revisiones: Object.fromEntries(Object.entries(b.situacional?.revisiones || {}).slice(0, 200)
       .map(([k, v]) => [String(k).slice(0, 300), { nota: texto(v?.nota, 500), fecha: /^\d{4}-\d{2}-\d{2}$/.test(v?.fecha || '') ? v.fecha : null }]).filter(([, v]) => v.nota)) },
@@ -136,6 +147,8 @@ export function limpiarDatosDoc(b = {}) {
     mant_actual: porTipo(b.mant_actual, v => numero(v, 0, 1e9)),
     vida_util: porTipo(b.vida_util, v => entero(v, 1, 30)),
     mant_nuevo: porTipo(b.mant_nuevo, v => numero(v, 0, 1e9)),
+    // Años del cronograma de mantenimiento del mobiliario nuevo (3 por defecto)
+    mant_anios: entero(b.mant_anios, 1, 20),
     sustento: parrafo(b.sustento),
     // F. Plazo
     fecha_inicio: fecha,
@@ -232,28 +245,29 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, efectivos = 
     : `ADQUISICIÓN DE MOBILIARIO DE AULA; EN EL(LA) IE ${mayus(u0.nombre)} EN LA LOCALIDAD ${mayus(u0.cp)}, DISTRITO DE ${mayus(u0.dist)}, PROVINCIA ${mayus(u0.prov)}, DEPARTAMENTO ${mayus(u0.dpto)}`;
 
   // ── A. Alineamiento a la brecha: códigos de la clasificación funcional; indicador y unidad editables ──
-  const cod = CODIGOS_FUNCIONALES;
+  const cod = CODIGOS_FUNCIONALES, grupoDe = k => d.grupo_funcional?.[k] || cod.grupo[k] || '';
   const A = {
     funcion: `${cod.funcion} EDUCACIÓN`, division: `${cod.division} EDUCACIÓN BÁSICA`, sector: 'EDUCACIÓN',
     // La reposición mantiene la calidad del servicio: contribuye a la brecha de calidad, no a la de cobertura
     contribucion: 'Calidad: la reposición recupera la capacidad de producción del servicio existente; no contribuye al cierre de la brecha de cobertura.',
-    grupos: niveles.map(k => `${cod.grupo[k] ? cod.grupo[k] + ' ' : ''}EDUCACIÓN ${NIVEL[k]}`),
+    grupos: niveles.map(k => `${grupoDe(k) ? grupoDe(k) + ' ' : 'PENDIENTE (código) '}EDUCACIÓN ${NIVEL[k]}`),
     servicio: d.servicio_brecha || niveles.map(k => 'SERVICIO DE EDUCACIÓN ' + NIVEL[k]).join('; '),
     tipologia: d.tipologia || niveles.map(k => 'EDUCACIÓN ' + NIVEL[k]).join('; '),
     indicadores: d.indicador_brecha
       ? [{ tipo: 'Calidad', nombre: d.indicador_brecha, unidad: d.unidad_indicador || '', valor: d.contribucion_brecha }]
-      : niveles.map(k => ({ tipo: 'Calidad', nombre: `PORCENTAJE DE LOCALES EDUCATIVOS CON EDUCACIÓN ${NIVEL[k]} CON CAPACIDAD INSTALADA INADECUADA`, unidad: d.unidad_indicador || 'LOCAL EDUCATIVO', valor: d.contribucion_brecha })),
-    espacio: !u0 ? '' : ambito === 'DISTRITAL' ? `${mayus(u0.dpto)}, ${mayus(u0.prov)}, ${mayus(u0.dist)}` : ambito === 'PROVINCIAL' ? `${mayus(u0.dpto)}, ${mayus(u0.prov)}` : mayus(u0.dpto),
+      : [{ tipo: 'Calidad', nombre: INDICADOR_BRECHA, unidad: d.unidad_indicador || '', valor: d.contribucion_brecha }],
+    // El indicador se mide a nivel departamental
+    espacio: !u0 ? '' : `DEPARTAMENTO DE ${mayus(u0.dpto)}`,
     propuesto: !d.servicio_brecha || !d.tipologia || !d.indicador_brecha,
     cadena: d.cadena_funcional || null,
-    sinCodigo: niveles.filter(k => !cod.grupo[k]).map(k => NIVEL[k])
+    sinCodigo: niveles.filter(k => !grupoDe(k)).map(k => NIVEL[k])
   };
 
   // ── Metas del 07-C: cada una con su costo directo × (1 + IGV). El redondeo va a la última,
   //    así las metas suman el costo directo + IGV de la estructura ──
   const igvPct = R.estructura?.params?.igv ?? 18;
   const metas = metasR.map(m => ({ k: m.k, nombre: m.n, plural: PLURAL[m.k], activo: 'MOBILIARIO DE AULA', unidad: UNIDAD_META[m.k] || 'Número de mobiliario',
-    cantidad: m.cantidad, porTalla: m.porTalla, costo: r2(m.cd * (1 + igvPct / 100)) }));
+    cantidad: m.cantidad, numero: m.k === 'kit' ? m.cantidad * PIEZAS_KIT : m.cantidad, porTalla: m.porTalla, costo: r2(m.cd * (1 + igvPct / 100)) }));
   if (metas.length) metas[metas.length - 1].costo = r2(T.cdIgv - metas.slice(0, -1).reduce((a, m) => a + m.costo, 0));
   // Tabla 3.7: A = costo directo (activos con IGV); B = documento equivalente + supervisión + liquidación + control concurrente
   const subtotalActivos = r2(T.cdIgv);
@@ -277,17 +291,18 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, efectivos = 
     supervision: { valores: repartir(r2(supervision), N), total: r2(supervision) },
     liquidacion: { valores: [...Array(N - 1).fill(0), liquidacion], total: liquidacion },
     control: control ? { valores: repartir(r2(control), N), total: r2(control) } : null,
-    metas: metas.map(m => ({ nombre: m.nombre, unidad: m.unidad, valores: repartirEnteros(m.cantidad, N), total: m.cantidad }))
+    metas: metas.map(m => ({ nombre: m.nombre, unidad: m.unidad, valores: repartirEnteros(m.numero, N), total: m.numero }))
   } : null;
   const plazoTexto = enDias ? (d.dias ? `${d.dias} días` : null) : (d.meses ? `${d.meses} ${d.meses === 1 ? 'mes' : 'meses'}` : null);
 
   // ── Mantenimiento de los activos nuevos (por meta; el costo puede ser 0) ──
-  const anios = Math.min(20, Math.max(0, ...metas.map(m => d.vida_util[m.k] || 0)));
+  // Cronograma de mantenimiento: 3 años (editable), con el monto anual de cada meta (editable, puede ser 0)
+  const anios = d.mant_anios || MANT_ANIOS;
   const mantenimiento = {
     inicio: fin ? new Date(Date.UTC(fin.getUTCFullYear(), fin.getUTCMonth() + 1, 1)) : null,
     anios,
     filas: metas.map(m => ({ nombre: m.nombre, anual: d.mant_nuevo[m.k] ?? null, vida: d.vida_util[m.k] ?? null,
-      valores: Array.from({ length: anios }, (_, j) => d.mant_nuevo[m.k] != null && j < (d.vida_util[m.k] || 0) ? d.mant_nuevo[m.k] : 0) }))
+      valores: Array.from({ length: anios }, () => d.mant_nuevo[m.k] ?? 0) }))
   };
   mantenimiento.totales = Array.from({ length: anios }, (_, j) => r2(mantenimiento.filas.reduce((a, f) => a + f.valores[j], 0)));
 
@@ -414,6 +429,8 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, efectivos = 
   falta(!d.en_uso && sinUsoDato, `Si el mobiliario está en uso (colegio operativo) en ${sinUsoDato === 1 ? '1 colegio' : sinUsoDato + ' colegios'}: márcalo en «Por colegio».`);
   if (supera && !masiva) falta(activos.some(a => a.antiguedad == null || !a.estado), 'E.3. Antigüedad y estado actual del mobiliario a reponer, por tipo.');
   falta(!d.ref_tecnica, 'Referencia técnica aplicable del mobiliario (descripción técnica).');
+  falta(A.sinCodigo.length, `A. Código del grupo funcional de ${A.sinCodigo.join(', ').toLowerCase()}: escríbelo en Documentos (no se propone un código que no se conoce).`);
+  falta(!d.indicador_brecha && !d.unidad_indicador, 'A. Unidad de medida del indicador de brecha (verifícala contra el PMI).');
   falta(A.propuesto, 'A. Alineamiento a la brecha: indicador, unidad de medida y servicio propuestos; verifícalos contra el PMI.');
 
   return {
@@ -506,7 +523,7 @@ function armarVerificacion({ R, ups, activos, condiciones, faltan, precios, efec
   const secciones = [
     { titulo: 'Costos', items: [
       it('Precio unitario de mercado de cada bien a reponer.', !sinPrecio.length, sinPrecio.length ? 'Falta: ' + sinPrecio.join(', ') : ''),
-      it('Precios revisados: ninguno se queda en la referencia precargada.', !deReferencia.length, deReferencia.length ? `${deReferencia.length} ${deReferencia.length === 1 ? 'precio usa' : 'precios usan'} la referencia (Loreto 2026): reemplázalos por tus cotizaciones.` : ''),
+      it('Precios revisados: ninguno se queda en la referencia precargada.', !deReferencia.length, deReferencia.length ? `${deReferencia.length} ${deReferencia.length === 1 ? 'precio usa' : 'precios usan'} la referencia precargada: reemplázalos por tus cotizaciones.` : ''),
       it('Referencia técnica aplicable en la descripción técnica.', !!d.ref_tecnica, d.ref_tecnica ? '' : 'Escríbela en Documentos (no se inventan normas).'),
       it('Valor de la UIT del año.', !!U.valor, U.valor ? `UIT ${U.anio}: S/ ${U.valor.toLocaleString('es-PE')}` : ''),
       ...(ioarr ? [montoCui(ioarr, total)] : [])

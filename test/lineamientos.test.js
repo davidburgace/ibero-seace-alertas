@@ -313,3 +313,114 @@ test('memoria: anexo «Consultas a la OPMI» con las dos preguntas, sin responde
   assert.match(a, /una IOARR masiva por nivel educativo/); assert.match(a, /programada en la cartera del PMI .* Obras por Impuestos/);
   assert.equal((a.match(/\nPENDIENTE\n/g) || []).length, 2);   // ninguna respondida
 });
+
+test('sección A: 22 / 047, grupo por nivel (Secundaria 0105; los demás editables), indicador departamental', () => {
+  const S = paquete().M('S'), P = paquete({ grupo_funcional: { P: '9999' } }).M('P');
+  assert.deepEqual(S.A.grupos, ['0105 EDUCACIÓN SECUNDARIA']); assert.ok(!S.faltan.some(x => /grupo funcional/.test(x)));
+  assert.deepEqual(P.A.grupos, ['9999 EDUCACIÓN PRIMARIA']);
+  assert.ok(paquete().M('P').faltan.some(x => /Código del grupo funcional de primaria/.test(x)));
+  assert.equal(S.A.indicadores[0].nombre, 'PORCENTAJE DE INSTALACIONES EDUCATIVAS QUE BRINDAN EL SERVICIO EN CONDICIONES INADECUADAS');
+  assert.equal(S.A.espacio, 'DEPARTAMENTO DE MOQUEGUA');
+  assert.deepEqual(limpiarDatosDoc({ grupo_funcional: { P: '01x4', S: ' 0105 ', X: '1' } }).grupo_funcional, { S: '0105' });
+});
+
+test('paquete tipo Huánuco: listado de UP y activos, y consolidado por UGEL y nivel con la columna de duplicación', async () => {
+  const { generarExcelPaquete } = await import('../src/selector-ioarr/excel-paquete.js');
+  const x0 = elegirIoarr(paquete().A, 'P'), otro = x0.R.locales[0].cod;
+  const M = paquete({ estructura: {}, colegios: { [otro]: { entregas: [{ anio: 2025, cantidad: 3, tipo: 'kit', fuente: 'ugel' }] } } }).M('P');
+  const P = M.paquete;
+  assert.equal(P.ups.length, M.ups.length);
+  assert.ok(P.ups.every(u => u.ugel && u.ubigeo && 'lat' in u && u.cp !== undefined));
+  // Totales de las metas del listado = metas del 07-C (número de mobiliario)
+  for (const m of M.F.metas) assert.equal(P.ups.reduce((a, u) => a + u.metas[m.k], 0), m.numero);
+  // Consolidado: suma la población y las aulas de la IOARR; el colegio con entrega reciente cuenta «con proyecto»
+  assert.equal(P.consolidado.total.est, elegirIoarr(paquete().A, 'P').R.totales.est);
+  assert.equal(P.consolidado.total.pi.si, 1);
+  const wb = new ExcelJS.Workbook(); await wb.xlsx.load(await generarExcelPaquete(P, { nombreIoarr: 'Primaria' }));
+  assert.deepEqual(wb.worksheets.map(w => w.name), ['UP y activos', 'Consolidado UGEL y nivel']);
+  const ws = wb.getWorksheet('UP y activos');
+  assert.equal(ws.getCell('J4').value, 'Activo'); assert.equal(ws.getCell('J5').value, 'MOBILIARIO DE AULA');
+  assert.match(ws.getRow(4).values.at(-1), /UGEL responsable del mantenimiento/);
+  let tot = null; wb.getWorksheet('Consolidado UGEL y nivel').eachRow(r => { if (r.getCell(1).value === 'TOTAL') tot = r; });
+  assert.equal(tot.getCell(9).value, 1);
+});
+
+test('informe de sustento de la inversión masiva: secciones y consolidado por UGEL y nivel en el anexo', async () => {
+  const { generarSustento } = await import('../src/selector-ioarr/word.js');
+  const M = paquete().M('P'), t = await textoDocx(await generarSustento(M));
+  for (const s of ['INFORME DE SUSTENTO DE LA INVERSIÓN MASIVA', '3. Diagnóstico del mobiliario por UGEL y nivel', '4. Sustento de la inversión masiva', '(Lineamientos IOARR, 2.5)',
+    'Recuadro 14', '5. Alineamiento a una brecha prioritaria', 'C = A + B', 'Cronograma de 3 años', 'Anexo 1. Consolidado por UGEL y nivel', 'Cartas de opinión favorable'])
+    assert.ok(t.includes(s), s);
+  for (const u of M.paquete.consolidado.niveles[0].filas) assert.ok(t.includes(u.ugel), u.ugel);
+  assert.doesNotMatch(t, /SECUNDARIA|Secundaria|INICIAL|Inicial/);   // IOARR de Primaria: sin textos de otros niveles
+});
+
+test('modelos de carta: opinión favorable por UGEL o por colegio, compromiso de O&M y oficio de remisión por UGEL', async () => {
+  const { generarCartas } = await import('../src/selector-ioarr/word.js');
+  const M = paquete().M('P'), ugels = [...new Set(M.paquete.ups.map(u => u.ugel))];
+  const op = await textoDocx(await generarCartas(M, 'opinion', 'ugel'));
+  assert.equal((op.match(/emitir OPINIÓN FAVORABLE/g) || []).length, ugels.length);
+  for (const u of ugels) assert.ok(op.includes(u));
+  const opc = await textoDocx(await generarCartas(M, 'opinion', 'colegio'));
+  assert.equal((opc.match(/emitir OPINIÓN FAVORABLE/g) || []).length, M.paquete.ups.length);
+  const co = await textoDocx(await generarCartas(M, 'compromiso'));
+  for (const s of ['Operación rutinaria', 'Mantenimiento preventivo y correctivo', 'APAFA', 'sujeto a la disponibilidad presupuestal', 'Durante 3 años']) assert.ok(co.includes(s), s);
+  const of = await textoDocx(await generarCartas(M, 'oficio'));
+  assert.equal((of.match(/OFICIO N\.° PENDIENTE/g) || []).length, ugels.length);
+  for (const t of [op, co, of]) assert.doesNotMatch(t, /Secundaria|secundaria|Inicial|inicial/);
+});
+
+test('cotizaciones: promedio sin IGV, mínimo 3 proveedores y alerta de viabilidad solo interna', async () => {
+  const { limpiarCotizaciones, cuadroCotizaciones, viabilidadCotizaciones } = await import('../src/selector-ioarr/cotizaciones.js');
+  const { limpiarOferta } = await import('../src/selector-ioarr/oferta.js');
+  const { generarExcelCostos } = await import('../src/selector-ioarr/excel-costos.js');
+  const c = limpiarCotizaciones({ P: [
+    { proveedor: 'Prov A', bien: 'mesa', precio_con_igv: 236, material: 'Madera', especificacion: 'Ficha técnica X', transporte_incluido: true, fecha: '2026-10-01' },
+    { proveedor: 'Prov B', bien: 'mesa', precio_sin_igv: 210, material: 'Metal y madera', especificacion: 'Ficha técnica X', fecha: '2026-10-02' },
+    { proveedor: 'Prov C', bien: 'mesa', precio_con_igv: 259.6, material: 'Madera', especificacion: '', fecha: '2026-10-03' },
+    { proveedor: 'Prov A', bien: 'silla', precio_con_igv: 118 }, { proveedor: '', bien: 'otro' }], X: [{ proveedor: 'Z' }] });
+  assert.deepEqual(Object.keys(c), ['P']); assert.equal(c.P.length, 4);   // la fila sin proveedor ni precio se descarta
+  const K = cuadroCotizaciones(c.P, 18), mesa = K.bienes.find(b => b.k === 'mesa'), silla = K.bienes.find(b => b.k === 'silla');
+  assert.deepEqual(mesa.filas.map(x => x.sin), [200, 210, 220]);   // con IGV ÷ 1.18
+  assert.equal(mesa.promedio_sin_igv, 210); assert.equal(mesa.promedio_con_igv, 247.8); assert.ok(mesa.suficiente);
+  assert.equal(silla.suficiente, false); assert.ok(K.avisos.some(a => /Silla del estudiante: 1 proveedor/.test(a.texto)));
+  assert.ok(K.avisos.some(a => /Prov C: falta la especificación técnica/.test(a.texto)));
+  // Viabilidad (uso interno): mesa referencial 210 < costo 180 + 20 + 15 + 5 = 220 → alerta
+  const V = viabilidadCotizaciones(K, limpiarOferta({ fabricacion: { mesa: 180, silla: 60 }, embalaje: 20, transporte_base: 15, instalacion: 5 }));
+  assert.equal(V.find(v => v.k === 'mesa').bajo, true); assert.match(V.find(v => v.k === 'mesa').texto, /ALERTA de viabilidad/);
+  assert.equal(V.find(v => v.k === 'silla').bajo, false);
+  // En el modelo: pendiente si faltan proveedores; el Excel de costos trae el cuadro y no el costo propio
+  const M = paquete({ cotizaciones: c }).M('P');
+  assert.ok(M.faltan.some(t => /menos de 3 proveedores en silla del estudiante/.test(t)));
+  const wb = new ExcelJS.Workbook(); await wb.xlsx.load(await generarExcelCostos(elegirIoarr(paquete().A, 'P').R, { fecha: '2026-10-25', cotizaciones: M.cotizaciones }));
+  const ws = wb.getWorksheet('Cotizaciones'), txt = []; ws.eachRow(r => txt.push(r.values.join('|')));
+  assert.ok(txt.some(t => t.includes('Prov B') && t.includes('210')));
+  assert.ok(txt.some(t => /Promedio \(precio referencial\)/.test(t)));
+  assert.ok(!txt.join(' ').match(/nuestro costo|viabilidad|fabricación/i));
+});
+
+test('los exportables de una IOARR no arrastran referencias de otros proyectos, regiones ni niveles', async () => {
+  const W = await import('../src/selector-ioarr/word.js');
+  const { generarExcelCostos } = await import('../src/selector-ioarr/excel-costos.js');
+  const { generarExcelPaquete } = await import('../src/selector-ioarr/excel-paquete.js');
+  const { anexosDe } = await import('../src/selector-ioarr/expediente.js');
+  const { preciosEfectivos: pe } = await import('../src/selector-ioarr/costos.js');
+  const { A, M } = paquete(), x = elegirIoarr(A, 'P'), MP = M('P');
+  const textoXlsx = async buf => { const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buf); const t = []; wb.eachSheet(ws => { t.push(ws.name); ws.eachRow(r => r.eachCell(c => t.push(String(c.value?.result ?? c.value?.text ?? c.value ?? '')))); }); return t.join('\n'); };
+  const textos = {
+    '07-C': await textoDocx(await W.generar07C(MP)), memoria: await textoDocx(await W.generarMemoria(MP)), verificacion: await textoDocx(await W.generarVerificacion(MP)),
+    vida: await textoDocx(await W.generarVidaUtil(MP, MP.vidaUtil)), '05-B': await textoDocx(await W.generar05B(MP)), sustento: await textoDocx(await W.generarSustento(MP)),
+    opinion: await textoDocx(await W.generarCartas(MP, 'opinion')), compromiso: await textoDocx(await W.generarCartas(MP, 'compromiso')), oficio: await textoDocx(await W.generarCartas(MP, 'oficio')),
+    costos: await textoXlsx(await generarExcelCostos(x.R, { proyecto: 'Prueba — IOARR Primaria', region: 'Moquegua', fecha: '2026-10-25', efectivos: pe({}, {}), cotizaciones: MP.cotizaciones })),
+    anexos: await textoXlsx(await excelL(anexosDe(MP), { nombreIoarr: 'Primaria' })), paquete: await textoXlsx(await generarExcelPaquete(MP.paquete, { nombreIoarr: 'Primaria' }))
+  };
+  const regiones = JSON.parse(readFileSync(new URL('index.json', DIR), 'utf8')).regiones.map(r => r.nombre).filter(n => n !== 'Moquegua');
+  const prohibido = [...regiones, 'Loreto', 'Huánuco', 'Huanuco', 'Chiclayo'].map(n => new RegExp(`\\b${n}\\b`, 'i'));
+  // La consulta a la OPMI sobre el criterio por nivel nombra los tres niveles a propósito
+  const { CONSULTAS_OPMI } = await import('../src/selector-ioarr/lineamientos.js');
+  for (const [doc, t0] of Object.entries(textos)) {
+    const t = CONSULTAS_OPMI.reduce((a, c) => a.replace(c.pregunta, ''), t0);
+    for (const re of prohibido) assert.doesNotMatch(t, re, `${doc}: ${re}`);
+    assert.doesNotMatch(t, /\b(inicial|secundaria)\b/i, `${doc}: otro nivel en la IOARR de Primaria`);
+  }
+});

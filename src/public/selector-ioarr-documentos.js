@@ -80,7 +80,8 @@ function pintar() {
     <div class="exportar">
       <div><h3>Documentos en Word</h3><p>Borrador del Formato 07-C para preparar el registro en el Banco de Inversiones, y memoria descriptiva. Lo que falte sale marcado «PENDIENTE» en amarillo.</p>
         <label class="chk"><input type="checkbox" id="doc-borrador" ${modoBorrador ? 'checked' : ''}> Borrador con todos los colegios (también los que tienen el checklist de inventario y baja incompleto)</label></div>
-      <div class="acciones-fila"><button class="btn btn-primary" data-doc-bajar="formato-07c" type="button">Formato 07-C (Word)</button><button class="btn btn-ghost" data-doc-bajar="memoria" type="button">Memoria descriptiva (Word)</button><button class="btn btn-ghost" data-doc-bajar="formato-05b" type="button">Formato 05-B (Word)</button><button class="btn btn-ghost" data-doc-bajar="lineamientos/anexos" type="button">Anexos de Lineamientos (Excel)</button><button class="btn btn-ghost" data-doc-zip type="button">Expediente completo (ZIP)</button></div>
+      <div class="acciones-fila"><button class="btn btn-primary" data-doc-bajar="formato-07c" type="button">Formato 07-C (Word)</button><button class="btn btn-ghost" data-doc-bajar="memoria" type="button">Memoria descriptiva (Word)</button><button class="btn btn-ghost" data-doc-bajar="formato-05b" type="button">Formato 05-B (Word)</button><button class="btn btn-ghost" data-doc-bajar="sustento" type="button">Informe de sustento (Word)</button></div>
+      <div class="acciones-fila"><span class="sub">Modelos de carta (Word, una por página):</span><button class="btn btn-ghost btn-sm" data-doc-bajar="cartas" data-doc-q="tipo=opinion&amp;por=ugel" type="button">Opinión favorable por UGEL</button><button class="btn btn-ghost btn-sm" data-doc-bajar="cartas" data-doc-q="tipo=opinion&amp;por=colegio" type="button">Opinión favorable por colegio</button><button class="btn btn-ghost btn-sm" data-doc-bajar="cartas" data-doc-q="tipo=compromiso" type="button">Compromiso de O&amp;M por UGEL</button><button class="btn btn-ghost btn-sm" data-doc-bajar="cartas" data-doc-q="tipo=oficio" type="button">Oficio de remisión por UGEL</button><button class="btn btn-ghost" data-doc-bajar="lineamientos/anexos" type="button">Anexos de Lineamientos (Excel)</button><button class="btn btn-ghost" data-doc-bajar="paquete/up-activos" type="button">Listado de UP y consolidado (Excel)</button><button class="btn btn-ghost" data-doc-zip type="button">Expediente completo (ZIP)</button></div>
     </div>
     <div class="cols">
       <div class="panel"><div class="panel-cab"><h3>Pendientes</h3><span class="guardado" id="doc-guardado"></span></div>
@@ -101,6 +102,7 @@ function pintar() {
       <p class="sub">Función ${esc(R.funcion)} · división ${esc(R.division)} · grupo ${esc(R.grupos.join('; '))}. Vacío = se propone por nivel educativo. Verifícalo contra el PMI de la entidad. ${esc(R.alineamiento.contribucion)}</p>
       <div class="form-grid">
         ${campo('cadena_funcional', 'Cadena funcional', { ancho: true, ph: R.alineamiento.cadena, ayuda: 'Función / división funcional / grupo funcional del PMI.' })}
+        ${(R.niveles_k || []).map(n => `<div class="campo"><label for="doc-gf-${n}">Código del grupo funcional – ${esc(R.nombres_nivel[n])}</label><input id="doc-gf-${n}" data-doc-gf="${n}" type="text" maxlength="5" inputmode="numeric" value="${esc(d.grupo_funcional?.[n] ?? '')}" placeholder="${esc(R.grupos_conocidos[n] || 'Sin código conocido')}"><span class="sub">${R.grupos_conocidos[n] ? 'Vacío = ' + esc(R.grupos_conocidos[n]) + '.' : '<b class="aviso-linea">Escríbelo: no se propone un código que no se conoce.</b>'}</span></div>`).join('')}
         ${campo('servicio_brecha', 'Servicio público con brecha', { ancho: true, ph: R.alineamiento.servicio })}
         ${campo('tipologia', 'Tipología de proyecto', { ancho: true, ph: R.alineamiento.tipologia })}
         ${campo('indicador_brecha', 'Indicador de brecha', { ancho: true, max: 500, ph: R.alineamiento.indicadores.map(x => x.nombre).join(' / '), ayuda: 'Verifícalo contra el PMI.' })}
@@ -114,6 +116,13 @@ function pintar() {
         ${R.b05.programacion.map(x => `<div class="campo"><label for="doc-05b-${x.k}">${x.rotulo} (${x.anio}), S/</label><input id="doc-05b-${x.k}" data-doc-05b="${x.k}" type="number" min="0" step="0.01" inputmode="decimal" value="${vista.datos.por_nivel?.[vista.nivel]?.montos_05b?.[x.k] ?? ''}" placeholder="${R.b05.propuesto ? x.monto : ''}"></div>`).join('')}
       </div>
       ${R.b05.cuadra ? '' : `<p class="sub aviso-linea">La programación suma ${soles(R.b05.suma)} y el monto de inversión es ${soles(R.total)}.</p>`}
+      <h3>Cuadro comparativo de cotizaciones${vista.nivel ? ` · ${esc(vista.nombre_ioarr)}` : ''}</h3>
+      <p class="sub">Al menos ${R.min_proveedores} proveedores por bien y nivel. Escribe el precio con IGV o sin IGV (el otro se calcula). El precio referencial es el promedio sin IGV; se aplica al precio unitario solo con el botón.</p>
+      <div class="tabla-wrap"><table class="tabla tabla-doc"><thead><tr><th>Bien</th><th>Proveedor</th><th>Con IGV (S/)</th><th>Sin IGV (S/)</th><th>Material</th><th>Especificación técnica</th><th>Transporte incluido</th><th>Fecha</th><th></th></tr></thead>
+      <tbody id="doc-cot">${(vista.datos.cotizaciones?.[vista.nivel] || []).map(filaCot).join('')}</tbody></table></div>
+      <button class="btn btn-ghost btn-sm" type="button" data-cot-add>Agregar cotización</button>
+      ${R.cotizaciones.bienes.length ? `<div class="tabla-wrap"><table class="tabla"><thead><tr><th>Bien</th><th class="num">Proveedores</th><th class="num">Promedio sin IGV</th><th class="num">Promedio con IGV</th><th></th></tr></thead><tbody>${R.cotizaciones.bienes.map(b => `<tr><td>${esc(b.nombre)}</td><td class="num">${b.proveedores}${b.suficiente ? '' : ' <span class="chip-est pend">faltan</span>'}</td><td class="num">${soles(b.promedio_sin_igv)}</td><td class="num">${soles(b.promedio_con_igv)}</td><td>${b.k !== 'kit' && b.promedio_sin_igv != null ? `<button class="x" type="button" data-cot-usar="${b.k}" data-cot-precio="${b.promedio_sin_igv}">Usar como precio</button>` : b.k === 'kit' ? '<span class="sub">El kit se cotiza junto: carga mesa y silla por separado para usarlo como precio.</span>' : ''}</td></tr>`).join('')}</tbody></table></div>` : ''}
+      ${R.cotizaciones.avisos.length ? `<ul class="pendientes">${R.cotizaciones.avisos.map(a => `<li>${esc(a.texto)}</li>`).join('')}</ul>` : ''}
       <h3>Unidades productoras</h3>
       <div class="form-grid">
         ${campo('up_por', 'Listar las UP por', { tipo: 'select', opciones: [['local', 'Código de local (solo los locales con bienes a reponer)'], ['modular', 'Código modular (todos los servicios, aunque el local no reponga)']], ayuda: `${R.ups} UP en el 07-C · ${R.locales_con_bienes} locales con bienes a reponer.` })}
@@ -149,7 +158,8 @@ function pintar() {
       <h3>Por tipo de bien</h3>
       <p class="sub">Antigüedad, vida útil estimada, estado y mantenimiento del mobiliario a reponer (E.3 y 2.4.C.b), y vida útil y mantenimiento anual del nuevo (F.4 o G.3). La antigüedad vacía se toma del año de adquisición registrado en cada local.</p>
       <div class="tabla-wrap"><table class="tabla tabla-doc"><thead><tr><th>Tipo de bien</th><th>Antigüedad (años)</th><th>Vida útil estimada (años)</th><th>Estado actual</th><th>Mant. anual actual (S/)</th></tr></thead><tbody>${tipos || '<tr><td colspan="5" class="vacio">No hay bienes a reponer.</td></tr>'}</tbody></table></div>
-      <p class="sub">Mobiliario nuevo, por meta del 07-C: vida útil y costo anual de mantenimiento (puede ser 0).</p>
+      <p class="sub">Mobiliario nuevo, por meta del 07-C: vida útil y costo anual de mantenimiento (puede ser 0). El cronograma de mantenimiento del 07-C repite el monto anual durante los años indicados.</p>
+      <div class="form-grid">${campo('mant_anios', 'Años del cronograma de mantenimiento', { tipo: 'number', min: 1, max: 20, ph: '3' })}</div>
       <div class="tabla-wrap"><table class="tabla tabla-doc"><thead><tr><th>Meta</th><th>Vida útil del nuevo (años)</th><th>Mant. anual del nuevo (S/)</th></tr></thead><tbody>${metas || '<tr><td colspan="3" class="vacio">No hay metas.</td></tr>'}</tbody></table></div>
       <div class="form-grid">
         ${campo('informe_vida_util', 'Documento de sustento de la vida útil', { ancho: true, ph: 'Ej.: Informe N° …-2026-UGEL…/APP, control patrimonial', ayuda: 'Va en el informe técnico de vida útil. Vacío = la antigüedad sale del año de adquisición registrado en cada local, si lo cargaste.' })}
@@ -180,12 +190,25 @@ function pintar() {
     </form>`;
 }
 
+// Fila editable del cuadro comparativo de cotizaciones
+function filaCot(c = {}) {
+  const opt = Object.entries(vista.bienes_cotizacion).map(([k, t]) => `<option value="${k}" ${(c.bien || 'kit') === k ? 'selected' : ''}>${esc(t)}</option>`).join('');
+  return `<tr><td><select data-cot="bien" aria-label="Bien">${opt}</select></td><td><input data-cot="proveedor" maxlength="150" value="${esc(c.proveedor)}" aria-label="Proveedor"></td>
+    <td><input data-cot="precio_con_igv" type="number" min="0" step="0.01" value="${c.precio_con_igv ?? ''}" aria-label="Precio con IGV"></td><td><input data-cot="precio_sin_igv" type="number" min="0" step="0.01" value="${c.precio_sin_igv ?? ''}" aria-label="Precio sin IGV"></td>
+    <td><input data-cot="material" maxlength="150" value="${esc(c.material)}" aria-label="Material"></td><td><input data-cot="especificacion" maxlength="500" value="${esc(c.especificacion)}" aria-label="Especificación técnica"></td>
+    <td><label class="chk"><input data-cot="transporte_incluido" type="checkbox" ${c.transporte_incluido ? 'checked' : ''}> Sí</label></td><td><input data-cot="fecha" type="date" value="${esc(c.fecha || '')}" aria-label="Fecha"></td>
+    <td><button class="x btn-peligro" type="button" data-cot-del>Quitar</button></td></tr>`;
+}
+
 // ─── Guardado ────────────────────────────────────────────────────────────────
 function leer() {
   const datos = { antiguedad: {}, vida_util_estimada: {}, estado_actual: {}, mant_actual: {}, vida_util: {}, mant_nuevo: {} };
   ctx.el.querySelectorAll('[data-doc]').forEach(e => { datos[e.dataset.doc] = e.value; });
   ctx.el.querySelectorAll('[data-doc-t]').forEach(e => { if (e.value !== '') datos[e.dataset.docT][e.dataset.k] = e.value; });
   datos.fuentes_vida_util = [...ctx.el.querySelectorAll('[data-doc-fuente]:checked')].map(e => e.dataset.docFuente);
+  if (vista.nivel) datos.cotizaciones = { ...(vista.datos.cotizaciones || {}), [vista.nivel]: [...ctx.el.querySelectorAll('#doc-cot tr')].map(tr => Object.fromEntries([...tr.querySelectorAll('[data-cot]')].map(e => [e.dataset.cot, e.type === 'checkbox' ? e.checked : e.value]))) };
+  datos.grupo_funcional = { ...(vista.datos.grupo_funcional || {}) };
+  ctx.el.querySelectorAll('[data-doc-gf]').forEach(e => { if (e.value.trim()) datos.grupo_funcional[e.dataset.docGf] = e.value.trim(); else delete datos.grupo_funcional[e.dataset.docGf]; });
   if (vista.nivel) {
     const propio = {}; ctx.el.querySelectorAll('[data-doc-niv]').forEach(e => { propio[e.dataset.docNiv] = e.value; });
     propio.montos_05b = {}; ctx.el.querySelectorAll('[data-doc-05b]').forEach(e => { if (e.value !== '') propio.montos_05b[e.dataset.doc05b] = e.value; });
@@ -219,6 +242,7 @@ async function bajar(btn) {
     const q = new URLSearchParams(ctx.nivel ? { nivel: ctx.nivel } : {});
     if ('docCod' in btn.dataset) q.set('cod', document.getElementById('doc-vida-cod')?.value || '');
     if (modoBorrador) q.set('borrador', '1');
+    for (const [k, v] of new URLSearchParams(btn.dataset.docQ || '')) q.set(k, v);
     const r = await fetch(`/api/selector-ioarr/proyectos/${ctx.proyecto.id}/${ruta}${q.size ? '?' + q : ''}`);
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Error ' + r.status);
     const blob = await r.blob(), cd = r.headers.get('Content-Disposition') || '';
@@ -228,6 +252,17 @@ async function bajar(btn) {
     ctx.toast(nombre.endsWith('.xlsx') ? 'Excel descargado.' : 'Word descargado.');
   } catch (e) { ctx.toast('No se pudo generar: ' + e.message); }
   finally { btn.disabled = false; btn.textContent = txt; }
+}
+
+// Promedio de las cotizaciones como precio unitario: mesa y silla en todas las tallas del nivel; los demás, su tipo
+async function usarPrecio(bien, precio) {
+  const tallas = { I: ['i'], P: ['p12', 'p34', 'p56'], S: ['s12', 's34', 's5'], E: ['e'] }[vista.nivel] || [];
+  const precios = ['mesa', 'silla'].includes(bien) ? Object.fromEntries(tallas.map(t => [`${bien}_${t}`, precio])) : { [bien]: precio };
+  try {
+    await ctx.api(`/proyectos/${ctx.proyecto.id}/costos`, { method: 'PATCH', body: { estructura: { precios } } });
+    ctx.toast(`Precio de ${vista.bienes_cotizacion[bien].toLowerCase()}: S/ ${NS.format(precio)} sin IGV${['mesa', 'silla'].includes(bien) ? ` (tallas de ${vista.nombre_ioarr})` : ''}.`);
+    renderDocumentos(ctx);
+  } catch (e) { ctx.toast('No se pudo aplicar: ' + e.message); }
 }
 
 // Eventos delegados sobre el contenedor (se enganchan una vez)
@@ -241,6 +276,9 @@ export function enlazarDocumentos(el) {
   el.addEventListener('submit', e => { if (e.target.id === 'doc-form') e.preventDefault(); });
   el.addEventListener('click', e => {
     const b = e.target.closest('[data-doc-bajar]'); if (b) bajar(b);
+    if (e.target.closest('[data-cot-add]')) { document.getElementById('doc-cot').insertAdjacentHTML('beforeend', filaCot()); return; }
+    const cd = e.target.closest('[data-cot-del]'); if (cd) { cd.closest('tr').remove(); programar(50); return; }
+    const cu = e.target.closest('[data-cot-usar]'); if (cu) { usarPrecio(cu.dataset.cotUsar, Number(cu.dataset.cotPrecio)); return; }
     const z = e.target.closest('[data-doc-zip]');
     const zc = { ...ctx, borrador: modoBorrador };
     if (z && ctx) { if (tGuardar) { clearTimeout(tGuardar); tGuardar = null; guardar().then(() => bajarZip(zc, z)); } else bajarZip(zc, z); }

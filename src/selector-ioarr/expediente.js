@@ -37,6 +37,9 @@
 //     GET    /proyectos/:id/lineamientos/anexos      Excel: ficha de activos a reponer…
 //     GET    /proyectos/:id/documentos/vida-util     Word del informe técnico de vida útil (?cod= un colegio)
 //     GET    /proyectos/:id/documentos/formato-05b   Word del borrador del Formato 05-B (idea, montos t, t+1, t+2)
+//     GET    /proyectos/:id/paquete/up-activos       Excel: listado de UP y activos, consolidado por UGEL y nivel
+//     GET    /proyectos/:id/documentos/sustento      Word del informe de sustento de la inversión masiva
+//     GET    /proyectos/:id/documentos/cartas        Word de modelos de carta (?tipo=opinion|compromiso|oficio, ?por=ugel|colegio)
 //     GET    /proyectos/:id/colegios                 por colegio: checklist de inventario y baja… y su costo
 //     PUT    /proyectos/:id/colegios/:cod            { datos } (en ioarr_expediente_documentos.datos.colegios)
 //   Documentos, anexos y ZIP salen en versión final: solo los colegios con el checklist completo.
@@ -77,12 +80,14 @@ import { calc, limpiarParams, CRIT, ITEMS, textoEscenario } from './calculo.js';
 const regDato = R => ({ n: R?.regularCampo?.completos || 0, de: R?.locales?.length || 0 });
 import { limpiarEstructura, preciosEfectivos, limpiarInventario, limpiarAdquisicion, censoLocal, FUENTES_PRECIO, CLAVES_PRECIO, PRECIOS_REFERENCIA, LEYENDA_REFERENCIA, NOTA_PORCENTAJES } from './costos.js';
 import { limpiarOferta, calcularOferta } from './oferta.js';
+import { cuadroCotizaciones, viabilidadCotizaciones, BIENES_COTIZACION, MIN_PROVEEDORES } from './cotizaciones.js';
 import { generarExcelCostos } from './excel-costos.js';
-import { armarModelo, limpiarDatosDoc, ESTADOS_ACTIVO, MODALIDADES, FUENTES_FIN } from './documentos.js';
-import { generar07C, generarMemoria, generarVerificacion, generarVidaUtil, generar05B } from './word.js';
+import { armarModelo, limpiarDatosDoc, ESTADOS_ACTIVO, MODALIDADES, FUENTES_FIN, CODIGOS_FUNCIONALES } from './documentos.js';
+import { generar07C, generarMemoria, generarVerificacion, generarVidaUtil, generar05B, generarSustento, generarCartas, TIPOS_CARTA } from './word.js';
 import { leerDuplicidad, separarLocales } from './duplicidad.js';
 import { fichaActivos, modeloVidaUtil, FUENTES_VIDA_UTIL, limpiarColegio, colegioVacio, colegioDe, checklistColegio, DOCS_BAJA, FUENTES_ENTREGA, TIPOS_ENTREGA, VENTANA_DUP, ESTADOS_USO } from './lineamientos.js';
 import { generarExcelLineamientos } from './excel-lineamientos.js';
+import { generarExcelPaquete } from './excel-paquete.js';
 import { calcularPaquete, modeloIoarr, elegirIoarr } from './paquete.js';
 import { porNivel, modoDe, sinNivel, nivelesDeLocal, vistaNivel, limpiarPorNivel, NOMBRE_NIVEL } from './niveles.js';
 import { modeloFicha, generarFichaExcel, generarFichaPdf, leerFicha, procesarFicha, requeridoFicha, ESTADO_VERIF } from './ficha.js';
@@ -346,7 +351,7 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
       archivos: archivos.filter(a => a.cod_local === x.cod_local).map(sinRuta) }]));
     const comun = { precios, estructura, uit: { anio: anioUit, valor: uit?.valor ?? null } };
     const K = calcularPaquete({ D, P, codigos, dup: dup.mapa, inv, comun, datosDoc, final, modo: modoDe(p), anioRef: anioLima() });
-    return { ...K, detalle, efectivos, estructura, factores, anioUit, uit, sinMigracionEst: !!fila && !('estructura' in fila) };
+    return { ...K, datosDoc, detalle, efectivos, estructura, factores, anioUit, uit, sinMigracionEst: !!fila && !('estructura' in fila) };
   }
   // La IOARR pedida (?nivel=P); sin nivel o con una sola IOARR, la primera
   const elegir = elegirIoarr;
@@ -401,8 +406,11 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     if (error) { if (faltaMigracion(error)) return { datos: limpiarOferta({}), sinMigracion: true }; throw error; }
     return { datos: limpiarOferta(data?.datos || {}), sinMigracion: false };
   }
+  // Viabilidad (uso interno): precio referencial de las cotizaciones de cada nivel frente a nuestro costo
+  const viabilidadDe = (A, o) => A.ioarrs.filter(x => x.nivel).map(x => ({ nivel: x.nivel, nombre: x.nombre,
+    items: viabilidadCotizaciones(cuadroCotizaciones(A.datosDoc?.cotizaciones?.[x.nivel] || [], A.estructura?.igv ?? 18), o.datos) })).filter(v => v.items.length);
   const vistaOferta = (A, o) => ({ datos: o.datos, sin_migracion: o.sinMigracion, escenario: textoEscenario(A.P, regDato(A.Runa)),
-    ...calcularOferta(A.Runa, o.datos, { factores: A.factores }) });
+    ...calcularOferta(A.Runa, o.datos, { factores: A.factores }), viabilidad: viabilidadDe(A, o) });
   api.get('/proyectos/:id/oferta', responder(async (req, res) => {
     const p = await proyecto(req);
     const [A, o] = await Promise.all([armar(p), leerOferta(p)]);
@@ -897,6 +905,8 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
       tipos: M.E.activos.map(a => ({ k: a.k, nombre: a.nombre, cantidad: a.cantidad, descripcion: a.descripcion, antiguedad_inventario: a.antiguedad_inventario })),
       alineamiento: { servicio: M.A.servicio, tipologia: M.A.tipologia, indicadores: M.A.indicadores, cadena: `${M.A.funcion} / ${M.A.division} / ${M.A.grupos.join('; ')}`, contribucion: M.A.contribucion },
       b05: M.B05,
+      cotizaciones: M.cotizaciones, bienes_cotizacion: BIENES_COTIZACION, min_proveedores: MIN_PROVEEDORES,
+      niveles_k: M.nivel ? [M.nivel] : [], nombres_nivel: NOMBRE_NIVEL, grupos_conocidos: CODIGOS_FUNCIONALES.grupo,
       inicio: M.F.inicio, fin: M.F.fin, condiciones: M.E.condiciones
     },
     faltan: M.faltan
@@ -986,6 +996,21 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     enviarWord(res, await generarVerificacion(M), `Lista_verificacion_${slug(p.nombre)}${sufijo(M)}_${M.fecha}.docx`);
   }));
 
+  // Informe de sustento de la inversión masiva (con el consolidado por UGEL y nivel)
+  api.get('/proyectos/:id/documentos/sustento', responder(async (req, res) => {
+    const p = await proyecto(req), { M } = await modelo(p, req.query.nivel, opcionesDe(req));
+    if (!M.ups.length) return res.status(400).json({ error: sinUps(M) });
+    enviarWord(res, await generarSustento(M), `Informe_sustento_masiva_${slug(p.nombre)}${sufijo(M)}_${M.fecha}.docx`);
+  }));
+
+  // Modelos de carta: ?tipo=opinion|compromiso|oficio, ?por=ugel|colegio (solo la opinión favorable)
+  api.get('/proyectos/:id/documentos/cartas', responder(async (req, res) => {
+    const p = await proyecto(req), { M } = await modelo(p, req.query.nivel, opcionesDe(req));
+    if (!M.ups.length) return res.status(400).json({ error: sinUps(M) });
+    const tipo = TIPOS_CARTA[req.query.tipo] ? req.query.tipo : 'opinion', por = req.query.por === 'colegio' ? 'colegio' : 'ugel';
+    enviarWord(res, await generarCartas(M, tipo, por), `Modelo_${tipo}_${tipo === 'opinion' ? por : 'ugel'}_${slug(p.nombre)}${sufijo(M)}_${M.fecha}.docx`);
+  }));
+
   // Formato 05-B: idea de la IOARR del nivel, con los montos por año
   api.get('/proyectos/:id/documentos/formato-05b', responder(async (req, res) => {
     const p = await proyecto(req), { M } = await modelo(p, req.query.nivel, opcionesDe(req));
@@ -1008,7 +1033,8 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     const fecha = hoyLima();
     const buffer = await generarExcelCostos(x.R, {
       proyecto: x.nivel ? `${p.nombre} — IOARR ${x.nombre}` : p.nombre, region: p.region, fecha, ioarr: p.ioarr, fuente: (await leerIndice()).fuente,
-      criterios: textoCriterios(A.P), escenario: textoEscenario(A.P, regDato(x.R)), precios: A.detalle, efectivos: A.efectivos, inventario: x.inv
+      criterios: textoCriterios(A.P), escenario: textoEscenario(A.P, regDato(x.R)), precios: A.detalle, efectivos: A.efectivos, inventario: x.inv,
+      cotizaciones: cuadroCotizaciones(A.datosDoc?.cotizaciones?.[x.nivel] || [], A.estructura?.igv ?? 18)
     });
     const archivo = `Costos_IOARR_${slug(p.nombre)}${x.nivel ? '_' + slug(x.nombre) : ''}_${fecha}.xlsx`;
     res.set({
@@ -1029,6 +1055,18 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
       'Content-Disposition': `attachment; filename="${archivo}"; filename*=UTF-8''${encodeURIComponent(archivo)}`,
       'Cache-Control': 'no-store'
     }).send(buffer);
+  }));
+
+  // Listado de UP y activos, y consolidado por UGEL y nivel (paquete tipo Huánuco), por IOARR
+  api.get('/proyectos/:id/paquete/up-activos', responder(async (req, res) => {
+    const p = await proyecto(req), { M } = await modelo(p, req.query.nivel, opcionesDe(req));
+    if (!M.ups.length) return res.status(400).json({ error: sinUps(M) });
+    const archivo = `Listado_UP_y_consolidado_${slug(p.nombre)}${sufijo(M)}_${M.fecha}.xlsx`;
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="${archivo}"; filename*=UTF-8''${encodeURIComponent(archivo)}`,
+      'Cache-Control': 'no-store'
+    }).send(await generarExcelPaquete(M.paquete, { proyecto: p.nombre, nombreIoarr: M.nombreIoarr, fecha: M.fecha }));
   }));
 
   // ─── Etapa 4: ZIP del expediente ──────────────────────────────────────────
@@ -1110,13 +1148,16 @@ export async function piezasExpediente({ A, datos, lista, meta, nombre }) {
     const vidaPorColegio = await Promise.all(M.vidaUtil.colegios.map(async y => ({ nombre: `${carpeta}07_Informes_vida_util_por_colegio/Informe_vida_util_${y.cod}.docx`, contenido: await generarVidaUtil(M, M.vidaUtil, y.cod), oculto: true })));
 
     const fuera = x.nivel ? (A.excluidos || []).filter(i => x.D.locSvc[i].length) : (A.excluidos || []);
-    const [f07c, memoria, verificacion, costos, { buffer: seleccion }, anexos, vida, f05b] = await Promise.all([
+    const [f07c, memoria, verificacion, costos, { buffer: seleccion }, anexos, vida, f05b, upActivos, sustento, cOpinion, cCompromiso, cOficio] = await Promise.all([
       generar07C(M), generarMemoria(M), generarVerificacion(M),
-      generarExcelCostos(x.R, { ...m, criterios: textoCriterios(A.P), escenario: textoEscenario(A.P, regDato(x.R)), precios: A.detalle, efectivos: A.efectivos, inventario: x.inv }),
+      generarExcelCostos(x.R, { ...m, criterios: textoCriterios(A.P), escenario: textoEscenario(A.P, regDato(x.R)), precios: A.detalle, efectivos: A.efectivos, inventario: x.inv, cotizaciones: M.cotizaciones }),
       generarExcel(x.D, x.C, A.P, x.list, { ...m, duplicidad: A.dup, excluidos: fuera, revisiones: datos.situacional?.revisiones }),
       generarExcelLineamientos(anexosDe(M), { ...m, nombreIoarr: M.nombreIoarr }),
       generarVidaUtil(M, M.vidaUtil),
-      generar05B(M)
+      generar05B(M),
+      M.paquete ? generarExcelPaquete(M.paquete, { ...m, nombreIoarr: M.nombreIoarr }) : null,
+      generarSustento(M),
+      generarCartas(M, 'opinion', 'ugel'), generarCartas(M, 'compromiso'), generarCartas(M, 'oficio')
     ]);
     return [
       { nombre: carpeta + '00_Formato_05B_idea.docx', contenido: f05b, descripcion: 'idea de la IOARR con los montos por año' },
@@ -1127,7 +1168,12 @@ export async function piezasExpediente({ A, datos, lista, meta, nombre }) {
       { nombre: carpeta + '05_Seleccion_de_locales_y_metrado.xlsx', contenido: seleccion, descripcion: 'metrado por aula del Selector' },
       { nombre: carpeta + '06_Anexos_Lineamientos.xlsx', contenido: anexos, descripcion: 'ficha de activos a reponer' },
       { nombre: carpeta + '07_Informe_vida_util.docx', contenido: vida, descripcion: 'consolidado; uno por colegio en la carpeta 07' },
-      ...vidaPorColegio
+      ...vidaPorColegio,
+      { nombre: carpeta + '10_Informe_sustento_masiva.docx', contenido: sustento, descripcion: 'con el consolidado por UGEL y nivel' },
+      { nombre: carpeta + '11_Cartas/Carta_opinion_favorable_por_UGEL.docx', contenido: cOpinion, descripcion: 'modelo, una por UGEL' },
+      { nombre: carpeta + '11_Cartas/Carta_compromiso_O_y_M_por_UGEL.docx', contenido: cCompromiso, descripcion: 'modelo, una por UGEL' },
+      { nombre: carpeta + '11_Cartas/Oficio_remision_por_UGEL.docx', contenido: cOficio, descripcion: 'modelo, uno por UGEL' },
+      ...(upActivos ? [{ nombre: carpeta + '08_Listado_UP_y_consolidado.xlsx', contenido: upActivos, descripcion: 'UP y activos; consolidado por UGEL y nivel' }] : [])
     ];
   }));
   return xs.flat();
