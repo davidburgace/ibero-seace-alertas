@@ -354,3 +354,18 @@ test('informe de sustento de la inversión masiva: secciones y consolidado por U
   for (const u of M.paquete.consolidado.niveles[0].filas) assert.ok(t.includes(u.ugel), u.ugel);
   assert.doesNotMatch(t, /SECUNDARIA|Secundaria|INICIAL|Inicial/);   // IOARR de Primaria: sin textos de otros niveles
 });
+
+test('modelos de carta: opinión favorable por UGEL o por colegio, compromiso de O&M y oficio de remisión por UGEL', async () => {
+  const { generarCartas } = await import('../src/selector-ioarr/word.js');
+  const M = paquete().M('P'), ugels = [...new Set(M.paquete.ups.map(u => u.ugel))];
+  const op = await textoDocx(await generarCartas(M, 'opinion', 'ugel'));
+  assert.equal((op.match(/emitir OPINIÓN FAVORABLE/g) || []).length, ugels.length);
+  for (const u of ugels) assert.ok(op.includes(u));
+  const opc = await textoDocx(await generarCartas(M, 'opinion', 'colegio'));
+  assert.equal((opc.match(/emitir OPINIÓN FAVORABLE/g) || []).length, M.paquete.ups.length);
+  const co = await textoDocx(await generarCartas(M, 'compromiso'));
+  for (const s of ['Operación rutinaria', 'Mantenimiento preventivo y correctivo', 'APAFA', 'sujeto a la disponibilidad presupuestal', 'Durante 3 años']) assert.ok(co.includes(s), s);
+  const of = await textoDocx(await generarCartas(M, 'oficio'));
+  assert.equal((of.match(/OFICIO N\.° PENDIENTE/g) || []).length, ugels.length);
+  for (const t of [op, co, of]) assert.doesNotMatch(t, /Secundaria|secundaria|Inicial|inicial/);
+});

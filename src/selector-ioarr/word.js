@@ -7,6 +7,8 @@
 //   generarVidaUtil(M, V, cod?)  Informe técnico de vida útil (consolidado o de un colegio)
 //   generar05B(M)      Borrador del Formato 05-B: idea de la inversión con los montos por año
 //   generarSustento(M) Informe de sustento de la inversión masiva (con el consolidado por UGEL y nivel)
+//   generarCartas(M, tipo, por)  Modelos de carta: opinión favorable (por UGEL o colegio), compromiso de
+//                      operación y mantenimiento (por UGEL) y oficio de remisión de data (por UGEL)
 // M es el modelo de armarModelo() (src/selector-ioarr/documentos.js).
 // ============================================================================
 
@@ -563,4 +565,60 @@ export async function generarSustento(M) {
     c.push(vinieta(x));
   if (K) { c.push(titulo('Anexo 1. Consolidado por UGEL y nivel')); c.push(tablaConsolidado(K)); c.push(nota('Población: matrícula del padrón de ESCALE. Mobiliario: Censo Educativo 2025 (mesa en puestos). «Con proyecto»: otra inversión vigente o reciente, inversión en ejecución o entrega de mobiliario de los últimos 3 años.')); }
   return Packer.toBuffer(documento(M, 'Informe de sustento', c, { horizontal: false }));
+}
+
+// ─── Modelos de cartas y oficios (una por página) ────────────────────────────
+export const TIPOS_CARTA = {
+  opinion: 'Carta de opinión favorable de la entidad responsable de la operación y el mantenimiento',
+  compromiso: 'Carta de compromiso de operación y mantenimiento',
+  oficio: 'Oficio de remisión de información'
+};
+// Grupos de destinatarios: por UGEL (todas) o por colegio (solo la opinión favorable)
+function gruposCarta(M, por) {
+  const ups = M.paquete?.ups || M.ups.map(u => ({ ...u, metas: {} }));
+  if (por === 'colegio') return ups.map(u => ({ titulo: `${u.nombre} (código de local ${u.cod})`, firmante: 'Director(a) de la institución educativa', entidad: u.nombre, ugel: u.ugel, ups: [u] }));
+  const g = new Map();
+  for (const u of ups) { const k = u.ugel || 'PENDIENTE: UGEL'; if (!g.has(k)) g.set(k, []); g.get(k).push(u); }
+  return [...g].map(([ugel, us]) => ({ titulo: ugel, firmante: `Director(a) de la ${ugel}`, entidad: ugel, ugel, ups: us }));
+}
+const cabCarta = (M, tipo, G, primera) => [
+  new Paragraph({ pageBreakBefore: !primera, alignment: AlignmentType.RIGHT, spacing: { after: 200 }, children: runs('PENDIENTE: lugar, fecha', { size: 20 }) }),
+  new Paragraph({ spacing: { after: 200 }, children: [run(`${tipo === 'oficio' ? 'OFICIO' : 'CARTA'} N.° `, { bold: true }), ...runs('PENDIENTE', { bold: true }), run(` – ${G.entidad}`, { bold: true })] }),
+  p('Señor(a):', { after: 40 }),
+  p(M.B.uf ? `Responsable de la Unidad Formuladora: ${M.B.uf}` : 'PENDIENTE: Unidad Formuladora (Documentos → Institucionalidad)', { after: 40 }),
+  p('Presente.-', { after: 200 }),
+  p(`Asunto: ${TIPOS_CARTA[tipo]} — «${M.nombre}»`, { bold: true })
+];
+const tablaColegiosCarta = (M, G) => tabla(['Código de local', 'Institución educativa', 'Nivel', ...((M.paquete?.metas) || []).map(m => `${m.nombre} (${m.unidad.toLowerCase()})`)],
+  G.ups.map(u => [u.cod, u.nombre, M.niveles.join(', ').toLowerCase(), ...((M.paquete?.metas) || []).map(m => ({ v: ent(u.metas?.[m.k] ?? 0) }))]), { num: (M.paquete?.metas || []).map((_, j) => j + 3), size: 16 });
+const firmaCarta = G => [new Paragraph({ spacing: { before: 700, after: 40 }, children: [run('_______________________________________', { color: TENUE })] }), p(G.firmante, { after: 20 }), p('Nombre, DNI, firma y sello: PENDIENTE')];
+
+export async function generarCartas(M, tipo = 'opinion', por = 'ugel') {
+  if (!TIPOS_CARTA[tipo]) throw Object.assign(new Error('Tipo de carta no válido'), { status: 400 });
+  const grupos = gruposCarta(M, tipo === 'opinion' && por === 'colegio' ? 'colegio' : 'ugel'), c = [];
+  grupos.forEach((G, j) => {
+    c.push(...cabCarta(M, tipo, G, j === 0));
+    if (tipo === 'opinion') {
+      c.push(p(`Me dirijo a usted para emitir OPINIÓN FAVORABLE a la inversión de reposición de mobiliario escolar «${M.nombre}» en ${G.ups.length === 1 ? 'la institución educativa' : `las ${G.ups.length} instituciones educativas`} de nivel ${M.niveles.join(', ').toLowerCase()} que se detallan, a cargo de ${G.entidad}, por tratarse de la reposición de mobiliario de aula que ya cumplió su vida útil y que está en uso.`));
+      c.push(tablaColegiosCarta(M, G));
+      c.push(p('Asimismo, la entidad se compromete a asumir la operación y el mantenimiento del mobiliario repuesto, y a dar de baja el mobiliario reemplazado conforme a los procedimientos de control patrimonial.', { before: 160 }));
+    } else if (tipo === 'compromiso') {
+      c.push(p(`Por medio de la presente, ${G.entidad} se compromete a la operación y el mantenimiento del mobiliario escolar que se adquiera con la inversión «${M.nombre}» en las instituciones educativas que se detallan:`));
+      c.push(tablaColegiosCarta(M, G));
+      c.push(vinieta('Operación rutinaria: uso del mobiliario por estudiantes y docentes en las aulas, su custodia y su registro en el inventario como «mobiliario de aula».'));
+      c.push(vinieta('Mantenimiento preventivo y correctivo, en coordinación con cada institución educativa y con la participación de la APAFA.'));
+      c.push(vinieta(`Durante ${M.F.mantenimiento.anios} años desde la entrega, según el cronograma de mantenimiento del expediente.`));
+      c.push(p('Este compromiso está sujeto a la disponibilidad presupuestal de la entidad.', { italics: true, before: 120 }));
+    } else {
+      c.push(p(`Me dirijo a usted para remitir la información de las instituciones educativas de ${G.entidad} que forman parte de la inversión «${M.nombre}»:`));
+      c.push(tablaColegiosCarta(M, G));
+      for (const x of ['Inventario patrimonial del mobiliario a reponer y su registro contable.', 'Fichas de verificación del mobiliario por aula, con fotos y firmas.',
+        'Actas, resoluciones o compromisos del trámite de baja del mobiliario a reponer.', 'Matrícula y número de aulas en uso de cada institución educativa.'])
+        c.push(vinieta(x));
+      c.push(p('PENDIENTE: número de folios.', { before: 120 }));
+    }
+    c.push(p('Atentamente,', { before: 240 }));
+    c.push(...firmaCarta(G));
+  });
+  return Packer.toBuffer(documento(M, TIPOS_CARTA[tipo], c));
 }

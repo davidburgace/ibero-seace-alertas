@@ -80,7 +80,8 @@ function pintar() {
     <div class="exportar">
       <div><h3>Documentos en Word</h3><p>Borrador del Formato 07-C para preparar el registro en el Banco de Inversiones, y memoria descriptiva. Lo que falte sale marcado «PENDIENTE» en amarillo.</p>
         <label class="chk"><input type="checkbox" id="doc-borrador" ${modoBorrador ? 'checked' : ''}> Borrador con todos los colegios (también los que tienen el checklist de inventario y baja incompleto)</label></div>
-      <div class="acciones-fila"><button class="btn btn-primary" data-doc-bajar="formato-07c" type="button">Formato 07-C (Word)</button><button class="btn btn-ghost" data-doc-bajar="memoria" type="button">Memoria descriptiva (Word)</button><button class="btn btn-ghost" data-doc-bajar="formato-05b" type="button">Formato 05-B (Word)</button><button class="btn btn-ghost" data-doc-bajar="sustento" type="button">Informe de sustento (Word)</button><button class="btn btn-ghost" data-doc-bajar="lineamientos/anexos" type="button">Anexos de Lineamientos (Excel)</button><button class="btn btn-ghost" data-doc-bajar="paquete/up-activos" type="button">Listado de UP y consolidado (Excel)</button><button class="btn btn-ghost" data-doc-zip type="button">Expediente completo (ZIP)</button></div>
+      <div class="acciones-fila"><button class="btn btn-primary" data-doc-bajar="formato-07c" type="button">Formato 07-C (Word)</button><button class="btn btn-ghost" data-doc-bajar="memoria" type="button">Memoria descriptiva (Word)</button><button class="btn btn-ghost" data-doc-bajar="formato-05b" type="button">Formato 05-B (Word)</button><button class="btn btn-ghost" data-doc-bajar="sustento" type="button">Informe de sustento (Word)</button></div>
+      <div class="acciones-fila"><span class="sub">Modelos de carta (Word, una por página):</span><button class="btn btn-ghost btn-sm" data-doc-bajar="cartas" data-doc-q="tipo=opinion&amp;por=ugel" type="button">Opinión favorable por UGEL</button><button class="btn btn-ghost btn-sm" data-doc-bajar="cartas" data-doc-q="tipo=opinion&amp;por=colegio" type="button">Opinión favorable por colegio</button><button class="btn btn-ghost btn-sm" data-doc-bajar="cartas" data-doc-q="tipo=compromiso" type="button">Compromiso de O&amp;M por UGEL</button><button class="btn btn-ghost btn-sm" data-doc-bajar="cartas" data-doc-q="tipo=oficio" type="button">Oficio de remisión por UGEL</button><button class="btn btn-ghost" data-doc-bajar="lineamientos/anexos" type="button">Anexos de Lineamientos (Excel)</button><button class="btn btn-ghost" data-doc-bajar="paquete/up-activos" type="button">Listado de UP y consolidado (Excel)</button><button class="btn btn-ghost" data-doc-zip type="button">Expediente completo (ZIP)</button></div>
     </div>
     <div class="cols">
       <div class="panel"><div class="panel-cab"><h3>Pendientes</h3><span class="guardado" id="doc-guardado"></span></div>
@@ -223,6 +224,7 @@ async function bajar(btn) {
     const q = new URLSearchParams(ctx.nivel ? { nivel: ctx.nivel } : {});
     if ('docCod' in btn.dataset) q.set('cod', document.getElementById('doc-vida-cod')?.value || '');
     if (modoBorrador) q.set('borrador', '1');
+    for (const [k, v] of new URLSearchParams(btn.dataset.docQ || '')) q.set(k, v);
     const r = await fetch(`/api/selector-ioarr/proyectos/${ctx.proyecto.id}/${ruta}${q.size ? '?' + q : ''}`);
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Error ' + r.status);
     const blob = await r.blob(), cd = r.headers.get('Content-Disposition') || '';
