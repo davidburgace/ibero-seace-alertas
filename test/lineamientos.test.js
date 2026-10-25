@@ -225,3 +225,21 @@ test('no aumentar capacidad: lo repuesto no pasa de la matrícula ni de la capac
   assert.equal(fila.getCell(4).value, cap); assert.equal(fila.getCell(12).value, cap);
   ws.eachRow((r, n) => { if (n > 5 && r.getCell(1).value !== l.cod) assert.match(String(r.getCell(4).value), /sin dato/); });
 });
+
+test('mobiliario en uso: un colegio inundado o cerrado no entra al monto y se avisa', async () => {
+  const base = paquete(), xP = elegirIoarr(base.A, 'P'), l = xP.R.locales.find(y => y.total > 0);
+  const { A, M } = paquete({ colegios: { [l.cod]: { uso: 'inundado' }, [CODIGOS.find(c => c !== l.cod)]: { uso: 'operativo' } } });
+  const x = elegirIoarr(A, 'P');
+  assert.ok(!x.R.locales.some(y => y.cod === l.cod));
+  assert.ok(x.R.totales.total < xP.R.totales.total);
+  assert.ok(x.R.avisos.some(a => a.tipo === 'uso' && a.alerta && a.texto.includes(`${l.cod} (inundado)`)));
+  assert.ok(x.R.avisos.some(a => a.tipo === 'uso' && /no tienen? registrado si el mobiliario está en uso/.test(a.texto)));
+  // Fuera de todas las IOARR de sus niveles
+  assert.ok(A.ioarrs.every(y => !y.list.some(i => D.locs[i][0] === l.cod)));
+  const MP = M('P'), cond = MP.E.condiciones.find(c => /en uso/.test(c.texto));
+  assert.equal(cond.estado, 'pendiente'); assert.match(cond.nota, /Colegio operativo en \d+ de \d+/);
+  assert.ok(MP.uso.some(u => u.cod === l.cod && !u.entra));
+  const wb = new ExcelJS.Workbook(); await wb.xlsx.load(await excelL({ ficha: MP.fichaActivos, uso: MP.uso }));
+  const vals = []; wb.getWorksheet('Mobiliario en uso').eachRow((r, n) => { if (n > 4) vals.push([r.getCell(1).value, r.getCell(3).value, r.getCell(4).value]); });
+  assert.deepEqual(vals.find(v => v[0] === l.cod), [l.cod, 'Inundado', 'No entra: mobiliario sin uso']);
+});

@@ -350,7 +350,7 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, efectivos = 
   const condiciones = [
     { texto: 'El mobiliario nuevo cumple la misma función que el reemplazado (2.4.C.a).', estado: 'cumple', nota: 'Mesas, sillas, escritorios y armarios de aula reemplazan a los del mismo uso.' },
     { texto: 'No se sustenta en un incremento de la capacidad de la UP (2.4.C.c).', estado: porCapacidad ? 'no' : 'cumple', nota: porCapacidad ? 'El escenario «Por capacidad» calcula las cantidades por aulas y ocupación, no por el mobiliario existente: no sirve como sustento de reposición.' : T.fal > 0 ? 'El faltante (brecha de dotación, no reposición) se excluyó del metrado y del costo.' : 'No hay faltante.' },
-    { texto: masiva ? 'El mobiliario a reponer está en uso (2.5.c).' : 'El mobiliario a reponer está en uso: no lleva más de un año sin operar (2.4.C.d).', estado: d.en_uso === 'si' ? 'cumple' : d.en_uso === 'no' ? 'no' : 'pendiente', nota: d.en_uso === 'no' ? (masiva ? 'En una reposición masiva el mobiliario debe estar en uso.' : 'Si lleva más de un año sin operar, va como optimización o proyecto de inversión.') : '' },
+    condUso(ups, d, masiva),
     condInventario(ups, d),
     escenario === 'malo'
       ? { texto: 'Vida útil: se repone solo mobiliario en estado malo, que ya no es útil ni operativo (vida útil efectiva, 2.4.B.e).', estado: 'cumple', nota: d.informe_vida_util ? 'Informe de vida útil: ' + d.informe_vida_util : 'El informe de vida útil estimada de la entidad (2.4.C.b) es recomendable como respaldo.' }
@@ -378,7 +378,8 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, efectivos = 
   falta(!d.ue_mantenimiento || !d.ue_mantenimiento_codigo, 'Entidad responsable del mantenimiento: nombre y código.');
   const sinCheck = ups.filter(u => !checklistColegio(colegioDe(d.colegios, u.cod), { registrado: d.inventario_registrado }).completo);
   falta(sinCheck.length, `Checklist de inventario y baja incompleto en ${sinCheck.length === 1 ? '1 colegio' : sinCheck.length + ' colegios'} (${sinCheck.slice(0, 10).map(u => u.cod).join(', ')}${sinCheck.length > 10 ? '…' : ''}): no entra${sinCheck.length === 1 ? '' : 'n'} al 07-C final.`);
-  falta(!d.en_uso, 'Si el mobiliario a reponer está en uso.');
+  const sinUsoDato = ups.filter(u => !colegioDe(d.colegios, u.cod).uso).length;
+  falta(!d.en_uso && sinUsoDato, `Si el mobiliario está en uso (colegio operativo) en ${sinUsoDato === 1 ? '1 colegio' : sinUsoDato + ' colegios'}: márcalo en «Por colegio».`);
   if (supera && !masiva) falta(activos.some(a => a.antiguedad == null || !a.estado), 'E.3. Antigüedad y estado actual del mobiliario a reponer, por tipo.');
   falta(!d.ref_tecnica, 'Referencia técnica aplicable del mobiliario (descripción técnica).');
   falta(A.propuesto, 'A. Alineamiento a la brecha: indicador, unidad de medida y servicio propuestos; verifícalos contra el PMI.');
@@ -416,6 +417,14 @@ function condInventario(ups, d) {
   const n = ups.length, ok = v.filter(x => x.reg === 'si' && x.cont === 'si').length, no = v.filter(x => x.reg === 'no' || x.cont === 'no').length;
   return { texto: 'Los bienes están registrados en la contabilidad e inventario de la entidad (2.4.C.e).', estado: no ? 'no' : n && ok === n ? 'cumple' : 'pendiente',
     nota: `Inventario y contabilidad «Sí» en ${ok} de ${n} ${n === 1 ? 'colegio' : 'colegios'}${no ? `; «No» en ${no}` : ''} (checklist por colegio).${d.codigo_inventario ? ' Código o documento: ' + d.codigo_inventario : ''}` };
+}
+// En uso (2.5.c / 2.4.C.d): por colegio (operativo); el sí/no de Documentos vale por defecto.
+// Los cerrados, inundados o en reconstrucción ya quedaron fuera del monto (paquete.js).
+function condUso(ups, d, masiva) {
+  const n = ups.length, op = ups.filter(u => (colegioDe(d.colegios, u.cod).uso || (d.en_uso === 'si' ? 'operativo' : '')) === 'operativo').length;
+  const texto = masiva ? 'El mobiliario a reponer está en uso (2.5.c).' : 'El mobiliario a reponer está en uso: no lleva más de un año sin operar (2.4.C.d).';
+  if (d.en_uso === 'no' && !ups.some(u => colegioDe(d.colegios, u.cod).uso)) return { texto, estado: 'no', nota: masiva ? 'En una reposición masiva el mobiliario debe estar en uso.' : 'Si lleva más de un año sin operar, va como optimización o proyecto de inversión.' };
+  return { texto, estado: n && op === n ? 'cumple' : 'pendiente', nota: `Colegio operativo en ${op} de ${n}${op < n ? '; el resto, sin registrar en «Por colegio»' : ''}. Los cerrados, inundados o en reconstrucción no entran al monto.` };
 }
 // Baja (2.4.C.f): trámite iniciado con documento de respaldo y fecha en el checklist, o archivo de baja adjunto
 function condBaja(ups, d, conBaja) {

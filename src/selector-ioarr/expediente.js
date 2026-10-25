@@ -80,7 +80,7 @@ import { generarExcelCostos } from './excel-costos.js';
 import { armarModelo, limpiarDatosDoc, ESTADOS_ACTIVO, MODALIDADES, FUENTES_FIN } from './documentos.js';
 import { generar07C, generarMemoria, generarVerificacion, generarVidaUtil } from './word.js';
 import { leerDuplicidad, separarLocales } from './duplicidad.js';
-import { fichaActivos, modeloVidaUtil, FUENTES_VIDA_UTIL, limpiarColegio, colegioVacio, colegioDe, checklistColegio, DOCS_BAJA, FUENTES_ENTREGA, TIPOS_ENTREGA, VENTANA_DUP } from './lineamientos.js';
+import { fichaActivos, modeloVidaUtil, FUENTES_VIDA_UTIL, limpiarColegio, colegioVacio, colegioDe, checklistColegio, DOCS_BAJA, FUENTES_ENTREGA, TIPOS_ENTREGA, VENTANA_DUP, ESTADOS_USO } from './lineamientos.js';
 import { generarExcelLineamientos } from './excel-lineamientos.js';
 import { calcularPaquete, modeloIoarr, elegirIoarr } from './paquete.js';
 import { porNivel, modoDe, sinNivel, nivelesDeLocal, vistaNivel, limpiarPorNivel, NOMBRE_NIVEL } from './niveles.js';
@@ -915,11 +915,11 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
         datos: c, checklist: A.checklist[cod] || checklistColegio(c), riesgo: A.riesgos?.[cod] ? { riesgo: A.riesgos[cod].riesgo, motivos: A.riesgos[cod].motivos } : null,
         niveles_k: nivelesDeLocal(D, i), excluido_dup: excluido, costo: porCod[cod] || null };
     };
-    const filas = [...A.list.map(i => fila(i, false)), ...A.excluidos.map(i => fila(i, true))];
+    const filas = [...A.list.map(i => fila(i, false)), ...(A.fueraUso || []).map(i => ({ ...fila(i, false), sin_uso: true })), ...A.excluidos.map(i => fila(i, true))];
     return {
-      filas, docs_baja: DOCS_BAJA, fuentes_entrega: FUENTES_ENTREGA, tipos_entrega: TIPOS_ENTREGA, ventana: VENTANA_DUP, anio: A.anioRef,
+      filas, docs_baja: DOCS_BAJA, estados_uso: ESTADOS_USO, fuentes_entrega: FUENTES_ENTREGA, tipos_entrega: TIPOS_ENTREGA, ventana: VENTANA_DUP, anio: A.anioRef,
       resumen: { colegios: A.list.length, bloqueados: A.bloqueados.length, completos: A.list.length - A.bloqueados.length, excluidos_dup: A.excluidos.length,
-        riesgo: Object.values(A.riesgos || {}).filter(r => r.riesgo).length, inconsistentes: A.comparativo.inconsistentes },
+        riesgo: Object.values(A.riesgos || {}).filter(r => r.riesgo).length, inconsistentes: A.comparativo.inconsistentes, sin_uso: (A.fueraUso || []).length },
       comparativo: A.comparativo
     };
   }
@@ -1153,7 +1153,7 @@ const LEEME_PAQUETE = (proyecto, paq, D, idxDe) => [
 ].join('\r\n');
 
 // Lo que va al Excel de anexos de los Lineamientos, desde el modelo de una IOARR
-export const anexosDe = M => ({ ficha: M.fichaActivos, checklist: M.checklist || [], riesgos: M.riesgos || [], capacidad: M.capacidad || [], anioRef: M.anioRef, borrador: !!M.borrador });
+export const anexosDe = M => ({ ficha: M.fichaActivos, checklist: M.checklist || [], riesgos: M.riesgos || [], capacidad: M.capacidad || [], uso: M.uso || [], anioRef: M.anioRef, borrador: !!M.borrador });
 
 export function textoCriterios(P) {
   const est = { b: 'Bueno', r: 'Regular', m: 'Malo' }[P.carpEstado];

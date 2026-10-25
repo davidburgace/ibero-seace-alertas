@@ -210,6 +210,10 @@ const txt = (v, max) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, max
 const sino = v => ['si', 'no'].includes(v) ? v : '';
 const fechaOk = v => /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(String(v || '')) ? v : null;
 
+// Mobiliario en uso (Lineamientos 2.5.c): sin uso, el colegio no entra al monto
+export const ESTADOS_USO = { operativo: 'Operativo', cerrado: 'Cerrado', inundado: 'Inundado', reconstruccion: 'En reconstrucción' };
+export const SIN_USO = ['cerrado', 'inundado', 'reconstruccion'];
+export const sinUso = c => SIN_USO.includes(c?.uso);
 // Entregas previas de mobiliario (chequeo de duplicación)
 export const FUENTES_ENTREGA = { pronied: 'Pronied', minedu: 'Minedu', gore: 'Gobierno regional', ugel: 'UGEL', municipalidad: 'Municipalidad', otra: 'Otra' };
 export const TIPOS_ENTREGA = { kit: 'Kit (mesa + silla)', mesa: 'Mesa del estudiante', silla: 'Silla del estudiante', esc: 'Escritorio docente', sdoc: 'Silla docente', arm: 'Armario / estante' };
@@ -228,6 +232,7 @@ function limpiarEntrega(e, anioMax) {
 export function limpiarColegio(b = {}, anioMax = new Date().getFullYear() + 1) {
   const x = b && typeof b === 'object' ? b : {}, inv = x.inventario && typeof x.inventario === 'object' ? x.inventario : {};
   return {
+    uso: ESTADOS_USO[x.uso] ? x.uso : '',
     // Entregas previas de mobiliario e inversión en ejecución (chequeo de duplicación)
     entregas: (Array.isArray(x.entregas) ? x.entregas : []).slice(0, 30).map(e => limpiarEntrega(e, anioMax)).filter(Boolean),
     inversion_ejecucion: x.inversion_ejecucion === true, inversion_codigo: txt(x.inversion_codigo, 30),
@@ -242,7 +247,7 @@ export function limpiarColegio(b = {}, anioMax = new Date().getFullYear() + 1) {
   };
 }
 // Sin nada cargado: no hace falta guardar la fila
-export const colegioVacio = c => !c.nota && !Object.values(c.inventario).some(Boolean) && !c.entregas.length && !c.inversion_ejecucion && !c.inversion_codigo && !Object.keys(c.capacidad).length;
+export const colegioVacio = c => !c.uso && !c.nota && !Object.values(c.inventario).some(Boolean) && !c.entregas.length && !c.inversion_ejecucion && !c.inversion_codigo && !Object.keys(c.capacidad).length;
 export function limpiarColegios(obj) {
   const out = {};
   for (const [cod, v] of Object.entries(obj && typeof obj === 'object' ? obj : {}).slice(0, 50000)) {

@@ -12,7 +12,7 @@ import { costear } from './costos.js';
 import { porNivel, validarNiveles, inventarioNivel, inventarioUna, sinNivel, nivelesDeLocal } from './niveles.js';
 import { separarLocales, estadoDe, avisosDuplicidad } from './duplicidad.js';
 import { armarModelo } from './documentos.js';
-import { fichaActivos, modeloVidaUtil, checklistColegio, colegioDe, riesgoDuplicacion, ajusteTotal, VENTANA_DUP, capacidadDe, filasCapacidad } from './lineamientos.js';
+import { fichaActivos, modeloVidaUtil, checklistColegio, colegioDe, riesgoDuplicacion, ajusteTotal, VENTANA_DUP, capacidadDe, filasCapacidad, sinUso, ESTADOS_USO } from './lineamientos.js';
 
 /**
  * @param {object} p
@@ -28,9 +28,12 @@ import { fichaActivos, modeloVidaUtil, checklistColegio, colegioDe, riesgoDuplic
  */
 export function calcularPaquete({ D, P, codigos, dup = {}, inv = {}, comun, datosDoc = {}, final = false, modo = 'por_nivel', anioRef = new Date().getFullYear() }) {
   // Los locales con otra inversión vigente o reciente que se excluyeron no entran a la propuesta
-  const sep = separarLocales(D, codigos, dup), excluidos = sep.excluidos;
-  // Checklist de inventario y baja por colegio (lineamientos.js)
+  const sep0 = separarLocales(D, codigos, dup), excluidos = sep0.excluidos;
   const colegios = datosDoc.colegios || {};
+  // Mobiliario en uso: los colegios cerrados, inundados o en reconstrucción no entran al monto
+  const fueraUso = sep0.list.filter(i => sinUso(colegios[D.locs[i][0]]));
+  const sep = { list: sep0.list.filter(i => !sinUso(colegios[D.locs[i][0]])) };
+  // Checklist de inventario y baja por colegio (lineamientos.js)
   const checklist = Object.fromEntries(sep.list.map(i => [D.locs[i][0], checklistColegio(colegios[D.locs[i][0]], { registrado: datosDoc.inventario_registrado })]));
   const bloqueados = sep.list.filter(i => !checklist[D.locs[i][0]].completo);
   const list = final ? sep.list.filter(i => checklist[D.locs[i][0]].completo) : sep.list;
@@ -82,6 +85,11 @@ export function calcularPaquete({ D, P, codigos, dup = {}, inv = {}, comun, dato
         ? { tipo: 'checklist', alerta: true, texto: `No ${n === 1 ? 'entra' : 'entran'} al Formato 07-C ${n === 1 ? '1 colegio' : n + ' colegios'} con el checklist de inventario y baja incompleto: ${lst}. Complétalo en «Por colegio» o exporta el borrador.` }
         : { tipo: 'checklist', alerta: true, texto: `${n === 1 ? '1 colegio tiene' : n + ' colegios tienen'} el checklist de inventario y baja incompleto (${lst}): ${n === 1 ? 'no entrará' : 'no entrarán'} al Formato 07-C final hasta completarlo en «Por colegio». El borrador sí ${n === 1 ? 'lo incluye' : 'los incluye'}.` });
     }
+    // Mobiliario en uso: los que no lo tienen quedan fuera del monto; los sin registrar, pendientes
+    x.sinUso = fueraUso.filter(i => !x.nivel || x.D.locSvc[i].length).map(i => ({ cod: D.locs[i][0], nom: D.locName[i], uso: colegios[D.locs[i][0]].uso }));
+    if (x.sinUso.length) R.avisos.push({ tipo: 'uso', alerta: true, texto: `No ${x.sinUso.length === 1 ? 'entra' : 'entran'} al monto ${x.sinUso.length === 1 ? '1 colegio' : x.sinUso.length + ' colegios'} sin el mobiliario en uso (2.5.c): ${x.sinUso.slice(0, 15).map(u => `${u.cod} (${ESTADOS_USO[u.uso].toLowerCase()})`).join(', ')}${x.sinUso.length > 15 ? '…' : ''}.` });
+    const sinDato = x.list.filter(i => !colegios[D.locs[i][0]]?.uso).length;
+    if (sinDato && datosDoc.en_uso !== 'si') R.avisos.push({ tipo: 'uso', texto: `${sinDato === 1 ? '1 colegio no tiene' : sinDato + ' colegios no tienen'} registrado si el mobiliario está en uso (operativo, cerrado, inundado o en reconstrucción). Márcalo en «Por colegio».` });
     // Riesgo de duplicación: colegios de la IOARR con entrega reciente sin descontar o inversión en ejecución
     x.riesgos = x.list.filter(i => riesgos[D.locs[i][0]]?.riesgo).map(i => ({ cod: D.locs[i][0], nom: D.locName[i], motivos: riesgos[D.locs[i][0]].motivos }));
     if (x.riesgos.length) R.avisos.push({ tipo: 'duplicacion', alerta: true, texto: `Riesgo de duplicación en ${x.riesgos.length === 1 ? '1 colegio' : x.riesgos.length + ' colegios'} (entrega de mobiliario en los últimos ${VENTANA_DUP} años sin descontar, inversión en ejecución u otra inversión): ${x.riesgos.slice(0, 10).map(r => `${r.cod} (${r.motivos.join('; ')})`).join(' · ')}${x.riesgos.length > 10 ? '…' : ''}. Descuenta la entrega o explica en «Por colegio».` });
@@ -100,7 +108,7 @@ export function calcularPaquete({ D, P, codigos, dup = {}, inv = {}, comun, dato
     // Colegios con datos inconsistentes del censo (mobiliario > matrícula) en algún nivel
     inconsistentes: new Set(Rniv.locales.filter(l => l.tope?.inconsistente).map(l => l.cod)).size
   };
-  return { final, colegios, checklist, bloqueados, riesgos, anioRef, modo, niveles: G.map(g => g.nivel), ioarrs, comparativo, Runa, P, escenarios, D, C, list, inv, dup, excluidos };
+  return { final, colegios, checklist, bloqueados, riesgos, fueraUso, anioRef, modo, niveles: G.map(g => g.nivel), ioarrs, comparativo, Runa, P, escenarios, D, C, list, inv, dup, excluidos };
 }
 
 /**
@@ -131,9 +139,12 @@ export function modeloIoarr(A, x, datos, p, fecha) {
   if (enRiesgo.length) M.faltan.push(`Riesgo de duplicación en ${enRiesgo.length === 1 ? '1 colegio' : enRiesgo.length + ' colegios'} (${enRiesgo.slice(0, 10).map(r => r.cod).join(', ')}${enRiesgo.length > 10 ? '…' : ''}): descuenta las entregas de los últimos ${VENTANA_DUP} años o explica por qué no hay duplicación.`);
   // No aumentar capacidad: matrícula, capacidad de diseño y existente por colegio
   const capacidad = filasCapacidad(x.R);
+  // Mobiliario en uso por colegio (los que no lo tienen, fuera del monto)
+  const uso = [...x.list.map(i => ({ cod: x.D.locs[i][0], nombre: x.D.locName[i], uso: colegioDe(A.colegios, x.D.locs[i][0]).uso || (datos.en_uso === 'si' ? 'operativo' : ''), entra: true })),
+    ...(x.sinUso || []).map(u => ({ cod: u.cod, nombre: u.nom, uso: u.uso, entra: false }))];
   if (capacidad.some(f => f.inconsistente)) M.faltan.push(`Datos inconsistentes del censo en ${capacidad.filter(f => f.inconsistente).length} colegios (más mesas o sillas que matrícula): verifícalos en campo.`);
   return Object.assign(M, { nivel: x.nivel, nombreIoarr: x.nombre, fichaActivos: ficha, vidaUtil: vida, completo: !M.faltan.length,
-    borrador: !A.final, bloqueados: x.bloqueados || [], checklist, riesgos, capacidad, anioRef: A.anioRef ?? M.anioRef });
+    borrador: !A.final, bloqueados: x.bloqueados || [], checklist, riesgos, capacidad, uso, sinUso: x.sinUso || [], anioRef: A.anioRef ?? M.anioRef });
 }
 
 // La IOARR pedida (nivel); sin nivel o si no está, la primera

@@ -6,11 +6,12 @@
 //   Inventario y baja  checklist por colegio; sin completar, el colegio no entra al 07-C final
 //   Riesgo de duplicación  entregas previas de mobiliario (3 años) e inversiones en ejecución
 //   Capacidad y censo  lo que se repone no pasa de la matrícula ni de la capacidad de diseño
+//   Mobiliario en uso  colegio operativo, cerrado, inundado o en reconstrucción (sin uso: fuera del monto)
 // Las filas «pendiente de verificación en campo» van en amarillo. La oferta (uso interno) no entra.
 // ============================================================================
 
 import ExcelJS from 'exceljs';
-import { PENDIENTE_CAMPO, DOCS_BAJA, SI_NO, FUENTES_ENTREGA, TIPOS_ENTREGA, VENTANA_DUP, PENDIENTE_CAPACIDAD } from './lineamientos.js';
+import { PENDIENTE_CAMPO, DOCS_BAJA, SI_NO, FUENTES_ENTREGA, TIPOS_ENTREGA, VENTANA_DUP, PENDIENTE_CAPACIDAD, ESTADOS_USO } from './lineamientos.js';
 import { NOTA_FALTANTE } from './costos.js';
 import { NIVN } from './calculo.js';
 
@@ -140,8 +141,22 @@ function hojaCapacidad(wb, filas) {
   ws.autoFilter = { from: { row: 5, column: 1 }, to: { row: 5, column: cols.length } };
 }
 
+// ─── Mobiliario en uso ───────────────────────────────────────────────────────
+function hojaUso(wb, filas) {
+  const ws = wb.addWorksheet('Mobiliario en uso', { views: [{ state: 'frozen', ySplit: 4 }] });
+  const cols = [['Código de local', 11], ['Institución educativa', 40], ['Estado del colegio', 18], ['Monto', 34]];
+  ws.columns = cols.map(([, width]) => ({ width }));
+  titulo(ws, 'Mobiliario en uso (Lineamientos IOARR 2.5.c)', 'Los colegios cerrados, inundados o en reconstrucción no tienen el mobiliario en uso: no entran al monto.');
+  ws.getRow(4).values = cols.map(([t]) => t); cabecera(ws, 4, cols.length);
+  filas.forEach((f, j) => {
+    const r = ws.getRow(5 + j);
+    r.values = [f.cod, f.nombre, ESTADOS_USO[f.uso] || 'Sin registrar', f.entra ? (f.uso ? 'Entra' : 'Entra (pendiente de verificar que está operativo)') : 'No entra: mobiliario sin uso'];
+    if (!f.entra || !f.uso) for (const c of [3, 4]) r.getCell(c).fill = relleno(AMARILLO);
+  });
+}
+
 /**
- * @param {object} L  { ficha: fichaActivos(), checklist: [filas], riesgos: [filas], capacidad: [filas], anioRef, borrador }
+ * @param {object} L  { ficha: fichaActivos(), checklist: [filas], riesgos: [filas], capacidad: [filas], uso: [filas], anioRef, borrador }
  * @param {object} meta { proyecto, nombreIoarr, region, fecha }
  * @returns {Promise<Buffer>}
  */
@@ -153,5 +168,6 @@ export async function generarExcelLineamientos(L, meta = {}) {
   if (L.checklist) hojaChecklist(wb, L.checklist, L.borrador);
   if (L.riesgos) hojaRiesgos(wb, L.riesgos, L.anioRef || new Date().getFullYear());
   if (L.capacidad) hojaCapacidad(wb, L.capacidad);
+  if (L.uso) hojaUso(wb, L.uso);
   return Buffer.from(await wb.xlsx.writeBuffer());
 }

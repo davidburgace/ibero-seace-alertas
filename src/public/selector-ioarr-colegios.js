@@ -28,6 +28,8 @@ export async function renderColegios(c) {
 // Chips de lo que falta o de lo que avisa (los demás puntos agregan los suyos en chipsDe)
 export function chipsDe(f) {
   const out = [];
+  if (f.sin_uso) return `<span class="chip-est alerta">Fuera del monto: ${esc(vista.estados_uso[f.datos.uso].toLowerCase())}</span>`;
+  if (!f.datos.uso && !f.excluido_dup) out.push('<span class="chip-est pend">Uso sin registrar</span>');
   out.push(f.checklist.completo ? '<span class="chip-est ok">Inventario y baja completos</span>'
     : `<span class="chip-est alerta" title="${esc('Falta: ' + f.checklist.faltan.join('; '))}">No entra al 07-C final: checklist incompleto</span>`);
   if (f.riesgo?.riesgo) out.push(`<span class="chip-est alerta" title="${esc(f.riesgo.motivos.join('; '))}">Riesgo de duplicación</span>`);
@@ -40,7 +42,7 @@ export function chipsDe(f) {
 function pintar() {
   const R = vista.resumen, K = vista.comparativo;
   const q = norm(filtro).trim();
-  const filas = vista.filas.filter(f => (!q || f.cod.includes(q) || norm(f.nombre).includes(q) || norm(f.dist).includes(q)) && (!soloPend || !f.checklist.completo || f.riesgo?.riesgo || f.costo?.inconsistente));
+  const filas = vista.filas.filter(f => (!q || f.cod.includes(q) || norm(f.nombre).includes(q) || norm(f.dist).includes(q)) && (!soloPend || !f.checklist.completo || f.riesgo?.riesgo || f.costo?.inconsistente || f.sin_uso || !f.datos.uso));
   const pags = Math.max(1, Math.ceil(filas.length / PAGE)); pag = Math.min(pag, pags - 1);
   const desde = pag * PAGE;
   const rows = filas.slice(desde, desde + PAGE).map(f => `<tr>
@@ -55,6 +57,7 @@ function pintar() {
       <div class="kpi"><div class="v">${ent(R.completos)}</div><div class="l">con el checklist de inventario y baja completo</div></div>
       <div class="kpi${R.bloqueados ? ' destacado' : ''}"><div class="v">${ent(R.bloqueados)}</div><div class="l">no entran al 07-C final (checklist incompleto)</div></div>
       <div class="kpi${R.riesgo ? ' destacado' : ''}"><div class="v">${ent(R.riesgo)}</div><div class="l">con riesgo de duplicación</div></div>
+      <div class="kpi${R.sin_uso ? ' destacado' : ''}"><div class="v">${ent(R.sin_uso)}</div><div class="l">fuera del monto: mobiliario sin uso (cerrado, inundado o en reconstrucción)</div></div>
       <div class="kpi${R.inconsistentes ? ' destacado' : ''}"><div class="v">${ent(R.inconsistentes)}</div><div class="l">con datos inconsistentes del censo (mobiliario &gt; matrícula)</div></div>
       <div class="kpi"><div class="v">${soles(K?.suma)}</div><div class="l">total del paquete · ${K?.niveles.length || 0} IOARR por nivel</div></div>
     </div>
@@ -95,6 +98,12 @@ function modal() {
 }
 // Secciones del formulario: cada punto de los Lineamientos agrega la suya
 export const SECCIONES = [
+  {
+    html: f => `<h3>Mobiliario en uso</h3>
+      <p class="sub">Lineamientos 2.5.c: en una reposición masiva el mobiliario debe estar en uso. Un colegio cerrado, inundado o en reconstrucción no entra al monto.</p>
+      <div class="form-grid"><div class="campo"><label for="col-uso">Estado del colegio</label>${sel('col-uso', f.datos.uso, [['', 'Sin registrar'], ...Object.entries(vista.estados_uso)])}</div></div>`,
+    leer: m => ({ uso: m.querySelector('#col-uso').value })
+  },
   {
     html: f => {
       const v = f.datos.inventario;
