@@ -38,8 +38,8 @@ test('catálogo con la precarga: normalizado, estadísticos sin el propio y posi
   const { status, json } = await pedir('GET', '/precios-ref');
   assert.equal(status, 200, JSON.stringify(json));
   assert.equal(json.registros.length, 5);
-  assert.equal(json.registros.filter(r => r.comparable && !r.propio).length, 2);   // Loreto y San Juan (memoria de costos)
-  assert.deepEqual(json.estadisticos.map(g => [g.material, g.nivel, g.n, g.mediana, g.pocas]), [['madera', 'por_confirmar', 1, 624, true], ['metal-polipropileno', 'Secundaria', 1, 411.85, true]]);
+  assert.equal(json.registros.filter(r => r.comparable && !r.propio).length, 3);   // Loreto, Huánuco 2025 (sin IGV, 036) y San Juan (memoria de costos)
+  assert.deepEqual(json.estadisticos.map(g => [g.material, g.nivel, g.n, g.mediana, g.pocas]), [['madera', 'por_confirmar', 1, 624, true], ['metal-madera', 'Primaria', 1, 467.5, true], ['metal-polipropileno', 'Secundaria', 1, 411.85, true]]);
   assert.ok('madera' in json.opciones.materiales);
   assert.equal(json.propio.precio_kit_sin_igv, 850);
   assert.match(json.estadisticos[0].propio.texto, /36\.22 % sobre la mediana/);
@@ -52,7 +52,7 @@ test('alta manual con validaciones, edición y PDF fuente', async () => {
   const ok = await pedir('POST', '/precios-ref', { tipo_documento: 'bases', cui: '2600001', entidad: 'GR Ejemplo', region: 'Moquegua', anio: 2026, nivel: 'Primaria', unidad: 'mesa', material: 'metal-madera', monto: 354, incluye_igv: 'si', composicion: [{ unidad: 'mesa', cantidad: 1 }, { unidad: 'silla', cantidad: 1, precio: 177 }], confianza: 'alta' });
   assert.equal(ok.status, 201, JSON.stringify(ok.json));
   assert.equal(ok.json.precio_kit_sin_igv, 450);
-  // Confirmar el IGV de Huánuco 2025 lo vuelve comparable (punto medio 467.50)
+  // Huánuco 2025 (sin IGV desde la 036): comparable por su punto medio; editarlo valida el rango
   const h = await pedir('PATCH', '/precios-ref/c0a7a10e-0000-4000-8000-000000000003', { incluye_igv: false });
   assert.equal(h.status, 200, JSON.stringify(h.json));
   assert.equal(h.json.precio_kit_sin_igv, 467.5);

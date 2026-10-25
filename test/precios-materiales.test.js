@@ -177,19 +177,24 @@ test('kit por nivel: se puede apagar en un nivel (los demás siguen con kit)', (
   if (R(con, 'S')) { assert.ok(R(sinP, 'S').kit, 'Secundaria sigue con kit'); assert.equal(enKit(R(sinP, 'S')), enKit(R(con, 'S'))); }
 });
 
-test('precio por kit del catálogo por material (precarga): Madera → Loreto, Metal/Polipropileno → San Juan, Metal/Madera pendiente', () => {
+test('precio por kit del catálogo por material (precarga): Madera → Loreto, Metal/Madera → Huánuco 2025, Metal/Polipropileno → San Juan', () => {
   const K = preciosKit(PRECARGA);
   assert.deepEqual([K.madera.precio, K.madera.n], [624, 1]);
   assert.match(K.madera.fuente, /Loreto/);
   assert.deepEqual([K['metal-polipropileno'].precio, K['metal-polipropileno'].n], [411.85, 1], 'San Juan, sin el precio propio (850)');
   assert.match(K['metal-polipropileno'].fuente, /La Libertad.*2711098/);
-  // Huánuco: 2025 sin saber si incluye IGV y 2023 por pieza: no se usan, se dice por qué
-  assert.equal(K['metal-madera'].precio, null);
-  assert.deepEqual(K['metal-madera'].pendientes.map(x => /2025/.test(x.fuente) ? 'IGV' : /composición/.test(x.motivo) ? 'pieza' : '?').sort(), ['IGV', 'pieza']);
-  assert.match(K['metal-madera'].pendientes.find(x => /2025/.test(x.fuente)).motivo, /IGV/);
-  // Con el IGV de Huánuco 2025 confirmado (sin IGV), entra por su punto medio
-  const conf = PRECARGA.map(r => /000000000003$/.test(r.id) ? { ...r, incluye_igv: false } : r);
-  assert.equal(preciosKit(conf)['metal-madera'].precio, 467.5);
+  // Huánuco 2025: sin IGV (confirmado, migración 036), punto medio del rango 455-480
+  assert.deepEqual([K['metal-madera'].precio, K['metal-madera'].n], [467.5, 1]);
+  assert.match(K['metal-madera'].fuente, /Huánuco, 2025/);
+  // Huánuco 2023 (por pieza, sin composición) no se usa y se dice por qué
+  assert.equal(K['metal-madera'].pendientes.length, 1);
+  assert.match(K['metal-madera'].pendientes[0].motivo, /composición/);
+  // Si el IGV vuelve a estar por confirmar, no se usa y se dice por qué
+  const sinDato = PRECARGA.map(r => /000000000003$/.test(r.id) ? { ...r, incluye_igv: null } : r);
+  assert.equal(preciosKit(sinDato)['metal-madera'].precio, null);
+  assert.ok(preciosKit(sinDato)['metal-madera'].pendientes.some(x => /IGV/.test(x.motivo)));
+  const m36 = readFileSync(new URL('../supabase/migrations/036_ioarr_huanuco_2025_sin_igv.sql', import.meta.url), 'utf8');
+  assert.match(m36, /set incluye_igv = false\s+where id = 'c0a7a10e-0000-4000-8000-000000000003' and incluye_igv is null/);
 });
 
 test('precio por kit en Costos: escrito → mesa + silla → kit del catálogo; entra al costo y basta para validar', () => {
