@@ -76,6 +76,9 @@ function tabla(cab, filas, { num = [], anchos, size } = {}) {
 }
 const espacio = () => new Paragraph({ children: [], spacing: { after: 60 } });
 
+// Piezas que reusa el Word del documento equivalente (word-documento-equivalente.js)
+export { run, runs, p, titulo, tabla, espacio, FUENTE, AZUL, GRIS, TENUE };
+
 // ─── Texto de plantilla → párrafos y tablas ─────────────────────────────────
 const RE_ITEM = /^(\s*)((?:\d+(?:\.\d+)*\.?|[a-z]\)|\(\d+\)|\(\*+\)|[•▪]|[ivx]+\)))(\s+)/;
 const RE_VINIETA = /^(\s*)- (.*)$/;

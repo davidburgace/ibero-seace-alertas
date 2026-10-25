@@ -49,7 +49,7 @@ export const REFERENCIA_PLAZO_DE = 'Referencia: San Juan 60 días, Loreto 30 dí
 export const RE_DOBLE = /\{\{([A-Z0-9_]+)\}\}/g;
 export const RE_SIMPLE = /(?<!\{)\{([A-Z][A-Z0-9_]*)\}(?!\})/g;
 // Marcadores que quedaron sin dato (y avisos que deben verse) en el texto final
-export const RE_RESALTAR = /\{\{[A-Z0-9_]+\}\}|(?<!\{)\{[A-Z][A-Z0-9_]*\}(?!\})|\[VERIFICAR[^\]]*\]|\[NO APLICA[^\]]*\]|\[COMPLETAR[^\]]*\]/g;
+export const RE_RESALTAR = /\{\{[A-Z0-9_]+\}\}|(?<!\{)\{[A-Z][A-Z0-9_]*\}(?!\})|\[VERIFICAR[^\]]*\]|\[NO APLICA[^\]]*\]|\[COMPLETAR[^\]]*\]|\[REVISAR[^\]]*\]/g;
 
 // Calendario (Anexo 2): llave simple, no están en el MANIFEST
 export const CAMPOS_CALENDARIO = [

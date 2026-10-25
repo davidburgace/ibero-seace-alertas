@@ -1,0 +1,236 @@
+{
+ "descripcion": "Documento equivalente (expediente técnico) de una IOARR de mobiliario escolar: plan de trabajo y tomos I a III. Se elabora después de la buena pro y lo aprueba la entidad.",
+ "fuente_plantilla": "docs/Plantilla del documento equivalente – IOARR de mobiliario escolar.docx (estructura basada en los términos de referencia de San Juan, CUI 2711098)",
+ "aviso": "Es una guía de estructura, no un modelo legal validado. El contenido mínimo, los plazos y las condiciones se verifican contra las bases integradas del proceso y con la entidad.",
+ "fuentes": {
+  "APP": "La app ya lo tiene o puede calcularlo",
+  "PARCIAL": "La app da la base y falta completar: se marca «REVISAR» hasta que el usuario lo revise",
+  "MANUAL": "Lo completa la empresa o la entidad: queda resaltado mientras falte"
+ },
+ "campos": {
+  "NOMBRE_IOARR": {
+   "descripcion": "Título del proyecto (nombre de la IOARR)",
+   "fuente": "APP",
+   "tipo": "parrafo"
+  },
+  "CUI": {
+   "descripcion": "Código único de inversiones",
+   "fuente": "APP",
+   "tipo": "texto"
+  },
+  "ENTIDAD": {
+   "descripcion": "Entidad ejecutora",
+   "fuente": "APP",
+   "tipo": "texto"
+  },
+  "NIVEL": {
+   "descripcion": "Nivel educativo de la IOARR",
+   "fuente": "APP",
+   "tipo": "texto"
+  },
+  "LOCALIZACION": {
+   "descripcion": "Localización (región / provincia / distrito)",
+   "fuente": "APP",
+   "tipo": "parrafo"
+  },
+  "NORMAS_TECNICAS": {
+   "descripcion": "Normas técnicas del mobiliario educativo",
+   "fuente": "APP",
+   "tipo": "parrafo",
+   "ayuda": "Se toman de la ficha de bases del mismo nivel o de las sugeridas; confírmalas."
+  },
+  "PLAZO_EJECUCION_DIAS": {
+   "descripcion": "Plazo de ejecución (días calendario)",
+   "fuente": "MANUAL",
+   "tipo": "dias"
+  },
+  "BREVE_DESCRIPCION": {
+   "descripcion": "Breve descripción",
+   "fuente": "PARCIAL",
+   "tipo": "parrafo"
+  },
+  "OBJETIVOS": {
+   "descripcion": "Objetivos",
+   "fuente": "PARCIAL",
+   "tipo": "parrafo"
+  },
+  "CRONOGRAMA_ENTREGABLES": {
+   "descripcion": "Cronograma de entregables",
+   "fuente": "PARCIAL",
+   "tipo": "parrafo",
+   "ayuda": "Según el cuadro de entregables de las bases."
+  },
+  "FINALIDAD_PUBLICA": {
+   "descripcion": "Finalidad pública (tomada de la IOARR aprobada)",
+   "fuente": "PARCIAL",
+   "tipo": "parrafo"
+  },
+  "OBJETIVO_PRINCIPAL": {
+   "descripcion": "Objetivo principal",
+   "fuente": "PARCIAL",
+   "tipo": "parrafo"
+  },
+  "CONDICIONES_AMBIENTALES": {
+   "descripcion": "Localización, condiciones ambientales y geográficas",
+   "fuente": "PARCIAL",
+   "tipo": "parrafo",
+   "ayuda": "Ubicación de los colegios; costa, sierra o selva según la zona; altitud y clima."
+  },
+  "SUSTENTO_TECNICO": {
+   "descripcion": "Sustento y acreditación de especificaciones técnicas",
+   "fuente": "PARCIAL",
+   "tipo": "parrafo"
+  },
+  "CRONOGRAMA_EJECUCION": {
+   "descripcion": "Cronograma de ejecución",
+   "fuente": "PARCIAL",
+   "tipo": "parrafo",
+   "ayuda": "Fabricación, control de calidad, transporte y entrega."
+  },
+  "CRITERIOS_COSTOS": {
+   "descripcion": "Criterios para determinar costos",
+   "fuente": "PARCIAL",
+   "tipo": "parrafo"
+  },
+  "CRONOGRAMA_ACTIVIDADES": {
+   "descripcion": "Cronograma de actividades y responsables (plan de trabajo)",
+   "fuente": "MANUAL",
+   "tipo": "parrafo"
+  },
+  "PLAZOS_REVISION": {
+   "descripcion": "Plazos de revisión y subsanación",
+   "fuente": "MANUAL",
+   "tipo": "parrafo",
+   "ayuda": "Según las bases del proceso."
+  },
+  "RESPONSABLE_ELABORACION": {
+   "descripcion": "Responsable de la elaboración (empresa privada y responsable)",
+   "fuente": "MANUAL",
+   "tipo": "texto"
+  },
+  "CRONOGRAMA_CIPRL": {
+   "descripcion": "Cronograma de solicitud de CIPRL",
+   "fuente": "MANUAL",
+   "tipo": "parrafo"
+  },
+  "CONFORMIDADES": {
+   "descripcion": "Conformidades",
+   "fuente": "MANUAL",
+   "tipo": "parrafo",
+   "ayuda": "Según las bases."
+  },
+  "POST_VENTA": {
+   "descripcion": "Servicio post venta (compromiso del proveedor)",
+   "fuente": "MANUAL",
+   "tipo": "parrafo"
+  },
+  "GARANTIA_COMERCIAL": {
+   "descripcion": "Garantía comercial",
+   "fuente": "MANUAL",
+   "tipo": "parrafo",
+   "ayuda": "Referencia: San Juan, 2 años para mobiliario. Verifícalo en las bases."
+  },
+  "FORMA_ENTREGA": {
+   "descripcion": "Forma de entrega e instalación",
+   "fuente": "MANUAL",
+   "tipo": "parrafo",
+   "ayuda": "Embalaje, transporte, instalación y retiro del mobiliario a reponer."
+  },
+  "VICIOS_OCULTOS": {
+   "descripcion": "Plazo de vicios ocultos",
+   "fuente": "MANUAL",
+   "tipo": "parrafo",
+   "ayuda": "Según las bases."
+  },
+  "MODALIDAD_EJECUCION": {
+   "descripcion": "Modalidad de ejecución",
+   "fuente": "MANUAL",
+   "tipo": "parrafo",
+   "ayuda": "Según las bases."
+  },
+  "CONSIDERACIONES_TECNICAS": {
+   "descripcion": "Consideraciones técnicas en la ejecución física",
+   "fuente": "MANUAL",
+   "tipo": "parrafo",
+   "ayuda": "Embalaje, inspecciones, pruebas."
+  },
+  "EXPERIENCIA_PROVEEDORES": {
+   "descripcion": "Experiencia de los proveedores",
+   "fuente": "MANUAL",
+   "tipo": "parrafo",
+   "ayuda": "Según las bases."
+  },
+  "FORMULA_REAJUSTE": {
+   "descripcion": "Fórmula de reajuste de precios",
+   "fuente": "MANUAL",
+   "tipo": "parrafo",
+   "ayuda": "Según las bases."
+  },
+  "CONFORMIDAD_PRESTACION": {
+   "descripcion": "Conformidad de la prestación ejecutada (procedimiento de recepción)",
+   "fuente": "MANUAL",
+   "tipo": "parrafo"
+  },
+  "ANEXOS_FORMATOS": {
+   "descripcion": "Anexos y formatos",
+   "fuente": "MANUAL",
+   "tipo": "parrafo"
+  },
+  "PUESTA_EN_FUNCIONAMIENTO": {
+   "descripcion": "Puesta en funcionamiento y capacitaciones",
+   "fuente": "MANUAL",
+   "tipo": "parrafo"
+  },
+  "COSTO_SUPERVISION": {
+   "descripcion": "Costo de supervisión",
+   "fuente": "MANUAL",
+   "tipo": "parrafo",
+   "ayuda": "Conforme a las tarifas de la oferta económica de la supervisora."
+  },
+  "INDICE": {
+   "descripcion": "Índice general (lo arma Word con los títulos)",
+   "fuente": "APP",
+   "tipo": "indice"
+  },
+  "TABLA_METAS": {
+   "descripcion": "Metas: cantidades por tipo de mobiliario del Formato 07-C",
+   "fuente": "APP",
+   "tipo": "tabla"
+  },
+  "TABLA_PRESUPUESTO_RESUMEN": {
+   "descripcion": "Presupuesto resumen: ejecución, documento equivalente y supervisión",
+   "fuente": "APP",
+   "tipo": "tabla"
+  },
+  "TABLA_LUGAR_ENTREGA": {
+   "descripcion": "Lugar de entrega e instalación: colegios de la IOARR",
+   "fuente": "APP",
+   "tipo": "tabla"
+  },
+  "TABLA_PRESUPUESTO": {
+   "descripcion": "Presupuesto referencial: costo directo, gastos generales, utilidad, subtotal, IGV y total",
+   "fuente": "APP",
+   "tipo": "tabla"
+  },
+  "ESPECIFICACIONES": {
+   "descripcion": "Especificaciones técnicas (biblioteca neutral de la app)",
+   "fuente": "APP",
+   "tipo": "tabla"
+  },
+  "TABLA_PRECIOS_PROMEDIO": {
+   "descripcion": "Precio unitario promedio por ítem y comparación con el catálogo de precios referenciales",
+   "fuente": "APP",
+   "tipo": "tabla"
+  },
+  "TABLA_PLAZOS_ENTREGA": {
+   "descripcion": "Plazos de entrega por proveedor cotizado (del legajo)",
+   "fuente": "MANUAL",
+   "tipo": "tabla"
+  },
+  "TABLA_COTIZACIONES": {
+   "descripcion": "Legajo de cotizaciones: proveedor, fecha, vigencia, IGV, plazo de entrega y precios por ítem",
+   "fuente": "MANUAL",
+   "tipo": "tabla"
+  }
+ }
+}

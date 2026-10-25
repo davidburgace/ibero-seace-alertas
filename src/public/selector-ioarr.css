@@ -520,3 +520,17 @@ tr.fila-alerta td{ background:rgba(214,69,58,0.06); }
 #exp-v-precios .tabla td .sub{ display:block; }
 #exp-v-precios .tabla td:nth-child(2){ min-width:170px; }
 #exp-v-precios .pr-formula{ max-width:240px; white-space:normal; overflow-wrap:anywhere; text-align:left; margin-left:auto; }
+
+/* Expediente › Documento equivalente (selector-ioarr-documento-equivalente.js) */
+.de-secciones summary{ cursor:pointer; font-weight:600; font-size:13px; margin-top:8px; }
+.de-secciones h4{ font-size:13px; margin:12px 0 6px; }
+.de-lista-sec{ display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:6px 14px; }
+.de-sec{ display:flex; gap:8px; align-items:center; }
+.de-sec input[type=text]{ flex:1; min-width:0; }
+.de-extra{ display:grid; grid-template-columns:120px 1fr 2fr auto; gap:8px; align-items:start; margin-bottom:8px; }
+.de-legajo input[type=text], .de-legajo input[type=number], .de-legajo input[type=date], #de-presupuesto td.num input{ width:100%; min-width:84px; padding:6px 8px; border:1px solid var(--border2); border-radius:8px; background:var(--surface); font:inherit; font-size:13px; }
+.de-legajo td{ vertical-align:top; }
+.de-legajo td input + input{ margin-top:4px; }
+#de-presupuesto textarea{ width:100%; margin-top:6px; font:inherit; font-size:12px; }
+#de-presupuesto td.num input{ width:90px; text-align:right; }
+@media (max-width:640px){ .de-extra{ grid-template-columns:1fr; } }
