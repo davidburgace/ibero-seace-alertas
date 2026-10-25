@@ -38,6 +38,7 @@
 //     GET    /proyectos/:id/documentos/vida-util     Word del informe técnico de vida útil (?cod= un colegio)
 //     GET    /proyectos/:id/documentos/formato-05b   Word del borrador del Formato 05-B (idea, montos t, t+1, t+2)
 //     GET    /proyectos/:id/paquete/up-activos       Excel: listado de UP y activos, consolidado por UGEL y nivel
+//     GET    /proyectos/:id/documentos/sustento      Word del informe de sustento de la inversión masiva
 //     GET    /proyectos/:id/colegios                 por colegio: checklist de inventario y baja… y su costo
 //     PUT    /proyectos/:id/colegios/:cod            { datos } (en ioarr_expediente_documentos.datos.colegios)
 //   Documentos, anexos y ZIP salen en versión final: solo los colegios con el checklist completo.
@@ -80,7 +81,7 @@ import { limpiarEstructura, preciosEfectivos, limpiarInventario, limpiarAdquisic
 import { limpiarOferta, calcularOferta } from './oferta.js';
 import { generarExcelCostos } from './excel-costos.js';
 import { armarModelo, limpiarDatosDoc, ESTADOS_ACTIVO, MODALIDADES, FUENTES_FIN, CODIGOS_FUNCIONALES } from './documentos.js';
-import { generar07C, generarMemoria, generarVerificacion, generarVidaUtil, generar05B } from './word.js';
+import { generar07C, generarMemoria, generarVerificacion, generarVidaUtil, generar05B, generarSustento } from './word.js';
 import { leerDuplicidad, separarLocales } from './duplicidad.js';
 import { fichaActivos, modeloVidaUtil, FUENTES_VIDA_UTIL, limpiarColegio, colegioVacio, colegioDe, checklistColegio, DOCS_BAJA, FUENTES_ENTREGA, TIPOS_ENTREGA, VENTANA_DUP, ESTADOS_USO } from './lineamientos.js';
 import { generarExcelLineamientos } from './excel-lineamientos.js';
@@ -989,6 +990,13 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     enviarWord(res, await generarVerificacion(M), `Lista_verificacion_${slug(p.nombre)}${sufijo(M)}_${M.fecha}.docx`);
   }));
 
+  // Informe de sustento de la inversión masiva (con el consolidado por UGEL y nivel)
+  api.get('/proyectos/:id/documentos/sustento', responder(async (req, res) => {
+    const p = await proyecto(req), { M } = await modelo(p, req.query.nivel, opcionesDe(req));
+    if (!M.ups.length) return res.status(400).json({ error: sinUps(M) });
+    enviarWord(res, await generarSustento(M), `Informe_sustento_masiva_${slug(p.nombre)}${sufijo(M)}_${M.fecha}.docx`);
+  }));
+
   // Formato 05-B: idea de la IOARR del nivel, con los montos por año
   api.get('/proyectos/:id/documentos/formato-05b', responder(async (req, res) => {
     const p = await proyecto(req), { M } = await modelo(p, req.query.nivel, opcionesDe(req));
@@ -1125,14 +1133,15 @@ export async function piezasExpediente({ A, datos, lista, meta, nombre }) {
     const vidaPorColegio = await Promise.all(M.vidaUtil.colegios.map(async y => ({ nombre: `${carpeta}07_Informes_vida_util_por_colegio/Informe_vida_util_${y.cod}.docx`, contenido: await generarVidaUtil(M, M.vidaUtil, y.cod), oculto: true })));
 
     const fuera = x.nivel ? (A.excluidos || []).filter(i => x.D.locSvc[i].length) : (A.excluidos || []);
-    const [f07c, memoria, verificacion, costos, { buffer: seleccion }, anexos, vida, f05b, upActivos] = await Promise.all([
+    const [f07c, memoria, verificacion, costos, { buffer: seleccion }, anexos, vida, f05b, upActivos, sustento] = await Promise.all([
       generar07C(M), generarMemoria(M), generarVerificacion(M),
       generarExcelCostos(x.R, { ...m, criterios: textoCriterios(A.P), escenario: textoEscenario(A.P, regDato(x.R)), precios: A.detalle, efectivos: A.efectivos, inventario: x.inv }),
       generarExcel(x.D, x.C, A.P, x.list, { ...m, duplicidad: A.dup, excluidos: fuera, revisiones: datos.situacional?.revisiones }),
       generarExcelLineamientos(anexosDe(M), { ...m, nombreIoarr: M.nombreIoarr }),
       generarVidaUtil(M, M.vidaUtil),
       generar05B(M),
-      M.paquete ? generarExcelPaquete(M.paquete, { ...m, nombreIoarr: M.nombreIoarr }) : null
+      M.paquete ? generarExcelPaquete(M.paquete, { ...m, nombreIoarr: M.nombreIoarr }) : null,
+      generarSustento(M)
     ]);
     return [
       { nombre: carpeta + '00_Formato_05B_idea.docx', contenido: f05b, descripcion: 'idea de la IOARR con los montos por año' },
@@ -1144,6 +1153,7 @@ export async function piezasExpediente({ A, datos, lista, meta, nombre }) {
       { nombre: carpeta + '06_Anexos_Lineamientos.xlsx', contenido: anexos, descripcion: 'ficha de activos a reponer' },
       { nombre: carpeta + '07_Informe_vida_util.docx', contenido: vida, descripcion: 'consolidado; uno por colegio en la carpeta 07' },
       ...vidaPorColegio,
+      { nombre: carpeta + '10_Informe_sustento_masiva.docx', contenido: sustento, descripcion: 'con el consolidado por UGEL y nivel' },
       ...(upActivos ? [{ nombre: carpeta + '08_Listado_UP_y_consolidado.xlsx', contenido: upActivos, descripcion: 'UP y activos; consolidado por UGEL y nivel' }] : [])
     ];
   }));

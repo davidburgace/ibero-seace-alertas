@@ -344,3 +344,13 @@ test('paquete tipo Huánuco: listado de UP y activos, y consolidado por UGEL y n
   let tot = null; wb.getWorksheet('Consolidado UGEL y nivel').eachRow(r => { if (r.getCell(1).value === 'TOTAL') tot = r; });
   assert.equal(tot.getCell(9).value, 1);
 });
+
+test('informe de sustento de la inversión masiva: secciones y consolidado por UGEL y nivel en el anexo', async () => {
+  const { generarSustento } = await import('../src/selector-ioarr/word.js');
+  const M = paquete().M('P'), t = await textoDocx(await generarSustento(M));
+  for (const s of ['INFORME DE SUSTENTO DE LA INVERSIÓN MASIVA', '3. Diagnóstico del mobiliario por UGEL y nivel', '4. Sustento de la inversión masiva', '(Lineamientos IOARR, 2.5)',
+    'Recuadro 14', '5. Alineamiento a una brecha prioritaria', 'C = A + B', 'Cronograma de 3 años', 'Anexo 1. Consolidado por UGEL y nivel', 'Cartas de opinión favorable'])
+    assert.ok(t.includes(s), s);
+  for (const u of M.paquete.consolidado.niveles[0].filas) assert.ok(t.includes(u.ugel), u.ugel);
+  assert.doesNotMatch(t, /SECUNDARIA|Secundaria|INICIAL|Inicial/);   // IOARR de Primaria: sin textos de otros niveles
+});

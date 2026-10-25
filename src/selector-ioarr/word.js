@@ -6,6 +6,7 @@
 //   generarVerificacion(M)  Lista de verificación del expediente
 //   generarVidaUtil(M, V, cod?)  Informe técnico de vida útil (consolidado o de un colegio)
 //   generar05B(M)      Borrador del Formato 05-B: idea de la inversión con los montos por año
+//   generarSustento(M) Informe de sustento de la inversión masiva (con el consolidado por UGEL y nivel)
 // M es el modelo de armarModelo() (src/selector-ioarr/documentos.js).
 // ============================================================================
 
@@ -515,4 +516,51 @@ export async function generar05B(M) {
   c.push(kv([['OPMI', M.B.opmi], ['Unidad Formuladora (UF)', M.B.uf], ['Unidad Ejecutora de Inversiones (UEI)', M.B.uei]]));
   c.push(nota('Una idea por nivel educativo (una IOARR masiva por nivel). Ver el anexo «Consultas a la OPMI» de la memoria descriptiva.'));
   return Packer.toBuffer(documento(M, 'Formato 05-B', c));
+}
+
+// ─── Informe de sustento de la inversión masiva (precedente Huánuco 2023) ───
+const tablaConsolidado = K => tabla(['Nivel', 'UGEL', 'Colegios', 'Población', 'Aulas', 'Bueno', 'Regular', 'Malo', 'Con proyecto', 'Sin proyecto', 'Sin verificar'],
+  [...K.niveles.flatMap(x => [...x.filas.map(f => [x.nombre, f.ugel, ...[f.n, f.est, f.aul, f.b, f.r, f.m, f.pi.si, f.pi.no, f.pi.sin_verificar].map(v => ({ v: ent(v) }))]),
+    [{ v: 'Subtotal ' + x.nombre, bold: true, gris: true }, { v: '', gris: true }, ...[x.subtotal.n, x.subtotal.est, x.subtotal.aul, x.subtotal.b, x.subtotal.r, x.subtotal.m, x.subtotal.pi.si, x.subtotal.pi.no, x.subtotal.pi.sin_verificar].map(v => ({ v: ent(v), bold: true, gris: true }))]]),
+  [{ v: 'TOTAL', bold: true }, '', ...[K.total.n, K.total.est, K.total.aul, K.total.b, K.total.r, K.total.m, K.total.pi.si, K.total.pi.no, K.total.pi.sin_verificar].map(v => ({ v: ent(v), bold: true }))]],
+  { num: [2, 3, 4, 5, 6, 7, 8, 9, 10], size: 14, anchos: [11, 21, 7, 8, 7, 8, 8, 7, 8, 8, 7] });
+export async function generarSustento(M) {
+  const c = [], K = M.paquete?.consolidado;
+  c.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 60 }, children: [run('INFORME DE SUSTENTO DE LA INVERSIÓN MASIVA DE REPOSICIÓN', { bold: true, size: 28 })] }));
+  c.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 200 }, children: [run(M.nombre, { bold: true, size: 20 })] }));
+  c.push(...aviso(M));
+  c.push(titulo('1. Datos generales'));
+  c.push(kv([['Nombre de la inversión', M.nombre], ['Código único de inversión', M.cui || 'Se asigna al registrar'], ['Tipo de inversión', M.masiva ? 'Inversión masiva de reposición (IOARR)' : 'IOARR de reposición'],
+    ['Nivel educativo', M.niveles.join(', ')], ['Ámbito', `${M.ambito.toLowerCase()} · ${M.A.espacio}`], ['Unidades productoras', ent((M.upsRegistro || M.ups).length)],
+    ['Estudiantes', ent(M.est)], ['Unidad Formuladora', M.B.uf], ['Unidad Ejecutora de Inversiones', M.B.uei],
+    ['Monto de inversión', `${soles(M.F.total)}${M.uit?.enUit != null ? ` = ${NS.format(M.uit.enUit)} UIT` : ''}`], ['Registro del Formato 07-C', M.registroRotulo || M.registro]]));
+  c.push(titulo('2. Antecedentes'));
+  if (M.memoria.antecedentes) for (const x of M.memoria.antecedentes.split(/\n+/)) c.push(p(x));
+  else c.push(p('PENDIENTE: cómo se identificó la necesidad (pedido de los directores, informe de las UGEL, priorización en el PMI).'));
+  c.push(titulo('3. Diagnóstico del mobiliario por UGEL y nivel'));
+  if (K) {
+    c.push(p(`${ent(K.total.n)} colegios con ${ent(K.total.est)} estudiantes en ${ent(K.total.aul)} aulas. Mobiliario según el Censo Educativo 2025: ${ent(K.total.b)} bueno, ${ent(K.total.r)} regular y ${ent(K.total.m)} malo. ${ent(K.total.pi.si)} ${K.total.pi.si === 1 ? 'colegio tiene' : 'colegios tienen'} otro proyecto de inversión o una entrega reciente de mobiliario. El detalle por UGEL va en el anexo 1.`));
+  }
+  c.push(...notaCantidades(M));
+  c.push(titulo('4. Sustento de la inversión masiva'));
+  c.push(p('Condiciones de la inversión masiva de reposición (Lineamientos IOARR, 2.5): activos homogéneos (mobiliario de aula), unidades productoras que prestan el mismo servicio y una misma entidad que adquiere los activos.'));
+  for (const x of M.E.sustento) c.push(p(x));
+  c.push(tabla(['Condición', 'Estado', 'Observación'], M.E.condiciones.map(x => [x.texto, { v: x.estado === 'cumple' ? 'Cumple' : x.estado === 'no' ? 'No cumple' : PEND, pend: x.estado !== 'cumple' }, x.nota]), { anchos: [46, 14, 40], size: 16 }));
+  c.push(titulo('5. Alineamiento a una brecha prioritaria'));
+  c.push(kv([['Cadena funcional', M.A.cadena || `${M.A.funcion} / ${M.A.division} / ${M.A.grupos.join('; ')}`], ['Servicio con brecha', M.A.servicio],
+    ['Indicador de brecha', M.A.indicadores.map(x => x.nombre).join('; ')], ['Ámbito del indicador', M.A.espacio], ['Tipo de brecha a la que contribuye', M.A.contribucion]]));
+  c.push(titulo('6. Metas y costos'));
+  c.push(tablaMetas(M));
+  c.push(nota(NOTA_ESTRUCTURA));
+  c.push(titulo('7. Cronograma de metas físicas', 1));
+  c.push(...cronogramaMetas(M));
+  c.push(titulo('8. Operación y mantenimiento'));
+  c.push(p(`El mantenimiento del mobiliario nuevo estará a cargo de ${M.D.mantenimiento || 'PENDIENTE: entidad responsable'}, según las cartas de compromiso de operación y mantenimiento de cada UGEL (anexo). Cronograma de ${M.F.mantenimiento.anios} años:`));
+  c.push(...mantenimiento(M, false));
+  c.push(titulo('9. Anexos'));
+  for (const x of ['Estructura de costos (Excel).', 'Listado de unidades productoras y activos (Excel).', 'Borrador del Formato 07-C.',
+    'Cartas de opinión favorable y de compromiso de operación y mantenimiento de la entidad responsable (una por UGEL o por colegio).', 'Oficios de remisión de la información por UGEL.', 'Cuadro comparativo de cotizaciones.'])
+    c.push(vinieta(x));
+  if (K) { c.push(titulo('Anexo 1. Consolidado por UGEL y nivel')); c.push(tablaConsolidado(K)); c.push(nota('Población: matrícula del padrón de ESCALE. Mobiliario: Censo Educativo 2025 (mesa en puestos). «Con proyecto»: otra inversión vigente o reciente, inversión en ejecución o entrega de mobiliario de los últimos 3 años.')); }
+  return Packer.toBuffer(documento(M, 'Informe de sustento', c, { horizontal: false }));
 }

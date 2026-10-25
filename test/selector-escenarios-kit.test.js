@@ -274,7 +274,7 @@ test('la pestaña interna de oferta no sale en ninguna exportación (07-C, memor
   const A = { modo: 'una', P, detalle: {}, efectivos: preciosEfectivos({}, {}), excluidos: [], dup: {} };
   const x = { nivel: null, nombre: 'Todos los niveles', D, C, list, R, inv: {} };
   const piezas = await piezasExpediente({ A, datos, lista: [{ x, M }], meta: { region: 'Prueba', fecha: '2026-10-23' }, nombre: 'Control' });
-  assert.deepEqual(piezas.filter(p => !p.oculto).map(p => p.nombre), ['00_Formato_05B_idea.docx', '01_Formato_07C_borrador.docx', '02_Memoria_descriptiva.docx', '03_Lista_de_verificacion.docx', '04_Estructura_de_costos.xlsx', '05_Seleccion_de_locales_y_metrado.xlsx', '06_Anexos_Lineamientos.xlsx', '07_Informe_vida_util.docx']);
+  assert.deepEqual(piezas.filter(p => !p.oculto).map(p => p.nombre), ['00_Formato_05B_idea.docx', '01_Formato_07C_borrador.docx', '02_Memoria_descriptiva.docx', '03_Lista_de_verificacion.docx', '04_Estructura_de_costos.xlsx', '05_Seleccion_de_locales_y_metrado.xlsx', '06_Anexos_Lineamientos.xlsx', '07_Informe_vida_util.docx', '10_Informe_sustento_masiva.docx']);
   // Un informe de vida útil por colegio con bienes a reponer
   assert.ok(piezas.filter(p => p.oculto).every(p => /^07_Informes_vida_util_por_colegio\/Informe_vida_util_\d+\.docx$/.test(p.nombre)));
   assert.equal(piezas.filter(p => p.oculto).length, M.ups.length);
@@ -300,7 +300,7 @@ test('la pestaña interna de oferta no sale en ninguna exportación (07-C, memor
   const src = f => readFileSync(new URL('../src/selector-ioarr/' + f, import.meta.url), 'utf8');
   for (const f of ['word.js', 'excel-costos.js', 'excel.js', 'zip.js', 'documentos.js', 'ficha.js', 'ficha-digital.js', 'lineamientos.js', 'excel-lineamientos.js']) assert.doesNotMatch(src(f), /oferta\.js|leerOferta|calcularOferta/, f);
   const exp = src('expediente.js');
-  const rutas = ['/documentos/formato-07c', '/documentos/memoria', '/documentos/verificacion', '/costos/excel', '/expediente-zip', '/fichas-zip', '/lineamientos/anexos', '/documentos/vida-util', '/documentos/formato-05b'];
+  const rutas = ['/documentos/formato-07c', '/documentos/memoria', '/documentos/verificacion', '/costos/excel', '/expediente-zip', '/fichas-zip', '/lineamientos/anexos', '/documentos/vida-util', '/documentos/formato-05b', '/documentos/sustento', '/paquete/up-activos'];
   for (const r of rutas) {
     const i = exp.indexOf(`'/proyectos/:id${r}'`), cuerpo = exp.slice(i, exp.indexOf('\n  }));', i));
     assert.ok(i > 0, r); assert.doesNotMatch(cuerpo, /leerOferta|calcularOferta|ioarr_expediente_oferta/, r);
