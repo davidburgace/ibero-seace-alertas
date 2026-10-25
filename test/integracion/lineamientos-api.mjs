@@ -170,3 +170,41 @@ test('7. descontar la entrega de C quita el riesgo y baja los kits; B cerrado sa
   assert.ok(c.avisos.some(a => a.tipo === 'uso' && a.alerta && a.texto.includes(`${B} (cerrado)`)));
   assert.deepEqual(c.ioarrs.map(x => x.nivel), ['P']);   // B era el único de Secundaria
 });
+
+const patch = async (ruta, body) => { const r = await fetch(BASE + ruta, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }); return { status: r.status, json: await r.json() }; };
+
+test('8. paquete tipo Huánuco: sección A por nivel, cotizaciones, informe de sustento, listado de UP, cartas y ZIP', async () => {
+  // B vuelve a estar operativo y con el checklist: entra con sus dos niveles
+  await put(`/colegios/${B}`, { datos: { uso: 'operativo', inventario: CHECK } });
+  const cot = n => ['Prov 1', 'Prov 2', 'Prov 3'].map((p, j) => ({ proveedor: p, bien: 'mesa', precio_con_igv: 230 + 10 * j, material: 'Madera', especificacion: 'Ficha técnica', fecha: '2026-10-0' + (j + 1), transporte_incluido: true }));
+  const d = await patch('/documentos?nivel=P', { datos: { grupo_funcional: { P: '9999' }, cotizaciones: { P: cot('P') } } });
+  assert.equal(d.status, 200, JSON.stringify(d.json));
+  assert.deepEqual(d.json.resumen.grupos, ['9999 EDUCACIÓN PRIMARIA']);
+  assert.ok(d.json.resumen.cotizaciones.bienes[0].suficiente);
+  // Secundaria (solo B): grupo 0105 e indicador departamental
+  const dS = (await get('/documentos?nivel=S')).json;
+  assert.deepEqual(dS.resumen.grupos, ['0105 EDUCACIÓN SECUNDARIA']);
+  assert.match(dS.resumen.alineamiento.indicadores[0].nombre, /INSTALACIONES EDUCATIVAS QUE BRINDAN EL SERVICIO EN CONDICIONES INADECUADAS/);
+  // Informe de sustento con el consolidado por UGEL y nivel
+  const s = await get('/documentos/sustento?nivel=P', { binario: true });
+  assert.equal(s.status, 200);
+  const ts = await docx(s.buf);
+  assert.match(ts, /Anexo 1\. Consolidado por UGEL y nivel/); assert.match(ts, /Número de mobiliario/);
+  // Listado de UP y activos: los 3 colegios de Primaria con coordenadas y UGEL
+  const u = await get('/paquete/up-activos?nivel=P', { binario: true });
+  const wb = new ExcelJS.Workbook(); await wb.xlsx.load(u.buf);
+  const cods = []; wb.getWorksheet('UP y activos').eachRow((r, n) => { if (n > 4 && /^\d{6}$/.test(String(r.getCell(1).value))) cods.push(r.getCell(1).value); });
+  assert.deepEqual(cods.sort(), [A, B, C].sort());
+  // Cartas: opinión por colegio (3) y compromiso por UGEL
+  const op = await docx((await get('/documentos/cartas?nivel=P&tipo=opinion&por=colegio', { binario: true })).buf);
+  assert.equal((op.match(/emitir OPINIÓN FAVORABLE/g) || []).length, 3);
+  const co = await docx((await get('/documentos/cartas?nivel=P&tipo=compromiso', { binario: true })).buf);
+  assert.match(co, /APAFA/); assert.match(co, /sujeto a la disponibilidad presupuestal/);
+  // Excel de costos con el cuadro de cotizaciones; ZIP con las piezas nuevas en las dos IOARR
+  const xc = await get('/costos/excel?nivel=P', { binario: true });
+  const wc = new ExcelJS.Workbook(); await wc.xlsx.load(xc.buf);
+  assert.ok(wc.getWorksheet('Cotizaciones'));
+  const z = await JSZip.loadAsync((await get('/expediente-zip', { binario: true })).buf), nombres = Object.keys(z.files);
+  for (const niv of ['Primaria', 'Secundaria']) for (const f of ['08_Listado_UP_y_consolidado.xlsx', '10_Informe_sustento_masiva.docx', '11_Cartas/Carta_compromiso_O_y_M_por_UGEL.docx'])
+    assert.ok(nombres.some(n => n.endsWith(`IOARR_${niv}/${f}`)), `${niv}/${f}`);
+});

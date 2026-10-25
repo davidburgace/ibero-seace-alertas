@@ -11,5 +11,5 @@ test('rutas del expediente con 3 colegios (completo, con datos faltantes y con r
   const { NODE_TEST_CONTEXT: _, ...env } = process.env;
   const r = spawnSync(process.execPath, ['--experimental-test-module-mocks', '--test', '--test-reporter=spec', script], { encoding: 'utf8', timeout: 300000, env });
   assert.equal(r.status, 0, (r.stdout || '') + (r.stderr || ''));
-  assert.match(r.stdout, /ℹ pass 7/);
+  assert.match(r.stdout, /ℹ pass 8/);
 });
