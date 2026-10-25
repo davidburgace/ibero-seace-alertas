@@ -226,6 +226,13 @@ test('precarga del Gobierno Regional: RUC, domicilio y sede de la región del pr
   const muni = precargar({ M: null, gore, radar: { entidad: 'Municipalidad Provincial de Ilo' } }).datos;
   assert.deepEqual(Object.keys(muni).filter(k => k.startsWith('ENTIDAD_') || ['PROVINCIA_NOTIFICACION', 'CIUDAD_JURISDICCION'].includes(k)), []);
   assert.equal(muni.ENTIDAD, 'Municipalidad Provincial de Ilo');
+  // La Libertad: domicilio legal completo y teléfono de sus bases (el padrón corta la vía)
+  const ll = precargar({ M: null, gore: goreDe('La Libertad') });
+  assert.match(ll.datos.ENTIDAD_DOMICILIO, /^Calle Baquíjano y Carrillo Altura Cuadra 18 .*distrito de La Esperanza/);
+  assert.equal(ll.datos.ENTIDAD_TELEFONO, '044-604000');
+  assert.match(ll.notas.ENTIDAD_DOMICILIO, /015-2026-GRLL/);
+  assert.equal(ll.datos.ENTIDAD_RUC, '20440374248');
+  assert.ok(!('ENTIDAD_TELEFONO' in datos), 'sin teléfono publicado no se inventa');
   // Lima: aviso de Lima Metropolitana
   assert.match(precargar({ M: null, gore: goreDe('Lima') }).notas.ENTIDAD, /Lima Metropolitana/);
 });
