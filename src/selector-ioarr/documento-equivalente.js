@@ -357,6 +357,7 @@ export function contextoDe(M, nivel, nombreNivel, precioRef = null) {
     total_activos: M?.F?.subtotalActivos ?? null, total_07c: M?.F?.total ?? null,
     locales: (M?.ups || []).map(u => ({ cod: u.cod, nombre: u.nombre, direccion: u.direccion || '', dist: u.dist, prov: u.prov, dpto: u.dpto, cp: u.cp || '', rural: !!u.rural, ugel: u.ugel || '' })),
     precio_ref: precioRef ? { precio: precioRef.precio ?? null, n: precioRef.n ?? null, modo: precioRef.modo || null } : null,
+    material: M?.estructura?.params?.material || null,
     borrador: !!(M?.borrador && M?.bloqueados?.length)
   };
 }

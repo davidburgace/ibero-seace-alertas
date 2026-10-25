@@ -78,7 +78,9 @@ import { supabase } from '../ioarr/db.js';
 import { calc, limpiarParams, CRIT, ITEMS, textoEscenario } from './calculo.js';
 // Locales con el Regular verificado por antigüedad (para declarar el origen del % de Regular)
 const regDato = R => ({ n: R?.regularCampo?.completos || 0, de: R?.locales?.length || 0 });
-import { limpiarEstructura, preciosEfectivos, limpiarInventario, limpiarAdquisicion, censoLocal, FUENTES_PRECIO, CLAVES_PRECIO, PRECIOS_REFERENCIA, LEYENDA_REFERENCIA, NOTA_PORCENTAJES } from './costos.js';
+import { limpiarEstructura, preciosEfectivos, limpiarInventario, limpiarAdquisicion, censoLocal, FUENTES_PRECIO, CLAVES_PRECIO, PRECIOS_REFERENCIA, LEYENDA_REFERENCIA, NOTA_PORCENTAJES,
+  MATERIALES, TIPOS, preciosPropuesta, preciosDeMaterial, validarPropuesta, tiposPropuesta, incluido, materialDe, tienePrecio, cuadraTotales } from './costos.js';
+import { preciosUnitarios, referencia as referenciaCatalogo } from './catalogo-ref.js';
 import { limpiarOferta, calcularOferta } from './oferta.js';
 import { cuadroCotizaciones, viabilidadCotizaciones, BIENES_COTIZACION, MIN_PROVEEDORES } from './cotizaciones.js';
 import { generarExcelCostos } from './excel-costos.js';
@@ -179,6 +181,14 @@ async function marcarVigente(id, tipo) {
   // Primero se quita el vigente actual del tipo (índice único parcial)
   ok(await supabase.from('ioarr_precios_catalogo').update({ vigente: false }).eq('tipo_bien', tipo).eq('vigente', true).neq('id', id));
   ok(await supabase.from('ioarr_precios_catalogo').update({ vigente: true }).eq('id', id));
+}
+
+// Tipos de mueble de los criterios del proyecto (en algún nivel)
+export const mueblesCriterio = P => TIPOS.filter(t => P.muebles.includes(t) || Object.values(P.mueblesNivel || {}).some(m => m.includes(t)));
+// Criterios sin los muebles excluidos de la propuesta: no entran al cálculo, al kit ni a los documentos
+export function quitarMuebles(P, excluidos) {
+  const f = m => m.filter(t => !excluidos.includes(t));
+  return { ...P, muebles: f(P.muebles), mueblesNivel: Object.fromEntries(Object.entries(P.mueblesNivel || {}).map(([n, m]) => [n, f(m)])) };
 }
 
 /**
@@ -306,6 +316,21 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
   // Junta todo y calcula. Devuelve también lo necesario para el Excel.
   // final: solo los colegios con el checklist de inventario y baja completo (el 07-C final y sus anexos).
   // Sin final (Costos, borrador): todos, con aviso de los que no entrarían.
+  // Catálogo de precios referenciales (029): sin la migración, vacío
+  async function leerCatalogoRef() {
+    const { data, error } = await supabase.from('ioarr_precios_ref').select('*');
+    if (error) { if (faltaMigracion(error)) return []; throw error; }
+    const n = v => v == null || v === '' ? null : Number(v);
+    return (data || []).map(r => ({ ...r, monto: n(r.monto), monto_hasta: n(r.monto_hasta), monto_alternativo: n(r.monto_alternativo), composicion: r.composicion || [] }));
+  }
+  // Niveles de los locales del proyecto (para saber qué tallas necesitan precio)
+  async function nivelesProyecto(p) {
+    const [D, codigos] = await Promise.all([cargarRegion(p.region), leerCodigos(p.id)]);
+    if (!D) return [];
+    const idx = new Map(D.locs.map((l, i) => [l[0], i]));
+    return [...new Set(codigos.filter(c => idx.has(c)).flatMap(c => nivelesDeLocal(D, idx.get(c))))];
+  }
+
   async function armar(p, { final = false } = {}) {
     const [fila, fijados, vigentes, factores, D, codigos, inventario, archivos, dup, { datos: datosDoc }] = await Promise.all([
       supabase.from('ioarr_expediente_costos').select('*').eq('proyecto_id', p.id).maybeSingle().then(ok),
@@ -320,6 +345,7 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
       leerDatosDoc(p)
     ]);
     if (!D) { const e = new Error('No hay datos para la región ' + p.region); e.status = 400; throw e; }
+    const registrosRef = await leerCatalogoRef();
     const anioUit = fila?.anio_uit || anioLima();
     const uit = ok(await supabase.from('ioarr_uit').select('*').eq('anio', anioUit).maybeSingle());
 
@@ -341,20 +367,54 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     // Precio de mercado de cada clave: editado en el proyecto → catálogo → referencia (costos.js)
     const estructura = limpiarEstructura(fila?.estructura);
     const efectivos = preciosEfectivos(estructura, detalle);
-    for (const t of CLAVES_PRECIO) precios[t] = efectivos[t].precio;
+    // Con material de la propuesta: precios por material (escrito o catálogo referencial); los antiguos no se usan
+    const catalogoRef = preciosUnitarios(registrosRef);
+    const propuestaPrecios = estructura.material_propuesta ? preciosPropuesta(estructura, catalogoRef, efectivos) : null;
+    for (const t of CLAVES_PRECIO) precios[t] = propuestaPrecios ? propuestaPrecios[t].precio : efectivos[t].precio;
 
-    const P = limpiarParams(p.criterios);
+    // Muebles de la propuesta: los de los criterios menos los excluidos en Costos (no suman en nada)
+    const Pcompleto = limpiarParams(p.criterios), excluidos = mueblesCriterio(Pcompleto).filter(t => !incluido(estructura, t));
+    const P = excluidos.length ? quitarMuebles(Pcompleto, excluidos) : Pcompleto;
     const idxCod = new Map(D.locs.map((l, i) => [l[0], i]));
     // Con ficha de verificación: requerido con los estudiantes verificados (solo cambia el faltante)
     const inv = Object.fromEntries(inventario.map(x => [x.cod_local, { ...x,
       req_ficha: x.ficha && idxCod.has(x.cod_local) ? requeridoFicha(x, D, P, idxCod.get(x.cod_local)) : null,
       archivos: archivos.filter(a => a.cod_local === x.cod_local).map(sinRuta) }]));
     const comun = { precios, estructura, uit: { anio: anioUit, valor: uit?.valor ?? null } };
-    const K = calcularPaquete({ D, P, codigos, dup: dup.mapa, inv, comun, datosDoc, final, modo: modoDe(p), anioRef: anioLima() });
-    return { ...K, datosDoc, detalle, efectivos, estructura, factores, anioUit, uit, sinMigracionEst: !!fila && !('estructura' in fila) };
+    const preciosMaterial = Object.fromEntries(Object.keys(MATERIALES).map(m => [m, Object.fromEntries(Object.entries(preciosDeMaterial(estructura, m, catalogoRef)).map(([k, x]) => [k, x.precio]))]));
+    const K = calcularPaquete({ D, P, codigos, dup: dup.mapa, inv, comun, datosDoc, final, modo: modoDe(p), anioRef: anioLima(), propuesta: { Pcompleto, excluidos, preciosMaterial } });
+    // Kit incompleto: se pidió kit y la mesa o la silla del estudiante quedó fuera de la propuesta
+    const fueraKit = excluidos.filter(t => t === 'mesa' || t === 'silla');
+    if (estructura.kit && fueraKit.length) for (const x of K.ioarrs) x.R.avisos.push({ tipo: 'kit', alerta: true,
+      texto: `El kit queda incompleto: ${fueraKit.map(t => ITEMS.find(y => y.k === t).n.toLowerCase()).join(' y ')} no ${fueraKit.length === 1 ? 'entra' : 'entran'} a la propuesta, así que no hay kit; lo demás se costea suelto.` });
+    return { ...K, datosDoc, detalle, efectivos, estructura, factores, anioUit, uit, sinMigracionEst: !!fila && !('estructura' in fila),
+      Pcompleto, excluidosPropuesta: excluidos, catalogoRef, registrosRef, propuestaPrecios };
   }
   // La IOARR pedida (?nivel=P); sin nivel o con una sola IOARR, la primera
   const elegir = elegirIoarr;
+
+  // Material y muebles de la propuesta de una IOARR: precios, comparativo de materiales y validación
+  function vistaPropuesta(A, x) {
+    const E = A.estructura, muebles = mueblesCriterio(A.Pcompleto), niv = x.nivel ? [x.nivel] : A.niveles;
+    const incl = tiposPropuesta(E, muebles);
+    const porMaterial = Object.keys(MATERIALES).map(m => {
+      const pr = preciosDeMaterial(E, m, A.catalogoRef), r = x.porMaterial?.[m];
+      const completo = incl.length > 0 && incl.every(t => tienePrecio(pr, t, niv));
+      const ref = x.nivel ? referenciaCatalogo(A.registrosRef, { nivel: x.nivel, sel: { modo: 'mediana', material: m } }) : null;
+      return { material: m, nombre: MATERIALES[m], completo, precios: Object.fromEntries(TIPOS.map(t => [t, pr[t]])),
+        kit_sin_igv: completo ? r?.kit_sin_igv ?? null : null, kit_igv: completo ? r?.kit_igv ?? null : null, kit_con_igv: completo ? r?.kit_con_igv ?? null : null,
+        total: completo ? r?.total ?? null : null, mediana: ref?.n ? { precio: ref.precio, n: ref.n } : null };
+    });
+    const min = Math.min(...porMaterial.filter(y => y.total != null).map(y => y.total));
+    for (const y of porMaterial) y.dif_pct = y.total != null && Number.isFinite(min) && min > 0 ? Math.round((y.total / min - 1) * 1000) / 10 : null;
+    return {
+      material: E.material_propuesta || null, materiales: Object.fromEntries(TIPOS.map(t => [t, materialDe(E, t)])), materiales_propios: E.materiales,
+      incluir: Object.fromEntries(TIPOS.map(t => [t, incluido(E, t)])), muebles_criterio: muebles, kit: E.kit, kit_niveles: E.kit_niveles, niveles: A.niveles,
+      precios: A.propuestaPrecios, por_material: porMaterial, excluidos: x.excluidosMuebles || [],
+      errores: [...(incl.length ? [] : ['Incluye al menos un mueble en la propuesta.']), ...validarPropuesta(E, { catalogo: A.catalogoRef, muebles, niveles: A.niveles }).filter(t => incl.length || !/al menos un mueble/.test(t))],
+      cuadra: cuadraTotales(x.R.totales)
+    };
+  }
 
   const vista = (A, nivel) => { const x = elegir(A, nivel); return vistaDe({ ...A, R: x.R }, x, A); };
   const vistaDe = ({ R, detalle, anioUit, uit, inv }, x, A) => ({
@@ -363,6 +423,7 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     escenario: { k: A.P.escenario, capOcup: A.P.capOcup, capPct: A.P.capPct, pctRegular: A.P.pctRegular, pctRegularNivel: A.P.pctRegularNivel, pctOrigen: A.P.pctOrigen,
       umbralVida: A.P.umbralVida, niveles: A.niveles, texto: textoEscenario(A.P, regDato(R)), campo: A.Runa.regularCampo }, escenarios: A.escenarios,
     estructura: { ...R.estructura, guardada: A.estructura }, sin_migracion_estructura: A.sinMigracionEst,
+    propuesta: vistaPropuesta(A, x),
     metas: R.metas, lineasKit: R.lineasKit, lineasTalla: R.lineasTalla,
     partidas: R.partidas, lineas: R.lineas, muebles: A.P.muebles, totales: R.totales, distritos: R.distritos, uitCalc: R.uit, avisos: R.avisos, excluidos: R.excluidos,
     locales: R.locales.map(l => ({ cod: l.cod, nom: l.nom, dist: l.dist, prov: l.prov, rural: l.rural, est: l.est, kits: l.kits,
@@ -386,7 +447,22 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
       const g = limpiarEstructura(actual?.estructura), n = b.estructura;
       const precios = { ...g.precios };
       for (const [k, v] of Object.entries(n.precios || {})) { if (v === null || v === '') delete precios[k]; else precios[k] = v; }
-      fila.estructura = limpiarEstructura({ ...g, ...n, precios });
+      // Precios por material: se fusionan por material y clave (null borra)
+      const precios_material = Object.fromEntries(Object.entries(g.precios_material).map(([m, o]) => [m, { ...o }]));
+      for (const [m, o] of Object.entries(n.precios_material || {})) for (const [k, v] of Object.entries(o || {})) {
+        precios_material[m] ??= {};
+        if (v === null || v === '') delete precios_material[m][k]; else precios_material[m][k] = v;
+      }
+      const fusion = k => ({ ...g[k], ...(n[k] && typeof n[k] === 'object' ? n[k] : {}) });
+      const materiales = fusion('materiales');
+      for (const [t, v] of Object.entries(n.materiales || {})) if (v === null || v === '') delete materiales[t];
+      fila.estructura = limpiarEstructura({ ...g, ...n, precios, precios_material, materiales, incluir: fusion('incluir'), kit_niveles: fusion('kit_niveles') });
+      // La propuesta debe quedar válida: al menos un mueble; con material, cada mueble incluido con material y precio
+      const E = fila.estructura, muebles = mueblesCriterio(limpiarParams(p.criterios));
+      const [registros, niveles] = await Promise.all([leerCatalogoRef(), nivelesProyecto(p)]);
+      const errores = [...(tiposPropuesta(E, muebles).length ? [] : ['Incluye al menos un mueble en la propuesta.']),
+        ...validarPropuesta(E, { catalogo: preciosUnitarios(registros), muebles, niveles }).filter(t => !/al menos un mueble/.test(t))];
+      if (errores.length) return res.status(400).json({ error: 'No se guardó: ' + errores.join(' '), errores });
     }
     if ('anio_uit' in b) {
       const a = Number(b.anio_uit);
@@ -410,6 +486,8 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
   const viabilidadDe = (A, o) => A.ioarrs.filter(x => x.nivel).map(x => ({ nivel: x.nivel, nombre: x.nombre,
     items: viabilidadCotizaciones(cuadroCotizaciones(A.datosDoc?.cotizaciones?.[x.nivel] || [], A.estructura?.igv ?? 18), o.datos) })).filter(v => v.items.length);
   const vistaOferta = (A, o) => ({ datos: o.datos, sin_migracion: o.sinMigracion, escenario: textoEscenario(A.P, regDato(A.Runa)),
+    material: A.estructura.material_propuesta ? { k: A.estructura.material_propuesta, nombre: MATERIALES[A.estructura.material_propuesta] } : null,
+    muebles_excluidos: A.excluidosPropuesta.map(t => ITEMS.find(y => y.k === t).n),
     ...calcularOferta(A.Runa, o.datos, { factores: A.factores }), viabilidad: viabilidadDe(A, o) });
   api.get('/proyectos/:id/oferta', responder(async (req, res) => {
     const p = await proyecto(req);
@@ -1129,6 +1207,12 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
   // Generador de bases OxI (bases-api.js): las IOARR del proyecto y el modelo de una (por nivel).
   // Toma los colegios del 07-C final; si ninguno tiene el checklist completo, los del borrador.
   api.ioarrsBases = async (p) => (await armar(p)).ioarrs.map(x => ({ nivel: x.nivel, nombre: x.nombre }));
+  // Material de la propuesta (Costos): lo usa el catálogo de precios referenciales para la referencia de las bases
+  api.materialPropuesta = async (p) => {
+    const { data, error } = await supabase.from('ioarr_expediente_costos').select('estructura').eq('proyecto_id', p.id).maybeSingle();
+    if (error) { if (faltaMigracion(error) || /estructura/.test(error.message || '')) return null; throw error; }
+    return limpiarEstructura(data?.estructura).material_propuesta || null;
+  };
   // Catálogo de precios referenciales (catalogo-ref-api.js): lo necesario para recalcular cada IOARR con otro precio por kit
   api.costosPorNivel = async (p) => (await armar(p)).ioarrs.map(x => ({
     nivel: x.nivel, nombre: x.nombre, kit: !!x.R.kit, T: x.R.totales, params: x.R.estructura.params,

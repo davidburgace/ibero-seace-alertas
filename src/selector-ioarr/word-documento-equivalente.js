@@ -19,6 +19,7 @@ import { run, p, titulo, tabla, espacio, FUENTE, AZUL, TENUE } from './word-base
 import { formatoMonto, especificacionDe } from './bases.js';
 import { MANIFEST, armarTexto, presupuesto, comparacionCatalogo, rotuloSeccion, venceDe, BIENES, MIN_COTIZACIONES } from './documento-equivalente.js';
 import { ESPECIFICACIONES } from './bases-especificaciones.js';
+import { MATERIALES } from './costos.js';
 
 const sol = n => n == null ? '—' : formatoMonto(n);
 const fechaPe = f => f ? f.split('-').reverse().join('/') : '—';
@@ -39,7 +40,7 @@ function tablas(d, ctx, P, hoy) {
     ], { num: [1], anchos: [70, 30], size: 18 }), espacio()],
     TABLA_LUGAR_ENTREGA: () => (ctx.locales || []).length ? [tabla(['Código de local', 'Institución educativa', 'Dirección', 'Distrito', 'Provincia'],
       ctx.locales.map(u => [u.cod, u.nombre, u.direccion || '—', u.dist, u.prov]), { anchos: [14, 30, 26, 15, 15], size: 16 }), espacio()] : [marcador('TABLA_LUGAR_ENTREGA')],
-    TABLA_PRESUPUESTO: () => P.cd == null
+    TABLA_PRESUPUESTO: () => [...(ctx.material ? [p(`Material del mobiliario: ${MATERIALES[ctx.material] || ctx.material} (material de la propuesta en Costos).`, { size: 18 })] : []), ...(P.cd == null
       ? [tabla(['Ítem', 'Unidad', 'Cantidad', 'Precio unitario sin IGV (S/)', 'Parcial (S/)'], P.items.map(x => [x.nombre, x.unidad, x.cantidad ?? '—', x.pu == null ? '[COMPLETAR: cotizaciones del legajo]' : sol(x.pu), x.parcial == null ? '—' : sol(x.parcial)]),
         { num: [2, 3, 4], anchos: [34, 18, 12, 20, 16], size: 17 }), espacio()]
       : [tabla(['Ítem', 'Unidad', 'Cantidad', 'Precio unitario sin IGV (S/)', 'Parcial (S/)'], [
@@ -52,7 +53,7 @@ function tablas(d, ctx, P, hoy) {
         [{ v: 'Total del presupuesto referencial', bold: true, span: 4 }, { v: sol(P.total), bold: true }]
       ], { num: [2, 3, 4], anchos: [34, 18, 12, 20, 16], size: 17 }),
       ...(P.gg_pct === 0 && P.ut_pct === 0 ? [p('Gastos generales y utilidad en 0 %: la estructura de costos del expediente es de adquisición de bienes. [VERIFICAR en bases]', { size: 16, italics: true, color: TENUE })] : []),
-      espacio()],
+      espacio()])],
     ESPECIFICACIONES: () => (ctx.metas || []).length ? (ctx.metas).flatMap(m => [
       p(ESPECIFICACIONES[m.k]?.nombre || m.nombre, { bold: true, after: 40 }), p(especificacionDe(d, m.k) || '[COMPLETAR especificación]')
     ]) : [marcador('ESPECIFICACIONES')],

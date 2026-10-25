@@ -27,7 +27,12 @@ import { fichaActivos, modeloVidaUtil, checklistColegio, colegioDe, riesgoDuplic
  *   modo       'por_nivel' (siempre, ver niveles.js)
  *   anioRef    año de referencia para la ventana de 3 años del chequeo de duplicación
  */
-export function calcularPaquete({ D, P, codigos, dup = {}, inv = {}, comun, datosDoc = {}, final = false, modo = 'por_nivel', anioRef = new Date().getFullYear() }) {
+/**
+ * propuesta (opcional, costos.js): { Pcompleto, excluidos: [tipo], preciosMaterial: { [material]: { [clave]: precio } } }
+ *   Pcompleto: los criterios sin quitar los muebles excluidos (para el monto excluido, en gris);
+ *   preciosMaterial: la misma IOARR costeada con los precios de cada material (comparativo).
+ */
+export function calcularPaquete({ D, P, codigos, dup = {}, inv = {}, comun, datosDoc = {}, final = false, modo = 'por_nivel', anioRef = new Date().getFullYear(), propuesta = null }) {
   // Los locales con otra inversión vigente o reciente que se excluyeron no entran a la propuesta
   const sep0 = separarLocales(D, codigos, dup), excluidos = sep0.excluidos;
   const colegios = datosDoc.colegios || {};
@@ -97,6 +102,26 @@ export function calcularPaquete({ D, P, codigos, dup = {}, inv = {}, comun, dato
     const sn = sinNiv.filter(c => R.locales.some(l => l.cod === c));
     if (sn.length) R.avisos.push({ tipo: 'inventario', alerta: true, texto: `El inventario verificado de ${sn.length === 1 ? 'el local' : 'los locales'} ${sn.join(', ')} se cargó sin nivel y el local tiene varios niveles: en esta IOARR se usa el censo. Vuelve a cargarlo por nivel en «Corregir inventario».` });
   }
+  // Propuesta: monto de los muebles excluidos y la IOARR con cada material (costos.js)
+  if (propuesta) {
+    const gruposDe = Pq => porNivel(D, Pq, sep.list).map(g => ({ clave: g.nivel, D: g.D, C: g.C, list: g.list.filter(i => enList.has(i)),
+      inventario: inventarioNivel(inv, D, g.nivel), ajustes: ajustesDe(g.nivel), capacidades: capacidadesDe(g.nivel) }));
+    const deNivel = (Rx, x) => x.nivel ? Rx.grupos?.[x.nivel] : null;
+    if (propuesta.excluidos?.length && propuesta.Pcompleto) {
+      const Rf = costear({ ...comun, grupos: gruposDe(propuesta.Pcompleto) });
+      for (const x of ioarrs) {
+        const R = deNivel(Rf, x);
+        x.excluidosMuebles = !R ? [] : R.partidas.filter(pt => propuesta.excluidos.includes(pt.k) && !pt.excluido && pt.rep > 0).map(pt => ({ k: pt.k, n: pt.n, rep: pt.rep, parcial: pt.parcial }));
+      }
+    }
+    if (propuesta.preciosMaterial) {
+      const gs = G.length ? gruposDe(P) : null;
+      for (const [m, precios] of Object.entries(propuesta.preciosMaterial)) {
+        const Rm = gs ? costear({ ...comun, precios, grupos: gs }) : null;
+        for (const x of ioarrs) { const R = Rm && deNivel(Rm, x); if (R) (x.porMaterial ??= {})[m] = resumenMaterial(R); }
+      }
+    }
+  }
   // Ningún aula ni servicio se cuenta dos veces entre las IOARR por nivel
   const control = validarNiveles(D, list, G);
   if (!control.ok) for (const x of ioarrs) x.R.avisos.push({ tipo: 'niveles', alerta: true, texto: 'Control por nivel: ' + control.errores.slice(0, 5).join(' ') });
@@ -110,6 +135,15 @@ export function calcularPaquete({ D, P, codigos, dup = {}, inv = {}, comun, dato
     inconsistentes: new Set(Rniv.locales.filter(l => l.tope?.inconsistente).map(l => l.cod)).size
   };
   return { final, colegios, checklist, bloqueados, riesgos, fueraUso, anioRef, modo, niveles: G.map(g => g.nivel), ioarrs, comparativo, Runa, P, escenarios, D, C, list, inv, dup, excluidos };
+}
+
+// Lo que muestra el comparativo de materiales de una IOARR: kit promedio sin IGV, costo de cada tipo y total
+function resumenMaterial(R) {
+  const T = R.totales, igv = R.estructura?.params?.igv ?? 18;
+  const kitBienes = (R.lineasKit || []).reduce((a, y) => a + y.parcial, 0);
+  const kit = T.kits ? Math.round(kitBienes / T.kits * 100) / 100 : null;
+  return { kits: T.kits || 0, kit_sin_igv: kit, kit_igv: kit == null ? null : Math.round(kit * igv) / 100, kit_con_igv: kit == null ? null : Math.round(kit * (100 + igv)) / 100,
+    cd: T.cd, total: T.total, partidas: Object.fromEntries(R.partidas.filter(pt => !pt.excluido).map(pt => [pt.k, pt.parcial])) };
 }
 
 /**

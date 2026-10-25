@@ -309,6 +309,14 @@ api.post('/proyectos/:id/duplicar', async (req, res, next) => {
     if (error) throw error;
     const codigos = await leerCodigos(p.id);
     await insertarCodigos(data.id, codigos);
+    // La copia conserva la estructura de costos: material, muebles de la propuesta y precios por material
+    const { data: costos, error: eC } = await supabase.from('ioarr_expediente_costos').select('*').eq('proyecto_id', p.id).maybeSingle();
+    if (eC && !/does not exist|schema cache/i.test(eC.message || '')) throw eC;
+    if (costos) {
+      const { proyecto_id: _, id: __, creado_en: ___, actualizado_en: ____, ...resto } = costos;
+      const { error: eI } = await supabase.from('ioarr_expediente_costos').insert({ ...resto, proyecto_id: data.id });
+      if (eI) throw eI;
+    }
     // La copia conserva lo verificado sobre otras inversiones
     const { mapa } = await leerDuplicidad(supabase, p.id), filas = Object.entries(mapa).map(([c, d]) => aFila(data.id, c, d, req.usuario.id));
     for (let i = 0; i < filas.length; i += LOTE) {
