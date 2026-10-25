@@ -19,6 +19,16 @@
 //   En Primaria los kits se reparten entre 1.°-2.°, 3.°-4.° y 5.°-6.° con una distribución
 //   editable (por defecto, partes iguales); los demás niveles, según el grado del aula.
 //
+// Material de la propuesta (opcional; sin él se usan los precios de antes, «valores antiguos»):
+//   Cada tipo de mueble tiene material (Madera, Metal/Madera, Metal/Polipropileno; por defecto, el
+//   de la propuesta) y sus precios unitarios se guardan por material (estructura.precios_material).
+//   Precio de una clave = el escrito para ese material → la mediana del catálogo de precios
+//   referenciales de ese material (mesa, silla y armario) → sin precio de referencia. Los precios
+//   antiguos (sin material) solo se muestran: con material no se usan.
+//   «Incluir en la propuesta» (estructura.incluir) quita un tipo del costo, del kit, de las
+//   cantidades y de los documentos (como si no estuviera en los criterios); su monto se ve aparte.
+//   El kit (mesa + silla del estudiante, del mismo material) puede apagarse por nivel (kit_niveles).
+//
 // Estructura referencial de adquisición de bienes (sin utilidad ni gastos generales):
 //   Bienes          = Σ cantidad × precio unitario de mercado (sin IGV), por línea
 //   Transporte      = piezas × transporte por pieza (kit = 2 piezas)
@@ -63,10 +73,14 @@ export const NOTA_PORCENTAJES = 'Los porcentajes (IGV, documento equivalente, su
 // Grupos de grado de Primaria para repartir los kits
 export const GRUPOS_PRIMARIA = TALLAS.filter(z => z.nivel === 'P').map(z => z.k);   // ['p12', 'p34', 'p56']
 export const ESTRUCTURA_DEF = { igv: 18, doc_pct: 3, sup_pct: 5, liquidacion: 15000, transporte_pieza: TRANSPORTE_REFERENCIA, kit: false, kit_dist: [1, 1, 1], precios: {},
-  cc_aplica: '', cc_pct: null, cc_umbral: null, liq_modo: 'monto', liq_pct: 1 };
+  cc_aplica: '', cc_pct: null, cc_umbral: null, liq_modo: 'monto', liq_pct: 1,
+  material_propuesta: '', materiales: {}, incluir: {}, kit_niveles: {}, precios_material: {} };
 export const ROTULO_CC = 'Control concurrente (Ley 31358)';
 // Registro del Formato 07-C: una inversión masiva (varias UP) va siempre con registro completo
 export const REGISTRO_MASIVA = 'Registro completo (masiva)';
+// Materiales del mobiliario (las mismas claves que el catálogo de precios referenciales)
+export const MATERIALES = { madera: 'Madera', 'metal-madera': 'Metal/Madera', 'metal-polipropileno': 'Metal/Polipropileno' };
+export const NIVELES_KIT = ['I', 'P', 'S', 'E'];
 // Líneas del kit: una por talla (precio = mesa + silla de esa talla)
 export const LINEAS_KIT = TALLAS.map((z, j) => ({ k: `kit_${z.k}`, tipo: 'kit', t: null, talla: z.k, j, n: `Kit de mobiliario (mesa + silla del estudiante) – ${z.n}`, u: 'kits' }));
 
@@ -92,8 +106,90 @@ export function limpiarEstructura(e) {
     // Control concurrente: '' = según el umbral (si lo hay) o pendiente; 'si' / 'no' a mano
     cc_aplica: ['si', 'no'].includes(x.cc_aplica) ? x.cc_aplica : '',
     cc_pct: x.cc_pct === '' || x.cc_pct == null ? null : num(x.cc_pct, 0, 100, null),
-    cc_umbral: x.cc_umbral === '' || x.cc_umbral == null ? null : num(x.cc_umbral, 0, 1e12, null)
+    cc_umbral: x.cc_umbral === '' || x.cc_umbral == null ? null : num(x.cc_umbral, 0, 1e12, null),
+    // Material de la propuesta ('' = sin material: precios antiguos), material por tipo, muebles incluidos,
+    // kit por nivel y precios por material (sin IGV)
+    material_propuesta: MATERIALES[x.material_propuesta] ? x.material_propuesta : '',
+    materiales: Object.fromEntries(TIPOS.filter(t => MATERIALES[x.materiales?.[t]]).map(t => [t, x.materiales[t]])),
+    incluir: Object.fromEntries(TIPOS.filter(t => typeof x.incluir?.[t] === 'boolean').map(t => [t, x.incluir[t]])),
+    kit_niveles: Object.fromEntries(NIVELES_KIT.filter(n => typeof x.kit_niveles?.[n] === 'boolean').map(n => [n, x.kit_niveles[n]])),
+    precios_material: Object.fromEntries(Object.keys(MATERIALES).map(m => [m, limpiarPrecios(x.precios_material?.[m])]).filter(([, v]) => Object.keys(v).length))
   };
+}
+function limpiarPrecios(o) {
+  const out = {};
+  for (const k of CLAVES_PRECIO) {
+    const v = o?.[k];
+    if (v === '' || v == null) continue;
+    const n = Number(v);
+    if (Number.isFinite(n) && n >= 0 && n <= 1e9) out[k] = Math.round(n * 100) / 100;
+  }
+  return out;
+}
+
+// ─── Material y propuesta ───────────────────────────────────────────────────
+const tipoDe = k => k.split('_')[0];
+/** Material de un tipo: el propio o el de la propuesta (null sin material) */
+export const materialDe = (E, t) => E.materiales?.[t] || E.material_propuesta || null;
+/** El tipo entra a la propuesta (por defecto sí: lo que dicen los criterios del proyecto) */
+export const incluido = (E, t) => E.incluir?.[t] !== false;
+/** Tipos de la propuesta: los de los criterios del proyecto que no se excluyeron */
+export const tiposPropuesta = (E, muebles = TIPOS) => muebles.filter(t => incluido(E, t));
+
+/**
+ * Precios de un material: escrito → catálogo referencial (solo el tipo, no la talla) → sin precio.
+ * @param catalogo preciosUnitarios() de catalogo-ref.js: { [material]: { [tipo]: { precio, n, fuente } } }
+ */
+export function preciosDeMaterial(E, material, catalogo = {}) {
+  const out = {}, man = E.precios_material?.[material] || {}, cat = catalogo[material] || {};
+  for (const k of CLAVES_PRECIO) {
+    if (man[k] != null) out[k] = { precio: man[k], origen: 'manual', material };
+    else if (k === tipoDe(k) && cat[k]?.precio != null) out[k] = { precio: cat[k].precio, origen: 'catalogo_ref', fuente: cat[k].fuente, n: cat[k].n, material };
+    else out[k] = { precio: null, origen: null, material };
+  }
+  return out;
+}
+/**
+ * Precios de la propuesta: cada clave con el material de su tipo. Lleva el valor antiguo
+ * (sin material) solo para mostrarlo: no se usa.
+ */
+export function preciosPropuesta(E, catalogo = {}, antiguos = {}) {
+  const porMat = Object.fromEntries(Object.keys(MATERIALES).map(m => [m, preciosDeMaterial(E, m, catalogo)]));
+  return Object.fromEntries(CLAVES_PRECIO.map(k => {
+    const m = materialDe(E, tipoDe(k));
+    const x = m ? porMat[m][k] : { precio: null, origen: null, material: null };
+    return [k, { ...x, antiguo: antiguos[k]?.precio != null ? { precio: antiguos[k].precio, origen: antiguos[k].origen } : null }];
+  }));
+}
+/** Un tipo tiene precio: el suyo o, mesa y silla, el de todas las tallas de los niveles del proyecto */
+export function tienePrecio(precios, t, niveles = []) {
+  if (precios[t]?.precio != null) return true;
+  if (!TIPOS_TALLA.includes(t)) return false;
+  const tallas = TALLAS.filter(z => niveles.includes(z.nivel));
+  return tallas.length > 0 && tallas.every(z => precios[`${t}_${z.k}`]?.precio != null);
+}
+/**
+ * Validación de la propuesta (bloquea el guardado): al menos un mueble incluido; cada mueble
+ * incluido con material y precio; el kit, mesa y silla del mismo material.
+ * @param muebles tipos de los criterios del proyecto; niveles: los de la IOARR (I, P, S, E)
+ */
+export function validarPropuesta(E, { catalogo = {}, muebles = TIPOS, niveles = [] } = {}) {
+  if (!E.material_propuesta) return [];
+  const errores = [], incl = tiposPropuesta(E, muebles), P = preciosPropuesta(E, catalogo), nombre = t => ITEMS.find(x => x.k === t).n;
+  if (!incl.length) errores.push('Incluye al menos un mueble en la propuesta.');
+  for (const t of incl) {
+    const m = materialDe(E, t);
+    if (!m) errores.push(`Elige el material de: ${nombre(t)}.`);
+    else if (!tienePrecio(P, t, niveles)) errores.push(`${nombre(t)} (${MATERIALES[m]}): sin precio. Escríbelo en la tabla de materiales o carga una fuente en «Precios referenciales».`);
+  }
+  if (E.kit && incl.includes('mesa') && incl.includes('silla') && materialDe(E, 'mesa') !== materialDe(E, 'silla'))
+    errores.push('El kit es mesa + silla del estudiante del mismo material: elige el mismo material para las dos (o quita el kit).');
+  return errores;
+}
+/** La suma de los componentes iguala el total (costo directo + IGV + documento + supervisión + liquidación + control) */
+export function cuadraTotales(T) {
+  const suma = T.cd + T.igv + T.doc + T.sup + T.liq + (T.cc || 0);
+  return Math.abs(suma - T.total) < 0.011;
 }
 
 /**
@@ -305,7 +401,7 @@ export function costear({ D, C, list, precios, estructura, uit, inventario, ajus
   // El kit necesita mesa y silla en la composición del nivel (de la IOARR)
   const locales = [];
   for (const g of fuentes) {
-    const kitG = E.kit && inclDe(g)[0] && inclDe(g)[1];
+    const kitG = E.kit && inclDe(g)[0] && inclDe(g)[1] && (g.clave == null || E.kit_niveles[g.clave] !== false);
     const ls = g.list.map(i => localDe(g, i));
     if (kitG) repartirPrimaria(ls, E.kit_dist);
     for (const l of ls) { l.kit = kitG; costoLocal(l, { kit: kitG, pu, puKit, E }); }
@@ -557,7 +653,9 @@ function resumir(locales, { pu, puGeneral, propio, incl, puKit, kit, E, escenari
     : cc.pendiente ? `${ROTULO_CC}: PENDIENTE indicar si corresponde` : `${ROTULO_CC}: no corresponde`;
   const estructura = {
     kit, escenario, params: { igv: E.igv, doc_pct: E.doc_pct, sup_pct: E.sup_pct, liquidacion: E.liquidacion, liq_modo: E.liq_modo, liq_pct: E.liq_pct, transporte_pieza: E.transporte_pieza, kit_dist: E.kit_dist,
-      cc_aplica: E.cc_aplica, cc_pct: E.cc_pct, cc_umbral: E.cc_umbral, cc_corresponde: !!cc.aplica },
+      cc_aplica: E.cc_aplica, cc_pct: E.cc_pct, cc_umbral: E.cc_umbral, cc_corresponde: !!cc.aplica,
+      // Material de la propuesta (lo leen las bases, la oferta y el documento equivalente)
+      material: E.material_propuesta || null, materiales: Object.fromEntries(TIPOS.map(t => [t, materialDe(E, t)])) },
     filas: [
       { clave: 'bienes', nombre: 'Bienes (cantidad × precio unitario sin IGV)', monto: T.bienes },
       { clave: 'transporte', nombre: `Transporte (${T.piezas.toLocaleString('es-PE')} piezas × S/ ${tp.toFixed(2)})`, monto: T.transporte },

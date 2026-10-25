@@ -27,6 +27,7 @@ import { createHash } from 'node:crypto';
 import { ESPECIFICACIONES, NORMAS_SUGERIDAS } from './bases-especificaciones.js';
 import { descuadre } from './montos.js';
 import { FUENTE_GORE, esEntidadGore } from './entidades-gore.js';
+import { MATERIALES as MATERIALES_COSTOS } from './costos.js';
 
 const DIR = new URL('../../templates/bases/', import.meta.url);
 export const MANIFEST = JSON.parse(readFileSync(new URL('MANIFEST.json', DIR), 'utf8'));
@@ -482,7 +483,8 @@ export function contextoApp(M, nivel, nombreNivel) {
     nivel, nivel_nombre: nombreNivel, region: M?.region || '', escenario_texto: M?.escenarioTexto || '', kit: !!M?.kit,
     metas: (M?.F?.metas || []).map(m => ({ k: m.k, nombre: m.nombre, unidad: m.unidad, cantidad: m.cantidad, costo: m.costo })),
     total_07c: M?.F?.total ?? null, liquidacion: M?.F?.liquidacion ?? null, control: M?.F?.control ?? null,
-    colegios: M?.ups?.length ?? 0, ugels: M?.ugels || [], borrador: !!(M?.borrador && M?.bloqueados?.length)
+    colegios: M?.ups?.length ?? 0, ugels: M?.ugels || [], borrador: !!(M?.borrador && M?.bloqueados?.length),
+    material: M?.estructura?.params?.material || null
   };
 }
 
@@ -495,6 +497,7 @@ export function transparencia(d, ctx = {}, armado = armarTexto(d)) {
   if (Q.precio_catalogo && ctx.precio_ref?.precio != null)
     app.push({ campo: 'Precio por kit (Anexo 3-A)', valor: `S/ ${formatoMonto(ctx.precio_ref.precio)} sin IGV`,
       fuente: `Catálogo de precios referenciales de IOARR publicadas: ${ctx.precio_ref.modo === 'registro' ? 'una fuente' : `mediana de ${ctx.precio_ref.n} ${ctx.precio_ref.n === 1 ? 'fuente' : 'fuentes'}`}.` });
+  if (ctx.material) app.push({ campo: 'Material del mobiliario considerado en los costos', valor: MATERIALES_COSTOS[ctx.material] || ctx.material, fuente: 'Material de la propuesta elegido en Costos (los precios unitarios son de ese material).' });
   if (Q.filas.length) app.push({ campo: 'Cantidades y precios unitarios (Anexo 3-A)', valor: Q.filas.map(f => `${f.nombre}: ${f.cantidad ?? '—'}`).join('; '), fuente: Q.texto });
   const supuestos = [
     `Las plantillas provienen de las bases del proceso 015-2026 (I.E. San Juan, La Libertad) y aplican el ${REGLAMENTO_PLANTILLAS}. Deben revisarse contra el documento original antes de publicar.`,

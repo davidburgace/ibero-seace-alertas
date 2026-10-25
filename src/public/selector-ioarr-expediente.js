@@ -1,7 +1,7 @@
 // Selector IOARR — pestaña «Expediente» (Etapa 1: estructura de costos).
 // El cálculo lo hace el servidor (src/selector-ioarr/costos.js), el mismo que
 // arma el Excel: así la pantalla y el Excel dan lo mismo.
-import { LIMITE_UIT, TIPOS_ARCHIVO } from '/selector-ioarr/costos.js';
+import { LIMITE_UIT, TIPOS_ARCHIVO, MATERIALES } from '/selector-ioarr/costos.js';
 import { ITEMS, CLAVES_PRECIO, TALLAS, AVISO_CAPACIDAD, NIVN, NIVELES_PCT, ROTULO_UMBRAL, LIM_UMBRAL } from '/selector-ioarr/calculo.js';
 import { renderOferta, enlazarOferta } from '/selector-ioarr-oferta.js';
 import { renderDocumentos, enlazarDocumentos } from '/selector-ioarr-documentos.js';
@@ -91,13 +91,14 @@ function pintar() {
       <div><h3>Excel de costos</h3><p>Parámetros, partidas, metrado y costos por local, y distribución por distrito, con el escenario elegido. Todo con fórmulas de Excel: si el evaluador cambia un precio o un porcentaje, el libro se recalcula. No incluye la oferta interna.</p></div>
       <button class="btn btn-primary" id="exp-excel" type="button">Exportar costos a Excel</button>
     </div>
+    <div class="panel" id="exp-material"></div>
     <div class="cols">
       <div class="panel" id="exp-precios"></div>
       <div class="panel" id="exp-rubros"></div>
     </div>
     <div id="exp-resultados"></div>
     </div>`;
-  pintarIoarr(); pintarEscenarios(); pintarPrecios(); pintarEstructura(); pintarResultados();
+  pintarIoarr(); pintarEscenarios(); pintarMaterial(); pintarPrecios(); pintarEstructura(); pintarResultados();
   if (vistaExp === 'fichas') abrirFichas();
   if (vistaExp === 'colegios') abrirColegios();
   if (vistaExp === 'oferta') abrirOferta();
@@ -211,6 +212,8 @@ function panelRegular(act) {
 const ORIGEN = { editado: '<span class="chip-est ok">Editado</span>', catalogo: '<span class="chip-est">Catálogo</span>', referencia: '<span class="chip-est pend">Referencia precargada</span>' };
 function pintarPrecios() {
   const lt = datos.lineasTalla || [], kit = datos.estructura?.kit, tallasKit = (datos.lineasKit || []).map(x => x.talla);
+  const PM = datos.propuesta?.material ? datos.propuesta.precios : null;
+  if (PM) return pintarPreciosMaterial(lt, kit, tallasKit);
   const fila = (k, nombre, cant, general) => {
     const p = datos.precios[k] || { precio: null, origen: null };
     const usaGeneral = general && p.precio == null;
@@ -240,6 +243,83 @@ function pintarPrecios() {
     <div class="panel-cab"><h3>Precios unitarios de mercado (sin IGV)</h3><a class="btn btn-ghost btn-sm" href="selector-ioarr-precios.html" target="_blank" rel="noopener">Catálogo de precios ↗</a></div>
     <p class="sub pad"><b>${esc(datos.referencia.leyenda)}.</b> Escribe tu precio en la casilla: se guarda en el proyecto. Vacía = el precio del catálogo (fijado en el proyecto o vigente) o, si no hay, la referencia. Una talla sin precio usa el precio general de su tipo.</p>
     <div class="tabla-wrap borde-0"><table class="tabla"><thead><tr><th>Bien</th><th class="num">Precio (S/)</th><th>Origen</th></tr></thead><tbody>${filas}</tbody></table></div>${kits}`;
+}
+
+// Con material de la propuesta: cada precio es del material de su tipo (escrito o del catálogo referencial)
+const ORIGEN_MAT = { manual: '<span class="chip-est ok">Manual</span>', catalogo_ref: '<span class="chip-est">Catálogo</span>' };
+function pintarPreciosMaterial(lt, kit, tallasKit) {
+  const P = datos.propuesta, PM = P.precios;
+  const fila = (k, nombre, cant, general) => {
+    const p = PM[k] || { precio: null, origen: null }, m = p.material, usaGeneral = general && p.precio == null;
+    const origen = p.origen ? ORIGEN_MAT[p.origen] + (p.fuente ? `<br><span class="sub">${esc(p.fuente)}</span>` : '')
+      : usaGeneral ? `<span class="chip-est">${general.precio == null ? 'Sin precio de referencia' : 'Usa el general'}</span>` : '<span class="chip-est alerta">Sin precio de referencia</span>';
+    const antiguo = p.antiguo && p.origen !== 'manual' ? `<br><span class="sub">Valor antiguo (sin material): ${soles(p.antiguo.precio)} <button class="x" type="button" data-pm-usar="${k}" data-pm-m="${m}" data-pm-v="${p.antiguo.precio}">Usar</button></span>` : '';
+    return `<tr${general ? ' class="fila-talla"' : ''}>
+      <td>${general ? `<span class="sangria">${esc(nombre)}</span>` : `<b>${esc(nombre)}</b>`}${cant ? `<br><span class="sub">${cant}</span>` : ''}</td>
+      <td class="num"><input class="precio-in" data-pm-k="${k}" data-pm-m="${m}" type="number" min="0" step="0.01" inputmode="decimal" value="${p.origen === 'manual' ? p.precio : ''}" placeholder="${usaGeneral ? (general.precio ?? '') : (p.precio ?? 'sin precio')}" aria-label="Precio de ${esc(nombre)} (${esc(MATERIALES[m] || '')})"></td>
+      <td>${origen}${antiguo}${p.origen === 'manual' ? ` <button class="x" type="button" data-pm-reset="${k}" data-pm-m="${m}">Quitar</button>` : ''}</td>
+    </tr>`;
+  };
+  const filas = datos.partidas.filter(part => !part.excluido).map(part => {
+    const x = ITEMS.find(y => y.k === part.k), conTalla = x.k === 'mesa' || x.k === 'silla', mat = MATERIALES[P.materiales[x.k]] || '';
+    if (!conTalla) return fila(x.k, `${x.n} · ${mat}`, `${ent(part.rep)} ${x.u} a reponer`);
+    const ks = [...new Set([...lt.filter(y => y.tipo === x.k && y.talla && y.rep > 0).map(y => y.talla), ...(kit ? tallasKit : [])])]
+      .sort((a, b) => TALLAS.findIndex(z => z.k === a) - TALLAS.findIndex(z => z.k === b));
+    const general = PM[x.k] || { precio: null };
+    return fila(x.k, `${x.n} · ${mat} – precio general`, ks.length ? 'vale para las tallas sin precio propio' : `${ent(part.rep)} ${x.u} a reponer`)
+      + ks.map(z => {
+        const y = lt.find(v => v.k === `${x.k}_${z}`), kz = (datos.lineasKit || []).find(v => v.talla === z);
+        const cant = kit ? (kz ? `${ent(kz.rep)} kits` : '') : y?.rep ? `${ent(y.rep)} ${x.u} a reponer` : '';
+        return fila(`${x.k}_${z}`, TALLAS.find(t => t.k === z).n, cant, general);
+      }).join('');
+  }).join('');
+  document.getElementById('exp-precios').innerHTML = `
+    <div class="panel-cab"><h3>Precios unitarios de mercado (sin IGV) · ${esc(MATERIALES[P.material])}</h3></div>
+    <p class="sub pad">Precios del material de cada mueble. Vacía = la mediana del catálogo de precios referenciales de ese material (mesa, silla y armario) o «sin precio de referencia»: escríbelo a mano. Los valores antiguos (sin material) no se usan; «Usar» los copia como precio manual. Una talla sin precio usa el precio general de su tipo.</p>
+    <div class="tabla-wrap borde-0"><table class="tabla"><thead><tr><th>Bien</th><th class="num">Precio (S/)</th><th>Origen</th></tr></thead><tbody>${filas || '<tr><td colspan="3" class="vacio">Ningún mueble en la propuesta.</td></tr>'}</tbody></table></div>
+    ${kit ? '<p class="sub pad">Precio del kit = mesa + silla de su talla, del mismo material.</p>' : ''}`;
+}
+
+// ─── Material y muebles de la propuesta (comparativo por material) ──────────
+function pintarMaterial() {
+  const el = document.getElementById('exp-material'), P = datos.propuesta;
+  if (!el || !P) return;
+  const mats = Object.keys(MATERIALES), conMat = !!P.material;
+  const exc = k => P.excluidos.find(x => x.k === k);
+  const filas = ITEMS.map(x => {
+    const enCrit = P.muebles_criterio.includes(x.k), inc = enCrit && P.incluir[x.k], e = exc(x.k);
+    return `<tr${inc ? '' : ' class="fila-excluida"'}>
+      <td><b>${esc(x.n)}</b>${enCrit ? '' : '<br><span class="sub">No está en los criterios del proyecto</span>'}</td>
+      <td><label class="chk"><input type="checkbox" data-incl="${x.k}" ${inc ? 'checked' : ''} ${enCrit ? '' : 'disabled'}> Incluir</label></td>
+      <td>${conMat ? `<select data-mat-tipo="${x.k}" ${inc ? '' : 'disabled'} aria-label="Material de ${esc(x.n)}">${mats.map(m => `<option value="${m}" ${P.materiales[x.k] === m ? 'selected' : ''}>${esc(MATERIALES[m])}${P.materiales_propios?.[x.k] ? '' : m === P.material ? ' (de la propuesta)' : ''}</option>`).join('')}</select>` : '<span class="sub">Elige el material de la propuesta</span>'}</td>
+      <td class="num">${e ? `<span class="sub" title="No suma al costo, al kit ni a los documentos">Excluido: ${soles(e.parcial)} · ${ent(e.rep)} ${esc(x.u)}</span>` : ''}</td></tr>`;
+  }).join('');
+  const kitNiv = P.kit ? `<div class="pad"><span class="lbl">Kit por nivel</span> <span class="sub">Kit = mesa + silla del estudiante, del mismo material (igual para los tres materiales; solo cambian los precios). Escritorio, silla docente y armario van aparte.</span>
+      <div class="chips">${P.niveles.map(n => `<label class="chk"><input type="checkbox" data-kit-niv="${n}" ${P.kit_niveles[n] !== false ? 'checked' : ''}> ${esc(NIVN[n])}</label>`).join('')}</div></div>` : '';
+  // Comparativo: una columna por material
+  const incl = ITEMS.filter(x => P.muebles_criterio.includes(x.k) && P.incluir[x.k]);
+  const celda = (y, t) => { const p = y.precios[t] || {};
+    return `<td class="num"><input class="precio-in" data-pm-k="${t}" data-pm-m="${y.material}" type="number" min="0" step="0.01" inputmode="decimal" value="${p.origen === 'manual' ? p.precio : ''}" placeholder="${p.precio ?? 'sin precio'}" aria-label="${esc(ITEMS.find(x => x.k === t).n)} (${esc(y.nombre)})">
+      <span class="sub">${p.origen === 'manual' ? 'manual' : p.origen === 'catalogo_ref' ? `catálogo (${p.n} ${p.n === 1 ? 'fuente' : 'fuentes'})` : 'sin precio de referencia'}</span></td>`; };
+  const fila = (rot, f, cls = '') => `<tr${cls ? ` class="${cls}"` : ''}><td>${rot}</td>${P.por_material.map(y => `<td class="num">${y.completo ? f(y) : '<span class="chip-est pend">Sin precio completo</span>'}</td>`).join('')}</tr>`;
+  el.innerHTML = `
+    <div class="panel-cab"><h3>Material y muebles de la propuesta</h3><span class="guardado" id="exp-mat-guardado"></span></div>
+    <div class="form-grid pad"><div class="campo"><label for="exp-mat-prop">Material de la propuesta</label>
+      <select id="exp-mat-prop"><option value="" ${conMat ? '' : 'selected'}>Sin material (precios antiguos)</option>${mats.map(m => `<option value="${m}" ${P.material === m ? 'selected' : ''}>${esc(MATERIALES[m])}</option>`).join('')}</select>
+      <span class="sub">Alimenta las Bases OxI, la Oferta (uso interno) y el documento equivalente. Para elegir uno, antes completa sus precios en el comparativo.</span></div></div>
+    ${P.errores.length ? `<div class="avisos pad">${P.errores.map(t => `<div class="aviso alerta" role="alert">${esc(t)}</div>`).join('')}</div>` : ''}
+    ${P.cuadra ? '' : '<div class="avisos pad"><div class="aviso alerta" role="alert">La suma de los componentes no iguala el total: revisa la estructura.</div></div>'}
+    <div class="tabla-wrap borde-0"><table class="tabla"><thead><tr><th>Mueble</th><th>Propuesta</th><th>Material</th><th class="num">Monto excluido</th></tr></thead><tbody>${filas}</tbody></table></div>
+    ${kitNiv}
+    <h3 class="pad">Comparativo por material · IOARR ${esc(datos.nombre_ioarr || '')}</h3>
+    <div class="tabla-wrap borde-0"><table class="tabla tabla-materiales"><thead><tr><th>Precio unitario sin IGV</th>${P.por_material.map(y => `<th class="num${y.material === P.material ? ' col-elegida' : ''}">${esc(y.nombre)}${y.material === P.material ? '<br><span class="chip-est ok">Propuesta</span>' : y.completo ? `<br><button class="btn btn-ghost btn-sm" type="button" data-mat-usar="${y.material}">Usar este</button>` : ''}</th>`).join('')}</tr></thead>
+    <tbody>${incl.map(x => `<tr><td>${esc(x.n)}</td>${P.por_material.map(y => celda(y, x.k)).join('')}</tr>`).join('') || '<tr><td colspan="4" class="vacio">Ningún mueble en la propuesta.</td></tr>'}
+      ${P.kit ? fila('Kit sin IGV (promedio por kit)', y => soles(y.kit_sin_igv)) + fila('IGV del kit', y => soles(y.kit_igv)) + fila('Kit con IGV', y => soles(y.kit_con_igv))
+        + `<tr><td>Mediana del catálogo (kit sin IGV, material y nivel)</td>${P.por_material.map(y => `<td class="num">${y.mediana ? `${soles(y.mediana.precio)}<span class="sub">${y.mediana.n} ${y.mediana.n === 1 ? 'fuente' : 'fuentes'}${y.mediana.n < 3 ? ' · menos de 3' : ''}</span>` : '<span class="sub">sin fuentes</span>'}</td>`).join('')}</tr>` : ''}
+      ${fila('<b>Total del expediente (IOARR)</b>', y => `<b>${soles(y.total)}</b>`)}
+      ${fila('Diferencia frente al más económico', y => y.dif_pct == null ? '—' : y.dif_pct === 0 ? 'el más económico' : `+${y.dif_pct} %`)}
+    </tbody></table></div>
+    <p class="sub pad">Los precios del comparativo se guardan por material. Vacío = la mediana del catálogo de precios referenciales de ese material, si la hay. Un material sin todos sus precios no se mezcla con otro.</p>`;
 }
 
 // ─── Estructura de costos del 07-C (sin utilidad) y kit ─────────────────────
@@ -377,14 +457,15 @@ function cambiarVista(v) {
 }
 
 // ─── Cambios ────────────────────────────────────────────────────────────────
-function estado(t, cls = '') { const s = document.getElementById('exp-guardado'); if (s) { s.className = 'guardado ' + cls; s.textContent = t; } }
+function estado(t, cls = '') { for (const id of ['exp-guardado', 'exp-mat-guardado']) { const s = document.getElementById(id); if (s) { s.className = 'guardado ' + cls; s.textContent = t; } } }
 
 // Repinta todo lo de Costos sin perder el foco ni la posición del cursor
 function repintar() {
-  const act = document.activeElement, id = act?.id, pk = act?.dataset?.precioK, kd = act?.dataset?.kitDist;
+  const act = document.activeElement, id = act?.id, pk = act?.dataset?.precioK, kd = act?.dataset?.kitDist, pmk = act?.dataset?.pmK, pmm = act?.dataset?.pmM, enMat = act?.closest?.('#exp-material');
   const pos = act && 'selectionStart' in act ? (() => { try { return act.selectionStart; } catch { return null; } })() : null;
-  pintarIoarr(); pintarEscenarios(); pintarPrecios(); pintarEstructura(); pintarResultados();
-  const e = id ? document.getElementById(id) : pk ? document.querySelector(`[data-precio-k="${pk}"]`) : kd != null ? document.querySelector(`[data-kit-dist="${kd}"]`) : null;
+  pintarIoarr(); pintarEscenarios(); pintarMaterial(); pintarPrecios(); pintarEstructura(); pintarResultados();
+  const e = id ? document.getElementById(id) : pk ? document.querySelector(`[data-precio-k="${pk}"]`) : kd != null ? document.querySelector(`[data-kit-dist="${kd}"]`)
+    : pmk ? document.querySelector(`${enMat ? '#exp-material ' : '#exp-precios '}[data-pm-k="${pmk}"][data-pm-m="${pmm}"]`) : null;
   if (e && e !== document.body) { e.focus(); if (pos != null) try { e.setSelectionRange(pos, pos); } catch { /* sin selección */ } }
 }
 
@@ -397,7 +478,12 @@ async function guardar(body) {
     datos = d;
     repintar();
     estado('Guardado', 'ok');
-  } catch (e) { if (mio === version) estado('No se pudo guardar: ' + e.message, 'error'); }
+  } catch (e) {
+    if (mio !== version) return;
+    // Lo rechazado (p. ej., la propuesta quedaría sin precio) vuelve a lo guardado
+    repintar(); estado(/^No se guardó/.test(e.message) ? e.message : 'No se pudo guardar: ' + e.message, 'error');
+    if (/^No se guardó/.test(e.message)) ctx.toast(e.message);
+  }
 }
 const guardarEstructura = (cambios, ms = 700) => { clearTimeout(tGuardar); estado('Cambios sin guardar', 'pend'); tGuardar = setTimeout(() => guardar({ estructura: cambios }), ms); };
 // Distribución de kits de Primaria (en %, se guardan como pesos)
@@ -441,6 +527,8 @@ export function enlazarExpediente(el, abrirNuevo) {
     // Control concurrente: vacío = sin dato (null)
     if (e.target.dataset.estCc) { const v = e.target.value === '' ? null : parseFloat(e.target.value); if (v === null || (Number.isFinite(v) && v >= 0)) guardarEstructura({ [e.target.dataset.estCc]: v }, 900); return; }
     if (e.target.dataset.precioK) { const v = e.target.value === '' ? null : parseFloat(e.target.value); if (v === null || (Number.isFinite(v) && v >= 0)) guardarEstructura({ precios: { [e.target.dataset.precioK]: v } }, 900); return; }
+    // Precio de un material (comparativo o tabla de precios con material)
+    if (e.target.dataset.pmK) { const v = e.target.value === '' ? null : parseFloat(e.target.value); if (v === null || (Number.isFinite(v) && v >= 0)) guardarEstructura({ precios_material: { [e.target.dataset.pmM]: { [e.target.dataset.pmK]: v } } }, 900); return; }
     if (e.target.dataset.kitDist != null) { const d = leerDist(); if (d.some(v => v > 0)) guardarEstructura({ kit_dist: d }, 900); return; }
     if (e.target.id === 'esc-ocup' || e.target.id === 'esc-pct') {
       clearTimeout(tEsc);
@@ -472,6 +560,11 @@ export function enlazarExpediente(el, abrirNuevo) {
     if (e.target.id === 'est-kit') { clearTimeout(tGuardar); guardar({ estructura: { kit: e.target.checked } }); }
     if (e.target.id === 'est-liqmodo') { clearTimeout(tGuardar); guardar({ estructura: { liq_modo: e.target.value } }); }
     if (e.target.id === 'est-cc') { clearTimeout(tGuardar); guardar({ estructura: { cc_aplica: e.target.value } }); }
+    // Material y muebles de la propuesta
+    if (e.target.id === 'exp-mat-prop') { clearTimeout(tGuardar); guardar({ estructura: { material_propuesta: e.target.value } }); }
+    if (e.target.dataset.matTipo) { clearTimeout(tGuardar); guardar({ estructura: { materiales: { [e.target.dataset.matTipo]: e.target.value === datos.propuesta.material ? null : e.target.value } } }); }
+    if (e.target.dataset.incl) { clearTimeout(tGuardar); guardar({ estructura: { incluir: { [e.target.dataset.incl]: e.target.checked } } }); }
+    if (e.target.dataset.kitNiv) { clearTimeout(tGuardar); guardar({ estructura: { kit_niveles: { [e.target.dataset.kitNiv]: e.target.checked } } }); }
   });
   enlazarDocumentos(el);
   enlazarOferta(el);
@@ -494,6 +587,12 @@ export function enlazarExpediente(el, abrirNuevo) {
     const pr = e.target.closest('[data-precio-reset]');
     if (pr) { clearTimeout(tGuardar); guardar({ estructura: { precios: { [pr.dataset.precioReset]: null } } }); }
     if (e.target.id === 'est-kd-iguales') { clearTimeout(tGuardar); guardar({ estructura: { kit_dist: [1, 1, 1] } }); }
+    const pmu = e.target.closest('[data-pm-usar]');
+    if (pmu) { clearTimeout(tGuardar); guardar({ estructura: { precios_material: { [pmu.dataset.pmM]: { [pmu.dataset.pmUsar]: Number(pmu.dataset.pmV) } } } }); }
+    const pmr = e.target.closest('[data-pm-reset]');
+    if (pmr) { clearTimeout(tGuardar); guardar({ estructura: { precios_material: { [pmr.dataset.pmM]: { [pmr.dataset.pmReset]: null } } } }); }
+    const mu = e.target.closest('[data-mat-usar]');
+    if (mu) { clearTimeout(tGuardar); guardar({ estructura: { material_propuesta: mu.dataset.matUsar } }); }
     if (e.target.closest('[data-exp-nuevo]')) abrirNuevo();
     const pg = e.target.closest('[data-exp-pag]');
     if (pg) { pagLoc += +pg.dataset.expPag; pintarResultados(); }

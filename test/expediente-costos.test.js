@@ -103,7 +103,8 @@ test('sin precios: bienes en 0 y avisos (no se inventan precios dentro del cálc
   assert.deepEqual(R.avisos.map(a => a.tipo).sort(), ['censo', 'control_concurrente', 'faltante', 'precio', 'uit']);
   // La estructura por defecto: transporte 19.50 por pieza, IGV 18 %, 3 %, 5 % y 15,000
   // Control concurrente (Ley 31358): vacío por defecto, no se inventa si corresponde ni su %
-  assert.deepEqual(R.estructura.params, { igv: 18, doc_pct: 3, sup_pct: 5, liquidacion: 15000, liq_modo: 'monto', liq_pct: 1, transporte_pieza: 19.5, kit_dist: [1, 1, 1], cc_aplica: '', cc_pct: null, cc_umbral: null, cc_corresponde: false });
+  assert.deepEqual(R.estructura.params, { igv: 18, doc_pct: 3, sup_pct: 5, liquidacion: 15000, liq_modo: 'monto', liq_pct: 1, transporte_pieza: 19.5, kit_dist: [1, 1, 1], cc_aplica: '', cc_pct: null, cc_umbral: null, cc_corresponde: false,
+    material: null, materiales: { mesa: null, silla: null, esc: null, sdoc: null, arm: null } });
   assert.equal(R.totales.cc, 0);
 });
 

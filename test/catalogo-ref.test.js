@@ -95,8 +95,16 @@ test('referencia: mediana del nivel (con los de nivel por confirmar), aviso con 
 // ─── Precarga ───────────────────────────────────────────────────────────────
 test('precarga: 5 registros con el material indicado; Loreto y San Juan (memoria de costos) son comparables', () => {
   assert.equal(PRECARGA.length, 5);
-  assert.deepEqual(PRECARGA.map(r => r.material), ['madera', 'metal-madera', 'metal-madera', 'metal-polipropileno', 'por_confirmar']);
-  assert.deepEqual(PRECARGA.map(r => r.confianza), ['media', 'media', 'media', 'alta', 'media']);
+  assert.deepEqual(PRECARGA.map(r => r.material), ['madera', 'metal-madera', 'metal-madera', 'metal-polipropileno', 'metal-polipropileno']);
+  assert.deepEqual(PRECARGA.map(r => r.confianza), ['alta', 'media', 'media', 'alta', 'alta']);
+  // Huecos que llenó la 035 con el CSV del usuario (sin pisar lo corregido): Loreto sin CUI, Huánuco 2023 sin CUI, propio sin entidad
+  assert.deepEqual(PRECARGA.map(r => r.cui ?? null), [null, null, '2586831', '2711098', null]);
+  assert.equal(PRECARGA[0].entidad, 'Gobierno Regional Loreto');
+  assert.equal(PRECARGA[2].nivel, 'Primaria');
+  assert.equal(PRECARGA[4].entidad, null, 'el precio propio no lleva nombre de empresa');
+  const m35 = readFileSync(new URL('../supabase/migrations/035_ioarr_precios_materiales_kit.sql', import.meta.url), 'utf8');
+  for (const x of ["entidad = 'Gobierno Regional Loreto'", "cui = '2586831'", "nivel = 'Primaria'", "material = 'metal-polipropileno'"]) assert.ok(m35.includes(x), x);
+  assert.ok(!/Ibero/i.test(m35));
   for (const r of PRECARGA) {
     assert.deepEqual(limpiarRegistro(r).errores, [], r.id);
   }
@@ -106,14 +114,14 @@ test('precarga: 5 registros con el material indicado; Loreto y San Juan (memoria
   assert.match(N[1].motivo, /composición/);   // Huánuco 2023: por pieza
   assert.match(N[2].motivo, /IGV/);           // Huánuco 2025: rango sin IGV declarado
   const E = estadisticos(PRECARGA);
-  assert.deepEqual(E.map(g => [g.material, g.n, g.mediana, g.pocas]), [['madera', 1, 624, true], ['metal-polipropileno', 1, 411.85, true]]);
+  assert.deepEqual(E.map(g => [g.material, g.nivel, g.n, g.mediana, g.pocas]), [['madera', 'por_confirmar', 1, 624, true], ['metal-polipropileno', 'Secundaria', 1, 411.85, true]], 'sin el precio propio');
   // La migración tiene los mismos ids y montos
   const sql = readFileSync(new URL('../supabase/migrations/029_ioarr_catalogo_precios_ref.sql', import.meta.url), 'utf8');
   // San Juan cambió con la 031 y la 032 (07-C y memoria de costos): ver test/montos-san-juan.test.js
   // y Huánuco 2023 con la 033 (estudio de mercado): ver el test de abajo
   for (const r of PRECARGA.filter(x => !x.cui && x.tipo_documento !== 'estudio_mercado')) assert.match(sql, new RegExp(`'${r.id}', '${r.tipo_documento}'[^\\n]*${r.monto.toFixed(2).replace('.', '\\.')}`));
-  // y la 030 les pone el material (solo si siguen por confirmar)
-  const sql30 = readFileSync(new URL('../supabase/migrations/030_ioarr_precios_ref_material.sql', import.meta.url), 'utf8');
+  // y la 030 (o la 035, el precio propio) les pone el material (solo si siguen por confirmar)
+  const sql30 = readFileSync(new URL('../supabase/migrations/030_ioarr_precios_ref_material.sql', import.meta.url), 'utf8') + m35;
   for (const r of PRECARGA.filter(x => x.material !== 'por_confirmar'))
     assert.match(sql30, new RegExp(`set material = '${r.material}'\\s+where id[^;]*'${r.id}'[^;]*material = 'por_confirmar'`), r.id);
   assert.match(sql30, /'madera', 'metal-madera', 'metal-polipropileno', 'por_confirmar'/);

@@ -168,7 +168,10 @@ export function crearApiPreciosRef({ expediente, proyectoDelUsuario }) {
   async function seleccion(p) {
     const r = await supabase.from('ioarr_precios_ref_proyecto').select('modo, registro_id, material').eq('proyecto_id', p.id).maybeSingle();
     if (r.error) throw r.error;
-    return r.data || { modo: 'mediana', registro_id: null, material: 'todos' };
+    const sel = r.data || { modo: 'mediana', registro_id: null, material: 'todos' };
+    // Con material de la propuesta (Costos), la referencia es de ese material
+    const mp = await expediente.materialPropuesta?.(p);
+    return mp ? { ...sel, material: mp, material_propuesta: mp } : sel;
   }
   const vistaProyecto = async p => {
     const [registros, costos, sel] = await Promise.all([leerTodos(), expediente.costosPorNivel(p), seleccion(p)]);

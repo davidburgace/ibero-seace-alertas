@@ -57,7 +57,9 @@ function pintarProyecto() {
   }).join('');
   return `<div class="panel"><div class="panel-cab"><h3>Referencia de este proyecto</h3><span class="guardado" id="pr-guardado"></span></div>
     <div class="form-grid pad">
-      <div class="campo"><label>Material del mobiliario</label>${sel('id="pr-material"', { todos: 'Todos los materiales', ...O().materiales }, S.material)}</div>
+      <div class="campo"><label>Material del mobiliario</label>${S.material_propuesta
+        ? `<output class="bx-calc">${esc(O().materiales[S.material_propuesta])}</output><span class="sub">Es el material de la propuesta, elegido en Costos: se cambia allí.</span>`
+        : sel('id="pr-material"', { todos: 'Todos los materiales', ...O().materiales }, S.material)}</div>
       <div class="campo"><label>Precio de referencia</label>${sel('id="pr-modo"', { mediana: 'Mediana del catálogo', registro: 'Una fuente específica' }, S.modo)}</div>
       ${S.modo === 'registro'
         ? `<div class="campo ancho"><label>Fuente${S.material !== 'todos' ? ' de ' + esc(O().materiales[S.material].toLowerCase()) : ''}</label><select id="pr-registro"><option value="">${comparables.length ? 'Elige una fuente' : 'No hay fuentes comparables de este material'}</option>

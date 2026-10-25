@@ -27,7 +27,7 @@ export const TIPOS_DOC = { '07-C': 'Formato 07-C', bases: 'Bases', estudio_merca
 // Componentes del monto total de una IOARR (07-C o bases): deben sumar exactamente el total declarado
 export const COMPONENTES = { ejecucion: 'Ejecución física', doc_equivalente: 'Documento equivalente', sup_doc_equivalente: 'Supervisión del documento equivalente', sup_ejecucion: 'Supervisión de la ejecución física' };
 export const NIVELES = { Inicial: 'Inicial', Primaria: 'Primaria', Secundaria: 'Secundaria', por_confirmar: 'Por confirmar' };
-export const UNIDADES = { kit: 'Kit (mesa + silla)', mesa: 'Mesa', silla: 'Silla', carpeta: 'Carpeta', pieza: 'Pieza de mobiliario (sin especificar)' };
+export const UNIDADES = { kit: 'Kit (mesa + silla)', mesa: 'Mesa', silla: 'Silla', carpeta: 'Carpeta', armario: 'Armario', pieza: 'Pieza de mobiliario (sin especificar)', otro: 'Otro' };
 export const MATERIALES = { madera: 'Madera', 'metal-madera': 'Metal y madera', 'metal-polipropileno': 'Metal y polipropileno', por_confirmar: 'Por confirmar' };
 export const CONFIANZAS = { alta: 'Alta', media: 'Media', baja: 'Baja' };
 export const MIN_FUENTES = 3;
@@ -235,6 +235,27 @@ export function referencia(registros, { nivel, sel = {} }) {
   if (xs.some(x => x.material === 'por_confirmar')) avisos.push('Incluye fuentes con el material por confirmar.');
   return { ...est, precio: est.mediana, modo, fuente: est.n ? `Mediana de ${est.n} ${est.n === 1 ? 'fuente publicada' : 'fuentes publicadas'} (${xs.map(describir).join('; ')})` : null, avisos, registros: xs.map(x => x.id) };
 }
+/**
+ * Precio unitario de referencia (sin IGV) por material y tipo de bien de Costos, para precargar
+ * la tabla de precios por material: mediana de las fuentes con esa unidad y ese material.
+ * Sin el precio propio; las de IGV por confirmar no entran (no se puede calcular sin IGV).
+ * Solo los tipos con unidad en el catálogo (mesa, silla, armario); escritorio y silla docente no.
+ * @returns { [material]: { [tipo]: { precio, n, fuente } } }
+ */
+export const UNIDAD_DE_TIPO = { mesa: 'mesa', silla: 'silla', arm: 'armario' };
+export function preciosUnitarios(registros) {
+  const out = {};
+  for (const m of Object.keys(MATERIALES).filter(m => m !== 'por_confirmar')) {
+    out[m] = {};
+    for (const [t, u] of Object.entries(UNIDAD_DE_TIPO)) {
+      const xs = registros.map(r => ({ ...r, ...normalizar(r) })).filter(x => !x.propio && x.unidad === u && x.material === m && x.precio_sin_igv != null);
+      if (!xs.length) continue;
+      const precio = mediana(xs.map(x => x.precio_sin_igv));
+      out[m][t] = { precio, n: xs.length, fuente: xs.length === 1 ? describir(xs[0]) : `Mediana de ${xs.length} fuentes (${xs.map(describir).join('; ')})` };
+    }
+  }
+  return out;
+}
 export const describir = x => [x.entidad || x.region, x.anio, TIPOS_DOC[x.tipo_documento], x.cui ? 'CUI ' + x.cui : null].filter(Boolean).join(', ');
 
 // ─── Estimación del monto del convenio ──────────────────────────────────────
@@ -327,19 +348,19 @@ export function validarCsv(texto, existentes = []) {
   return { ok: !errores.length && registros.length > 0, registros, errores, total: filas.length - 1, columnas_ignoradas: desconocidas };
 }
 
-// ─── Precarga (la de la migración 029, con los materiales de la 030, San Juan de la 032 y Huánuco 2023 de la 033; ids fijos) ──
+// ─── Precarga (la de la migración 029, con los materiales de la 030, San Juan de la 032, Huánuco 2023 de la 033 y los huecos de la 035; ids fijos) ──
 export const PRECARGA = [
-  { id: 'c0a7a10e-0000-4000-8000-000000000001', tipo_documento: 'por_confirmar', entidad: null, region: 'Loreto', anio: 2026, nivel: 'por_confirmar', unidad: 'kit', material: 'madera', monto: 624, monto_hasta: null, incluye_igv: false, cotizaciones: null, composicion: [], confianza: 'media' },
+  { id: 'c0a7a10e-0000-4000-8000-000000000001', tipo_documento: 'por_confirmar', entidad: 'Gobierno Regional Loreto', region: 'Loreto', anio: 2026, nivel: 'por_confirmar', unidad: 'kit', material: 'madera', monto: 624, monto_hasta: null, incluye_igv: false, cotizaciones: null, composicion: [], confianza: 'alta', notas: 'Precio por kit sin IGV.' },
   // Huánuco 2023: cuadro comparativo y estructura preliminar de costos (migración 033)
   { id: 'c0a7a10e-0000-4000-8000-000000000002', tipo_documento: 'estudio_mercado', entidad: 'Gobierno Regional Huánuco', region: 'Huánuco', anio: 2023, nivel: 'Primaria', unidad: 'pieza', material: 'metal-madera',
     monto: 267.5, monto_hasta: null, incluye_igv: true, cotizaciones: { valores: [370, 250, 270, 180], n: 4, promedio: 267.5 }, composicion: [], confianza: 'media',
     notas: 'Cuadro comparativo y estructura preliminar de costos (mar. 2023), «Reposición de mobiliario de aulas del nivel primario … 11 provincias de la región Huánuco»; sin CUI. Promedio de 4 cotizaciones con IGV y transporte incluido (ene. 2023): Mobiliarios Yi 370 (polipropileno), Carpintería Garay 250 (madera tornillo), Mobi Edu 270 (polipropileno), Maderera Burgos 180 (madera). 12,310 piezas × 267.50 = S/ 3,292,925.00 con IGV; con expediente 1.19 %, supervisión 0.9 % y liquidación 0.8 %: S/ 3,388,090.53. No comparable hasta indicar la composición del kit.' },
-  { id: 'c0a7a10e-0000-4000-8000-000000000003', tipo_documento: 'por_confirmar', entidad: null, region: 'Huánuco', anio: 2025, nivel: 'por_confirmar', unidad: 'kit', material: 'metal-madera', monto: 455, monto_hasta: 480, incluye_igv: null, cotizaciones: null, composicion: [], confianza: 'media' },
+  { id: 'c0a7a10e-0000-4000-8000-000000000003', tipo_documento: 'por_confirmar', cui: '2586831', entidad: 'Gobierno Regional Huánuco', region: 'Huánuco', anio: 2025, nivel: 'Primaria', unidad: 'kit', material: 'metal-madera', monto: 455, monto_hasta: 480, incluye_igv: null, cotizaciones: null, composicion: [], confianza: 'media', notas: 'Rango 455-480 (se compara por su punto medio, 467.50); confirmar si incluye IGV.' },
   // San Juan: precio unitario real de la memoria de costos y presupuestos (migración 032; antes, el estimado de la 031)
   { id: 'c0a7a10e-0000-4000-8000-000000000004', tipo_documento: '07-C', cui: '2711098', entidad: 'Gobierno Regional de La Libertad', region: 'La Libertad', anio: 2026, nivel: 'Secundaria', unidad: 'kit', material: 'metal-polipropileno',
     monto: 411.85, monto_hasta: null, incluye_igv: false, flete_transporte: 26.02, cotizaciones: { valores: [], n: 4, promedio: null }, composicion: [], confianza: 'alta',
     componentes: { ejecucion: 739373.42, doc_equivalente: 43144.10, sup_doc_equivalente: 41219.36, sup_ejecucion: 96178.51, total: 919915.39 },
     notas: 'Memoria de costos y presupuestos (dic. 2025): precio del bien sin flete, gastos generales, utilidad ni IGV; promedio de 1,045 kits mesa + silla (rojo 420, verde 420, marrón 205). Flete S/ 13.01 por pieza (S/ 26.02 por kit). Con flete por color: S/ 434.47 / 436.09 / 448.49. Con gastos generales 18.17 % y utilidad 10 %: S/ 561.23 sin IGV.' },
 
-  { id: 'c0a7a10e-0000-4000-8000-000000000005', tipo_documento: 'propio', entidad: null, region: null, anio: 2026, nivel: 'por_confirmar', unidad: 'kit', material: 'por_confirmar', monto: 850, monto_hasta: null, incluye_igv: false, cotizaciones: null, composicion: [], confianza: 'media' }
+  { id: 'c0a7a10e-0000-4000-8000-000000000005', tipo_documento: 'propio', entidad: null, region: null, anio: 2026, nivel: 'por_confirmar', unidad: 'kit', material: 'metal-polipropileno', monto: 850, monto_hasta: null, incluye_igv: false, cotizaciones: null, composicion: [], confianza: 'alta', notas: 'Excluir de estadísticos.' }
 ];
