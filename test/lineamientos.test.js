@@ -369,3 +369,32 @@ test('modelos de carta: opinión favorable por UGEL o por colegio, compromiso de
   assert.equal((of.match(/OFICIO N\.° PENDIENTE/g) || []).length, ugels.length);
   for (const t of [op, co, of]) assert.doesNotMatch(t, /Secundaria|secundaria|Inicial|inicial/);
 });
+
+test('cotizaciones: promedio sin IGV, mínimo 3 proveedores y alerta de viabilidad solo interna', async () => {
+  const { limpiarCotizaciones, cuadroCotizaciones, viabilidadCotizaciones } = await import('../src/selector-ioarr/cotizaciones.js');
+  const { limpiarOferta } = await import('../src/selector-ioarr/oferta.js');
+  const { generarExcelCostos } = await import('../src/selector-ioarr/excel-costos.js');
+  const c = limpiarCotizaciones({ P: [
+    { proveedor: 'Prov A', bien: 'mesa', precio_con_igv: 236, material: 'Madera', especificacion: 'Ficha técnica X', transporte_incluido: true, fecha: '2026-10-01' },
+    { proveedor: 'Prov B', bien: 'mesa', precio_sin_igv: 210, material: 'Metal y madera', especificacion: 'Ficha técnica X', fecha: '2026-10-02' },
+    { proveedor: 'Prov C', bien: 'mesa', precio_con_igv: 259.6, material: 'Madera', especificacion: '', fecha: '2026-10-03' },
+    { proveedor: 'Prov A', bien: 'silla', precio_con_igv: 118 }, { proveedor: '', bien: 'otro' }], X: [{ proveedor: 'Z' }] });
+  assert.deepEqual(Object.keys(c), ['P']); assert.equal(c.P.length, 4);   // la fila sin proveedor ni precio se descarta
+  const K = cuadroCotizaciones(c.P, 18), mesa = K.bienes.find(b => b.k === 'mesa'), silla = K.bienes.find(b => b.k === 'silla');
+  assert.deepEqual(mesa.filas.map(x => x.sin), [200, 210, 220]);   // con IGV ÷ 1.18
+  assert.equal(mesa.promedio_sin_igv, 210); assert.equal(mesa.promedio_con_igv, 247.8); assert.ok(mesa.suficiente);
+  assert.equal(silla.suficiente, false); assert.ok(K.avisos.some(a => /Silla del estudiante: 1 proveedor/.test(a.texto)));
+  assert.ok(K.avisos.some(a => /Prov C: falta la especificación técnica/.test(a.texto)));
+  // Viabilidad (uso interno): mesa referencial 210 < costo 180 + 20 + 15 + 5 = 220 → alerta
+  const V = viabilidadCotizaciones(K, limpiarOferta({ fabricacion: { mesa: 180, silla: 60 }, embalaje: 20, transporte_base: 15, instalacion: 5 }));
+  assert.equal(V.find(v => v.k === 'mesa').bajo, true); assert.match(V.find(v => v.k === 'mesa').texto, /ALERTA de viabilidad/);
+  assert.equal(V.find(v => v.k === 'silla').bajo, false);
+  // En el modelo: pendiente si faltan proveedores; el Excel de costos trae el cuadro y no el costo propio
+  const M = paquete({ cotizaciones: c }).M('P');
+  assert.ok(M.faltan.some(t => /menos de 3 proveedores en silla del estudiante/.test(t)));
+  const wb = new ExcelJS.Workbook(); await wb.xlsx.load(await generarExcelCostos(elegirIoarr(paquete().A, 'P').R, { fecha: '2026-10-25', cotizaciones: M.cotizaciones }));
+  const ws = wb.getWorksheet('Cotizaciones'), txt = []; ws.eachRow(r => txt.push(r.values.join('|')));
+  assert.ok(txt.some(t => t.includes('Prov B') && t.includes('210')));
+  assert.ok(txt.some(t => /Promedio \(precio referencial\)/.test(t)));
+  assert.ok(!txt.join(' ').match(/nuestro costo|viabilidad|fabricación/i));
+});

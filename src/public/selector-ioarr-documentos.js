@@ -116,6 +116,13 @@ function pintar() {
         ${R.b05.programacion.map(x => `<div class="campo"><label for="doc-05b-${x.k}">${x.rotulo} (${x.anio}), S/</label><input id="doc-05b-${x.k}" data-doc-05b="${x.k}" type="number" min="0" step="0.01" inputmode="decimal" value="${vista.datos.por_nivel?.[vista.nivel]?.montos_05b?.[x.k] ?? ''}" placeholder="${R.b05.propuesto ? x.monto : ''}"></div>`).join('')}
       </div>
       ${R.b05.cuadra ? '' : `<p class="sub aviso-linea">La programación suma ${soles(R.b05.suma)} y el monto de inversión es ${soles(R.total)}.</p>`}
+      <h3>Cuadro comparativo de cotizaciones${vista.nivel ? ` · ${esc(vista.nombre_ioarr)}` : ''}</h3>
+      <p class="sub">Al menos ${R.min_proveedores} proveedores por bien y nivel. Escribe el precio con IGV o sin IGV (el otro se calcula). El precio referencial es el promedio sin IGV; se aplica al precio unitario solo con el botón.</p>
+      <div class="tabla-wrap"><table class="tabla tabla-doc"><thead><tr><th>Bien</th><th>Proveedor</th><th>Con IGV (S/)</th><th>Sin IGV (S/)</th><th>Material</th><th>Especificación técnica</th><th>Transporte incluido</th><th>Fecha</th><th></th></tr></thead>
+      <tbody id="doc-cot">${(vista.datos.cotizaciones?.[vista.nivel] || []).map(filaCot).join('')}</tbody></table></div>
+      <button class="btn btn-ghost btn-sm" type="button" data-cot-add>Agregar cotización</button>
+      ${R.cotizaciones.bienes.length ? `<div class="tabla-wrap"><table class="tabla"><thead><tr><th>Bien</th><th class="num">Proveedores</th><th class="num">Promedio sin IGV</th><th class="num">Promedio con IGV</th><th></th></tr></thead><tbody>${R.cotizaciones.bienes.map(b => `<tr><td>${esc(b.nombre)}</td><td class="num">${b.proveedores}${b.suficiente ? '' : ' <span class="chip-est pend">faltan</span>'}</td><td class="num">${soles(b.promedio_sin_igv)}</td><td class="num">${soles(b.promedio_con_igv)}</td><td>${b.k !== 'kit' && b.promedio_sin_igv != null ? `<button class="x" type="button" data-cot-usar="${b.k}" data-cot-precio="${b.promedio_sin_igv}">Usar como precio</button>` : b.k === 'kit' ? '<span class="sub">El kit se cotiza junto: carga mesa y silla por separado para usarlo como precio.</span>' : ''}</td></tr>`).join('')}</tbody></table></div>` : ''}
+      ${R.cotizaciones.avisos.length ? `<ul class="pendientes">${R.cotizaciones.avisos.map(a => `<li>${esc(a.texto)}</li>`).join('')}</ul>` : ''}
       <h3>Unidades productoras</h3>
       <div class="form-grid">
         ${campo('up_por', 'Listar las UP por', { tipo: 'select', opciones: [['local', 'Código de local (solo los locales con bienes a reponer)'], ['modular', 'Código modular (todos los servicios, aunque el local no reponga)']], ayuda: `${R.ups} UP en el 07-C · ${R.locales_con_bienes} locales con bienes a reponer.` })}
@@ -183,12 +190,23 @@ function pintar() {
     </form>`;
 }
 
+// Fila editable del cuadro comparativo de cotizaciones
+function filaCot(c = {}) {
+  const opt = Object.entries(vista.bienes_cotizacion).map(([k, t]) => `<option value="${k}" ${(c.bien || 'kit') === k ? 'selected' : ''}>${esc(t)}</option>`).join('');
+  return `<tr><td><select data-cot="bien" aria-label="Bien">${opt}</select></td><td><input data-cot="proveedor" maxlength="150" value="${esc(c.proveedor)}" aria-label="Proveedor"></td>
+    <td><input data-cot="precio_con_igv" type="number" min="0" step="0.01" value="${c.precio_con_igv ?? ''}" aria-label="Precio con IGV"></td><td><input data-cot="precio_sin_igv" type="number" min="0" step="0.01" value="${c.precio_sin_igv ?? ''}" aria-label="Precio sin IGV"></td>
+    <td><input data-cot="material" maxlength="150" value="${esc(c.material)}" aria-label="Material"></td><td><input data-cot="especificacion" maxlength="500" value="${esc(c.especificacion)}" aria-label="Especificación técnica"></td>
+    <td><label class="chk"><input data-cot="transporte_incluido" type="checkbox" ${c.transporte_incluido ? 'checked' : ''}> Sí</label></td><td><input data-cot="fecha" type="date" value="${esc(c.fecha || '')}" aria-label="Fecha"></td>
+    <td><button class="x btn-peligro" type="button" data-cot-del>Quitar</button></td></tr>`;
+}
+
 // ─── Guardado ────────────────────────────────────────────────────────────────
 function leer() {
   const datos = { antiguedad: {}, vida_util_estimada: {}, estado_actual: {}, mant_actual: {}, vida_util: {}, mant_nuevo: {} };
   ctx.el.querySelectorAll('[data-doc]').forEach(e => { datos[e.dataset.doc] = e.value; });
   ctx.el.querySelectorAll('[data-doc-t]').forEach(e => { if (e.value !== '') datos[e.dataset.docT][e.dataset.k] = e.value; });
   datos.fuentes_vida_util = [...ctx.el.querySelectorAll('[data-doc-fuente]:checked')].map(e => e.dataset.docFuente);
+  if (vista.nivel) datos.cotizaciones = { ...(vista.datos.cotizaciones || {}), [vista.nivel]: [...ctx.el.querySelectorAll('#doc-cot tr')].map(tr => Object.fromEntries([...tr.querySelectorAll('[data-cot]')].map(e => [e.dataset.cot, e.type === 'checkbox' ? e.checked : e.value]))) };
   datos.grupo_funcional = { ...(vista.datos.grupo_funcional || {}) };
   ctx.el.querySelectorAll('[data-doc-gf]').forEach(e => { if (e.value.trim()) datos.grupo_funcional[e.dataset.docGf] = e.value.trim(); else delete datos.grupo_funcional[e.dataset.docGf]; });
   if (vista.nivel) {
@@ -236,6 +254,17 @@ async function bajar(btn) {
   finally { btn.disabled = false; btn.textContent = txt; }
 }
 
+// Promedio de las cotizaciones como precio unitario: mesa y silla en todas las tallas del nivel; los demás, su tipo
+async function usarPrecio(bien, precio) {
+  const tallas = { I: ['i'], P: ['p12', 'p34', 'p56'], S: ['s12', 's34', 's5'], E: ['e'] }[vista.nivel] || [];
+  const precios = ['mesa', 'silla'].includes(bien) ? Object.fromEntries(tallas.map(t => [`${bien}_${t}`, precio])) : { [bien]: precio };
+  try {
+    await ctx.api(`/proyectos/${ctx.proyecto.id}/costos`, { method: 'PATCH', body: { estructura: { precios } } });
+    ctx.toast(`Precio de ${vista.bienes_cotizacion[bien].toLowerCase()}: S/ ${NS.format(precio)} sin IGV${['mesa', 'silla'].includes(bien) ? ` (tallas de ${vista.nombre_ioarr})` : ''}.`);
+    renderDocumentos(ctx);
+  } catch (e) { ctx.toast('No se pudo aplicar: ' + e.message); }
+}
+
 // Eventos delegados sobre el contenedor (se enganchan una vez)
 export function enlazarDocumentos(el) {
   const programar = (ms) => { clearTimeout(tGuardar); estado('Cambios sin guardar', 'pend'); tGuardar = setTimeout(() => { tGuardar = null; guardar(); }, ms); };
@@ -247,6 +276,9 @@ export function enlazarDocumentos(el) {
   el.addEventListener('submit', e => { if (e.target.id === 'doc-form') e.preventDefault(); });
   el.addEventListener('click', e => {
     const b = e.target.closest('[data-doc-bajar]'); if (b) bajar(b);
+    if (e.target.closest('[data-cot-add]')) { document.getElementById('doc-cot').insertAdjacentHTML('beforeend', filaCot()); return; }
+    const cd = e.target.closest('[data-cot-del]'); if (cd) { cd.closest('tr').remove(); programar(50); return; }
+    const cu = e.target.closest('[data-cot-usar]'); if (cu) { usarPrecio(cu.dataset.cotUsar, Number(cu.dataset.cotPrecio)); return; }
     const z = e.target.closest('[data-doc-zip]');
     const zc = { ...ctx, borrador: modoBorrador };
     if (z && ctx) { if (tGuardar) { clearTimeout(tGuardar); tGuardar = null; guardar().then(() => bajarZip(zc, z)); } else bajarZip(zc, z); }

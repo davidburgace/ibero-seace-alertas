@@ -20,6 +20,7 @@
 import { ITEMS, TALLAS, NIVN, textoEscenario, textoPct, textoOrigenPct, ROTULO_UMBRAL, DEF as DEF_CRIT } from './calculo.js';
 import { TIPOS, LIMITE_UIT, NOTA_FALTANTE, REGISTRO_MASIVA } from './costos.js';
 import { FUENTES_VIDA_UTIL, limpiarColegios, colegioDe, checklistColegio } from './lineamientos.js';
+import { limpiarCotizaciones } from './cotizaciones.js';
 
 // Nota del material, dentro de la descripción técnica
 export const NOTA_MATERIAL = 'El material debe respetar la ficha técnica aplicable; la entidad convocante puede exigir madera.';
@@ -135,6 +136,8 @@ export function limpiarDatosDoc(b = {}) {
     patrimonial_cargo: texto(b.patrimonial_cargo, 200),
     // Por colegio: checklist de inventario y baja… (lineamientos.js); se guarda con PUT /colegios/:cod
     colegios: limpiarColegios(b.colegios),
+    // Cuadro comparativo de cotizaciones por nivel (cotizaciones.js)
+    cotizaciones: limpiarCotizaciones(b.cotizaciones),
     // Cuadro de estado situacional: advertencias revisadas, con su explicación ({ clave: { nota, fecha } })
     situacional: { revisiones: Object.fromEntries(Object.entries(b.situacional?.revisiones || {}).slice(0, 200)
       .map(([k, v]) => [String(k).slice(0, 300), { nota: texto(v?.nota, 500), fecha: /^\d{4}-\d{2}-\d{2}$/.test(v?.fecha || '') ? v.fecha : null }]).filter(([, v]) => v.nota)) },

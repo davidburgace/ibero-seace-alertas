@@ -8,6 +8,7 @@
 // ============================================================================
 
 import { calc, ESCENARIOS, textoPct, estadoSituacional } from './calculo.js';
+import { cuadroCotizaciones, MIN_PROVEEDORES } from './cotizaciones.js';
 import { costear } from './costos.js';
 import { porNivel, validarNiveles, inventarioNivel, inventarioUna, sinNivel, nivelesDeLocal } from './niveles.js';
 import { separarLocales, estadoDe, avisosDuplicidad } from './duplicidad.js';
@@ -153,7 +154,11 @@ export function modeloIoarr(A, x, datos, p, fecha) {
       ugel: u.ugel, metas: Object.fromEntries(M.F.metas.map(m => [m.k, m.k === 'kit' ? u.kits * 2 : u.rep[tIdx[m.k]] || 0])) })),
     consolidado: estadoSituacional(x.D, x.C, x.list, conProyecto)
   };
-  return Object.assign(M, { paquete, nivel: x.nivel, nombreIoarr: x.nombre, fichaActivos: ficha, vidaUtil: vida, completo: !M.faltan.length,
+  // Cuadro comparativo de cotizaciones del nivel (sustento de los precios)
+  const cotizaciones = cuadroCotizaciones(datos.cotizaciones?.[x.nivel] || [], M.estructura?.params?.igv ?? 18);
+  if (!cotizaciones.bienes.length) M.faltan.push(`Cuadro comparativo de cotizaciones: al menos ${MIN_PROVEEDORES} proveedores por bien para el nivel (Documentos).`);
+  else if (cotizaciones.bienes.some(b => !b.suficiente)) M.faltan.push(`Cuadro comparativo de cotizaciones: menos de ${MIN_PROVEEDORES} proveedores en ${cotizaciones.bienes.filter(b => !b.suficiente).map(b => b.nombre.toLowerCase()).join(', ')}.`);
+  return Object.assign(M, { cotizaciones, paquete, nivel: x.nivel, nombreIoarr: x.nombre, fichaActivos: ficha, vidaUtil: vida, completo: !M.faltan.length,
     borrador: !A.final, bloqueados: x.bloqueados || [], checklist, riesgos, capacidad, uso, sinUso: x.sinUso || [], anioRef: A.anioRef ?? M.anioRef });
 }
 

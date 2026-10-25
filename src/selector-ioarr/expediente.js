@@ -80,6 +80,7 @@ import { calc, limpiarParams, CRIT, ITEMS, textoEscenario } from './calculo.js';
 const regDato = R => ({ n: R?.regularCampo?.completos || 0, de: R?.locales?.length || 0 });
 import { limpiarEstructura, preciosEfectivos, limpiarInventario, limpiarAdquisicion, censoLocal, FUENTES_PRECIO, CLAVES_PRECIO, PRECIOS_REFERENCIA, LEYENDA_REFERENCIA, NOTA_PORCENTAJES } from './costos.js';
 import { limpiarOferta, calcularOferta } from './oferta.js';
+import { cuadroCotizaciones, viabilidadCotizaciones, BIENES_COTIZACION, MIN_PROVEEDORES } from './cotizaciones.js';
 import { generarExcelCostos } from './excel-costos.js';
 import { armarModelo, limpiarDatosDoc, ESTADOS_ACTIVO, MODALIDADES, FUENTES_FIN, CODIGOS_FUNCIONALES } from './documentos.js';
 import { generar07C, generarMemoria, generarVerificacion, generarVidaUtil, generar05B, generarSustento, generarCartas, TIPOS_CARTA } from './word.js';
@@ -350,7 +351,7 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
       archivos: archivos.filter(a => a.cod_local === x.cod_local).map(sinRuta) }]));
     const comun = { precios, estructura, uit: { anio: anioUit, valor: uit?.valor ?? null } };
     const K = calcularPaquete({ D, P, codigos, dup: dup.mapa, inv, comun, datosDoc, final, modo: modoDe(p), anioRef: anioLima() });
-    return { ...K, detalle, efectivos, estructura, factores, anioUit, uit, sinMigracionEst: !!fila && !('estructura' in fila) };
+    return { ...K, datosDoc, detalle, efectivos, estructura, factores, anioUit, uit, sinMigracionEst: !!fila && !('estructura' in fila) };
   }
   // La IOARR pedida (?nivel=P); sin nivel o con una sola IOARR, la primera
   const elegir = elegirIoarr;
@@ -405,8 +406,11 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     if (error) { if (faltaMigracion(error)) return { datos: limpiarOferta({}), sinMigracion: true }; throw error; }
     return { datos: limpiarOferta(data?.datos || {}), sinMigracion: false };
   }
+  // Viabilidad (uso interno): precio referencial de las cotizaciones de cada nivel frente a nuestro costo
+  const viabilidadDe = (A, o) => A.ioarrs.filter(x => x.nivel).map(x => ({ nivel: x.nivel, nombre: x.nombre,
+    items: viabilidadCotizaciones(cuadroCotizaciones(A.datosDoc?.cotizaciones?.[x.nivel] || [], A.estructura?.igv ?? 18), o.datos) })).filter(v => v.items.length);
   const vistaOferta = (A, o) => ({ datos: o.datos, sin_migracion: o.sinMigracion, escenario: textoEscenario(A.P, regDato(A.Runa)),
-    ...calcularOferta(A.Runa, o.datos, { factores: A.factores }) });
+    ...calcularOferta(A.Runa, o.datos, { factores: A.factores }), viabilidad: viabilidadDe(A, o) });
   api.get('/proyectos/:id/oferta', responder(async (req, res) => {
     const p = await proyecto(req);
     const [A, o] = await Promise.all([armar(p), leerOferta(p)]);
@@ -901,6 +905,7 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
       tipos: M.E.activos.map(a => ({ k: a.k, nombre: a.nombre, cantidad: a.cantidad, descripcion: a.descripcion, antiguedad_inventario: a.antiguedad_inventario })),
       alineamiento: { servicio: M.A.servicio, tipologia: M.A.tipologia, indicadores: M.A.indicadores, cadena: `${M.A.funcion} / ${M.A.division} / ${M.A.grupos.join('; ')}`, contribucion: M.A.contribucion },
       b05: M.B05,
+      cotizaciones: M.cotizaciones, bienes_cotizacion: BIENES_COTIZACION, min_proveedores: MIN_PROVEEDORES,
       niveles_k: M.nivel ? [M.nivel] : [], nombres_nivel: NOMBRE_NIVEL, grupos_conocidos: CODIGOS_FUNCIONALES.grupo,
       inicio: M.F.inicio, fin: M.F.fin, condiciones: M.E.condiciones
     },
@@ -1028,7 +1033,8 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     const fecha = hoyLima();
     const buffer = await generarExcelCostos(x.R, {
       proyecto: x.nivel ? `${p.nombre} — IOARR ${x.nombre}` : p.nombre, region: p.region, fecha, ioarr: p.ioarr, fuente: (await leerIndice()).fuente,
-      criterios: textoCriterios(A.P), escenario: textoEscenario(A.P, regDato(x.R)), precios: A.detalle, efectivos: A.efectivos, inventario: x.inv
+      criterios: textoCriterios(A.P), escenario: textoEscenario(A.P, regDato(x.R)), precios: A.detalle, efectivos: A.efectivos, inventario: x.inv,
+      cotizaciones: cuadroCotizaciones(A.datosDoc?.cotizaciones?.[x.nivel] || [], A.estructura?.igv ?? 18)
     });
     const archivo = `Costos_IOARR_${slug(p.nombre)}${x.nivel ? '_' + slug(x.nombre) : ''}_${fecha}.xlsx`;
     res.set({
@@ -1144,7 +1150,7 @@ export async function piezasExpediente({ A, datos, lista, meta, nombre }) {
     const fuera = x.nivel ? (A.excluidos || []).filter(i => x.D.locSvc[i].length) : (A.excluidos || []);
     const [f07c, memoria, verificacion, costos, { buffer: seleccion }, anexos, vida, f05b, upActivos, sustento, cOpinion, cCompromiso, cOficio] = await Promise.all([
       generar07C(M), generarMemoria(M), generarVerificacion(M),
-      generarExcelCostos(x.R, { ...m, criterios: textoCriterios(A.P), escenario: textoEscenario(A.P, regDato(x.R)), precios: A.detalle, efectivos: A.efectivos, inventario: x.inv }),
+      generarExcelCostos(x.R, { ...m, criterios: textoCriterios(A.P), escenario: textoEscenario(A.P, regDato(x.R)), precios: A.detalle, efectivos: A.efectivos, inventario: x.inv, cotizaciones: M.cotizaciones }),
       generarExcel(x.D, x.C, A.P, x.list, { ...m, duplicidad: A.dup, excluidos: fuera, revisiones: datos.situacional?.revisiones }),
       generarExcelLineamientos(anexosDe(M), { ...m, nombreIoarr: M.nombreIoarr }),
       generarVidaUtil(M, M.vidaUtil),

@@ -53,6 +53,8 @@ function pintar() {
       <div class="kpi"><div class="v">${T.por_kit ? soles(T.por_kit.margen) : '—'}</div><div class="l">margen por kit · ${ent(T.kits)} kits${T.por_kit ? ` · costo ${soles(T.por_kit.costo)} / precio ${soles(T.por_kit.referencia)}` : ''}</div></div>
     </div>
     <p class="sub">${esc(vista.nota)} Margen = precio de referencia − tu costo.</p>
+    ${(vista.viabilidad || []).length ? `<div class="panel"><div class="panel-cab"><h3>Viabilidad frente a las cotizaciones</h3><span class="sub">Precio referencial (promedio sin IGV del cuadro comparativo) frente a tu costo por unidad (fabricación + embalaje + transporte + instalación; el kit son 2 piezas)</span></div>
+      <div class="avisos pad">${vista.viabilidad.flatMap(v => v.items.map(i => `<div class="aviso${i.bajo ? ' alerta' : ''}" role="${i.bajo ? 'alert' : 'note'}"><b>IOARR ${esc(v.nombre)}:</b> ${esc(i.texto)}</div>`)).join('')}</div></div>` : ''}
     ${vista.avisos.length ? `<div class="avisos">${vista.avisos.map(a => `<div class="aviso${a.alerta ? ' alerta' : ''}" role="${a.alerta ? 'alert' : 'note'}">${esc(a.texto)}</div>`).join('')}</div>` : ''}
     <form class="panel doc-form" id="of-form" autocomplete="off">
       <div class="panel-cab"><h3>Tus costos (sin IGV)</h3><span class="guardado" id="of-guardado"></span></div>

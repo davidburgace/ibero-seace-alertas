@@ -374,5 +374,29 @@ export async function generarExcelCostos(R, meta) {
     }
   }
 
+  // ── Cuadro comparativo de cotizaciones (sustento de los precios) ────────────
+  if (meta.cotizaciones?.bienes?.length) {
+    const ws = wb.addWorksheet('Cotizaciones', { views: [{ state: 'frozen', ySplit: 3 }] });
+    ws.columns = [30, 30, 15, 15, 22, 46, 12, 12].map(width => ({ width }));
+    ws.getCell('A1').value = 'Cuadro comparativo de cotizaciones'; ws.getCell('A1').font = { bold: true, size: 14 };
+    ws.getCell('A2').value = 'Precio sin IGV: el cotizado o, si solo hay precio con IGV, con IGV ÷ (1 + IGV). Precio referencial: promedio sin IGV. Se piden al menos 3 proveedores por nivel.';
+    ws.getCell('A2').font = { italic: true, color: { argb: 'FF5C6270' } };
+    let r = 3;
+    for (const b of meta.cotizaciones.bienes) {
+      ws.getRow(r).values = [b.nombre, 'Proveedor', 'Precio con IGV (S/)', 'Precio sin IGV (S/)', 'Material', 'Especificación técnica', 'Transporte incluido', 'Fecha']; cabecera(ws, r, 8); r++;
+      const desde = r;
+      for (const x of b.filas) {
+        ws.getRow(r).values = ['', x.proveedor, x.con ?? '', x.sin ?? '', x.material, x.especificacion, x.transporte_incluido ? 'Sí' : 'No', fechaPe(x.fecha)];
+        for (const c of [3, 4]) ws.getCell(r, c).numFmt = SOLES;
+        if (!x.fecha || !x.especificacion) for (const c of [6, 8]) if (!ws.getCell(r, c).value) resaltar(ws.getCell(r, c), AMARILLO);
+        r++;
+      }
+      ws.getRow(r).values = ['', `Promedio (precio referencial)${b.suficiente ? '' : ' · PENDIENTE: menos de 3 proveedores'}`, f(`IFERROR(AVERAGE(C${desde}:C${r - 1}),0)`, b.promedio_con_igv ?? 0), f(`IFERROR(AVERAGE(D${desde}:D${r - 1}),0)`, b.promedio_sin_igv ?? 0)];
+      ws.getRow(r).font = { bold: true }; for (const c of [3, 4]) ws.getCell(r, c).numFmt = SOLES;
+      if (!b.suficiente) resaltar(ws.getCell(r, 2), AMARILLO);
+      r += 2;
+    }
+  }
+
   return Buffer.from(await wb.xlsx.writeBuffer());
 }
