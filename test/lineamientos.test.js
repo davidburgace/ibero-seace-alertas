@@ -102,3 +102,56 @@ test('vida útil: el Regular solo se sustenta con antigüedad o daño documentad
   const uno = await textoDocx(await generarVidaUtil(M, V, l.cod));
   assert.match(uno, new RegExp(`código de local ${l.cod}`)); assert.match(uno, /Lotes del local/); assert.match(uno, /Daño documentado/);
 });
+
+// ─── Paquete completo (el mismo armado que la API, sin Supabase) ────────────
+import { calcularPaquete, modeloIoarr, elegirIoarr } from '../src/selector-ioarr/paquete.js';
+import { limpiarDatosDoc } from '../src/selector-ioarr/documentos.js';
+import { generar07C } from '../src/selector-ioarr/word.js';
+import { checklistColegio, limpiarColegio, AVISO_BORRADOR } from '../src/selector-ioarr/lineamientos.js';
+import { preciosEfectivos } from '../src/selector-ioarr/costos.js';
+import { generarExcelLineamientos as excelL } from '../src/selector-ioarr/excel-lineamientos.js';
+export const CHECK_OK = { inventario: { registrado: 'si', contabilidad: 'si', baja: 'si', doc_tipo: 'resolucion', doc_numero: 'RD 001-2026', doc_fecha: '2026-09-15' } };
+const CODIGOS = LISTA.map(i => D.locs[i][0]);
+export function paquete(datos = {}, { final = false, P = DEF } = {}) {
+  const datosDoc = limpiarDatosDoc(datos);
+  const K = calcularPaquete({ D, P, codigos: CODIGOS, comun: BASE, datosDoc, final });
+  const A = { ...K, detalle: {}, efectivos: preciosEfectivos({}, {}) };
+  return { A, datosDoc, M: nivel => modeloIoarr(A, elegirIoarr(A, nivel), datosDoc, { nombre: 'Prueba', region: 'Moquegua' }, '2026-10-25') };
+}
+
+test('checklist de inventario y baja: valida, y sin completar no entra al 07-C final', () => {
+  const c = limpiarColegio({ inventario: { registrado: 'si', contabilidad: 'quizá', doc_tipo: 'otro', doc_fecha: '2026-13-01' }, raro: 1 });
+  assert.deepEqual(c.inventario, { registrado: 'si', contabilidad: '', baja: '', doc_tipo: '', doc_numero: '', doc_fecha: null });
+  assert.equal(checklistColegio(c).completo, false);
+  assert.deepEqual(checklistColegio(c).faltan, ['registro en la contabilidad', 'trámite de baja iniciado', 'documento de respaldo (acta, resolución o compromiso)', 'fecha del documento de respaldo']);
+  assert.ok(checklistColegio(limpiarColegio(CHECK_OK)).completo);
+  // El sí del proyecto vale por defecto para el registro en el inventario
+  assert.ok(!checklistColegio(limpiarColegio({ inventario: { ...CHECK_OK.inventario, registrado: '' } })).completo);
+  assert.ok(checklistColegio(limpiarColegio({ inventario: { ...CHECK_OK.inventario, registrado: '' } }), { registrado: 'si' }).completo);
+  assert.match(checklistColegio(limpiarColegio({ inventario: { ...CHECK_OK.inventario, registrado: 'no' } })).faltan[0], /no está registrado/);
+});
+
+test('07-C final: solo los colegios con el checklist completo; el borrador trae todos con aviso', async () => {
+  const ok = CODIGOS.slice(0, 5);
+  const datos = { colegios: Object.fromEntries(ok.map(c => [c, CHECK_OK])) };
+  const B = paquete(datos), F = paquete(datos, { final: true });
+  assert.equal(B.A.list.length, LISTA.length); assert.equal(F.A.list.length, 5);
+  assert.equal(B.A.bloqueados.length, LISTA.length - 5);
+  // Los niveles se mantienen aunque queden vacíos en el final
+  assert.deepEqual(F.A.ioarrs.map(x => x.nivel), B.A.ioarrs.map(x => x.nivel));
+  const xB = elegirIoarr(B.A, 'P'), xF = elegirIoarr(F.A, 'P');
+  assert.ok(xB.R.avisos.some(a => a.tipo === 'checklist' && /no entrarán? al Formato 07-C final/.test(a.texto)));
+  assert.ok(xF.R.avisos.some(a => a.tipo === 'checklist' && /No entran? al Formato 07-C/.test(a.texto)));
+  assert.ok(xF.R.locales.every(l => ok.includes(l.cod)));
+  assert.ok(xF.R.totales.locales < xB.R.totales.locales);
+  // Word: el borrador lo dice arriba; el final lista los que no entran
+  const tB = await textoDocx(await generar07C(B.M('P'))), tF = await textoDocx(await generar07C(F.M('P')));
+  assert.ok(tB.includes(AVISO_BORRADOR)); assert.ok(!tF.includes(AVISO_BORRADOR));
+  assert.match(tF, /No se incluyen (el colegio|los \d+ colegios) con el checklist de inventario y baja incompleto/);
+  // Excel de anexos: hoja con el checklist, también de los bloqueados
+  const MF = F.M('P'), wb = new ExcelJS.Workbook(); await wb.xlsx.load(await excelL({ ficha: MF.fichaActivos, checklist: MF.checklist }));
+  const ws = wb.getWorksheet('Inventario y baja'), vals = [];
+  ws.eachRow((r, n) => { if (n > 4) vals.push([r.getCell(1).value, r.getCell(9).value]); });
+  assert.equal(vals.length, xB.list.length);
+  assert.ok(vals.some(([, e]) => e === 'Entra') && vals.some(([, e]) => /Bloqueado/.test(e)));
+});

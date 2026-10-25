@@ -12,7 +12,7 @@ import {
   Document, Packer, Paragraph, TextRun, Table, TableRow, TableCell, WidthType, AlignmentType,
   HeadingLevel, ShadingType, Header, Footer, PageNumber, BorderStyle, PageOrientation
 } from 'docx';
-import { FUENTES_VIDA_UTIL } from './lineamientos.js';
+import { FUENTES_VIDA_UTIL, AVISO_BORRADOR } from './lineamientos.js';
 
 const AZUL = '3A63E0', GRIS = 'EEF0F4', AMARILLO = 'FFF3B0', TEXTO = '16181D', TENUE = '5C6270';
 const FUENTE = 'Calibri';
@@ -88,7 +88,12 @@ function documento(M, nombre, children, { horizontal } = {}) {
     }]
   });
 }
+// Colegios con el checklist de inventario y baja incompleto: en el borrador van con aviso; en el final, fuera
+const avisoChecklist = M => !M.bloqueados?.length ? [] : M.borrador
+  ? [p(`${AVISO_BORRADOR} Colegios con el checklist incompleto (${M.bloqueados.length}): ${M.bloqueados.slice(0, 30).map(b => b.cod).join(', ')}${M.bloqueados.length > 30 ? '…' : ''}.`, { bold: true, size: 18, highlight: 'yellow', plano: true })]
+  : [nota(`No se incluyen ${M.bloqueados.length === 1 ? 'el colegio' : 'los ' + M.bloqueados.length + ' colegios'} con el checklist de inventario y baja incompleto (registro en inventario y contabilidad, trámite de baja y documento de respaldo): ${M.bloqueados.slice(0, 30).map(b => b.cod).join(', ')}${M.bloqueados.length > 30 ? '…' : ''}.`)];
 const aviso = M => [
+  ...avisoChecklist(M),
   p('BORRADOR DE TRABAJO. No reemplaza el registro en el aplicativo del Banco de Inversiones del MEF: sirve para preparar, revisar y sustentar lo que se va a registrar. Lo marcado como «PENDIENTE» (en amarillo) falta completar.', { italics: true, color: TENUE, size: 17, plano: true }),
   // El escenario de cantidad usado, en una línea
   p(M.escenarioTexto + (M.kit ? ' Mesas y sillas presentadas como kit (mesa + silla del estudiante).' : ''), { bold: true, size: 18, plano: true }),
@@ -429,6 +434,7 @@ export async function generarVidaUtil(M, V, cod = null) {
   const uno = cols.length === 1 && cod;
   c.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 60 }, children: [run('INFORME TÉCNICO DE VIDA ÚTIL DEL MOBILIARIO ESCOLAR A REPONER', { bold: true, size: 26 })] }));
   c.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 200 }, children: [run(uno ? `${cols[0].colegio} (código de local ${cols[0].cod})` : `${M.nombre}${V.nombreIoarr ? ' — IOARR ' + V.nombreIoarr : ''}`, { bold: true, size: 20 })] }));
+  c.push(...avisoChecklist(M));
   c.push(p('BORRADOR DE TRABAJO para revisión y firma de la oficina de control patrimonial. Lo marcado «PENDIENTE» falta completar.', { italics: true, color: TENUE, size: 17, plano: true }));
   if (V.faltan.length) { c.push(p('Datos pendientes:', { bold: true, size: 18 })); V.faltan.forEach(x => c.push(vinieta(x))); }
   c.push(titulo('1. Objeto'));

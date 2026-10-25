@@ -3,11 +3,12 @@
 //
 // Un libro por IOARR (nivel). Hojas:
 //   Ficha de activos   estructura preliminar de costos: un lote por aula, bien y estado a reponer
+//   Inventario y baja  checklist por colegio; sin completar, el colegio no entra al 07-C final
 // Las filas «pendiente de verificación en campo» van en amarillo. La oferta (uso interno) no entra.
 // ============================================================================
 
 import ExcelJS from 'exceljs';
-import { PENDIENTE_CAMPO } from './lineamientos.js';
+import { PENDIENTE_CAMPO, DOCS_BAJA, SI_NO } from './lineamientos.js';
 
 const AZUL = 'FF3A63E0', AMARILLO = 'FFFFF3B0', GRIS = 'FFF1F3F7';
 const SOLES = '"S/ "#,##0.00', ENTERO = '#,##0';
@@ -63,8 +64,28 @@ function hojaFicha(wb, F, meta) {
   }
 }
 
+// ─── Checklist de inventario y baja ──────────────────────────────────────────
+function hojaChecklist(wb, filas, borrador) {
+  const ws = wb.addWorksheet('Inventario y baja', { views: [{ state: 'frozen', ySplit: 4 }] });
+  const cols = [['Código de local', 11], ['Institución educativa', 36], ['Registrado en el inventario', 13], ['Registrado en la contabilidad', 13], ['Trámite de baja iniciado', 12],
+    ['Documento de respaldo', 14], ['N.° del documento', 20], ['Fecha del documento', 12], ['Formato 07-C', 22], ['Falta', 60]];
+  ws.columns = cols.map(([, width]) => ({ width }));
+  titulo(ws, 'Checklist de inventario y baja por colegio (Lineamientos IOARR 2.4.C.e y 2.4.C.f)',
+    `Un colegio sin el checklist completo no entra al Formato 07-C final${borrador ? '; este libro es un BORRADOR con todos los colegios' : ''}.`);
+  ws.getRow(4).values = cols.map(([t]) => t); cabecera(ws, 4, cols.length);
+  filas.forEach((f, j) => {
+    const r = ws.getRow(5 + j);
+    r.values = [f.cod, f.nombre, SI_NO[f.registrado] || '', SI_NO[f.contabilidad] || '', SI_NO[f.baja] || '', DOCS_BAJA[f.doc_tipo] || '', f.doc_numero || '',
+      f.doc_fecha ? f.doc_fecha.split('-').reverse().join('/') : '', f.completo ? 'Entra' : 'Bloqueado: no entra al final', f.faltan.join('; ')];
+    if (!f.completo) for (const c of [9, 10]) r.getCell(c).fill = relleno(AMARILLO);
+    for (const [c, v] of [[3, f.registrado], [4, f.contabilidad], [5, f.baja], [6, f.doc_tipo], [8, f.doc_fecha]]) if (!v || v === 'no') r.getCell(c).fill = relleno(AMARILLO);
+    r.getCell(10).alignment = { wrapText: true, vertical: 'top' };
+  });
+  ws.autoFilter = { from: { row: 4, column: 1 }, to: { row: 4, column: cols.length } };
+}
+
 /**
- * @param {object} L  { ficha: fichaActivos() }
+ * @param {object} L  { ficha: fichaActivos(), checklist: [filas], borrador }
  * @param {object} meta { proyecto, nombreIoarr, region, fecha }
  * @returns {Promise<Buffer>}
  */
@@ -73,5 +94,6 @@ export async function generarExcelLineamientos(L, meta = {}) {
   wb.creator = 'Radar Ibero — Expediente IOARR';
   wb.created = new Date();
   hojaFicha(wb, L.ficha, meta);
+  if (L.checklist) hojaChecklist(wb, L.checklist, L.borrador);
   return Buffer.from(await wb.xlsx.writeBuffer());
 }

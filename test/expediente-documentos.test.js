@@ -33,8 +33,11 @@ function chiclayo(uit = 5500, datos = {}) {
   const R = costear({ D, C, list, precios: PRECIOS, estructura: EST, uit: { anio: 2026, valor: uit }, inventario: inv });
   return { R, M: armarModelo({ R, D, list, proyecto: { nombre: 'Chiclayo', region: 'Lambayeque' }, datos: limpiarDatosDoc(datos), precios: DESC, inv, fecha: '2026-10-21' }) };
 }
+// Checklist de inventario y baja completo en cada colegio (datos de PRUEBA)
+const CHECK_OK = { inventario: { registrado: 'si', contabilidad: 'si', baja: 'si', doc_tipo: 'acta', doc_numero: 'Acta 1', doc_fecha: '2026-10-01' } };
 function mariscal(uit = 500, datos = COMPLETOS) {
   const D = region('moquegua'), C = calc(D, DEF), list = filtrar(D, C, { ...FILTRO_VACIO(), q: 'mariscal' });
+  if (datos === COMPLETOS) datos = { ...COMPLETOS, colegios: Object.fromEntries(list.map(i => [D.locs[i][0], CHECK_OK])) };
   const R = costear({ D, C, list, precios: PRECIOS, estructura: EST, uit: { anio: 2026, valor: uit } });
   return { R, M: armarModelo({ R, D, list, proyecto: { nombre: 'Mariscal', region: 'Moquegua' }, datos: limpiarDatosDoc(datos), precios: DESC, fecha: '2026-10-21' }) };
 }
@@ -61,7 +64,7 @@ test('Chiclayo 11124: IOARR individual, registro abreviado, el costo del 07-C cu
   cerca(M.F.subtotalActivos + M.F.expediente + M.F.supervision + M.F.liquidacion, R.totales.total, 'activos + documento equivalente + supervisión + liquidación');
   cerca(M.F.metas.reduce((a, m) => a + m.costo, 0), R.totales.cdIgv, 'las metas suman el costo directo + IGV');
   // Sin los datos del usuario, se listan como pendientes y no se inventan
-  for (const t of [/Institucionalidad/, /inicio y plazo/, /mantenimiento .*vida útil/, /inventario de la entidad/, /Modalidad de ejecución/, /Referencia técnica/]) assert.ok(M.faltan.some(x => t.test(x)), t);
+  for (const t of [/Institucionalidad/, /inicio y plazo/, /mantenimiento .*vida útil/, /Checklist de inventario y baja/, /Modalidad de ejecución/, /Referencia técnica/]) assert.ok(M.faltan.some(x => t.test(x)), t);
   assert.equal(M.F.cronograma, null);
   assert.equal(M.E.condiciones.find(c => /acta/.test(c.texto)).estado, 'cumple');
 });

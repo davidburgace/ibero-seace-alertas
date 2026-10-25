@@ -7,6 +7,7 @@ import { renderOferta, enlazarOferta } from '/selector-ioarr-oferta.js';
 import { renderDocumentos, enlazarDocumentos } from '/selector-ioarr-documentos.js';
 import { renderVerificacion, enlazarVerificacion } from '/selector-ioarr-verificacion.js';
 import { renderFichas, enlazarFichas } from '/selector-ioarr-fichas.js';
+import { renderColegios, enlazarColegios } from '/selector-ioarr-colegios.js';
 
 const NF = new Intl.NumberFormat('es-PE');
 const NS = new Intl.NumberFormat('es-PE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -21,7 +22,7 @@ let ctx = null;        // { el, proyecto, api, toast, guardarYa }
 let datos = null;      // respuesta de /costos
 let catalogo = null;   // precios del catálogo por tipo
 let pagLoc = 0, tGuardar = null, version = 0, filtroLoc = '';
-let vistaExp = 'costos';   // sub-pestaña: 'costos' | 'fichas' | 'docs' | 'verif' | 'oferta'
+let vistaExp = 'costos';   // sub-pestaña: 'costos' | 'colegios' | 'fichas' | 'docs' | 'verif' | 'oferta'
 let costosViejos = false;  // se importaron fichas: al volver a Costos se recalcula
 let nivelExp = null;       // IOARR (nivel) a la vista: 'I' | 'P' | 'S' | 'E'
 let proyectoExp = null;    // al cambiar de proyecto se vuelve a la primera IOARR
@@ -62,6 +63,7 @@ function pintar() {
     <div id="exp-ioarr"></div>
     <div class="subtabs" role="tablist" aria-label="Expediente">
       <button type="button" role="tab" data-exp-vista="costos" aria-selected="${vistaExp === 'costos'}">Costos</button>
+      <button type="button" role="tab" data-exp-vista="colegios" aria-selected="${vistaExp === 'colegios'}">Por colegio (Lineamientos)</button>
       <button type="button" role="tab" data-exp-vista="fichas" aria-selected="${vistaExp === 'fichas'}">Fichas de verificación</button>
       <button type="button" role="tab" data-exp-vista="docs" aria-selected="${vistaExp === 'docs'}">Documentos: Formato 07-C y memoria</button>
       <button type="button" role="tab" data-exp-vista="verif" aria-selected="${vistaExp === 'verif'}">Verificación</button>
@@ -69,6 +71,7 @@ function pintar() {
     </div>
     <div id="exp-v-oferta" ${vistaExp === 'oferta' ? '' : 'hidden'}></div>
     <div id="exp-v-fichas" ${vistaExp === 'fichas' ? '' : 'hidden'}></div>
+    <div id="exp-v-colegios" ${vistaExp === 'colegios' ? '' : 'hidden'}></div>
     <div id="exp-v-docs" ${vistaExp === 'docs' ? '' : 'hidden'}></div>
     <div id="exp-v-verif" ${vistaExp === 'verif' ? '' : 'hidden'}></div>
     <div id="exp-v-costos" ${vistaExp === 'costos' ? '' : 'hidden'}>
@@ -87,6 +90,7 @@ function pintar() {
     </div>`;
   pintarIoarr(); pintarEscenarios(); pintarPrecios(); pintarEstructura(); pintarResultados();
   if (vistaExp === 'fichas') abrirFichas();
+  if (vistaExp === 'colegios') abrirColegios();
   if (vistaExp === 'oferta') abrirOferta();
   if (vistaExp === 'docs') abrirDocumentos();
   if (vistaExp === 'verif') abrirVerificacion();
@@ -313,6 +317,10 @@ function abrirVerificacion() {
 function abrirOferta() {
   return renderOferta({ ...ctx, el: document.getElementById('exp-v-oferta') });
 }
+// Por colegio: lo que se guarda cambia el costo (uso, entregas, capacidad) y quién entra al 07-C
+function abrirColegios() {
+  return renderColegios({ ...ctx, el: document.getElementById('exp-v-colegios'), alCambiar: () => { costosViejos = true; } });
+}
 function abrirFichas() {
   return renderFichas({ ...ctx, el: document.getElementById('exp-v-fichas'), alCambiarInventario: () => { costosViejos = true; } });
 }
@@ -323,10 +331,12 @@ function cambiarVista(v) {
   document.getElementById('exp-v-docs').hidden = v !== 'docs';
   document.getElementById('exp-v-verif').hidden = v !== 'verif';
   document.getElementById('exp-v-fichas').hidden = v !== 'fichas';
+  document.getElementById('exp-v-colegios').hidden = v !== 'colegios';
   document.getElementById('exp-v-oferta').hidden = v !== 'oferta';
   if (v === 'costos' && costosViejos) { costosViejos = false; renderExpediente(ctx); return; }
   if (v === 'oferta') abrirOferta();
   if (v === 'fichas') abrirFichas();
+  if (v === 'colegios') abrirColegios();
   if (v === 'docs') abrirDocumentos();
   if (v === 'verif') abrirVerificacion();
 }
@@ -428,6 +438,7 @@ export function enlazarExpediente(el, abrirNuevo) {
   enlazarOferta(el);
   enlazarVerificacion(el);
   enlazarFichas(el);
+  enlazarColegios(el);
   el.addEventListener('click', e => {
     const sv = e.target.closest('[data-exp-vista]');
     if (sv) cambiarVista(sv.dataset.expVista);

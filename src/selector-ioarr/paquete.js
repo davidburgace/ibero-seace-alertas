@@ -1,0 +1,120 @@
+// ============================================================================
+// src/selector-ioarr/paquete.js — Paquete de IOARR por nivel de un proyecto (función pura)
+//
+// Lo usa la API del expediente (expediente.js) después de leer la base, y las pruebas.
+//   calcularPaquete()  quién entra (duplicidad, checklist de inventario y baja…), las IOARR por
+//                      nivel con su costo y sus avisos, la IOARR única de comparación y los escenarios
+//   modeloIoarr()      el modelo de los documentos de una IOARR (07-C, memoria, anexos, vida útil)
+// ============================================================================
+
+import { calc, ESCENARIOS, textoPct } from './calculo.js';
+import { costear } from './costos.js';
+import { porNivel, validarNiveles, inventarioNivel, inventarioUna, sinNivel, nivelesDeLocal } from './niveles.js';
+import { separarLocales, estadoDe, avisosDuplicidad } from './duplicidad.js';
+import { armarModelo } from './documentos.js';
+import { fichaActivos, modeloVidaUtil, checklistColegio, colegioDe } from './lineamientos.js';
+
+/**
+ * @param {object} p
+ *   D, P       datos de la región (prep) y criterios (limpiarParams)
+ *   codigos    códigos de local del proyecto
+ *   dup        { [cod]: duplicidad } (otra inversión vigente o reciente)
+ *   inv        inventario verificado por código de local (con archivos y req_ficha)
+ *   comun      { precios, estructura, uit } para costear
+ *   datosDoc   datos de Documentos (limpiarDatosDoc), con colegios
+ *   final      true: solo los colegios con el checklist de inventario y baja completo (07-C final)
+ *   modo       'por_nivel' (siempre, ver niveles.js)
+ */
+export function calcularPaquete({ D, P, codigos, dup = {}, inv = {}, comun, datosDoc = {}, final = false, modo = 'por_nivel' }) {
+  // Los locales con otra inversión vigente o reciente que se excluyeron no entran a la propuesta
+  const sep = separarLocales(D, codigos, dup), excluidos = sep.excluidos;
+  // Checklist de inventario y baja por colegio (lineamientos.js)
+  const colegios = datosDoc.colegios || {};
+  const checklist = Object.fromEntries(sep.list.map(i => [D.locs[i][0], checklistColegio(colegios[D.locs[i][0]], { registrado: datosDoc.inventario_registrado })]));
+  const bloqueados = sep.list.filter(i => !checklist[D.locs[i][0]].completo);
+  const list = final ? sep.list.filter(i => checklist[D.locs[i][0]].completo) : sep.list;
+
+  const C = calc(D, P);
+  // Una IOARR (todos los niveles) y una por nivel: se calculan las dos para compararlas
+  // Niveles de toda la selección: en el 07-C final, un nivel con todos sus colegios bloqueados queda vacío
+  const enList = new Set(list);
+  const G = porNivel(D, P, sep.list).map(g => ({ ...g, list: g.list.filter(i => enList.has(i)) })), Cn = Object.fromEntries(G.map(g => [g.nivel, g.C]));
+  const Runa = costear({ D, C, list, ...comun, inventario: inventarioUna(inv, D, Cn) });
+  // Los tres escenarios de cantidad lado a lado (IOARR única, con la misma estructura y precios)
+  const escenarios = ESCENARIOS.map(e => {
+    const Pe = { ...P, escenario: e.k };
+    const R = e.k === P.escenario ? Runa : (() => {
+      const Ce = calc(D, Pe), Gn = Object.fromEntries(porNivel(D, Pe, list).map(g => [g.nivel, g.C]));
+      return costear({ D, C: Ce, list, ...comun, inventario: inventarioUna(inv, D, Gn) });
+    })();
+    return { k: e.k, n: e.n, pct: e.k === 'malo_regular' ? textoPct(P, G.map(g => g.nivel)) : null, actual: e.k === P.escenario, rep: R.totales.rep, kits: R.totales.kits, cd: R.totales.cd, total: R.totales.total,
+      partidas: Object.fromEntries(R.partidas.map(x => [x.k, x.excluido ? null : x.rep])), aulas: R.totales.aul };
+  });
+  const Rniv = costear({ ...comun, grupos: G.map(g => ({ clave: g.nivel, D: g.D, C: g.C, list: g.list, inventario: inventarioNivel(inv, D, g.nivel) })) });
+  // Cada 07-C es de un solo nivel. Sin locales no hay niveles: se muestra una IOARR vacía
+  const ioarrs = !G.length
+    ? [{ nivel: null, nombre: 'Todos los niveles', R: Runa, D, C, list, inv: inventarioUna(inv, D, Cn) }]
+    : G.map(g => ({ nivel: g.nivel, nombre: g.nombre, R: Rniv.grupos[g.nivel], D: g.D, C: g.C, list: g.list, inv: inventarioNivel(inv, D, g.nivel) }));
+
+  // Locales de varios niveles con inventario cargado sin nivel (antes de la 018): no valen por nivel
+  const sinNiv = modo === 'por_nivel' ? Object.entries(inv).filter(([cod, f]) => { const i = D.locs.findIndex(l => l[0] === cod); return i >= 0 && enList.has(i) && sinNivel(f, nivelesDeLocal(D, i)); }).map(([c]) => c) : [];
+  for (const x of ioarrs) {
+    const R = x.R;
+    for (const l of R.locales) l.duplicidad = estadoDe(dup, l.cod);
+    const fuera = x.nivel ? excluidos.filter(i => x.D.locSvc[i].length) : excluidos;
+    R.excluidos = fuera.map(i => ({ cod: D.locs[i][0], nom: x.D.locName[i], dist: D.dists[D.locs[i][1]][0], rep: x.C.L.repTot[i], ...estadoDe(dup, D.locs[i][0]) }));
+    R.avisos.push(...avisosDuplicidad(dup, codigos));
+    // Sustento: cada local corregido debería tener al menos el acta de la visita
+    const sinActa = R.locales.filter(l => l.verificado && !inv[l.cod].archivos.some(a => a.tipo === 'acta')).map(l => l.cod);
+    if (sinActa.length) R.avisos.push({ tipo: 'sustento', texto: `Falta adjuntar el acta de verificación de: ${sinActa.join(', ')}. Súbela en «Corregir inventario» del local, con las fotos y el inventario patrimonial.` });
+    // Colegios con el checklist incompleto: fuera del 07-C final; en el borrador, avisados
+    x.bloqueados = bloqueados.filter(i => !x.nivel || x.D.locSvc[i].length).map(i => ({ cod: D.locs[i][0], nom: D.locName[i], faltan: checklist[D.locs[i][0]].faltan }));
+    if (x.bloqueados.length) {
+      const cods = x.bloqueados.map(b => b.cod), n = cods.length, lst = cods.slice(0, 20).join(', ') + (n > 20 ? '…' : '');
+      R.avisos.push(final
+        ? { tipo: 'checklist', alerta: true, texto: `No ${n === 1 ? 'entra' : 'entran'} al Formato 07-C ${n === 1 ? '1 colegio' : n + ' colegios'} con el checklist de inventario y baja incompleto: ${lst}. Complétalo en «Por colegio» o exporta el borrador.` }
+        : { tipo: 'checklist', alerta: true, texto: `${n === 1 ? '1 colegio tiene' : n + ' colegios tienen'} el checklist de inventario y baja incompleto (${lst}): ${n === 1 ? 'no entrará' : 'no entrarán'} al Formato 07-C final hasta completarlo en «Por colegio». El borrador sí ${n === 1 ? 'lo incluye' : 'los incluye'}.` });
+    }
+    const sn = sinNiv.filter(c => R.locales.some(l => l.cod === c));
+    if (sn.length) R.avisos.push({ tipo: 'inventario', alerta: true, texto: `El inventario verificado de ${sn.length === 1 ? 'el local' : 'los locales'} ${sn.join(', ')} se cargó sin nivel y el local tiene varios niveles: en esta IOARR se usa el censo. Vuelve a cargarlo por nivel en «Corregir inventario».` });
+  }
+  // Ningún aula ni servicio se cuenta dos veces entre las IOARR por nivel
+  const control = validarNiveles(D, list, G);
+  if (!control.ok) for (const x of ioarrs) x.R.avisos.push({ tipo: 'niveles', alerta: true, texto: 'Control por nivel: ' + control.errores.slice(0, 5).join(' ') });
+  const fila_ = R => ({ total: R.totales.total, rep: R.totales.rep, locales: R.totales.locales, est: R.totales.est, en_uit: R.uit.enUit, supera: R.uit.supera, registro: R.uit.valor == null ? null : R.uit.supera ? 'completo' : 'abreviado' });
+  const comparativo = {
+    modo, uit: Runa.uit.valor ? { anio: Runa.uit.anio, valor: Runa.uit.valor, limite: Runa.uit.limite } : null,
+    una: fila_(Runa), niveles: G.map(g => ({ nivel: g.nivel, nombre: g.nombre, ...fila_(Rniv.grupos[g.nivel]) })), suma: Rniv.totales.total,
+    // Paquete: colegios distintos (un colegio con varios niveles cuenta una vez) y control de doble conteo
+    colegios: list.length, control
+  };
+  return { final, colegios, checklist, bloqueados, modo, niveles: G.map(g => g.nivel), ioarrs, comparativo, Runa, P, escenarios, D, C, list, inv, dup, excluidos };
+}
+
+/**
+ * Modelo de los documentos de una IOARR (un nivel). Cada IOARR tiene su nombre y su CUI
+ * (datos.por_nivel), y el vínculo con Radar IOARR vale para la IOARR que tiene ese CUI.
+ * @param A  calcularPaquete() + { detalle, efectivos } (precios del catálogo y efectivos)
+ */
+export function modeloIoarr(A, x, datos, p, fecha) {
+  const porNiv = A.modo === 'por_nivel';
+  const dn = porNiv ? datos.por_nivel?.[x.nivel] || {} : null;
+  const datosX = porNiv ? { ...datos, nombre_inversion: dn.nombre_inversion || '', cui: dn.cui || '' } : datos;
+  const proyectoX = porNiv ? { ...p, nombre: `${p.nombre} — IOARR ${x.nombre}`, ioarr: p.ioarr && dn.cui && dn.cui === p.ioarr.cui ? p.ioarr : null } : p;
+  const M = armarModelo({ R: x.R, D: x.D, list: x.list, proyecto: proyectoX, datos: datosX, precios: A.detalle, efectivos: A.efectivos, P: A.P, inv: A.inv, fecha });
+  // Estructura preliminar de costos: lotes de activos a reponer (anexo de la memoria y Excel)
+  const ficha = fichaActivos({ x, P: A.P, datos: datosX, anioRef: M.anioRef });
+  const vida = modeloVidaUtil({ ficha, datos: datosX, umbral: A.P.umbralVida, nombreIoarr: x.nombre });
+  // El Regular sin antigüedad ni daño documentado no se sustenta: queda como pendiente del expediente
+  if (vida.regularSin) M.faltan.push(vida.faltan.find(t => /Regular sin antigüedad/.test(t)));
+  // Checklist de inventario y baja de los colegios de la IOARR (también los que no entran al 07-C final)
+  const cods = [...new Set([...x.list.map(i => x.D.locs[i][0]), ...(x.bloqueados || []).map(b => b.cod)])];
+  const nom = Object.fromEntries([...x.list.map(i => [x.D.locs[i][0], x.D.locName[i]]), ...(x.bloqueados || []).map(b => [b.cod, b.nom])]);
+  const checklist = cods.map(cod => { const v = colegioDe(A.colegios, cod).inventario, ch = A.checklist?.[cod] || checklistColegio(null);
+    return { cod, nombre: nom[cod], ...v, registrado: v.registrado || datos.inventario_registrado || '', completo: ch.completo, faltan: ch.faltan }; });
+  return Object.assign(M, { nivel: x.nivel, nombreIoarr: x.nombre, fichaActivos: ficha, vidaUtil: vida, completo: !M.faltan.length,
+    borrador: !A.final, bloqueados: x.bloqueados || [], checklist });
+}
+
+// La IOARR pedida (nivel); sin nivel o si no está, la primera
+export const elegirIoarr = (A, nivel) => A.ioarrs.find(x => x.nivel === nivel) || A.ioarrs[0];

@@ -19,7 +19,7 @@
 
 import { ITEMS, TALLAS, NIVN, textoEscenario, textoPct, textoOrigenPct, ROTULO_UMBRAL, DEF as DEF_CRIT } from './calculo.js';
 import { TIPOS, LIMITE_UIT } from './costos.js';
-import { FUENTES_VIDA_UTIL } from './lineamientos.js';
+import { FUENTES_VIDA_UTIL, limpiarColegios, colegioDe, checklistColegio } from './lineamientos.js';
 
 // Nota del material, dentro de la descripción técnica
 export const NOTA_MATERIAL = 'El material debe respetar la ficha técnica aplicable; la entidad convocante puede exigir madera.';
@@ -118,6 +118,8 @@ export function limpiarDatosDoc(b = {}) {
     fuentes_vida_util: Array.isArray(b.fuentes_vida_util) ? Object.keys(FUENTES_VIDA_UTIL).filter(k => b.fuentes_vida_util.includes(k)) : [],
     patrimonial_nombre: texto(b.patrimonial_nombre, 200),
     patrimonial_cargo: texto(b.patrimonial_cargo, 200),
+    // Por colegio: checklist de inventario y baja… (lineamientos.js); se guarda con PUT /colegios/:cod
+    colegios: limpiarColegios(b.colegios),
     // Cuadro de estado situacional: advertencias revisadas, con su explicación ({ clave: { nota, fecha } })
     situacional: { revisiones: Object.fromEntries(Object.entries(b.situacional?.revisiones || {}).slice(0, 200)
       .map(([k, v]) => [String(k).slice(0, 300), { nota: texto(v?.nota, 500), fecha: /^\d{4}-\d{2}-\d{2}$/.test(v?.fecha || '') ? v.fecha : null }]).filter(([, v]) => v.nota)) },
@@ -349,12 +351,12 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, efectivos = 
     { texto: 'El mobiliario nuevo cumple la misma función que el reemplazado (2.4.C.a).', estado: 'cumple', nota: 'Mesas, sillas, escritorios y armarios de aula reemplazan a los del mismo uso.' },
     { texto: 'No se sustenta en un incremento de la capacidad de la UP (2.4.C.c).', estado: porCapacidad ? 'no' : 'cumple', nota: porCapacidad ? 'El escenario «Por capacidad» calcula las cantidades por aulas y ocupación, no por el mobiliario existente: no sirve como sustento de reposición.' : T.fal > 0 ? 'El faltante (brecha de dotación, no reposición) se excluyó del metrado y del costo.' : 'No hay faltante.' },
     { texto: masiva ? 'El mobiliario a reponer está en uso (2.5.c).' : 'El mobiliario a reponer está en uso: no lleva más de un año sin operar (2.4.C.d).', estado: d.en_uso === 'si' ? 'cumple' : d.en_uso === 'no' ? 'no' : 'pendiente', nota: d.en_uso === 'no' ? (masiva ? 'En una reposición masiva el mobiliario debe estar en uso.' : 'Si lleva más de un año sin operar, va como optimización o proyecto de inversión.') : '' },
-    { texto: 'Los bienes están registrados en la contabilidad e inventario de la entidad (2.4.C.e).', estado: d.inventario_registrado === 'si' ? 'cumple' : d.inventario_registrado === 'no' ? 'no' : 'pendiente', nota: d.codigo_inventario ? 'Código o documento: ' + d.codigo_inventario : '' },
+    condInventario(ups, d),
     escenario === 'malo'
       ? { texto: 'Vida útil: se repone solo mobiliario en estado malo, que ya no es útil ni operativo (vida útil efectiva, 2.4.B.e).', estado: 'cumple', nota: d.informe_vida_util ? 'Informe de vida útil: ' + d.informe_vida_util : 'El informe de vida útil estimada de la entidad (2.4.C.b) es recomendable como respaldo.' }
       : { texto: 'Vida útil: el mobiliario a reponer ya no es útil ni operativo (vida útil efectiva, 2.4.B.e) o cumplió su vida útil estimada (2.4.C.b).', estado: porCapacidad ? 'no' : 'pendiente',
         nota: porCapacidad ? 'El escenario «Por capacidad» no usa el estado del mobiliario.' : `El escenario «Malo + % de Regular» incluye ${pctTxt} del mobiliario regular, que todavía se puede usar: sustenta su reposición con la verificación en campo (antigüedad de ${Pesc.umbralVida} años o más, ${ROTULO_UMBRAL})${d.informe_vida_util ? ' y el informe de vida útil (' + d.informe_vida_util + ')' : ' o con el informe de vida útil estimada'}.` },
-    { texto: 'Los bienes reemplazados se darán de baja o se inició su trámite (2.4.C.f).', estado: conBaja.length === nLoc && nLoc ? 'cumple' : 'pendiente', nota: conBaja.length ? `Hay sustento de baja en ${conBaja.length} de ${nLoc} ${nLoc === 1 ? 'local' : 'locales'}.` : 'Adjunta la resolución o el trámite de baja en «Corregir inventario» de cada local.' },
+    condBaja(ups, d, conBaja),
     { texto: 'Verificación en campo con acta.', estado: nLoc && conActa.length === nLoc ? 'cumple' : 'pendiente', nota: `${conActa.length} de ${nLoc} ${nLoc === 1 ? 'local' : 'locales'} con acta adjunta.` }
   ];
   if (masiva) condiciones.push({ texto: 'Las UP prestan el mismo servicio y las administra la misma entidad, que adquiere los activos (2.5.b).', estado: 'pendiente', nota: ugels.length > 1 ? `Los locales son de ${ugels.length} UGEL (${lista(ugels)}): confirma que la entidad que adquiere es la misma.` : `Locales de ${ugels[0] || 'una misma UGEL'}.` });
@@ -374,7 +376,8 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, efectivos = 
   falta(!d.fecha_inicio || !N, `F. Fecha prevista de inicio y plazo de ejecución (${enDias ? 'días' : 'meses'}).`);
   falta(metas.some(m => d.mant_nuevo[m.k] == null || d.vida_util[m.k] == null), 'Costo anual de mantenimiento (puede ser 0) y vida útil del mobiliario nuevo, por meta.');
   falta(!d.ue_mantenimiento || !d.ue_mantenimiento_codigo, 'Entidad responsable del mantenimiento: nombre y código.');
-  falta(!d.inventario_registrado, 'Si el mobiliario a reponer está registrado en el inventario de la entidad (Lineamientos 2.4.C.e).');
+  const sinCheck = ups.filter(u => !checklistColegio(colegioDe(d.colegios, u.cod), { registrado: d.inventario_registrado }).completo);
+  falta(sinCheck.length, `Checklist de inventario y baja incompleto en ${sinCheck.length === 1 ? '1 colegio' : sinCheck.length + ' colegios'} (${sinCheck.slice(0, 10).map(u => u.cod).join(', ')}${sinCheck.length > 10 ? '…' : ''}): no entra${sinCheck.length === 1 ? '' : 'n'} al 07-C final.`);
   falta(!d.en_uso, 'Si el mobiliario a reponer está en uso.');
   if (supera && !masiva) falta(activos.some(a => a.antiguedad == null || !a.estado), 'E.3. Antigüedad y estado actual del mobiliario a reponer, por tipo.');
   falta(!d.ref_tecnica, 'Referencia técnica aplicable del mobiliario (descripción técnica).');
@@ -403,6 +406,24 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, efectivos = 
     ioarr: proyecto.ioarr || null,
     verificacion: armarVerificacion({ R, ups, activos, condiciones, faltan, precios, efectivos, U, d, n: nLoc, ioarr: proyecto.ioarr, total, cantidades })
   };
+}
+
+// ─── Condiciones con el checklist por colegio ───────────────────────────────
+// Registro en el inventario y la contabilidad (2.4.C.e): por colegio; el sí/no de Documentos vale como
+// valor por defecto del registro en el inventario
+function condInventario(ups, d) {
+  const v = ups.map(u => { const c = colegioDe(d.colegios, u.cod).inventario; return { reg: c.registrado || d.inventario_registrado, cont: c.contabilidad }; });
+  const n = ups.length, ok = v.filter(x => x.reg === 'si' && x.cont === 'si').length, no = v.filter(x => x.reg === 'no' || x.cont === 'no').length;
+  return { texto: 'Los bienes están registrados en la contabilidad e inventario de la entidad (2.4.C.e).', estado: no ? 'no' : n && ok === n ? 'cumple' : 'pendiente',
+    nota: `Inventario y contabilidad «Sí» en ${ok} de ${n} ${n === 1 ? 'colegio' : 'colegios'}${no ? `; «No» en ${no}` : ''} (checklist por colegio).${d.codigo_inventario ? ' Código o documento: ' + d.codigo_inventario : ''}` };
+}
+// Baja (2.4.C.f): trámite iniciado con documento de respaldo y fecha en el checklist, o archivo de baja adjunto
+function condBaja(ups, d, conBaja) {
+  const n = ups.length, arch = new Set(conBaja.map(u => u.cod));
+  const ok = ups.filter(u => { const c = colegioDe(d.colegios, u.cod).inventario; return (c.baja === 'si' && c.doc_tipo && c.doc_fecha) || arch.has(u.cod); }).length;
+  const no = ups.filter(u => colegioDe(d.colegios, u.cod).inventario.baja === 'no').length;
+  return { texto: 'Los bienes reemplazados se darán de baja o se inició su trámite (2.4.C.f).', estado: n && ok === n ? 'cumple' : 'pendiente',
+    nota: `Baja iniciada con documento de respaldo en ${ok} de ${n} ${n === 1 ? 'colegio' : 'colegios'}${no ? `; sin iniciar en ${no}` : ''}. Se marca en «Por colegio» (acta, resolución o compromiso, con fecha).` };
 }
 
 // ─── Lista de verificación del expediente ───────────────────────────────────

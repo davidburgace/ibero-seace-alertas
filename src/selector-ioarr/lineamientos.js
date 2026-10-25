@@ -201,3 +201,53 @@ export function modeloVidaUtil({ ficha, datos = {}, umbral = VIDA_REFERENCIAL, n
   return { nombreIoarr, tipos, colegios, fuentes, umbral, referencial: VIDA_REFERENCIAL, regularSin, documento: datos.informe_vida_util || '',
     responsable: { nombre: datos.patrimonial_nombre || '', cargo: datos.patrimonial_cargo || '' }, faltan };
 }
+
+// ─── Datos por colegio (Documentos → datos.colegios[codLocal]) ───────────────
+// Se guardan en ioarr_expediente_documentos.datos (migración 015): no hace falta otra tabla.
+export const DOCS_BAJA = { acta: 'Acta', resolucion: 'Resolución', compromiso: 'Compromiso' };
+export const SI_NO = { si: 'Sí', no: 'No' };
+const txt = (v, max) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+const sino = v => ['si', 'no'].includes(v) ? v : '';
+const fechaOk = v => /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(String(v || '')) ? v : null;
+
+/** Valida los datos de un colegio. Lo desconocido se descarta; lo vacío queda vacío. */
+export function limpiarColegio(b = {}) {
+  const x = b && typeof b === 'object' ? b : {}, inv = x.inventario && typeof x.inventario === 'object' ? x.inventario : {};
+  return {
+    // Inventario y baja (Lineamientos 2.4.C.e y 2.4.C.f)
+    inventario: {
+      registrado: sino(inv.registrado), contabilidad: sino(inv.contabilidad), baja: sino(inv.baja),
+      doc_tipo: DOCS_BAJA[inv.doc_tipo] ? inv.doc_tipo : '', doc_numero: txt(inv.doc_numero, 120), doc_fecha: fechaOk(inv.doc_fecha)
+    },
+    nota: txt(x.nota, 500)
+  };
+}
+// Sin nada cargado: no hace falta guardar la fila
+export const colegioVacio = c => !c.nota && !Object.values(c.inventario).some(Boolean);
+export function limpiarColegios(obj) {
+  const out = {};
+  for (const [cod, v] of Object.entries(obj && typeof obj === 'object' ? obj : {}).slice(0, 50000)) {
+    if (!/^\d{4,10}$/.test(cod)) continue;
+    const c = limpiarColegio(v);
+    if (!colegioVacio(c)) out[cod] = c;
+  }
+  return out;
+}
+export const colegioDe = (colegios, cod) => colegios?.[cod] || limpiarColegio({});
+
+/**
+ * Checklist de inventario y baja de un colegio. Sin completar, el colegio no entra al 07-C
+ * (se puede exportar un borrador con todos).
+ * @returns { completo, faltan: [texto] }
+ */
+export function checklistColegio(c, def = {}) {
+  // registrado: lo del colegio o, si no lo tiene, lo marcado para todo el proyecto en Documentos
+  const v0 = (c || limpiarColegio({})).inventario, v = { ...v0, registrado: v0.registrado || sino(def.registrado) }, faltan = [];
+  if (v.registrado !== 'si') faltan.push(v.registrado === 'no' ? 'el mobiliario no está registrado en el inventario (2.4.C.e)' : 'registro en el inventario');
+  if (v.contabilidad !== 'si') faltan.push(v.contabilidad === 'no' ? 'el mobiliario no está registrado en la contabilidad (2.4.C.e)' : 'registro en la contabilidad');
+  if (v.baja !== 'si') faltan.push(v.baja === 'no' ? 'el trámite de baja no se inició (2.4.C.f)' : 'trámite de baja iniciado');
+  if (!v.doc_tipo) faltan.push('documento de respaldo (acta, resolución o compromiso)');
+  if (!v.doc_fecha) faltan.push('fecha del documento de respaldo');
+  return { completo: !faltan.length, faltan };
+}
+export const AVISO_BORRADOR = 'BORRADOR CON TODOS LOS COLEGIOS: incluye colegios con el checklist de inventario y baja incompleto, que no entran al Formato 07-C final.';

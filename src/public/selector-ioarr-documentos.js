@@ -11,7 +11,9 @@ const soles = n => n == null ? '—' : 'S/ ' + NS.format(n);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 let ctx = null, vista = null, tGuardar = null, version = 0;
-const qn = () => ctx?.nivel ? `?nivel=${ctx.nivel}` : '';
+// Borrador: los documentos incluyen los colegios con el checklist de inventario y baja incompleto
+let modoBorrador = false;
+const qn = () => { const q = new URLSearchParams(ctx?.nivel ? { nivel: ctx.nivel } : {}); if (modoBorrador) q.set('borrador', '1'); return q.size ? '?' + q : ''; };
 
 export async function renderDocumentos(c) {
   ctx = c;
@@ -72,8 +74,12 @@ function pintar() {
     </div>
     <div class="avisos"><div class="aviso">${esc(vista.escenario)}${vista.kit ? ' Mesas y sillas presentadas como kit.' : ''} Se cambia en Costos.</div></div>
     ${R.sin_rep.length ? `<div class="avisos"><div class="aviso">No se incluyen como UP ${R.sin_rep.length === 1 ? 'el local' : 'los locales'} sin bienes a reponer: ${R.sin_rep.map(esc).join(', ')}.</div></div>` : ''}
+    ${(vista.bloqueados || []).length ? `<div class="avisos"><div class="aviso alerta" role="alert">${modoBorrador
+      ? `Borrador con todos los colegios: ${vista.bloqueados.length === 1 ? '1 colegio tiene' : vista.bloqueados.length + ' colegios tienen'} el checklist de inventario y baja incompleto y no ${vista.bloqueados.length === 1 ? 'entraría' : 'entrarían'} al 07-C final.`
+      : `No ${vista.bloqueados.length === 1 ? 'entra' : 'entran'} al 07-C ${vista.bloqueados.length === 1 ? '1 colegio' : vista.bloqueados.length + ' colegios'} con el checklist de inventario y baja incompleto (${vista.bloqueados.slice(0, 15).map(b => esc(b.cod)).join(', ')}${vista.bloqueados.length > 15 ? '…' : ''}). Complétalo en «Por colegio» o marca «Borrador con todos los colegios».`}</div></div>` : ''}
     <div class="exportar">
-      <div><h3>Documentos en Word</h3><p>Borrador del Formato 07-C para preparar el registro en el Banco de Inversiones, y memoria descriptiva. Lo que falte sale marcado «PENDIENTE» en amarillo.</p></div>
+      <div><h3>Documentos en Word</h3><p>Borrador del Formato 07-C para preparar el registro en el Banco de Inversiones, y memoria descriptiva. Lo que falte sale marcado «PENDIENTE» en amarillo.</p>
+        <label class="chk"><input type="checkbox" id="doc-borrador" ${modoBorrador ? 'checked' : ''}> Borrador con todos los colegios (también los que tienen el checklist de inventario y baja incompleto)</label></div>
       <div class="acciones-fila"><button class="btn btn-primary" data-doc-bajar="formato-07c" type="button">Formato 07-C (Word)</button><button class="btn btn-ghost" data-doc-bajar="memoria" type="button">Memoria descriptiva (Word)</button><button class="btn btn-ghost" data-doc-bajar="lineamientos/anexos" type="button">Anexos de Lineamientos (Excel)</button><button class="btn btn-ghost" data-doc-zip type="button">Expediente completo (ZIP)</button></div>
     </div>
     <div class="cols">
@@ -203,7 +209,7 @@ async function bajar(btn) {
     const ruta = btn.dataset.docBajar.includes('/') ? btn.dataset.docBajar : 'documentos/' + btn.dataset.docBajar;
     const q = new URLSearchParams(ctx.nivel ? { nivel: ctx.nivel } : {});
     if ('docCod' in btn.dataset) q.set('cod', document.getElementById('doc-vida-cod')?.value || '');
-    if ('docBorrador' in btn.dataset) q.set('borrador', '1');
+    if (modoBorrador) q.set('borrador', '1');
     const r = await fetch(`/api/selector-ioarr/proyectos/${ctx.proyecto.id}/${ruta}${q.size ? '?' + q : ''}`);
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'Error ' + r.status);
     const blob = await r.blob(), cd = r.headers.get('Content-Disposition') || '';
@@ -219,11 +225,15 @@ async function bajar(btn) {
 export function enlazarDocumentos(el) {
   const programar = (ms) => { clearTimeout(tGuardar); estado('Cambios sin guardar', 'pend'); tGuardar = setTimeout(() => { tGuardar = null; guardar(); }, ms); };
   el.addEventListener('input', e => { if (e.target.closest('#doc-form') && e.target.tagName !== 'SELECT') programar(900); });
-  el.addEventListener('change', e => { if (e.target.closest('#doc-form') && e.target.tagName === 'SELECT') programar(50); });
+  el.addEventListener('change', e => {
+    if (e.target.id === 'doc-borrador') { modoBorrador = e.target.checked; renderDocumentos(ctx); return; }
+    if (e.target.closest('#doc-form') && e.target.tagName === 'SELECT') programar(50);
+  });
   el.addEventListener('submit', e => { if (e.target.id === 'doc-form') e.preventDefault(); });
   el.addEventListener('click', e => {
     const b = e.target.closest('[data-doc-bajar]'); if (b) bajar(b);
     const z = e.target.closest('[data-doc-zip]');
-    if (z && ctx) { if (tGuardar) { clearTimeout(tGuardar); tGuardar = null; guardar().then(() => bajarZip(ctx, z)); } else bajarZip(ctx, z); }
+    const zc = { ...ctx, borrador: modoBorrador };
+    if (z && ctx) { if (tGuardar) { clearTimeout(tGuardar); tGuardar = null; guardar().then(() => bajarZip(zc, z)); } else bajarZip(zc, z); }
   });
 }
