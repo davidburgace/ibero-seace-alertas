@@ -256,6 +256,25 @@ export function preciosUnitarios(registros) {
   }
   return out;
 }
+/**
+ * Precio por kit de referencia (sin IGV) por material: mediana de las fuentes comparables de ese
+ * material (kit, o mesa/silla con composición), de cualquier nivel; sin el precio propio.
+ * Las que no se pueden usar (IGV por confirmar, por pieza sin composición) van en «pendientes», con el motivo.
+ * @returns { [material]: { precio, n, fuente, pendientes: [{ fuente, motivo }] } }
+ */
+export function preciosKit(registros) {
+  const out = {};
+  for (const m of Object.keys(MATERIALES).filter(m => m !== 'por_confirmar')) {
+    const xs = registros.filter(r => r.tipo_documento !== 'propio' && r.material === m).map(r => ({ ...r, ...normalizar(r) }));
+    const ok = xs.filter(x => x.comparable);
+    // Mesa, silla o armario sueltos sin composición son precios unitarios (preciosUnitarios), no de kit
+    const pend = xs.filter(x => !x.comparable && !Object.values(UNIDAD_DE_TIPO).includes(x.unidad));
+    out[m] = { precio: ok.length ? mediana(ok.map(x => x.precio_kit_sin_igv)) : null, n: ok.length,
+      fuente: !ok.length ? null : ok.length === 1 ? describir(ok[0]) : `Mediana de ${ok.length} fuentes (${ok.map(describir).join('; ')})`,
+      pendientes: pend.map(x => ({ fuente: describir(x), motivo: x.motivo })) };
+  }
+  return out;
+}
 export const describir = x => [x.entidad || x.region, x.anio, TIPOS_DOC[x.tipo_documento], x.cui ? 'CUI ' + x.cui : null].filter(Boolean).join(', ');
 
 // ─── Estimación del monto del convenio ──────────────────────────────────────
@@ -348,14 +367,14 @@ export function validarCsv(texto, existentes = []) {
   return { ok: !errores.length && registros.length > 0, registros, errores, total: filas.length - 1, columnas_ignoradas: desconocidas };
 }
 
-// ─── Precarga (la de la migración 029, con los materiales de la 030, San Juan de la 032, Huánuco 2023 de la 033 y los huecos de la 035; ids fijos) ──
+// ─── Precarga (la de la migración 029, con los materiales de la 030, San Juan de la 032, Huánuco 2023 de la 033, los huecos de la 035 y el IGV de Huánuco 2025 de la 036; ids fijos) ──
 export const PRECARGA = [
   { id: 'c0a7a10e-0000-4000-8000-000000000001', tipo_documento: 'por_confirmar', entidad: 'Gobierno Regional Loreto', region: 'Loreto', anio: 2026, nivel: 'por_confirmar', unidad: 'kit', material: 'madera', monto: 624, monto_hasta: null, incluye_igv: false, cotizaciones: null, composicion: [], confianza: 'alta', notas: 'Precio por kit sin IGV.' },
   // Huánuco 2023: cuadro comparativo y estructura preliminar de costos (migración 033)
   { id: 'c0a7a10e-0000-4000-8000-000000000002', tipo_documento: 'estudio_mercado', entidad: 'Gobierno Regional Huánuco', region: 'Huánuco', anio: 2023, nivel: 'Primaria', unidad: 'pieza', material: 'metal-madera',
     monto: 267.5, monto_hasta: null, incluye_igv: true, cotizaciones: { valores: [370, 250, 270, 180], n: 4, promedio: 267.5 }, composicion: [], confianza: 'media',
     notas: 'Cuadro comparativo y estructura preliminar de costos (mar. 2023), «Reposición de mobiliario de aulas del nivel primario … 11 provincias de la región Huánuco»; sin CUI. Promedio de 4 cotizaciones con IGV y transporte incluido (ene. 2023): Mobiliarios Yi 370 (polipropileno), Carpintería Garay 250 (madera tornillo), Mobi Edu 270 (polipropileno), Maderera Burgos 180 (madera). 12,310 piezas × 267.50 = S/ 3,292,925.00 con IGV; con expediente 1.19 %, supervisión 0.9 % y liquidación 0.8 %: S/ 3,388,090.53. No comparable hasta indicar la composición del kit.' },
-  { id: 'c0a7a10e-0000-4000-8000-000000000003', tipo_documento: 'por_confirmar', cui: '2586831', entidad: 'Gobierno Regional Huánuco', region: 'Huánuco', anio: 2025, nivel: 'Primaria', unidad: 'kit', material: 'metal-madera', monto: 455, monto_hasta: 480, incluye_igv: null, cotizaciones: null, composicion: [], confianza: 'media', notas: 'Rango 455-480 (se compara por su punto medio, 467.50); confirmar si incluye IGV.' },
+  { id: 'c0a7a10e-0000-4000-8000-000000000003', tipo_documento: 'por_confirmar', cui: '2586831', entidad: 'Gobierno Regional Huánuco', region: 'Huánuco', anio: 2025, nivel: 'Primaria', unidad: 'kit', material: 'metal-madera', monto: 455, monto_hasta: 480, incluye_igv: false, cotizaciones: null, composicion: [], confianza: 'media', notas: 'Rango 455-480 sin IGV (se compara por su punto medio, 467.50).' },
   // San Juan: precio unitario real de la memoria de costos y presupuestos (migración 032; antes, el estimado de la 031)
   { id: 'c0a7a10e-0000-4000-8000-000000000004', tipo_documento: '07-C', cui: '2711098', entidad: 'Gobierno Regional de La Libertad', region: 'La Libertad', anio: 2026, nivel: 'Secundaria', unidad: 'kit', material: 'metal-polipropileno',
     monto: 411.85, monto_hasta: null, incluye_igv: false, flete_transporte: 26.02, cotizaciones: { valores: [], n: 4, promedio: null }, composicion: [], confianza: 'alta',

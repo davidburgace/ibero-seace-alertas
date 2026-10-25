@@ -109,12 +109,12 @@ test('precarga: 5 registros con el material indicado; Loreto y San Juan (memoria
     assert.deepEqual(limpiarRegistro(r).errores, [], r.id);
   }
   const N = PRECARGA.map(r => ({ id: r.id, ...normalizar(r) }));
-  assert.deepEqual(N.filter(x => x.comparable && !x.propio).map(x => x.precio_kit_sin_igv), [624, 411.85]);
+  assert.deepEqual(N.filter(x => x.comparable && !x.propio).map(x => x.precio_kit_sin_igv), [624, 467.5, 411.85]);
   assert.equal(N.find(x => x.propio).precio_kit_sin_igv, 850);
   assert.match(N[1].motivo, /composición/);   // Huánuco 2023: por pieza
-  assert.match(N[2].motivo, /IGV/);           // Huánuco 2025: rango sin IGV declarado
+  assert.equal(N[2].precio_kit_sin_igv, 467.5);   // Huánuco 2025: rango sin IGV (confirmado, migración 036), punto medio
   const E = estadisticos(PRECARGA);
-  assert.deepEqual(E.map(g => [g.material, g.nivel, g.n, g.mediana, g.pocas]), [['madera', 'por_confirmar', 1, 624, true], ['metal-polipropileno', 'Secundaria', 1, 411.85, true]], 'sin el precio propio');
+  assert.deepEqual(E.map(g => [g.material, g.nivel, g.n, g.mediana, g.pocas]), [['madera', 'por_confirmar', 1, 624, true], ['metal-madera', 'Primaria', 1, 467.5, true], ['metal-polipropileno', 'Secundaria', 1, 411.85, true]], 'sin el precio propio');
   // La migración tiene los mismos ids y montos
   const sql = readFileSync(new URL('../supabase/migrations/029_ioarr_catalogo_precios_ref.sql', import.meta.url), 'utf8');
   // San Juan cambió con la 031 y la 032 (07-C y memoria de costos): ver test/montos-san-juan.test.js

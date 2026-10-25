@@ -251,7 +251,7 @@ function pintarPreciosMaterial(lt, kit, tallasKit) {
   const P = datos.propuesta, PM = P.precios;
   const fila = (k, nombre, cant, general) => {
     const p = PM[k] || { precio: null, origen: null }, m = p.material, usaGeneral = general && p.precio == null;
-    const origen = p.origen ? ORIGEN_MAT[p.origen] + (p.fuente ? `<br><span class="sub">${esc(p.fuente)}</span>` : '')
+    const origen = p.origen === 'mesa_silla' ? '<span class="chip-est">Mesa + silla</span>' : p.origen ? ORIGEN_MAT[p.origen] + (p.fuente ? `<br><span class="sub">${esc(p.fuente)}</span>` : '')
       : usaGeneral ? `<span class="chip-est">${general.precio == null ? 'Sin precio de referencia' : 'Usa el general'}</span>` : '<span class="chip-est alerta">Sin precio de referencia</span>';
     const antiguo = p.antiguo && p.origen !== 'manual' ? `<br><span class="sub">Valor antiguo (sin material): ${soles(p.antiguo.precio)} <button class="x" type="button" data-pm-usar="${k}" data-pm-m="${m}" data-pm-v="${p.antiguo.precio}">Usar</button></span>` : '';
     return `<tr${general ? ' class="fila-talla"' : ''}>
@@ -273,11 +273,12 @@ function pintarPreciosMaterial(lt, kit, tallasKit) {
         return fila(`${x.k}_${z}`, TALLAS.find(t => t.k === z).n, cant, general);
       }).join('');
   }).join('');
+  const filaKit = kit && PM.kit ? fila('kit', `Kit de mobiliario (mesa + silla) · ${MATERIALES[PM.kit.material] || ''} – precio por kit`, PM.kit.origen === 'mesa_silla' ? 'se calcula con mesa + silla de cada talla' : 'vale para todas las tallas') : '';
   document.getElementById('exp-precios').innerHTML = `
     <div class="panel-cab"><h3>Precios unitarios de mercado (sin IGV) · ${esc(MATERIALES[P.material])}</h3></div>
     <p class="sub pad">Precios del material de cada mueble. Vacía = la mediana del catálogo de precios referenciales de ese material (mesa, silla y armario) o «sin precio de referencia»: escríbelo a mano. Los valores antiguos (sin material) no se usan; «Usar» los copia como precio manual. Una talla sin precio usa el precio general de su tipo.</p>
-    <div class="tabla-wrap borde-0"><table class="tabla"><thead><tr><th>Bien</th><th class="num">Precio (S/)</th><th>Origen</th></tr></thead><tbody>${filas || '<tr><td colspan="3" class="vacio">Ningún mueble en la propuesta.</td></tr>'}</tbody></table></div>
-    ${kit ? '<p class="sub pad">Precio del kit = mesa + silla de su talla, del mismo material.</p>' : ''}`;
+    <div class="tabla-wrap borde-0"><table class="tabla"><thead><tr><th>Bien</th><th class="num">Precio (S/)</th><th>Origen</th></tr></thead><tbody>${filaKit}${filas || '<tr><td colspan="3" class="vacio">Ningún mueble en la propuesta.</td></tr>'}</tbody></table></div>
+    ${kit ? '<p class="sub pad">Precio del kit: el escrito; si no, mesa + silla de su talla (del mismo material); si no hay, el kit del catálogo de ese material.</p>' : ''}`;
 }
 
 // ─── Material y muebles de la propuesta (comparativo por material) ──────────
@@ -301,6 +302,11 @@ function pintarMaterial() {
   const celda = (y, t) => { const p = y.precios[t] || {};
     return `<td class="num"><input class="precio-in" data-pm-k="${t}" data-pm-m="${y.material}" type="number" min="0" step="0.01" inputmode="decimal" value="${p.origen === 'manual' ? p.precio : ''}" placeholder="${p.precio ?? 'sin precio'}" aria-label="${esc(ITEMS.find(x => x.k === t).n)} (${esc(y.nombre)})">
       <span class="sub">${p.origen === 'manual' ? 'manual' : p.origen === 'catalogo_ref' ? `catálogo (${p.n} ${p.n === 1 ? 'fuente' : 'fuentes'})` : 'sin precio de referencia'}</span></td>`; };
+  const celdaKit = y => { const k = y.precios.kit || {};
+    const origen = k.origen === 'manual' ? 'manual' : k.origen === 'mesa_silla' ? 'mesa + silla' : k.origen === 'catalogo_ref' ? `catálogo: ${esc(k.fuente)}` : 'sin precio de referencia';
+    const pend = (k.pendientes || []).map(x => `<span class="sub aviso-celda">No se usa ${esc(x.fuente)}: ${esc(x.motivo)}. Corrígelo en «Precios referenciales».</span>`).join('');
+    return `<td class="num"><input class="precio-in" data-pm-k="kit" data-pm-m="${y.material}" type="number" min="0" step="0.01" inputmode="decimal" value="${k.origen === 'manual' ? k.precio : ''}" placeholder="${k.precio ?? (k.origen === 'mesa_silla' ? 'mesa + silla' : 'sin precio')}" aria-label="Precio por kit (${esc(y.nombre)})">
+      <span class="sub">${origen}</span>${pend}</td>`; };
   const fila = (rot, f, cls = '') => `<tr${cls ? ` class="${cls}"` : ''}><td>${rot}</td>${P.por_material.map(y => `<td class="num">${y.completo ? f(y) : '<span class="chip-est pend">Sin precio completo</span>'}</td>`).join('')}</tr>`;
   el.innerHTML = `
     <div class="panel-cab"><h3>Material y muebles de la propuesta</h3><span class="guardado" id="exp-mat-guardado"></span></div>
@@ -314,6 +320,7 @@ function pintarMaterial() {
     <h3 class="pad">Comparativo por material · IOARR ${esc(datos.nombre_ioarr || '')}</h3>
     <div class="tabla-wrap borde-0"><table class="tabla tabla-materiales"><thead><tr><th>Precio unitario sin IGV</th>${P.por_material.map(y => `<th class="num${y.material === P.material ? ' col-elegida' : ''}">${esc(y.nombre)}${y.material === P.material ? '<br><span class="chip-est ok">Propuesta</span>' : y.completo ? `<br><button class="btn btn-ghost btn-sm" type="button" data-mat-usar="${y.material}">Usar este</button>` : ''}</th>`).join('')}</tr></thead>
     <tbody>${incl.map(x => `<tr><td>${esc(x.n)}</td>${P.por_material.map(y => celda(y, x.k)).join('')}</tr>`).join('') || '<tr><td colspan="4" class="vacio">Ningún mueble en la propuesta.</td></tr>'}
+      ${P.kit ? `<tr><td><b>Precio por kit</b><br><span class="sub">El escrito, mesa + silla si las dos tienen precio, o el kit del catálogo de ese material</span></td>${P.por_material.map(celdaKit).join('')}</tr>` : ''}
       ${P.kit ? fila('Kit sin IGV (promedio por kit)', y => soles(y.kit_sin_igv)) + fila('IGV del kit', y => soles(y.kit_igv)) + fila('Kit con IGV', y => soles(y.kit_con_igv))
         + `<tr><td>Mediana del catálogo (kit sin IGV, material y nivel)</td>${P.por_material.map(y => `<td class="num">${y.mediana ? `${soles(y.mediana.precio)}<span class="sub">${y.mediana.n} ${y.mediana.n === 1 ? 'fuente' : 'fuentes'}${y.mediana.n < 3 ? ' · menos de 3' : ''}</span>` : '<span class="sub">sin fuentes</span>'}</td>`).join('')}</tr>` : ''}
       ${fila('<b>Total del expediente (IOARR)</b>', y => `<b>${soles(y.total)}</b>`)}
