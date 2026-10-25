@@ -98,10 +98,10 @@ function pintar() {
 
 // ─── Una IOARR por nivel ─────────────────────────────────────────────────────
 // Cada 07-C es de un solo nivel. «Una IOARR» con todos los niveles es solo una cifra de comparación.
-const REG = r => r == null ? '<span class="chip-est pend">UIT sin cargar</span>' : r === 'completo' ? '<span class="chip-est alerta">Registro completo · supera 75 UIT</span>' : '<span class="chip-est ok">Registro abreviado · hasta 75 UIT</span>';
+const REG = (r, masiva) => masiva ? '<span class="chip-est alerta">Registro completo (masiva)</span>' : r == null ? '<span class="chip-est pend">UIT sin cargar</span>' : r === 'completo' ? '<span class="chip-est alerta">Registro completo · supera 75 UIT</span>' : '<span class="chip-est ok">Registro abreviado · hasta 75 UIT</span>';
 function pintarIoarr() {
   const K = datos.comparativo, U = K.uit;
-  const fila = (txt, x, o = {}) => `<tr class="${o.activa ? 'activa' : ''}${o.tenue ? ' sub' : ''}"><td>${txt}</td><td class="num">${ent(x.locales)}</td><td class="num">${ent(x.rep)}</td><td class="num"><b>${soles(x.total)}</b></td><td class="num">${x.en_uit == null ? '—' : dec(x.en_uit) + ' UIT'}</td><td>${o.reg ?? REG(x.registro)}</td></tr>`;
+  const fila = (txt, x, o = {}) => `<tr class="${o.activa ? 'activa' : ''}${o.tenue ? ' sub' : ''}"><td>${txt}</td><td class="num">${ent(x.locales)}</td><td class="num">${ent(x.rep)}</td><td class="num"><b>${soles(x.total)}</b></td><td class="num">${x.en_uit == null ? '—' : dec(x.en_uit) + ' UIT'}</td><td>${o.reg ?? REG(x.registro, x.masiva)}</td></tr>`;
   const pestanas = datos.ioarrs.length > 1 ? `<div class="subtabs ioarr-tabs" role="tablist" aria-label="IOARR por nivel">${datos.ioarrs.map(x =>
     `<button type="button" role="tab" data-exp-nivel="${x.nivel}" aria-selected="${x.nivel === datos.nivel}">IOARR ${esc(x.nombre)} <span class="sub">${soles(x.total)}</span></button>`).join('')}</div>` : '';
   const ctrl = K.control && !K.control.ok ? `<div class="avisos pad"><div class="aviso alerta" role="alert">${esc(K.control.errores.slice(0, 3).join(' '))}</div></div>` : '';
@@ -124,8 +124,7 @@ async function cambiarNivel(n) {
 
 function pintarKpis() {
   const T = datos.totales, U = datos.uitCalc;
-  const reg = U.valor == null ? '<span class="chip-est pend">UIT sin cargar</span>'
-    : U.supera ? '<span class="chip-est alerta">Registro completo · supera 75 UIT</span>' : '<span class="chip-est ok">Registro abreviado · hasta 75 UIT</span>';
+  const reg = REG(U.registro ?? (U.valor == null ? null : U.supera ? 'completo' : 'abreviado'), U.masiva);
   document.getElementById('exp-kpis').innerHTML = `
     <div class="kpis kpis-montos">
       <div class="kpi destacado"><div class="v">${soles(T.total)}</div><div class="l">monto de inversión${datos.nivel ? ` · IOARR ${esc(datos.nombre_ioarr)}` : ''}</div></div>
@@ -248,6 +247,11 @@ function pintarEstructura() {
       ${num('est-doc', 'Documento equivalente (% del costo directo sin IGV)', g.doc_pct, { k: 'doc_pct', max: 100 })}
       ${num('est-sup', 'Supervisión (% del costo directo sin IGV)', g.sup_pct, { k: 'sup_pct', max: 100 })}
       ${num('est-liq', 'Liquidación (S/, monto fijo)', g.liquidacion, { k: 'liquidacion' })}
+    </div>
+    <div class="form-grid pad">
+      <div class="campo"><label for="est-cc">Control concurrente (Ley 31358)</label><select id="est-cc"><option value="" ${!g.cc_aplica ? 'selected' : ''}>Según el umbral / sin indicar</option><option value="si" ${g.cc_aplica === 'si' ? 'selected' : ''}>Corresponde</option><option value="no" ${g.cc_aplica === 'no' ? 'selected' : ''}>No corresponde</option></select><span class="sub">Va en B. Otros costos de inversión.</span></div>
+      <div class="campo"><label for="est-ccpct">% del control concurrente</label><input id="est-ccpct" data-est-cc="cc_pct" type="number" min="0" max="100" step="0.01" inputmode="decimal" value="${g.cc_pct ?? ''}" placeholder="Lo fija la entidad"></div>
+      <div class="campo"><label for="est-ccumb">Umbral de monto (S/, opcional)</label><input id="est-ccumb" data-est-cc="cc_umbral" type="number" min="0" step="1" inputmode="decimal" value="${g.cc_umbral ?? ''}" placeholder="Corresponde si el monto lo supera"><span class="sub">Solo si arriba dice «según el umbral».</span></div>
     </div>
     <div class="pad">
       <label class="chk"><input type="checkbox" id="est-kit" ${g.kit ? 'checked' : ''}> <b>Presentar como kit (mesa + silla del estudiante)</b></label>
@@ -403,6 +407,8 @@ export function enlazarExpediente(el, abrirNuevo) {
       return;
     }
     if (e.target.dataset.est) { const v = parseFloat(e.target.value); if (Number.isFinite(v) && v >= 0) guardarEstructura({ [e.target.dataset.est]: v }); return; }
+    // Control concurrente: vacío = sin dato (null)
+    if (e.target.dataset.estCc) { const v = e.target.value === '' ? null : parseFloat(e.target.value); if (v === null || (Number.isFinite(v) && v >= 0)) guardarEstructura({ [e.target.dataset.estCc]: v }, 900); return; }
     if (e.target.dataset.precioK) { const v = e.target.value === '' ? null : parseFloat(e.target.value); if (v === null || (Number.isFinite(v) && v >= 0)) guardarEstructura({ precios: { [e.target.dataset.precioK]: v } }, 900); return; }
     if (e.target.dataset.kitDist != null) { const d = leerDist(); if (d.some(v => v > 0)) guardarEstructura({ kit_dist: d }, 900); return; }
     if (e.target.id === 'esc-ocup' || e.target.id === 'esc-pct') {
@@ -433,6 +439,7 @@ export function enlazarExpediente(el, abrirNuevo) {
   el.addEventListener('change', e => {
     if (e.target.name === 'exp-esc') { cambiarEscenario({ escenario: e.target.value }); return; }
     if (e.target.id === 'est-kit') { clearTimeout(tGuardar); guardar({ estructura: { kit: e.target.checked } }); }
+    if (e.target.id === 'est-cc') { clearTimeout(tGuardar); guardar({ estructura: { cc_aplica: e.target.value } }); }
   });
   enlazarDocumentos(el);
   enlazarOferta(el);

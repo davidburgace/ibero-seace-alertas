@@ -47,7 +47,7 @@ const campoNivel = (k, etiqueta, { area, ph = '', ayuda } = {}) => {
 
 function pintar() {
   const R = vista.resumen, d = vista.datos;
-  const reg = R.registro === 'completo' ? '<span class="chip-est alerta">Registro completo · secciones D, E y F</span>'
+  const reg = R.registro === 'completo' ? `<span class="chip-est alerta">${R.masiva ? 'Registro completo (masiva)' : 'Registro completo'} · secciones D, E y F</span>`
     : R.registro === 'abreviado' ? '<span class="chip-est ok">Registro abreviado · sección G</span>' : '<span class="chip-est pend">Falta la UIT</span>';
   const est = { cumple: '<span class="chip-est ok">Cumple</span>', no: '<span class="chip-est alerta">No cumple</span>', pendiente: '<span class="chip-est pend">Pendiente</span>' };
   // Mobiliario nuevo: vida útil y mantenimiento anual por meta (con kit, el kit; el costo puede ser 0)

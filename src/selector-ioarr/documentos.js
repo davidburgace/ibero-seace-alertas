@@ -18,7 +18,7 @@
 // ============================================================================
 
 import { ITEMS, TALLAS, NIVN, textoEscenario, textoPct, textoOrigenPct, ROTULO_UMBRAL, DEF as DEF_CRIT } from './calculo.js';
-import { TIPOS, LIMITE_UIT, NOTA_FALTANTE } from './costos.js';
+import { TIPOS, LIMITE_UIT, NOTA_FALTANTE, REGISTRO_MASIVA } from './costos.js';
 import { FUENTES_VIDA_UTIL, limpiarColegios, colegioDe, checklistColegio } from './lineamientos.js';
 
 // Nota del material, dentro de la descripción técnica
@@ -245,8 +245,9 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, efectivos = 
   const metas = metasR.map(m => ({ k: m.k, nombre: m.n, plural: PLURAL[m.k], activo: 'MOBILIARIO DE AULA', unidad: UNIDAD_META[m.k] || 'Número de mobiliario',
     cantidad: m.cantidad, porTalla: m.porTalla, costo: r2(m.cd * (1 + igvPct / 100)) }));
   if (metas.length) metas[metas.length - 1].costo = r2(T.cdIgv - metas.slice(0, -1).reduce((a, m) => a + m.costo, 0));
+  // Tabla 3.7: A = costo directo (activos con IGV); B = documento equivalente + supervisión + liquidación + control concurrente
   const subtotalActivos = r2(T.cdIgv);
-  const expediente = T.doc, supervision = T.sup, liquidacion = T.liq;
+  const expediente = T.doc, supervision = T.sup, liquidacion = T.liq, control = T.cc || 0;
   const total = T.total;
 
   // ── Plazo y cronogramas (mensual a partir del plazo; en días, se cuentan meses de 30 días) ──
@@ -265,6 +266,7 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, efectivos = 
     expediente: { valores: [r2(expediente), ...Array(N - 1).fill(0)], total: r2(expediente) },
     supervision: { valores: repartir(r2(supervision), N), total: r2(supervision) },
     liquidacion: { valores: [...Array(N - 1).fill(0), liquidacion], total: liquidacion },
+    control: control ? { valores: repartir(r2(control), N), total: r2(control) } : null,
     metas: metas.map(m => ({ nombre: m.nombre, unidad: m.unidad, valores: repartirEnteros(m.cantidad, N), total: m.cantidad }))
   } : null;
   const plazoTexto = enDias ? (d.dias ? `${d.dias} días` : null) : (d.meses ? `${d.meses} ${d.meses === 1 ? 'mes' : 'meses'}` : null);
@@ -368,7 +370,8 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, efectivos = 
   falta(R.locales.length && !nLoc, 'Ningún local tiene bienes a reponer.');
   falta(!T.cd, 'No hay costo directo: carga los precios unitarios.');
   falta((R.lineas || []).some(y => y.rep > 0 && y.pu == null), 'Falta el precio unitario de algún bien.');
-  falta(!U.valor, 'Falta la UIT del año: no se sabe si el registro es abreviado o completo.');
+  falta(!U.valor, masiva ? 'Falta la UIT del año para expresar el monto en UIT (registro completo, masiva).' : 'Falta la UIT del año: no se sabe si el registro es abreviado o completo.');
+  falta(/PENDIENTE/.test((R.estructura?.filas || []).find(f => f.clave === 'cc')?.nombre || ''), 'Control concurrente (Ley 31358): indica si corresponde y su % (Costos → estructura).');
   falta(!d.uf || !d.uei, 'B. Institucionalidad: Unidad Formuladora y Unidad Ejecutora de Inversiones.');
   falta(!d.opmi, 'B. Institucionalidad: OPMI.');
   falta(!d.modalidad, 'Modalidad de ejecución.');
@@ -387,7 +390,9 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, efectivos = 
   return {
     fecha, proyecto: proyecto.nombre || '(sin nombre)', region: proyecto.region,
     nombre: d.nombre_inversion || nombreSugerido, nombreSugerido, cui: d.cui || proyecto.ioarr?.cui || '',
-    masiva, supera, registro: supera == null ? 'pendiente' : supera ? 'completo' : 'abreviado',
+    // Una inversión masiva va siempre con registro completo; una individual, según las 75 UIT
+    masiva, supera, registro: masiva ? 'completo' : supera == null ? 'pendiente' : supera ? 'completo' : 'abreviado',
+    registroRotulo: masiva ? REGISTRO_MASIVA : supera == null ? 'Registro: PENDIENTE (falta la UIT)' : supera ? 'Registro completo (supera 75 UIT)' : 'Registro abreviado (hasta 75 UIT)',
     uit: U, limite: LIMITE_UIT, A,
     escenario, escenarioTexto: textoEscenario(Pesc, regDato), kit: !!R.kit,
     regular: escenario === 'malo_regular' ? { pct: pctTxt, origen: textoOrigenPct(Pesc, regDato), porDato, umbral: Pesc.umbralVida, observado: RC.observado ?? null, muestra: RC.conDato || 0 } : null,
@@ -397,7 +402,8 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, efectivos = 
     niveles: niveles.map(k => NIVEL[k]), ugels, ambito,
     D: { inventario: d.inventario_registrado, codigo_inventario: d.codigo_inventario, mantenimiento: d.ue_mantenimiento, mantenimiento_codigo: d.ue_mantenimiento_codigo },
     E: { sustento: [...sustentoAuto, ...(d.sustento ? d.sustento.split(/\n+/) : [])], activos, intervencion, condiciones, refTecnica: d.ref_tecnica },
-    F: { metas, subtotalActivos, expediente: r2(expediente), supervision: r2(supervision), liquidacion, total,
+    F: { metas, subtotalActivos, expediente: r2(expediente), supervision: r2(supervision), liquidacion, control: r2(control), otros: r2(T.b ?? (expediente + supervision + liquidacion + control)), total,
+      controlTexto: (R.estructura?.filas || []).find(f => f.clave === 'cc')?.nombre || '',
       inicio: inicio && fechaPe(inicio), fin: fin && fechaPe(fin), meses: N, plazo: plazoTexto, cronograma, mantenimiento },
     totales: T, estructura: R.estructura, partidas: R.partidas, lineas: R.lineas || R.partidas, distritos: R.distritos, excluidos: R.excluidos || [],
     faltante: { cantidad: T.fal, valor: T.falValor, partidas: R.partidas.filter(p => p.fal > 0).map(p => ({ nombre: p.n, cantidad: p.fal, valor: p.falValor })) },

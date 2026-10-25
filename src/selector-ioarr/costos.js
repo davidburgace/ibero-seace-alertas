@@ -27,7 +27,13 @@
 //   Doc. equivalente= costo directo × 3 %      (parámetro)
 //   Supervisión     = costo directo × 5 %      (parámetro)
 //   Liquidación     = monto fijo (15,000 por defecto)
-//   Monto de inversión = (costo directo + IGV) + documento equivalente + supervisión + liquidación
+//   Control concurrente (Ley 31358) = % × (lo anterior), solo si corresponde (parámetro: sí / no, o
+//                     según un umbral de monto; el % y el umbral los fija la entidad: vacíos por defecto)
+// Desglose de la Tabla 3.7 de los Lineamientos IOARR:
+//   A. Costo directo = bienes + transporte + IGV (el costo de los activos, metas del 07-C)
+//   B. Otros costos de inversión = documento equivalente + supervisión + liquidación + control concurrente
+//   C = A + B: costo de inversión (monto de inversión)
+//   Monto de inversión = (costo directo + IGV) + documento equivalente + supervisión + liquidación (+ control concurrente)
 // Los porcentajes dependen de la entidad convocante. La liquidación se reparte entre los
 // locales (y entre las IOARR por nivel) según su costo directo.
 // ============================================================================
@@ -55,7 +61,11 @@ export const LEYENDA_REFERENCIA = 'Referencia Loreto 2026; edítalo con tus prec
 export const NOTA_PORCENTAJES = 'Los porcentajes (IGV, documento equivalente, supervisión) y la liquidación dependen de la entidad convocante: revísalos con sus bases.';
 // Grupos de grado de Primaria para repartir los kits
 export const GRUPOS_PRIMARIA = TALLAS.filter(z => z.nivel === 'P').map(z => z.k);   // ['p12', 'p34', 'p56']
-export const ESTRUCTURA_DEF = { igv: 18, doc_pct: 3, sup_pct: 5, liquidacion: 15000, transporte_pieza: TRANSPORTE_REFERENCIA, kit: false, kit_dist: [1, 1, 1], precios: {} };
+export const ESTRUCTURA_DEF = { igv: 18, doc_pct: 3, sup_pct: 5, liquidacion: 15000, transporte_pieza: TRANSPORTE_REFERENCIA, kit: false, kit_dist: [1, 1, 1], precios: {},
+  cc_aplica: '', cc_pct: null, cc_umbral: null };
+export const ROTULO_CC = 'Control concurrente (Ley 31358)';
+// Registro del Formato 07-C: una inversión masiva (varias UP) va siempre con registro completo
+export const REGISTRO_MASIVA = 'Registro completo (masiva)';
 // Líneas del kit: una por talla (precio = mesa + silla de esa talla)
 export const LINEAS_KIT = TALLAS.map((z, j) => ({ k: `kit_${z.k}`, tipo: 'kit', t: null, talla: z.k, j, n: `Kit de mobiliario (mesa + silla del estudiante) – ${z.n}`, u: 'kits' }));
 
@@ -75,7 +85,11 @@ export function limpiarEstructura(e) {
     igv: num(x.igv, 0, 100, D.igv), doc_pct: num(x.doc_pct, 0, 100, D.doc_pct), sup_pct: num(x.sup_pct, 0, 100, D.sup_pct),
     liquidacion: Math.round(num(x.liquidacion, 0, 1e10, D.liquidacion) * 100) / 100,
     transporte_pieza: Math.round(num(x.transporte_pieza, 0, 1e6, D.transporte_pieza) * 100) / 100,
-    kit: x.kit === true, kit_dist: dist.some(v => v > 0) ? dist : D.kit_dist, precios
+    kit: x.kit === true, kit_dist: dist.some(v => v > 0) ? dist : D.kit_dist, precios,
+    // Control concurrente: '' = según el umbral (si lo hay) o pendiente; 'si' / 'no' a mano
+    cc_aplica: ['si', 'no'].includes(x.cc_aplica) ? x.cc_aplica : '',
+    cc_pct: x.cc_pct === '' || x.cc_pct == null ? null : num(x.cc_pct, 0, 100, null),
+    cc_umbral: x.cc_umbral === '' || x.cc_umbral == null ? null : num(x.cc_umbral, 0, 1e12, null)
   };
 }
 
@@ -302,13 +316,22 @@ export function costear({ D, C, list, precios, estructura, uit, inventario, ajus
     l.liq = cdTodos ? E.liquidacion * l.cd / cdTodos : E.liquidacion / (n || 1);
     l.total = l.cd + l.igv + l.doc + l.sup + l.liq;
   }
+  // Control concurrente (Ley 31358): por IOARR, si corresponde (a mano o porque supera el umbral)
+  const cc = {};
+  for (const g of fuentes) {
+    const ls = locales.filter(l => l.grupo === g.clave), base = ls.reduce((a, l) => a + l.total, 0);
+    const aplica = E.cc_aplica === 'si' || (E.cc_aplica === '' && E.cc_umbral != null && base > E.cc_umbral);
+    cc[g.clave] = { aplica, pendiente: E.cc_aplica === '' && E.cc_umbral == null, sinPct: aplica && E.cc_pct == null };
+    for (const l of ls) { l.cc = aplica && E.cc_pct != null ? l.total * E.cc_pct / 100 : 0; l.total += l.cc; }
+  }
 
   const C0 = fuentes[0]?.C || {};
   const P = { pu, puGeneral, propio, incl, puKit, kit, E, escenario, pctRegular: C0.pctRegular ?? 100, umbralVida: C0.umbralVida ?? 10 };
-  const res = resumir(locales, P, uit);
+  const ccTodos = { aplica: Object.values(cc).some(x => x.aplica), pendiente: Object.values(cc).some(x => x.pendiente), sinPct: Object.values(cc).some(x => x.sinPct) };
+  const res = resumir(locales, { ...P, cc: ccTodos }, uit);
   if (grupos) res.grupos = Object.fromEntries(grupos.map(g => {
     const ls = locales.filter(l => l.grupo === g.clave), ig = inclDe(g);
-    return [g.clave, resumir(ls, { ...P, incl: ig, kit: ls.length ? ls.some(l => l.kit) : E.kit && ig[0] && ig[1] }, uit)];
+    return [g.clave, resumir(ls, { ...P, incl: ig, kit: ls.length ? ls.some(l => l.kit) : E.kit && ig[0] && ig[1], cc: cc[g.clave] }, uit)];
   }));
   return res;
 }
@@ -462,7 +485,7 @@ function costoLocal(l, { kit, pu, puKit, E }) {
 const r2 = n => Math.round((n + Number.EPSILON) * 100) / 100;
 
 // Totales, partidas, metas, distritos, UIT y avisos de un conjunto de locales ya costeados
-function resumir(locales, { pu, puGeneral, propio, incl, puKit, kit, E, escenario, pctRegular, umbralVida }, uit) {
+function resumir(locales, { pu, puGeneral, propio, incl, puKit, kit, E, escenario, pctRegular, umbralVida, cc = {} }, uit) {
   const n = locales.length;
   const sum = f => locales.reduce((a, loc) => a + f(loc), 0);
   const T = {
@@ -480,7 +503,10 @@ function resumir(locales, { pu, puGeneral, propio, incl, puKit, kit, E, escenari
   T.bienes = r2(T.bienes); T.cd = r2(T.bienes + T.transporte);
   T.igv = r2(T.cd * E.igv / 100); T.doc = r2(T.cd * E.doc_pct / 100); T.sup = r2(T.cd * E.sup_pct / 100); T.liq = r2(sum(l => l.liq));
   T.cdIgv = r2(T.cd + T.igv);
-  T.total = r2(T.cdIgv + T.doc + T.sup + T.liq);
+  T.cc = cc.aplica && E.cc_pct != null ? r2((T.cdIgv + T.doc + T.sup + T.liq) * E.cc_pct / 100) : 0;
+  // Tabla 3.7: A = costo directo (con IGV); B = otros costos de inversión; C = A + B
+  T.a = T.cdIgv; T.b = r2(T.doc + T.sup + T.liq + T.cc);
+  T.total = r2(T.a + T.b);
   T.porEstudiante = T.est ? T.total / T.est : null;
 
   // Líneas de mesa y silla por talla y de los demás (diagnóstico y, sin kit, costo)
@@ -524,18 +550,23 @@ function resumir(locales, { pu, puGeneral, propio, incl, puKit, kit, E, escenari
   });
   for (const m of metas) m.cd = m.bienes + m.transporte;
 
+  const ccTexto = cc.aplica ? (E.cc_pct != null ? `${ROTULO_CC}: ${E.cc_pct} % de lo anterior` : `${ROTULO_CC}: PENDIENTE el %`)
+    : cc.pendiente ? `${ROTULO_CC}: PENDIENTE indicar si corresponde` : `${ROTULO_CC}: no corresponde`;
   const estructura = {
-    kit, escenario, params: { igv: E.igv, doc_pct: E.doc_pct, sup_pct: E.sup_pct, liquidacion: E.liquidacion, transporte_pieza: E.transporte_pieza, kit_dist: E.kit_dist },
+    kit, escenario, params: { igv: E.igv, doc_pct: E.doc_pct, sup_pct: E.sup_pct, liquidacion: E.liquidacion, transporte_pieza: E.transporte_pieza, kit_dist: E.kit_dist,
+      cc_aplica: E.cc_aplica, cc_pct: E.cc_pct, cc_umbral: E.cc_umbral, cc_corresponde: !!cc.aplica },
     filas: [
       { clave: 'bienes', nombre: 'Bienes (cantidad × precio unitario sin IGV)', monto: T.bienes },
       { clave: 'transporte', nombre: `Transporte (${T.piezas.toLocaleString('es-PE')} piezas × S/ ${tp.toFixed(2)})`, monto: T.transporte },
-      { clave: 'cd', nombre: 'Costo directo', monto: T.cd, fuerte: true },
+      { clave: 'cd', nombre: 'Costo directo sin IGV (bienes + transporte)', monto: T.cd },
       { clave: 'igv', nombre: `IGV (${E.igv} %)`, monto: T.igv },
-      { clave: 'cdIgv', nombre: 'Costo directo + IGV', monto: T.cdIgv, fuerte: true },
+      { clave: 'cdIgv', nombre: 'A. COSTO DIRECTO (con IGV)', monto: T.cdIgv, fuerte: true },
       { clave: 'doc', nombre: `Documento equivalente (${E.doc_pct} % del costo directo sin IGV)`, monto: T.doc },
       { clave: 'sup', nombre: `Supervisión (${E.sup_pct} % del costo directo sin IGV)`, monto: T.sup },
       { clave: 'liq', nombre: 'Liquidación (monto fijo)', monto: T.liq },
-      { clave: 'total', nombre: 'MONTO DE INVERSIÓN', monto: T.total, total: true }]
+      { clave: 'cc', nombre: ccTexto, monto: T.cc },
+      { clave: 'b', nombre: 'B. OTROS COSTOS DE INVERSIÓN', monto: T.b, fuerte: true },
+      { clave: 'total', nombre: 'C = A + B. COSTO DE INVERSIÓN (MONTO DE INVERSIÓN)', monto: T.total, total: true }]
   };
 
   // ── Por distrito ──────────────────────────────────────────────────────────
@@ -553,6 +584,10 @@ function resumir(locales, { pu, puGeneral, propio, incl, puKit, kit, E, escenari
   const U = { anio: uit?.anio ?? null, valor: valorUit, limite: valorUit ? LIMITE_UIT * valorUit : null };
   U.supera = U.limite != null ? T.total > U.limite : null;
   U.enUit = valorUit ? T.total / valorUit : null;
+  // Inversión masiva (más de una UP con bienes a reponer): siempre registro completo
+  U.masiva = locales.filter(l => l.rep.some(q => q > 0)).length > 1;
+  U.registro = U.masiva ? 'completo' : U.supera == null ? null : U.supera ? 'completo' : 'abreviado';
+  U.rotulo = U.masiva ? REGISTRO_MASIVA : U.registro === 'completo' ? 'Registro completo (supera 75 UIT)' : U.registro === 'abreviado' ? 'Registro abreviado (hasta 75 UIT)' : 'Registro: falta la UIT';
 
   // Muestra de campo: Regular contado con antigüedad y, de eso, con vida útil cumplida
   const conDato = locales.filter(l => l.regular?.conocido > 0);
@@ -574,8 +609,11 @@ function resumir(locales, { pu, puGeneral, propio, incl, puKit, kit, E, escenari
   const recortados = locales.filter(l => l.tope?.recorte.some(q => q > 0) || l.tope?.kits > 0);
   if (recortados.length) avisos.push({ tipo: 'tope', texto: `En ${recortados.length === 1 ? '1 colegio' : recortados.length + ' colegios'} lo que se repone se limitó a la matrícula o a la capacidad de diseño (${(T.recortado + T.kitsRecortados).toLocaleString('es-PE')} bienes menos): la reposición no aumenta la capacidad (${recortados.slice(0, 15).map(l => l.cod).join(', ')}${recortados.length > 15 ? '…' : ''}).` });
   if (T.inconsistentes) avisos.push({ tipo: 'censo', alerta: true, texto: `${T.inconsistentes === 1 ? '1 colegio tiene' : T.inconsistentes + ' colegios tienen'} datos inconsistentes del censo: más mesas o sillas que matrícula (${locales.filter(l => l.tope?.inconsistente).slice(0, 15).map(l => l.cod).join(', ')}). Verifícalo en campo.` });
-  if (!valorUit) avisos.push({ tipo: 'uit', texto: `Carga el valor de la UIT${U.anio ? ' de ' + U.anio : ''} para saber si el registro del Formato 07-C es abreviado o completo.` });
+  if (!valorUit) avisos.push({ tipo: 'uit', texto: U.masiva ? `Carga el valor de la UIT${U.anio ? ' de ' + U.anio : ''} para expresar el monto en UIT (${REGISTRO_MASIVA}).` : `Carga el valor de la UIT${U.anio ? ' de ' + U.anio : ''} para saber si el registro del Formato 07-C es abreviado o completo.` });
+  else if (U.masiva) avisos.push({ tipo: 'uit75', texto: `${REGISTRO_MASIVA}: el Formato 07-C de una inversión masiva lleva las secciones D, E y F. Monto: ${(T.total / valorUit).toLocaleString('es-PE', { maximumFractionDigits: 2 })} UIT (UIT ${U.anio}).` });
   else if (U.supera) avisos.push({ tipo: 'uit75', texto: `El monto de inversión supera las ${LIMITE_UIT} UIT (UIT ${U.anio}): corresponde el registro completo del Formato 07-C (secciones D, E y F).` });
+  if (cc.pendiente) avisos.push({ tipo: 'control_concurrente', texto: `Indica si corresponde el ${ROTULO_CC.toLowerCase()} (sí / no, o un umbral de monto) y su %. Por ahora no se incluye en B. Otros costos de inversión.` });
+  else if (cc.sinPct) avisos.push({ tipo: 'control_concurrente', alerta: true, texto: `Corresponde el ${ROTULO_CC.toLowerCase()}, pero falta su %: se calcula con 0 hasta que lo cargues.` });
   const conDesc = locales.filter(l => l.descuento?.tipos.some(q => q > 0) || l.descuento?.kits > 0);
   if (conDesc.length) avisos.push({ tipo: 'duplicacion', texto: `Se ${T.descontado === 1 ? 'descuenta' : 'descuentan'} ${T.descontado.toLocaleString('es-PE')} ${T.descontado === 1 ? 'bien' : 'bienes'}${T.kitsDescontados ? ` (${T.kitsDescontados.toLocaleString('es-PE')} kits)` : ''} por entregas previas de mobiliario de los últimos 3 años en ${conDesc.length === 1 ? '1 colegio' : conDesc.length + ' colegios'} (${conDesc.slice(0, 15).map(l => l.cod).join(', ')}${conDesc.length > 15 ? '…' : ''}).` });
   const verif = locales.filter(l => l.verificado?.tipos.length);

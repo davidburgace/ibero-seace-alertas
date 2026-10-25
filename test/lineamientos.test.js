@@ -243,3 +243,35 @@ test('mobiliario en uso: un colegio inundado o cerrado no entra al monto y se av
   const vals = []; wb.getWorksheet('Mobiliario en uso').eachRow((r, n) => { if (n > 4) vals.push([r.getCell(1).value, r.getCell(3).value, r.getCell(4).value]); });
   assert.deepEqual(vals.find(v => v[0] === l.cod), [l.cod, 'Inundado', 'No entra: mobiliario sin uso']);
 });
+
+test('Tabla 3.7: A costo directo, B otros costos (con control concurrente si corresponde), C = A + B; masiva = registro completo', async () => {
+  const cerca = (a, b, m) => assert.ok(Math.abs(a - b) < 0.011, `${m}: ${a} ≠ ${b}`);
+  const conCC = (estructura) => {
+    const datosDoc = limpiarDatosDoc({ fecha_inicio: '2027-03', meses: 4 });
+    const K = calcularPaquete({ D, P: DEF, codigos: CODIGOS, comun: { ...BASE, estructura: { ...BASE.estructura, ...estructura } }, datosDoc, anioRef: 2026 });
+    const A = { ...K, detalle: {}, efectivos: preciosEfectivos({}, {}) };
+    return { A, M: modeloIoarr(A, elegirIoarr(A, 'P'), datosDoc, { nombre: 'Prueba', region: 'Moquegua' }, '2026-10-25') };
+  };
+  const sin = conCC({}), si = conCC({ cc_aplica: 'si', cc_pct: 2 }), umbral = conCC({ cc_umbral: 1 }), no = conCC({ cc_aplica: 'no' });
+  const T = si.M.totales;
+  cerca(T.a, T.cdIgv, 'A = costo directo con IGV');
+  cerca(T.cc, (T.cdIgv + T.doc + T.sup + T.liq) * 0.02, 'control concurrente 2 %');
+  cerca(T.b, T.doc + T.sup + T.liq + T.cc, 'B'); cerca(T.total, T.a + T.b, 'C = A + B');
+  cerca(T.total, sin.M.totales.total * 1.02, 'el control concurrente suma 2 % al monto');
+  assert.equal(sin.M.totales.cc, 0); assert.equal(no.M.totales.cc, 0);
+  // Sin indicar si corresponde: pendiente y aviso; con umbral superado pero sin %, alerta
+  assert.ok(sin.M.faltan.some(t => /Control concurrente \(Ley 31358\)/.test(t)));
+  assert.ok(!no.M.faltan.some(t => /Control concurrente/.test(t)));
+  assert.ok(elegirIoarr(umbral.A, 'P').R.avisos.some(a => a.tipo === 'control_concurrente' && a.alerta));
+  // Filas de la estructura con A, B y C
+  assert.deepEqual(si.M.estructura.filas.filter(f => f.fuerte || f.total).map(f => f.clave), ['cdIgv', 'b', 'total']);
+  // El cronograma suma el total, con la fila del control concurrente
+  const Cr = si.M.F.cronograma, suma = [...Cr.activos, Cr.expediente, Cr.supervision, Cr.liquidacion, Cr.control].reduce((a, x) => a + x.total, 0);
+  cerca(suma, si.M.F.total, 'cronograma');
+  // Masiva: siempre «Registro completo (masiva)» y el monto en UIT
+  assert.equal(si.M.masiva, true); assert.equal(si.M.registro, 'completo');
+  const t = await textoDocx(await generar07C(si.M));
+  assert.match(t, /UIT \(UIT 2026: S\/ 5,500\.00\) → Registro completo \(masiva\), secciones D, E y F/);
+  assert.match(t, /A\. COSTO DIRECTO \(activos, con IGV\)/); assert.match(t, /CONTROL CONCURRENTE \(LEY 31358\)/);
+  assert.match(t, /B\. OTROS COSTOS DE INVERSIÓN/); assert.match(t, /C = A \+ B\. COSTO DE INVERSIÓN \(TOTAL\)/);
+});

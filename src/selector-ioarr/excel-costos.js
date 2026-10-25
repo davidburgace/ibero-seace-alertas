@@ -3,9 +3,10 @@
 //
 // Hojas: Resumen · Parámetros · Partidas · Metrado y costos por local · Por distrito
 //        · Inventario verificado (solo si algún local se corrigió con una visita de campo)
-// Estructura referencial de adquisición de bienes, SIN gastos generales ni utilidad:
+// Estructura referencial de adquisición de bienes, SIN gastos generales ni utilidad (Tabla 3.7):
 //   Costo directo = bienes + transporte (piezas × transporte por pieza)
-//   Monto de inversión = (costo directo + IGV) + documento equivalente + supervisión + liquidación
+//   A = costo directo + IGV · B = documento equivalente + supervisión + liquidación + control concurrente
+//   C = A + B: monto de inversión
 // Todo lo que se calcula es una fórmula de Excel (con su resultado ya puesto), para
 // que el evaluador pueda auditar cada cifra: si cambia un precio, un % o la UIT en
 // «Parámetros», el libro se recalcula.
@@ -112,17 +113,20 @@ export async function generarExcelCostos(R, meta) {
       ['igv', 'IGV', '%', E.igv / 100, PCT, 'Sobre el costo directo.'],
       ['doc', 'Documento equivalente', '%', E.doc_pct / 100, PCT, 'Sobre el costo directo sin IGV.'],
       ['sup', 'Supervisión', '%', E.sup_pct / 100, PCT, 'Sobre el costo directo sin IGV.'],
-      ['liq', 'Liquidación', 'S/', T.liq, SOLES, R.grupos ? 'Monto fijo.' : 'Monto fijo; se reparte entre los locales según su costo directo.']
+      ['liq', 'Liquidación', 'S/', T.liq, SOLES, R.grupos ? 'Monto fijo.' : 'Monto fijo; se reparte entre los locales según su costo directo.'],
+      ['cc', 'Control concurrente (Ley 31358)', '%', E.cc_corresponde ? (E.cc_pct ?? 0) / 100 : 0, PCT,
+        `Sobre costo directo + IGV + documento equivalente + supervisión + liquidación. ${E.cc_corresponde ? (E.cc_pct == null ? 'Corresponde: PENDIENTE el %.' : 'Corresponde.') : E.cc_aplica === 'no' ? 'No corresponde (0 %).' : 'PENDIENTE indicar si corresponde (0 % por ahora).'}`]
     ];
     filas.forEach(([k, nombre, u, v, fmt, como], j) => {
       const r = f0 + 1 + j;
       ws.getRow(r).values = [nombre, u, v, como];
       ws.getCell(r, 3).numFmt = fmt;
       cel[k] = `${HP}!$C$${r}`;
+      if (k === 'cc' && (!E.cc_corresponde ? E.cc_aplica !== 'no' : E.cc_pct == null)) resaltar(ws.getCell(r, 3), AMARILLO);
     });
     const fn = f0 + filas.length + 2;
     ws.getCell(fn, 1).value = NOTA_PORCENTAJES;
-    ws.getCell(fn + 1, 1).value = 'Estructura referencial de adquisición de bienes: costo directo + IGV + documento equivalente + supervisión + liquidación.';
+    ws.getCell(fn + 1, 1).value = 'Tabla 3.7: A. costo directo (bienes + transporte + IGV); B. otros costos de inversión (documento equivalente + supervisión + liquidación + control concurrente); C = A + B.';
     for (const r of [fn, fn + 1]) ws.getCell(r, 1).font = { italic: true, color: { argb: 'FF5C6270' } };
 
     const fu = fn + 3;
@@ -152,7 +156,8 @@ export async function generarExcelCostos(R, meta) {
   col('doc', 'Documento equivalente (S/)', 15);
   col('sup', 'Supervisión (S/)', 15);
   col('liq', 'Liquidación (S/)', 15);
-  col('total', 'MONTO DE INVERSIÓN (S/)', 18);
+  col('cc', 'Control concurrente (S/)', 15);
+  col('total', 'C = A + B. MONTO DE INVERSIÓN (S/)', 18);
   const LF = R.lineasTalla;
   LF.forEach((x, j) => col('fq' + j, `${x.n} – ${FALTANTE_MIN} (${x.u}), no incluido`, 15));
   col('fv', 'Faltante valorizado, referencial (S/)', 17);
@@ -182,7 +187,8 @@ export async function generarExcelCostos(R, meta) {
     v[C.doc] = f(`${A('cd', r)}*${cel.doc}`, l.doc);
     v[C.sup] = f(`${A('cd', r)}*${cel.sup}`, l.sup);
     v[C.liq] = f(`IF(${totDe('cd')}=0,${cel.liq}/${nLoc},${cel.liq}*${A('cd', r)}/${totDe('cd')})`, l.liq);
-    v[C.total] = f(`${A('cd', r)}+${A('igv', r)}+${A('doc', r)}+${A('sup', r)}+${A('liq', r)}`, l.total);
+    v[C.cc] = f(`(${A('cd', r)}+${A('igv', r)}+${A('doc', r)}+${A('sup', r)}+${A('liq', r)})*${cel.cc}`, l.cc || 0);
+    v[C.total] = f(`${A('cd', r)}+${A('igv', r)}+${A('doc', r)}+${A('sup', r)}+${A('liq', r)}+${A('cc', r)}`, l.total);
     LF.forEach((x, j) => { v[C['fq' + j]] = l.lin.fal[idxF[j]]; });
     // Faltante × precio: la celda del precio si está en Parámetros; si no (talla sin kit), el valor
     v[C.fv] = f(LF.length ? LF.map((x, j) => `${A('fq' + j, r)}*${filaDe[x.k] ? `${HP}!$C$${filaDe[x.k]}` : (x.pu ?? 0)}`).join('+') : '0', l.falValor);
@@ -194,7 +200,7 @@ export async function generarExcelCostos(R, meta) {
     const v = []; v[C.cod] = 'TOTAL';
     const sumables = Object.keys(C).filter(k => !['cod', 'nom', 'ubigeo', 'prov', 'dist', 'area', 'inv'].includes(k));
     const resultado = {
-      est: T.est, aul: T.aul, bienes: T.bienes, piezas: T.piezas, transporte: T.transporte, cd: T.cd, igv: T.igv, doc: T.doc, sup: T.sup, liq: T.liq, total: T.total, fv: T.falValor,
+      est: T.est, aul: T.aul, bienes: T.bienes, piezas: T.piezas, transporte: T.transporte, cd: T.cd, igv: T.igv, doc: T.doc, sup: T.sup, liq: T.liq, cc: T.cc || 0, total: T.total, fv: T.falValor,
       ...Object.fromEntries(LS.flatMap((x, j) => [['q' + j, x.rep], ['cd' + j, x.parcial]])),
       ...Object.fromEntries(LF.map((x, j) => ['fq' + j, x.fal]))
     };
@@ -205,7 +211,7 @@ export async function generarExcelCostos(R, meta) {
   for (let r = ini; r <= TOT; r++) {
     const row = ws.getRow(r);
     for (const k of ['est', 'aul', 'piezas', ...LS.map((_, j) => 'q' + j), ...LF.map((_, j) => 'fq' + j)]) row.getCell(C[k]).numFmt = ENTERO;
-    for (const k of [...LS.map((_, j) => 'cd' + j), 'bienes', 'transporte', 'cd', 'igv', 'doc', 'sup', 'liq', 'total', 'fv']) row.getCell(C[k]).numFmt = SOLES;
+    for (const k of [...LS.map((_, j) => 'cd' + j), 'bienes', 'transporte', 'cd', 'igv', 'doc', 'sup', 'liq', 'cc', 'total', 'fv']) row.getCell(C[k]).numFmt = SOLES;
     row.getCell(C.total).font = { bold: true };
   }
   ws.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: cab.length } };
@@ -263,15 +269,18 @@ export async function generarExcelCostos(R, meta) {
     const linea = (txt, formula, val, como, negrita) => add([txt, f(formula, val), como], r => { soles(r); if (negrita) r.font = { bold: true }; }).number;
     const fB = linea('Bienes (cantidad × precio unitario sin IGV)', MT('bienes'), T.bienes, 'Hoja Partidas');
     const fT = linea('Transporte', MT('transporte'), T.transporte, `Piezas × transporte por pieza`);
-    const fCD = linea('Costo directo', `B${fB}+B${fT}`, T.cd, 'Bienes + transporte', true);
+    const fCD = linea('Costo directo sin IGV', `B${fB}+B${fT}`, T.cd, 'Bienes + transporte');
     const fI = linea('IGV', MT('igv'), T.igv, `${E.igv} % del costo directo`);
-    linea('Costo directo + IGV', `B${fCD}+B${fI}`, T.cdIgv, '', true);
-    linea('Documento equivalente', MT('doc'), T.doc, `${E.doc_pct} % del costo directo sin IGV`);
+    const fA = linea('A. COSTO DIRECTO (con IGV)', `B${fCD}+B${fI}`, T.cdIgv, 'Costo de los activos: metas del 07-C', true);
+    const fDoc = linea('Documento equivalente', MT('doc'), T.doc, `${E.doc_pct} % del costo directo sin IGV`);
     linea('Supervisión', MT('sup'), T.sup, `${E.sup_pct} % del costo directo sin IGV`);
     linea('Liquidación', MT('liq'), T.liq, 'Monto fijo');
-    const filaTot = add(['MONTO DE INVERSIÓN', f(MT('total'), T.total), '(Costo directo + IGV) + documento equivalente + supervisión + liquidación'], r => { soles(r); r.font = { bold: true, size: 12 }; }).number;
+    const fCC = linea('Control concurrente (Ley 31358)', MT('cc'), T.cc || 0, E.cc_corresponde ? `${E.cc_pct ?? 'PENDIENTE'} % (Parámetros)` : E.cc_aplica === 'no' ? 'No corresponde' : 'PENDIENTE indicar si corresponde');
+    const fBB = linea('B. OTROS COSTOS DE INVERSIÓN', `SUM(B${fDoc}:B${fCC})`, T.b ?? (T.doc + T.sup + T.liq), 'Documento equivalente + supervisión + liquidación + control concurrente', true);
+    const filaTot = add(['C = A + B. COSTO DE INVERSIÓN (MONTO DE INVERSIÓN)', f(`B${fA}+B${fBB}`, T.total), 'Tabla 3.7 de los Lineamientos IOARR'], r => { soles(r); r.font = { bold: true, size: 12 }; }).number;
+    add(['Control: monto de la hoja «Metrado y costos por local»', f(MT('total'), T.total)], soles);
     add([NOTA_PORCENTAJES]);
-    add(['Estructura referencial de adquisición de bienes: costo directo + IGV + documento equivalente + supervisión + liquidación.']);
+    add(['Tabla 3.7: A. costo directo + B. otros costos de inversión = C. costo de inversión.']);
     add(['Control: costo directo de la hoja Partidas', f(celCD, T.cd)], soles);
     add(['Costo por estudiante', f(`IFERROR(B${filaTot}/B${filaEst},0)`, T.porEstudiante ?? 0), 'Monto ÷ estudiantes del padrón'], soles);
     add(['Costo por local (promedio)', f(`IFERROR(B${filaTot}/B${filaLoc},0)`, T.locales ? T.total / T.locales : 0), 'Monto ÷ locales'], soles);
@@ -281,9 +290,12 @@ export async function generarExcelCostos(R, meta) {
     add(['Valor de la UIT', f(celUit, R.uit.valor ?? 0)], soles);
     add(['Límite: 75 UIT', f(`${celLim}*${celUit}`, R.uit.limite ?? 0)], soles);
     add(['Monto de inversión en UIT', f(`IFERROR(B${filaTot}/${celUit},0)`, R.uit.enUit ?? 0)], r => { r.getCell(2).numFmt = '#,##0.00'; });
-    const reg = R.uit.valor ? (R.uit.supera ? 'COMPLETO: supera 75 UIT (secciones D, E y F)' : 'ABREVIADO: hasta 75 UIT (sección G)') : 'PENDIENTE: falta el valor de la UIT';
-    add(['Registro que corresponde', f(`IF(${celUit}<=0,"PENDIENTE: falta el valor de la UIT",IF(B${filaTot}>${celLim}*${celUit},"COMPLETO: supera 75 UIT (secciones D, E y F)","ABREVIADO: hasta 75 UIT (sección G)"))`, reg)],
-      r => { r.font = { bold: true }; if (R.uit.supera || !R.uit.valor) resaltar(r.getCell(2), AMARILLO); });
+    if (R.uit.masiva) add(['Registro que corresponde', 'REGISTRO COMPLETO (MASIVA): secciones D, E y F', 'Inversión masiva (varias UP): siempre registro completo'], r => { r.font = { bold: true }; resaltar(r.getCell(2), AMARILLO); });
+    else {
+      const reg = R.uit.valor ? (R.uit.supera ? 'COMPLETO: supera 75 UIT (secciones D, E y F)' : 'ABREVIADO: hasta 75 UIT (sección G)') : 'PENDIENTE: falta el valor de la UIT';
+      add(['Registro que corresponde', f(`IF(${celUit}<=0,"PENDIENTE: falta el valor de la UIT",IF(B${filaTot}>${celLim}*${celUit},"COMPLETO: supera 75 UIT (secciones D, E y F)","ABREVIADO: hasta 75 UIT (sección G)"))`, reg)],
+        r => { r.font = { bold: true }; if (R.uit.supera || !R.uit.valor) resaltar(r.getCell(2), AMARILLO); });
+    }
     add([]);
     add([FALTANTE + ', no incluido en el total'], sub);
     add(['Faltante valorizado, referencial', f(MT('fv'), T.falValor), 'Bienes por encima de los existentes × precio unitario'], soles);

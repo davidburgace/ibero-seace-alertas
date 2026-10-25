@@ -99,7 +99,7 @@ export function calcularPaquete({ D, P, codigos, dup = {}, inv = {}, comun, dato
   // Ningún aula ni servicio se cuenta dos veces entre las IOARR por nivel
   const control = validarNiveles(D, list, G);
   if (!control.ok) for (const x of ioarrs) x.R.avisos.push({ tipo: 'niveles', alerta: true, texto: 'Control por nivel: ' + control.errores.slice(0, 5).join(' ') });
-  const fila_ = R => ({ total: R.totales.total, rep: R.totales.rep, locales: R.totales.locales, est: R.totales.est, en_uit: R.uit.enUit, supera: R.uit.supera, registro: R.uit.valor == null ? null : R.uit.supera ? 'completo' : 'abreviado' });
+  const fila_ = R => ({ total: R.totales.total, rep: R.totales.rep, locales: R.totales.locales, est: R.totales.est, en_uit: R.uit.enUit, supera: R.uit.supera, registro: R.uit.registro ?? (R.uit.valor == null ? null : R.uit.supera ? 'completo' : 'abreviado'), masiva: !!R.uit.masiva });
   const comparativo = {
     modo, uit: Runa.uit.valor ? { anio: Runa.uit.anio, valor: Runa.uit.valor, limite: Runa.uit.limite } : null,
     una: fila_(Runa), niveles: G.map(g => ({ nivel: g.nivel, nombre: g.nombre, ...fila_(Rniv.grupos[g.nivel]) })), suma: Rniv.totales.total,

@@ -114,8 +114,8 @@ test('caso de control: el Excel recalculado con LibreOffice da S/ 4,864,528.32',
       'csv:Text - txt - csv (StarCalc):44,34,76,1,,0,false,true,false,false,false,-1', '--outdir', join(dir, 'out'), join(dir, 'c.xlsx')], { stdio: 'ignore', timeout: 120000 });
     const res = readFileSync(join(dir, 'out', readdirSync(join(dir, 'out')).find(f => /Resumen/.test(f))), 'utf8');
     const val = e => Number(res.split('\n').find(l => l.startsWith(e + ',')).split(',')[1]);
-    assert.equal(Math.round(val('MONTO DE INVERSIÓN') * 100), 486452832);
-    assert.equal(Math.round(val('Costo directo') * 100), 384883200);
+    assert.equal(Math.round(val('C = A + B. COSTO DE INVERSIÓN (MONTO DE INVERSIÓN)') * 100), 486452832);
+    assert.equal(Math.round(val('Costo directo sin IGV') * 100), 384883200);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

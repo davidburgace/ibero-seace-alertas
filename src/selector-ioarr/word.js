@@ -117,12 +117,17 @@ const notaUPs = M => M.upPor === 'modular' ? [nota(`UP listadas por código modu
 // Activo de una meta: con kit, «MOBILIARIO DE AULA» en una línea
 const activoMeta = m => m.k === 'kit' ? m.activo : `${m.activo}\n(${m.nombre.toLowerCase()})`;
 
+// Metas y costo según la Tabla 3.7: A. costo directo (activos), B. otros costos de inversión, C = A + B
+const filaCosto = (txt, v, o = {}) => [{ v: txt, span: 6, gris: !o.bold, bold: o.bold }, { v: NS.format(v), gris: !o.bold, bold: o.bold }, { v: '', gris: !o.bold }, { v: '', gris: !o.bold }];
 const tablaMetas = M => tabla(['Tipo de IOARR', 'Acción', 'Activo', 'Tipo de factor productivo', 'Unidad de medida', 'Cantidad', 'Costo de inversión (S/)', 'Inicio', 'Término'], [
   ...M.F.metas.map(m => ['REPOSICIÓN', 'ADQUISICIÓN', activoMeta(m), 'MOBILIARIO', m.unidad, { v: ent(m.cantidad) }, { v: NS.format(m.costo) }, M.F.inicio || PEND, M.F.fin || PEND]),
-  [{ v: 'EXPEDIENTE TÉCNICO O DOCUMENTO EQUIVALENTE', span: 6, gris: true }, { v: NS.format(M.F.expediente), gris: true }, { v: '', gris: true }, { v: '', gris: true }],
-  [{ v: 'SUPERVISIÓN', span: 6, gris: true }, { v: NS.format(M.F.supervision), gris: true }, { v: '', gris: true }, { v: '', gris: true }],
-  [{ v: 'LIQUIDACIÓN', span: 6, gris: true }, { v: NS.format(M.F.liquidacion), gris: true }, { v: '', gris: true }, { v: '', gris: true }],
-  [{ v: 'TOTAL', span: 6, bold: true }, { v: NS.format(M.F.total), bold: true }, '', '']
+  filaCosto('A. COSTO DIRECTO (activos, con IGV)', M.F.subtotalActivos, { bold: true }),
+  filaCosto('EXPEDIENTE TÉCNICO O DOCUMENTO EQUIVALENTE', M.F.expediente),
+  filaCosto('SUPERVISIÓN', M.F.supervision),
+  filaCosto('LIQUIDACIÓN', M.F.liquidacion),
+  ...(M.F.control || /PENDIENTE/.test(M.F.controlTexto || '') ? [filaCosto(M.F.control ? 'CONTROL CONCURRENTE (LEY 31358)' : 'CONTROL CONCURRENTE (LEY 31358): PENDIENTE indicar si corresponde', M.F.control || 0)] : []),
+  filaCosto('B. OTROS COSTOS DE INVERSIÓN', M.F.otros ?? (M.F.expediente + M.F.supervision + M.F.liquidacion), { bold: true }),
+  filaCosto('C = A + B. COSTO DE INVERSIÓN (TOTAL)', M.F.total, { bold: true })
 ], { num: [5, 6], size: 15, anchos: [9, 11, 13, 10, 12, 7, 12, 13, 13] });
 
 function cronogramas(M) {
@@ -137,6 +142,7 @@ function cronogramas(M) {
       ['Documento equivalente', ...col(C.expediente.valores), ...(ultimo ? [NS.format(C.expediente.total)] : [])],
       ['Supervisión', ...col(C.supervision.valores), ...(ultimo ? [NS.format(C.supervision.total)] : [])],
       ['Liquidación', ...col(C.liquidacion.valores), ...(ultimo ? [NS.format(C.liquidacion.total)] : [])],
+      ...(C.control ? [['Control concurrente (Ley 31358)', ...col(C.control.valores), ...(ultimo ? [NS.format(C.control.total)] : [])]] : []),
       ...(ultimo ? [[{ v: 'TOTAL', bold: true }, ...per.map(() => ''), { v: NS.format(M.F.total), bold: true }]] : [])
     ], { num: Array.from({ length: per.length + 1 }, (_, j) => j + 1), size: 15 }), espacio());
   }
@@ -172,7 +178,7 @@ function mantenimiento(M, conInicio = true) {
 }
 
 // Cómo se arma el costo de las metas (estructura referencial de adquisición de bienes)
-const NOTA_ESTRUCTURA = 'Estructura referencial de adquisición de bienes: el costo de cada activo es su costo directo (bienes + transporte) más IGV. El documento equivalente y la supervisión son un porcentaje del costo directo sin IGV y la liquidación es un monto fijo; esos porcentajes dependen de la entidad convocante. Ver la estructura de costos en Excel.';
+const NOTA_ESTRUCTURA = 'Desglose de la Tabla 3.7 de los Lineamientos IOARR: A. costo directo = costo de los activos (bienes + transporte) más IGV; B. otros costos de inversión = documento equivalente y supervisión (porcentaje del costo directo sin IGV), liquidación (monto fijo) y, cuando corresponda, el control concurrente (Ley 31358); C = A + B, costo de inversión. Los porcentajes dependen de la entidad convocante. Ver la estructura de costos en Excel.';
 
 // ─── Formato 07-C ───────────────────────────────────────────────────────────
 export async function generar07C(M) {
@@ -185,7 +191,7 @@ export async function generar07C(M) {
     ['Código único de la inversión', M.cui || 'Se asigna al registrar'],
     ['¿Es una inversión en el marco de un Decreto Supremo?', 'No'],
     ['Tipo de registro', M.masiva ? 'Inversión masiva de reposición (varias UP, activo homogéneo: mobiliario de aula)' : 'IOARR de reposición'],
-    ['Monto de inversión y registro', M.registro === 'pendiente' ? `${soles(M.F.total)} · PENDIENTE: falta la UIT` : `${soles(M.F.total)} = ${NS.format(M.uit.enUit)} UIT (UIT ${M.uit.anio}: ${soles(M.uit.valor)}) → registro ${M.registro === 'completo' ? 'completo, secciones D, E y F' : 'abreviado, sección G'}`]
+    ['Monto de inversión y registro', `${soles(M.F.total)}${M.uit?.valor ? ` = ${NS.format(M.uit.enUit)} UIT (UIT ${M.uit.anio}: ${soles(M.uit.valor)})` : ' · PENDIENTE: falta la UIT para expresarlo en UIT'} → ${M.registroRotulo || M.registro}${M.registro === 'completo' ? ', secciones D, E y F' : M.registro === 'abreviado' ? ', sección G' : ''}`]
   ]));
 
   c.push(titulo('A. Alineamiento a una brecha prioritaria'));
@@ -409,7 +415,7 @@ export async function generarVerificacion(M) {
   c.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 60 }, children: [run('LISTA DE VERIFICACIÓN DEL EXPEDIENTE IOARR', { bold: true, size: 28 })] }));
   c.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { after: 200 }, children: [run(M.nombre, { bold: true, size: 20 })] }));
   c.push(kv([['Proyecto', M.proyecto], ['Tipo', M.masiva ? `Inversión masiva de reposición · ${(M.upsRegistro || M.ups).length} UP` : 'IOARR de reposición · 1 UP'], ['Escenario de cantidad', M.escenarioTexto.replace(/^Escenario de cantidad: /, '')],
-    ['Registro', M.registro === 'pendiente' ? null : M.registro === 'completo' ? 'Completo (más de 75 UIT)' : 'Abreviado (hasta 75 UIT)'], ['Monto', soles(M.F.total)],
+    ['Registro', M.registro === 'pendiente' ? null : M.registroRotulo || (M.registro === 'completo' ? 'Completo (más de 75 UIT)' : 'Abreviado (hasta 75 UIT)')], ['Monto', `${soles(M.F.total)}${M.uit?.enUit != null ? ` = ${NS.format(M.uit.enUit)} UIT` : ''}`],
     ['Avance', `${V.hechos} de ${V.total} puntos listos${V.bloqueos ? ` · ${V.bloqueos} no cumple${V.bloqueos === 1 ? '' : 'n'}` : ''}`], ['Fecha', M.fecha]]));
   for (const sec of V.secciones) {
     c.push(titulo(sec.titulo));
