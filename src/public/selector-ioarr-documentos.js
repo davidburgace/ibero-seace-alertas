@@ -101,6 +101,7 @@ function pintar() {
       <p class="sub">Función ${esc(R.funcion)} · división ${esc(R.division)} · grupo ${esc(R.grupos.join('; '))}. Vacío = se propone por nivel educativo. Verifícalo contra el PMI de la entidad. ${esc(R.alineamiento.contribucion)}</p>
       <div class="form-grid">
         ${campo('cadena_funcional', 'Cadena funcional', { ancho: true, ph: R.alineamiento.cadena, ayuda: 'Función / división funcional / grupo funcional del PMI.' })}
+        ${(R.niveles_k || []).map(n => `<div class="campo"><label for="doc-gf-${n}">Código del grupo funcional – ${esc(R.nombres_nivel[n])}</label><input id="doc-gf-${n}" data-doc-gf="${n}" type="text" maxlength="5" inputmode="numeric" value="${esc(d.grupo_funcional?.[n] ?? '')}" placeholder="${esc(R.grupos_conocidos[n] || 'Sin código conocido')}"><span class="sub">${R.grupos_conocidos[n] ? 'Vacío = ' + esc(R.grupos_conocidos[n]) + '.' : '<b class="aviso-linea">Escríbelo: no se propone un código que no se conoce.</b>'}</span></div>`).join('')}
         ${campo('servicio_brecha', 'Servicio público con brecha', { ancho: true, ph: R.alineamiento.servicio })}
         ${campo('tipologia', 'Tipología de proyecto', { ancho: true, ph: R.alineamiento.tipologia })}
         ${campo('indicador_brecha', 'Indicador de brecha', { ancho: true, max: 500, ph: R.alineamiento.indicadores.map(x => x.nombre).join(' / '), ayuda: 'Verifícalo contra el PMI.' })}
@@ -186,6 +187,8 @@ function leer() {
   ctx.el.querySelectorAll('[data-doc]').forEach(e => { datos[e.dataset.doc] = e.value; });
   ctx.el.querySelectorAll('[data-doc-t]').forEach(e => { if (e.value !== '') datos[e.dataset.docT][e.dataset.k] = e.value; });
   datos.fuentes_vida_util = [...ctx.el.querySelectorAll('[data-doc-fuente]:checked')].map(e => e.dataset.docFuente);
+  datos.grupo_funcional = { ...(vista.datos.grupo_funcional || {}) };
+  ctx.el.querySelectorAll('[data-doc-gf]').forEach(e => { if (e.value.trim()) datos.grupo_funcional[e.dataset.docGf] = e.value.trim(); else delete datos.grupo_funcional[e.dataset.docGf]; });
   if (vista.nivel) {
     const propio = {}; ctx.el.querySelectorAll('[data-doc-niv]').forEach(e => { propio[e.dataset.docNiv] = e.value; });
     propio.montos_05b = {}; ctx.el.querySelectorAll('[data-doc-05b]').forEach(e => { if (e.value !== '') propio.montos_05b[e.dataset.doc05b] = e.value; });

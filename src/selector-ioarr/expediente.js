@@ -78,7 +78,7 @@ const regDato = R => ({ n: R?.regularCampo?.completos || 0, de: R?.locales?.leng
 import { limpiarEstructura, preciosEfectivos, limpiarInventario, limpiarAdquisicion, censoLocal, FUENTES_PRECIO, CLAVES_PRECIO, PRECIOS_REFERENCIA, LEYENDA_REFERENCIA, NOTA_PORCENTAJES } from './costos.js';
 import { limpiarOferta, calcularOferta } from './oferta.js';
 import { generarExcelCostos } from './excel-costos.js';
-import { armarModelo, limpiarDatosDoc, ESTADOS_ACTIVO, MODALIDADES, FUENTES_FIN } from './documentos.js';
+import { armarModelo, limpiarDatosDoc, ESTADOS_ACTIVO, MODALIDADES, FUENTES_FIN, CODIGOS_FUNCIONALES } from './documentos.js';
 import { generar07C, generarMemoria, generarVerificacion, generarVidaUtil, generar05B } from './word.js';
 import { leerDuplicidad, separarLocales } from './duplicidad.js';
 import { fichaActivos, modeloVidaUtil, FUENTES_VIDA_UTIL, limpiarColegio, colegioVacio, colegioDe, checklistColegio, DOCS_BAJA, FUENTES_ENTREGA, TIPOS_ENTREGA, VENTANA_DUP, ESTADOS_USO } from './lineamientos.js';
@@ -897,6 +897,7 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
       tipos: M.E.activos.map(a => ({ k: a.k, nombre: a.nombre, cantidad: a.cantidad, descripcion: a.descripcion, antiguedad_inventario: a.antiguedad_inventario })),
       alineamiento: { servicio: M.A.servicio, tipologia: M.A.tipologia, indicadores: M.A.indicadores, cadena: `${M.A.funcion} / ${M.A.division} / ${M.A.grupos.join('; ')}`, contribucion: M.A.contribucion },
       b05: M.B05,
+      niveles_k: M.nivel ? [M.nivel] : [], nombres_nivel: NOMBRE_NIVEL, grupos_conocidos: CODIGOS_FUNCIONALES.grupo,
       inicio: M.F.inicio, fin: M.F.fin, condiciones: M.E.condiciones
     },
     faltan: M.faltan

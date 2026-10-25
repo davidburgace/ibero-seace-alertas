@@ -313,3 +313,13 @@ test('memoria: anexo «Consultas a la OPMI» con las dos preguntas, sin responde
   assert.match(a, /una IOARR masiva por nivel educativo/); assert.match(a, /programada en la cartera del PMI .* Obras por Impuestos/);
   assert.equal((a.match(/\nPENDIENTE\n/g) || []).length, 2);   // ninguna respondida
 });
+
+test('sección A: 22 / 047, grupo por nivel (Secundaria 0105; los demás editables), indicador departamental', () => {
+  const S = paquete().M('S'), P = paquete({ grupo_funcional: { P: '9999' } }).M('P');
+  assert.deepEqual(S.A.grupos, ['0105 EDUCACIÓN SECUNDARIA']); assert.ok(!S.faltan.some(x => /grupo funcional/.test(x)));
+  assert.deepEqual(P.A.grupos, ['9999 EDUCACIÓN PRIMARIA']);
+  assert.ok(paquete().M('P').faltan.some(x => /Código del grupo funcional de primaria/.test(x)));
+  assert.equal(S.A.indicadores[0].nombre, 'PORCENTAJE DE INSTALACIONES EDUCATIVAS QUE BRINDAN EL SERVICIO EN CONDICIONES INADECUADAS');
+  assert.equal(S.A.espacio, 'DEPARTAMENTO DE MOQUEGUA');
+  assert.deepEqual(limpiarDatosDoc({ grupo_funcional: { P: '01x4', S: ' 0105 ', X: '1' } }).grupo_funcional, { S: '0105' });
+});

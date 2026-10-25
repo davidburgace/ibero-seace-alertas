@@ -49,8 +49,11 @@ function descripcionMeta(m, precios, refTecnica) {
 export const ESTADOS_ACTIVO = ['REGULAR', 'MALO', 'MUY MALO', 'IRRECUPERABLE'];
 const UNIDAD_META = { kit: 'Kit de mobiliario', mesa: 'Número de mobiliario (puestos)', silla: 'Número de mobiliario', esc: 'Número de mobiliario', sdoc: 'Número de mobiliario', arm: 'Número de mobiliario' };
 const PLURAL = { kit: 'kits de mobiliario (mesa + silla del estudiante)', mesa: 'mesas del estudiante', silla: 'sillas del estudiante', esc: 'escritorios del docente', sdoc: 'sillas del docente', arm: 'armarios o estantes' };
-// Clasificación funcional (verificar contra el PMI). Solo el grupo de Primaria lleva código aquí.
-export const CODIGOS_FUNCIONALES = { funcion: '22', division: '047', grupo: { P: '0104' } };
+// Clasificación funcional (verificar contra el PMI). Solo se conoce el grupo de Secundaria (0105);
+// los demás se escriben en Documentos (grupo_funcional) y, mientras falten, quedan pendientes.
+export const CODIGOS_FUNCIONALES = { funcion: '22', division: '047', grupo: { S: '0105' } };
+// Indicador de brecha por defecto (precedente de las IOARR masivas aprobadas), a nivel departamental
+export const INDICADOR_BRECHA = 'PORCENTAJE DE INSTALACIONES EDUCATIVAS QUE BRINDAN EL SERVICIO EN CONDICIONES INADECUADAS';
 // Sugerencias (el usuario escribe lo que corresponda)
 export const MODALIDADES = ['Administración directa', 'Administración indirecta – Por contrata', 'Administración indirecta – Obras por Impuestos', 'Administración indirecta – Núcleo ejecutor'];
 export const FUENTES_FIN = ['Recursos Ordinarios', 'Recursos Directamente Recaudados', 'Recursos por Operaciones Oficiales de Crédito', 'Donaciones y Transferencias', 'Recursos Determinados'];
@@ -95,6 +98,8 @@ export function limpiarDatosDoc(b = {}) {
     anio_t: entero(b.anio_t, 2020, 2100),
     // A. Alineamiento: cadena funcional (vacía = función, división y grupo propuestos)
     cadena_funcional: texto(b.cadena_funcional, 300),
+    // Código del grupo funcional por nivel (solo dígitos; vacío = el conocido o pendiente)
+    grupo_funcional: Object.fromEntries(['I', 'P', 'S', 'E'].map(n => [n, String(b.grupo_funcional?.[n] ?? '').trim()]).filter(([, v]) => /^\d{3,5}$/.test(v))),
     // A. Alineamiento (se proponen por nivel; el usuario los ajusta al PMI)
     servicio_brecha: texto(b.servicio_brecha, 300),
     tipologia: texto(b.tipologia, 300),
@@ -232,21 +237,22 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, efectivos = 
     : `ADQUISICIÓN DE MOBILIARIO DE AULA; EN EL(LA) IE ${mayus(u0.nombre)} EN LA LOCALIDAD ${mayus(u0.cp)}, DISTRITO DE ${mayus(u0.dist)}, PROVINCIA ${mayus(u0.prov)}, DEPARTAMENTO ${mayus(u0.dpto)}`;
 
   // ── A. Alineamiento a la brecha: códigos de la clasificación funcional; indicador y unidad editables ──
-  const cod = CODIGOS_FUNCIONALES;
+  const cod = CODIGOS_FUNCIONALES, grupoDe = k => d.grupo_funcional?.[k] || cod.grupo[k] || '';
   const A = {
     funcion: `${cod.funcion} EDUCACIÓN`, division: `${cod.division} EDUCACIÓN BÁSICA`, sector: 'EDUCACIÓN',
     // La reposición mantiene la calidad del servicio: contribuye a la brecha de calidad, no a la de cobertura
     contribucion: 'Calidad: la reposición recupera la capacidad de producción del servicio existente; no contribuye al cierre de la brecha de cobertura.',
-    grupos: niveles.map(k => `${cod.grupo[k] ? cod.grupo[k] + ' ' : ''}EDUCACIÓN ${NIVEL[k]}`),
+    grupos: niveles.map(k => `${grupoDe(k) ? grupoDe(k) + ' ' : 'PENDIENTE (código) '}EDUCACIÓN ${NIVEL[k]}`),
     servicio: d.servicio_brecha || niveles.map(k => 'SERVICIO DE EDUCACIÓN ' + NIVEL[k]).join('; '),
     tipologia: d.tipologia || niveles.map(k => 'EDUCACIÓN ' + NIVEL[k]).join('; '),
     indicadores: d.indicador_brecha
       ? [{ tipo: 'Calidad', nombre: d.indicador_brecha, unidad: d.unidad_indicador || '', valor: d.contribucion_brecha }]
-      : niveles.map(k => ({ tipo: 'Calidad', nombre: `PORCENTAJE DE LOCALES EDUCATIVOS CON EDUCACIÓN ${NIVEL[k]} CON CAPACIDAD INSTALADA INADECUADA`, unidad: d.unidad_indicador || 'LOCAL EDUCATIVO', valor: d.contribucion_brecha })),
-    espacio: !u0 ? '' : ambito === 'DISTRITAL' ? `${mayus(u0.dpto)}, ${mayus(u0.prov)}, ${mayus(u0.dist)}` : ambito === 'PROVINCIAL' ? `${mayus(u0.dpto)}, ${mayus(u0.prov)}` : mayus(u0.dpto),
+      : [{ tipo: 'Calidad', nombre: INDICADOR_BRECHA, unidad: d.unidad_indicador || '', valor: d.contribucion_brecha }],
+    // El indicador se mide a nivel departamental
+    espacio: !u0 ? '' : `DEPARTAMENTO DE ${mayus(u0.dpto)}`,
     propuesto: !d.servicio_brecha || !d.tipologia || !d.indicador_brecha,
     cadena: d.cadena_funcional || null,
-    sinCodigo: niveles.filter(k => !cod.grupo[k]).map(k => NIVEL[k])
+    sinCodigo: niveles.filter(k => !grupoDe(k)).map(k => NIVEL[k])
   };
 
   // ── Metas del 07-C: cada una con su costo directo × (1 + IGV). El redondeo va a la última,
@@ -414,6 +420,8 @@ export function armarModelo({ R, D, list, proyecto, datos, precios, efectivos = 
   falta(!d.en_uso && sinUsoDato, `Si el mobiliario está en uso (colegio operativo) en ${sinUsoDato === 1 ? '1 colegio' : sinUsoDato + ' colegios'}: márcalo en «Por colegio».`);
   if (supera && !masiva) falta(activos.some(a => a.antiguedad == null || !a.estado), 'E.3. Antigüedad y estado actual del mobiliario a reponer, por tipo.');
   falta(!d.ref_tecnica, 'Referencia técnica aplicable del mobiliario (descripción técnica).');
+  falta(A.sinCodigo.length, `A. Código del grupo funcional de ${A.sinCodigo.join(', ').toLowerCase()}: escríbelo en Documentos (no se propone un código que no se conoce).`);
+  falta(!d.indicador_brecha && !d.unidad_indicador, 'A. Unidad de medida del indicador de brecha (verifícala contra el PMI).');
   falta(A.propuesto, 'A. Alineamiento a la brecha: indicador, unidad de medida y servicio propuestos; verifícalos contra el PMI.');
 
   return {

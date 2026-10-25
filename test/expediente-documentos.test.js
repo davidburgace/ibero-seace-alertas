@@ -21,7 +21,7 @@ const cerca = (a, b, msg) => assert.ok(Math.abs(a - b) < 0.011, `${msg}: ${a} �
 const PRECIOS = { mesa: 180, silla: 90, esc: 400, sdoc: 120, arm: 650 };
 const DESC = Object.fromEntries(Object.keys(PRECIOS).map(k => [k, { descripcion: 'Descripción de prueba de ' + k }]));
 const EST = { transporte_pieza: 15, igv: 18, doc_pct: 3, sup_pct: 5, liquidacion: 15000, cc_aplica: 'no' };
-const COMPLETOS = { uf: 'UF de prueba', uei: 'UEI de prueba', opmi: 'OPMI de prueba', fecha_inicio: '2027-03', meses: 5, en_uso: 'si', inventario_registrado: 'si',
+const COMPLETOS = { grupo_funcional: { I: '9991', P: '9992', S: '0105' }, unidad_indicador: 'UNIDAD DE PRUEBA', uf: 'UF de prueba', uei: 'UEI de prueba', opmi: 'OPMI de prueba', fecha_inicio: '2027-03', meses: 5, en_uso: 'si', inventario_registrado: 'si',
   servicio_brecha: 'S', tipologia: 'T', indicador_brecha: 'I', ue_mantenimiento: 'UGEL de prueba', ue_mantenimiento_codigo: '0123',
   modalidad: 'Administración indirecta – Obras por Impuestos', fuente_financiamiento: 'Recursos Determinados', ref_tecnica: 'Ficha técnica de prueba',
   vida_util: { mesa: 10, silla: 10, esc: 10, sdoc: 10, arm: 12 }, mant_nuevo: { mesa: 2000, silla: 800, esc: 300, sdoc: 100, arm: 500 },

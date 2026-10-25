@@ -202,7 +202,7 @@ export async function generar07C(M) {
   c.push(tabla(['Tipo', 'Indicador de brecha', 'Unidad de medida', 'Contribución a la brecha del PMI'], M.A.indicadores.map(x => [x.tipo, x.nombre, x.unidad || PEND, { v: x.valor == null ? '' : ent(x.valor) }]), { num: [3], anchos: [12, 52, 18, 18] }));
   c.push(espacio());
   c.push(kv([['Espacio geográfico de la brecha', M.A.espacio]]));
-  c.push(nota(`Indicador de brecha y unidad de medida: verifícalos contra el PMI de la entidad.${M.A.propuesto ? ' Servicio, tipología e indicador propuestos según los niveles educativos de los locales.' : ''} La contribución a la brecha queda vacía hasta confirmarla con el PMI.${M.A.sinCodigo.length ? ` Código del grupo funcional de ${M.A.sinCodigo.join(', ').toLowerCase()}: verifícalo contra el PMI.` : ''}`));
+  c.push(nota(`Indicador de brecha a nivel departamental; indicador y unidad de medida: verifícalos contra el PMI de la entidad.${M.A.propuesto ? ' Servicio, tipología e indicador propuestos según el precedente de IOARR masivas aprobadas.' : ''} La contribución a la brecha queda vacía hasta confirmarla con el PMI.${M.A.sinCodigo.length ? ` PENDIENTE: código del grupo funcional de ${M.A.sinCodigo.join(', ').toLowerCase()} (se escribe en Documentos; no se propone un código que no se conoce).` : ''}`));
 
   c.push(titulo('B. Institucionalidad'));
   c.push(kv([['OPMI', M.B.opmi], ['Unidad Formuladora (UF)', M.B.uf], ['Responsable de la UF', M.B.uf_responsable], ['Unidad Ejecutora de Inversiones (UEI)', M.B.uei], ['Responsable de la UEI', M.B.uei_responsable]]));

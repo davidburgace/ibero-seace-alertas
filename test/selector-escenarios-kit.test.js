@@ -223,7 +223,11 @@ test('07-C: descripción por nivel y grupo de grado, referencia técnica, códig
   assert.match(desc, /Referencia técnica aplicable: Ficha técnica de la entidad\./);
   assert.match(armarModelo({ R, D, list: [0, 1], proyecto: { nombre: 'X', region: 'Prueba' }, datos: limpiarDatosDoc({}), precios, P: DEF, fecha: '2026-10-23' }).E.intervencion[0].descripcion, /Referencia técnica aplicable: PENDIENTE/);
   // Códigos de la clasificación funcional; contribución a la brecha vacía por defecto
-  assert.equal(M.A.funcion, '22 EDUCACIÓN'); assert.equal(M.A.division, '047 EDUCACIÓN BÁSICA'); assert.deepEqual(M.A.grupos, ['0104 EDUCACIÓN PRIMARIA']);
+  assert.equal(M.A.funcion, '22 EDUCACIÓN'); assert.equal(M.A.division, '047 EDUCACIÓN BÁSICA'); assert.deepEqual(M.A.grupos, ['PENDIENTE (código) EDUCACIÓN PRIMARIA']);
+  // No se propone un código que no se conoce: Primaria queda pendiente; Secundaria es 0105; lo escrito manda
+  assert.ok(M.faltan.some(x => /Código del grupo funcional de primaria/.test(x)));
+  assert.equal(M.A.indicadores[0].nombre, 'PORCENTAJE DE INSTALACIONES EDUCATIVAS QUE BRINDAN EL SERVICIO EN CONDICIONES INADECUADAS');
+  assert.match(M.A.espacio, /^DEPARTAMENTO DE /);
   assert.equal(M.A.indicadores[0].valor, null);
   // Por código modular: todas las UP, también el local sin bienes a reponer
   assert.equal(M.ups.length, 1);
@@ -232,7 +236,7 @@ test('07-C: descripción por nivel y grupo de grado, referencia técnica, códig
   assert.equal(M.F.meses, 3); assert.equal(M.F.cronograma.periodos.length, 3);
   assert.ok(!M.faltan.some(x => /mantenimiento \(puede ser 0\)|Modalidad|Fuente de financiamiento|Referencia técnica|mantenimiento: nombre/.test(x)), M.faltan.join(' | '));
   const t = await textoDocx(await generar07C(M));
-  for (const s of ['22 EDUCACIÓN', '047 EDUCACIÓN BÁSICA', '0104 EDUCACIÓN PRIMARIA', 'verifícalos contra el PMI', 'Código modular (UP)', 'Administración indirecta – Obras por Impuestos', 'Recursos Determinados', '75 días'])
+  for (const s of ['22 EDUCACIÓN', '047 EDUCACIÓN BÁSICA', 'PENDIENTE (código) EDUCACIÓN PRIMARIA', 'verifícalos contra el PMI', 'Código modular (UP)', 'Administración indirecta – Obras por Impuestos', 'Recursos Determinados', '75 días'])
     assert.ok(t.includes(s), s);
   // Sin datos no se inventan valores por defecto
   const V = armarModelo({ R, D, list: [0, 1], proyecto: { nombre: 'X', region: 'Prueba' }, datos: limpiarDatosDoc({}), precios, P: DEF, fecha: '2026-10-23' });
