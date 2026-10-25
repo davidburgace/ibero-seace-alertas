@@ -32,6 +32,7 @@ import { generarExcelVisitas } from './excel-visitas.js';
 import { agruparVisitas, puntosVisita, limitarPorDia } from './visitas.js';
 import { crearApiExpediente, borrarArchivosProyecto } from './expediente.js';
 import { crearApiBases } from './bases-api.js';
+import { crearApiDocumentoEquivalente } from './documento-equivalente-api.js';
 import { crearApiPreciosRef } from './catalogo-ref-api.js';
 import { MODOS } from './niveles.js';
 import { limpiarDatosDoc } from './documentos.js';
@@ -401,6 +402,7 @@ api.use(expediente);
 const preciosRef = crearApiPreciosRef({ expediente, proyectoDelUsuario });
 api.use(preciosRef);
 api.use(crearApiBases({ expediente, preciosRef }));
+api.use(crearApiDocumentoEquivalente({ expediente, preciosRef }));
 
 // Visitas de campo (src/selector-ioarr/campo.js): el ZIP de fichas de un proyecto, sin validar al dueño
 // (campo.js ya validó que el supervisor tiene colegios asignados o que el proveedor es el dueño)
