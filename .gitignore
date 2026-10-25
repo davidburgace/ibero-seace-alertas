@@ -1,3 +1,7 @@
 node_modules/
 .env
 __pycache__/
+
+# Archivos de trabajo local en docs/ (exportaciones y plantillas de bases)
+docs/*.xlsx
+docs/plantillas_bases/
