@@ -541,4 +541,7 @@ tr.fila-alerta td{ background:rgba(214,69,58,0.06); }
 .tabla-materiales th.col-elegida, .tabla-materiales td.col-elegida{ background:rgba(46,158,91,.06); }
 .tabla-materiales td.num input{ width:110px; text-align:right; padding:6px 8px; border:1px solid var(--border2); border-radius:8px; background:var(--surface); font:inherit; font-size:13px; }
 #exp-material h3.pad{ font-size:14px; margin:6px 0 0; }
+.tabla-materiales td{ white-space:normal; }
+.tabla-materiales td.num .sub{ display:block; white-space:normal; max-width:240px; margin-left:auto; text-align:right; }
+.tabla-materiales td.num .aviso-celda{ color:#9a5f0c; }
 

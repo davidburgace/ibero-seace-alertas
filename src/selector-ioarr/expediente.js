@@ -80,7 +80,7 @@ import { calc, limpiarParams, CRIT, ITEMS, textoEscenario } from './calculo.js';
 const regDato = R => ({ n: R?.regularCampo?.completos || 0, de: R?.locales?.length || 0 });
 import { limpiarEstructura, preciosEfectivos, limpiarInventario, limpiarAdquisicion, censoLocal, FUENTES_PRECIO, CLAVES_PRECIO, PRECIOS_REFERENCIA, LEYENDA_REFERENCIA, NOTA_PORCENTAJES,
   MATERIALES, TIPOS, preciosPropuesta, preciosDeMaterial, validarPropuesta, tiposPropuesta, incluido, materialDe, tienePrecio, cuadraTotales } from './costos.js';
-import { preciosUnitarios, referencia as referenciaCatalogo } from './catalogo-ref.js';
+import { preciosUnitarios, preciosKit, referencia as referenciaCatalogo } from './catalogo-ref.js';
 import { limpiarOferta, calcularOferta } from './oferta.js';
 import { cuadroCotizaciones, viabilidadCotizaciones, BIENES_COTIZACION, MIN_PROVEEDORES } from './cotizaciones.js';
 import { generarExcelCostos } from './excel-costos.js';
@@ -368,9 +368,12 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     const estructura = limpiarEstructura(fila?.estructura);
     const efectivos = preciosEfectivos(estructura, detalle);
     // Con material de la propuesta: precios por material (escrito o catálogo referencial); los antiguos no se usan
-    const catalogoRef = preciosUnitarios(registrosRef);
+    // Por material: precio unitario (mesa, silla, armario) y precio por kit del catálogo
+    const unit = preciosUnitarios(registrosRef), kitCat = preciosKit(registrosRef);
+    const catalogoRef = Object.fromEntries(Object.keys(MATERIALES).map(m => [m, { ...unit[m], kit: kitCat[m] }]));
     const propuestaPrecios = estructura.material_propuesta ? preciosPropuesta(estructura, catalogoRef, efectivos) : null;
     for (const t of CLAVES_PRECIO) precios[t] = propuestaPrecios ? propuestaPrecios[t].precio : efectivos[t].precio;
+    if (propuestaPrecios?.kit.precio != null) precios.kit = propuestaPrecios.kit.precio;
 
     // Muebles de la propuesta: los de los criterios menos los excluidos en Costos (no suman en nada)
     const Pcompleto = limpiarParams(p.criterios), excluidos = mueblesCriterio(Pcompleto).filter(t => !incluido(estructura, t));
@@ -399,9 +402,9 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     const incl = tiposPropuesta(E, muebles);
     const porMaterial = Object.keys(MATERIALES).map(m => {
       const pr = preciosDeMaterial(E, m, A.catalogoRef), r = x.porMaterial?.[m];
-      const completo = incl.length > 0 && incl.every(t => tienePrecio(pr, t, niv));
+      const completo = incl.length > 0 && incl.every(t => tienePrecio(pr, t, niv, E));
       const ref = x.nivel ? referenciaCatalogo(A.registrosRef, { nivel: x.nivel, sel: { modo: 'mediana', material: m } }) : null;
-      return { material: m, nombre: MATERIALES[m], completo, precios: Object.fromEntries(TIPOS.map(t => [t, pr[t]])),
+      return { material: m, nombre: MATERIALES[m], completo, precios: Object.fromEntries([...TIPOS, 'kit'].map(t => [t, pr[t]])),
         kit_sin_igv: completo ? r?.kit_sin_igv ?? null : null, kit_igv: completo ? r?.kit_igv ?? null : null, kit_con_igv: completo ? r?.kit_con_igv ?? null : null,
         total: completo ? r?.total ?? null : null, mediana: ref?.n ? { precio: ref.precio, n: ref.n } : null };
     });
@@ -460,8 +463,10 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
       // La propuesta debe quedar válida: al menos un mueble; con material, cada mueble incluido con material y precio
       const E = fila.estructura, muebles = mueblesCriterio(limpiarParams(p.criterios));
       const [registros, niveles] = await Promise.all([leerCatalogoRef(), nivelesProyecto(p)]);
+      const unit = preciosUnitarios(registros), kitCat = preciosKit(registros);
+      const catalogo = Object.fromEntries(Object.keys(MATERIALES).map(m => [m, { ...unit[m], kit: kitCat[m] }]));
       const errores = [...(tiposPropuesta(E, muebles).length ? [] : ['Incluye al menos un mueble en la propuesta.']),
-        ...validarPropuesta(E, { catalogo: preciosUnitarios(registros), muebles, niveles }).filter(t => !/al menos un mueble/.test(t))];
+        ...validarPropuesta(E, { catalogo, muebles, niveles }).filter(t => !/al menos un mueble/.test(t))];
       if (errores.length) return res.status(400).json({ error: 'No se guardó: ' + errores.join(' '), errores });
     }
     if ('anio_uit' in b) {

@@ -256,6 +256,25 @@ export function preciosUnitarios(registros) {
   }
   return out;
 }
+/**
+ * Precio por kit de referencia (sin IGV) por material: mediana de las fuentes comparables de ese
+ * material (kit, o mesa/silla con composición), de cualquier nivel; sin el precio propio.
+ * Las que no se pueden usar (IGV por confirmar, por pieza sin composición) van en «pendientes», con el motivo.
+ * @returns { [material]: { precio, n, fuente, pendientes: [{ fuente, motivo }] } }
+ */
+export function preciosKit(registros) {
+  const out = {};
+  for (const m of Object.keys(MATERIALES).filter(m => m !== 'por_confirmar')) {
+    const xs = registros.filter(r => r.tipo_documento !== 'propio' && r.material === m).map(r => ({ ...r, ...normalizar(r) }));
+    const ok = xs.filter(x => x.comparable);
+    // Mesa, silla o armario sueltos sin composición son precios unitarios (preciosUnitarios), no de kit
+    const pend = xs.filter(x => !x.comparable && !Object.values(UNIDAD_DE_TIPO).includes(x.unidad));
+    out[m] = { precio: ok.length ? mediana(ok.map(x => x.precio_kit_sin_igv)) : null, n: ok.length,
+      fuente: !ok.length ? null : ok.length === 1 ? describir(ok[0]) : `Mediana de ${ok.length} fuentes (${ok.map(describir).join('; ')})`,
+      pendientes: pend.map(x => ({ fuente: describir(x), motivo: x.motivo })) };
+  }
+  return out;
+}
 export const describir = x => [x.entidad || x.region, x.anio, TIPOS_DOC[x.tipo_documento], x.cui ? 'CUI ' + x.cui : null].filter(Boolean).join(', ');
 
 // ─── Estimación del monto del convenio ──────────────────────────────────────

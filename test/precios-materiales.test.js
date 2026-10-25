@@ -8,7 +8,7 @@ import {
 } from '../src/selector-ioarr/costos.js';
 import { calcularPaquete } from '../src/selector-ioarr/paquete.js';
 import { quitarMuebles, mueblesCriterio } from '../src/selector-ioarr/expediente.js';
-import { normalizar, estadisticos, preciosUnitarios, validarCsv, plantillaCsv, sinIgv, conIgv, PRECARGA, COMPONENTES } from '../src/selector-ioarr/catalogo-ref.js';
+import { normalizar, estadisticos, preciosUnitarios, preciosKit, validarCsv, plantillaCsv, sinIgv, conIgv, PRECARGA, COMPONENTES } from '../src/selector-ioarr/catalogo-ref.js';
 import { descuadre } from '../src/selector-ioarr/montos.js';
 
 const DIR = new URL('../src/public/data/selector-ioarr/2025/', import.meta.url);
@@ -175,4 +175,39 @@ test('kit por nivel: se puede apagar en un nivel (los demás siguen con kit)', (
   assert.equal(R(sinP, 'P').kit, false, 'Primaria sin kit');
   assert.equal(enKit(R(sinP, 'P')), 0, 'mesa y silla sueltas');
   if (R(con, 'S')) { assert.ok(R(sinP, 'S').kit, 'Secundaria sigue con kit'); assert.equal(enKit(R(sinP, 'S')), enKit(R(con, 'S'))); }
+});
+
+test('precio por kit del catálogo por material (precarga): Madera → Loreto, Metal/Polipropileno → San Juan, Metal/Madera pendiente', () => {
+  const K = preciosKit(PRECARGA);
+  assert.deepEqual([K.madera.precio, K.madera.n], [624, 1]);
+  assert.match(K.madera.fuente, /Loreto/);
+  assert.deepEqual([K['metal-polipropileno'].precio, K['metal-polipropileno'].n], [411.85, 1], 'San Juan, sin el precio propio (850)');
+  assert.match(K['metal-polipropileno'].fuente, /La Libertad.*2711098/);
+  // Huánuco: 2025 sin saber si incluye IGV y 2023 por pieza: no se usan, se dice por qué
+  assert.equal(K['metal-madera'].precio, null);
+  assert.deepEqual(K['metal-madera'].pendientes.map(x => /2025/.test(x.fuente) ? 'IGV' : /composición/.test(x.motivo) ? 'pieza' : '?').sort(), ['IGV', 'pieza']);
+  assert.match(K['metal-madera'].pendientes.find(x => /2025/.test(x.fuente)).motivo, /IGV/);
+  // Con el IGV de Huánuco 2025 confirmado (sin IGV), entra por su punto medio
+  const conf = PRECARGA.map(r => /000000000003$/.test(r.id) ? { ...r, incluye_igv: false } : r);
+  assert.equal(preciosKit(conf)['metal-madera'].precio, 467.5);
+});
+
+test('precio por kit en Costos: escrito → mesa + silla → kit del catálogo; entra al costo y basta para validar', () => {
+  const cat = { madera: { kit: preciosKit(PRECARGA).madera } };
+  const E = limpiarEstructura({ kit: true, material_propuesta: 'madera', precios_material: { madera: { arm: 600 } } });
+  const P = preciosDeMaterial(E, 'madera', cat);
+  assert.deepEqual([P.kit.precio, P.kit.origen], [624, 'catalogo_ref']);
+  assert.match(P.kit.fuente, /Loreto/);
+  // Con mesa y silla con precio, el kit es mesa + silla (más específico que el catálogo)
+  assert.equal(preciosDeMaterial(limpiarEstructura({ precios_material: { madera: { mesa: 200, silla: 100 } } }), 'madera', cat).kit.origen, 'mesa_silla');
+  // Escrito a mano, manda
+  assert.deepEqual(preciosDeMaterial(limpiarEstructura({ precios_material: { madera: { kit: 500, mesa: 200, silla: 100 } } }), 'madera', cat).kit.precio, 500);
+  // Basta el precio por kit si todos los niveles van con kit
+  assert.deepEqual(validarPropuesta(E, { catalogo: cat, muebles: ['mesa', 'silla', 'arm'], niveles: ['P'] }), []);
+  assert.ok(validarPropuesta({ ...E, kit_niveles: { P: false } }, { catalogo: cat, muebles: ['mesa', 'silla', 'arm'], niveles: ['P'] }).some(t => /Mesa/.test(t)), 'sin kit en Primaria, mesa y silla necesitan su precio');
+  // En el costo: cada kit a 624
+  const D = moquegua(), Pc = limpiarParams({ muebles: ['mesa', 'silla'] }), C = calc(D, Pc), list = filtrar(D, C, { ...FILTRO_VACIO(), q: 'mariscal' });
+  const R = costear({ D, C, list, precios: { kit: P.kit.precio }, estructura: { kit: true }, uit: UIT });
+  assert.ok(R.totales.kits > 0);
+  assert.equal((R.lineasKit || []).reduce((a, y) => a + y.parcial, 0), R.totales.kits * 624);
 });

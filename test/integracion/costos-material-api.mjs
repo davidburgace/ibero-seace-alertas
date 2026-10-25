@@ -24,7 +24,7 @@ Object.assign(sb.tablas, {
   ioarr_expediente_costos: [{ proyecto_id: PID, anio_uit: 2026, estructura: { kit: true, cc_aplica: 'no', precios: { mesa: 999, silla: 999, arm: 999 }, transporte_pieza: 10 } }],
   ioarr_expediente_documentos: [{ proyecto_id: PID, datos: { uf: 'UF de Moquegua', por_nivel: { P: { nombre_inversion: 'ADQUISICIÓN DE MOBILIARIO DE AULA PRIMARIA MOQUEGUA', cui: '2700001' } } } }],
   // Catálogo referencial: mesa de madera 236 con IGV (200 sin IGV) y silla de madera 100 sin IGV
-  ioarr_precios_ref: [ref(1, 'mesa', 'madera', 236, true), ref(2, 'silla', 'madera', 100, false)]
+  ioarr_precios_ref: [ref(1, 'mesa', 'madera', 236, true), ref(2, 'silla', 'madera', 100, false), ref(3, 'kit', 'metal-polipropileno', 411.85, false)]
 });
 
 let usuario = { id: 'u1', email: 'formulador@ejemplo.invalid' };
@@ -56,6 +56,9 @@ test('sin material: precios antiguos; el comparativo ya muestra los tres materia
   assert.equal(mad.precios.mesa.precio, 200, 'catálogo: 236 con IGV → 200 sin IGV');
   assert.equal(mad.precios.mesa.origen, 'catalogo_ref');
   assert.equal(mad.completo, false, 'falta el armario de madera');
+  assert.equal(mad.precios.kit.origen, 'mesa_silla', 'madera tiene mesa y silla: el kit es mesa + silla');
+  const mp = legado.propuesta.por_material[2];
+  assert.deepEqual([mp.precios.kit.precio, mp.precios.kit.origen], [411.85, 'catalogo_ref'], 'metal/polipropileno: el kit del catálogo');
   assert.ok(legado.propuesta.cuadra);
   assert.ok(legado.partidas.find(p => p.k === 'arm').pu === 999, 'sin material siguen los precios de antes');
 });

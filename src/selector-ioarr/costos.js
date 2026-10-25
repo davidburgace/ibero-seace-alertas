@@ -118,7 +118,7 @@ export function limpiarEstructura(e) {
 }
 function limpiarPrecios(o) {
   const out = {};
-  for (const k of CLAVES_PRECIO) {
+  for (const k of [...CLAVES_PRECIO, 'kit']) {   // 'kit': precio por kit del material (mesa + silla)
     const v = o?.[k];
     if (v === '' || v == null) continue;
     const n = Number(v);
@@ -147,6 +147,13 @@ export function preciosDeMaterial(E, material, catalogo = {}) {
     else if (k === tipoDe(k) && cat[k]?.precio != null) out[k] = { precio: cat[k].precio, origen: 'catalogo_ref', fuente: cat[k].fuente, n: cat[k].n, material };
     else out[k] = { precio: null, origen: null, material };
   }
+  // Precio por kit: el escrito → mesa + silla de la talla (si las dos tienen precio) → el kit del catálogo
+  const conPrecio = t => out[t].precio != null || CLAVES_PRECIO.some(k => k.startsWith(t + '_') && out[k].precio != null);
+  if (man.kit != null) out.kit = { precio: man.kit, origen: 'manual', material };
+  else if (conPrecio('mesa') && conPrecio('silla')) out.kit = { precio: null, origen: 'mesa_silla', material };
+  else if (cat.kit?.precio != null) out.kit = { precio: cat.kit.precio, origen: 'catalogo_ref', fuente: cat.kit.fuente, n: cat.kit.n, material };
+  else out.kit = { precio: null, origen: null, material };
+  if (!out.kit.precio && cat.kit?.pendientes?.length && out.kit.origen !== 'mesa_silla') out.kit.pendientes = cat.kit.pendientes;
   return out;
 }
 /**
@@ -155,16 +162,20 @@ export function preciosDeMaterial(E, material, catalogo = {}) {
  */
 export function preciosPropuesta(E, catalogo = {}, antiguos = {}) {
   const porMat = Object.fromEntries(Object.keys(MATERIALES).map(m => [m, preciosDeMaterial(E, m, catalogo)]));
-  return Object.fromEntries(CLAVES_PRECIO.map(k => {
-    const m = materialDe(E, tipoDe(k));
+  return Object.fromEntries([...CLAVES_PRECIO, 'kit'].map(k => {
+    const m = materialDe(E, k === 'kit' ? 'mesa' : tipoDe(k));
     const x = m ? porMat[m][k] : { precio: null, origen: null, material: null };
     return [k, { ...x, antiguo: antiguos[k]?.precio != null ? { precio: antiguos[k].precio, origen: antiguos[k].origen } : null }];
   }));
 }
-/** Un tipo tiene precio: el suyo o, mesa y silla, el de todas las tallas de los niveles del proyecto */
-export function tienePrecio(precios, t, niveles = []) {
+/**
+ * Un tipo tiene precio: el suyo o, mesa y silla, el de todas las tallas de los niveles del proyecto,
+ * o el precio por kit si todos los niveles van con kit (entonces mesa y silla no se costean sueltas).
+ */
+export function tienePrecio(precios, t, niveles = [], E = null) {
   if (precios[t]?.precio != null) return true;
   if (!TIPOS_TALLA.includes(t)) return false;
+  if (E?.kit && precios.kit?.precio != null && niveles.length && niveles.every(n => E.kit_niveles?.[n] !== false)) return true;
   const tallas = TALLAS.filter(z => niveles.includes(z.nivel));
   return tallas.length > 0 && tallas.every(z => precios[`${t}_${z.k}`]?.precio != null);
 }
@@ -180,7 +191,7 @@ export function validarPropuesta(E, { catalogo = {}, muebles = TIPOS, niveles = 
   for (const t of incl) {
     const m = materialDe(E, t);
     if (!m) errores.push(`Elige el material de: ${nombre(t)}.`);
-    else if (!tienePrecio(P, t, niveles)) errores.push(`${nombre(t)} (${MATERIALES[m]}): sin precio. Escríbelo en la tabla de materiales o carga una fuente en «Precios referenciales».`);
+    else if (!tienePrecio(P, t, niveles, E)) errores.push(`${nombre(t)} (${MATERIALES[m]}): sin precio. Escríbelo en la tabla de materiales o carga una fuente en «Precios referenciales».`);
   }
   if (E.kit && incl.includes('mesa') && incl.includes('silla') && materialDe(E, 'mesa') !== materialDe(E, 'silla'))
     errores.push('El kit es mesa + silla del estudiante del mismo material: elige el mismo material para las dos (o quita el kit).');
@@ -387,7 +398,10 @@ export function costear({ D, C, list, precios, estructura, uit, inventario, ajus
   const puGeneral = TIPOS.map(val);
   const propio = LINEAS.map(x => !!x.talla && val(x.k) != null);   // la talla tiene precio propio
   // Kit por talla = mesa + silla de esa talla (null si falta alguno)
+  // Precio por kit: el del kit (precios.kit, por material) o mesa + silla de esa talla
+  const kitPrecio = val('kit');
   const puKit = TALLAS.map(z => {
+    if (kitPrecio != null) return kitPrecio;
     const m = pu[LINEAS.findIndex(x => x.k === `mesa_${z.k}`)], s = pu[LINEAS.findIndex(x => x.k === `silla_${z.k}`)];
     return m == null || s == null ? null : m + s;
   });
