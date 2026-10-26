@@ -43,6 +43,8 @@ export const HASH_PLANTILLAS = createHash('sha256')
 
 export const REGLAMENTO_PLANTILLAS = 'DS 038-2026-EF';
 export const DECLARACION = 'Apoyo técnico brindado por un potencial postor; la entidad es responsable del contenido y su validación legal.';
+// Texto de la sección «Fuentes del precio» de la hoja de transparencia (lo dio el usuario)
+export const DECLARACION_COTIZACIONES = 'Apoyo técnico brindado por un potencial postor; la entidad es responsable de obtener y validar las cotizaciones';
 export const PROPUESTA_MIN = 90, PROPUESTA_MAX = 110;   // Anexo 4-E (texto fijo)
 export const REFERENCIA_PLAZO_DE = 'Referencia: San Juan 60 días, Loreto 30 días.';
 
@@ -484,8 +486,24 @@ export function contextoApp(M, nivel, nombreNivel) {
     metas: (M?.F?.metas || []).map(m => ({ k: m.k, nombre: m.nombre, unidad: m.unidad, cantidad: m.cantidad, costo: m.costo })),
     total_07c: M?.F?.total ?? null, liquidacion: M?.F?.liquidacion ?? null, control: M?.F?.control ?? null,
     colegios: M?.ups?.length ?? 0, ugels: M?.ugels || [], borrador: !!(M?.borrador && M?.bloqueados?.length),
-    material: M?.estructura?.params?.material || null
+    material: M?.estructura?.params?.material || null,
+    // Origen del precio (Costos): estimación preliminar o cotizaciones. Sin nombres de proveedores ni entidades
+    origen_precio: M?.precioEstado ? { origen: M.precioEstado.origen, preliminar: M.precioEstado.preliminar,
+      items: M.precioEstado.items.map(x => ({ nombre: x.nombre, proveedores: x.proveedores, justificado: x.justificado, promedio: x.promedio != null })) } : null
   };
+}
+/** Fuentes del precio para la hoja de transparencia (sin nombres de proveedores, entidades ni el precio propio) */
+export function fuentesPrecio(ctx = {}, Q = null) {
+  const O = ctx.origen_precio, out = [];
+  if (!O) out.push('Origen de los precios unitarios: no informado por la aplicación.');
+  else if (O.origen === 'cotizaciones') {
+    out.push('Precios unitarios del expediente: promedio sin IGV de las cotizaciones vigentes del legajo (si la cotización incluye IGV, se divide entre 1.18).');
+    for (const x of O.items) out.push(x.promedio
+      ? `${x.nombre}: ${x.proveedores} ${x.proveedores === 1 ? 'proveedor' : 'proveedores'} con cotización vigente${x.justificado && x.proveedores < 3 ? ' (menos de 3: con justificación escrita)' : ''}.`
+      : `${x.nombre}: sin cotizaciones vigentes; precio del catálogo de precios referenciales (estimación preliminar).`);
+  } else out.push('Precios unitarios del expediente: estimación preliminar con el catálogo de precios referenciales de IOARR publicadas (o precios escritos); falta sustentarlos con cotizaciones.');
+  if (Q?.precio_catalogo && ctx.precio_ref?.precio != null) out.push(`Precio por kit del Anexo 3-A: catálogo de precios referenciales de IOARR publicadas (${['registro', 'defecto'].includes(ctx.precio_ref.modo) ? 'una fuente' : `mediana de ${ctx.precio_ref.n} ${ctx.precio_ref.n === 1 ? 'fuente' : 'fuentes'}`}).`);
+  return out;
 }
 
 // ─── Hoja de transparencia ──────────────────────────────────────────────────
@@ -496,7 +514,7 @@ export function transparencia(d, ctx = {}, armado = armarTexto(d)) {
   const Q = cuadroCantidades(d, ctx);
   if (Q.precio_catalogo && ctx.precio_ref?.precio != null)
     app.push({ campo: 'Precio por kit (Anexo 3-A)', valor: `S/ ${formatoMonto(ctx.precio_ref.precio)} sin IGV`,
-      fuente: `Catálogo de precios referenciales de IOARR publicadas: ${ctx.precio_ref.modo === 'registro' ? 'una fuente' : `mediana de ${ctx.precio_ref.n} ${ctx.precio_ref.n === 1 ? 'fuente' : 'fuentes'}`}.` });
+      fuente: `Catálogo de precios referenciales de IOARR publicadas: ${['registro', 'defecto'].includes(ctx.precio_ref.modo) ? 'una fuente' : `mediana de ${ctx.precio_ref.n} ${ctx.precio_ref.n === 1 ? 'fuente' : 'fuentes'}`}.` });
   if (ctx.material) app.push({ campo: 'Material del mobiliario considerado en los costos', valor: MATERIALES_COSTOS[ctx.material] || ctx.material, fuente: 'Material de la propuesta elegido en Costos (los precios unitarios son de ese material).' });
   if (Q.filas.length) app.push({ campo: 'Cantidades y precios unitarios (Anexo 3-A)', valor: Q.filas.map(f => `${f.nombre}: ${f.cantidad ?? '—'}`).join('; '), fuente: Q.texto });
   const supuestos = [
@@ -521,7 +539,7 @@ export function transparencia(d, ctx = {}, armado = armarTexto(d)) {
     'Anexo 3-A: requisitos habilitantes, entregables y perfil del personal (los completa la entidad).',
     'Los campos entre corchetes de los formatos ([INDICAR …], [CONSIGNAR …]) los llena cada postor.'
   ];
-  return { declaracion: DECLARACION, app, supuestos, pendientes };
+  return { declaracion: DECLARACION, app, supuestos, pendientes, fuentes_precio: fuentesPrecio(ctx, Q), declaracion_cotizaciones: DECLARACION_COTIZACIONES };
 }
 
 // ─── Comparar dos versiones de la ficha ─────────────────────────────────────

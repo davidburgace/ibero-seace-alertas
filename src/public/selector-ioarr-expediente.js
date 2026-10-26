@@ -140,7 +140,7 @@ function pintarKpis() {
   const reg = REG(U.registro ?? (U.valor == null ? null : U.supera ? 'completo' : 'abreviado'), U.masiva);
   document.getElementById('exp-kpis').innerHTML = `
     <div class="kpis kpis-montos">
-      <div class="kpi destacado"><div class="v">${soles(T.total)}</div><div class="l">monto de inversión${datos.nivel ? ` · IOARR ${esc(datos.nombre_ioarr)}` : ''}</div></div>
+      <div class="kpi destacado"><div class="v">${soles(T.total)}</div><div class="l">monto de inversión${datos.nivel ? ` · IOARR ${esc(datos.nombre_ioarr)}` : ''}${datos.origen_precio?.estado?.preliminar ? '<br><span class="chip-est pend">Estimación preliminar</span>' : datos.origen_precio?.estado ? '<br><span class="chip-est ok">Precio de cotizaciones</span>' : ''}</div></div>
       <div class="kpi"><div class="v">${soles(T.cd)}</div><div class="l">costo directo · ${datos.estructura?.kit ? `${ent(T.kits)} kits` : `${ent(T.rep)} bienes a reponer`}</div></div>
       <div class="kpi"><div class="v">${T.porEstudiante == null ? '—' : soles(T.porEstudiante)}</div><div class="l">por estudiante · ${ent(T.est)} estudiantes</div></div>
       <div class="kpi"><div class="v">${U.enUit == null ? '—' : dec(U.enUit) + ' UIT'}</div><div class="l">${reg}</div></div>
@@ -247,11 +247,14 @@ function pintarPrecios() {
 
 // Con material de la propuesta: cada precio es del material de su tipo (escrito o del catálogo referencial)
 const ORIGEN_MAT = { manual: '<span class="chip-est ok">Manual</span>', catalogo_ref: '<span class="chip-est">Catálogo</span>' };
+// Indicador de IGV del precio: todos los de la tabla son sin IGV; del catálogo se dice cómo venía la fuente
+const IGV_ORIGEN = { con: 'la fuente lo traía con IGV: ÷ 1.18', sin: 'la fuente ya era sin IGV', mixto: 'fuentes con y sin IGV, llevadas a sin IGV' };
+const igvDe = p => p.origen === 'catalogo_ref' && p.igv ? IGV_ORIGEN[p.igv] : p.origen === 'manual' ? 'escrito sin IGV' : '';
 function pintarPreciosMaterial(lt, kit, tallasKit) {
   const P = datos.propuesta, PM = P.precios;
   const fila = (k, nombre, cant, general) => {
     const p = PM[k] || { precio: null, origen: null }, m = p.material, usaGeneral = general && p.precio == null;
-    const origen = p.origen === 'mesa_silla' ? '<span class="chip-est">Mesa + silla</span>' : p.origen ? ORIGEN_MAT[p.origen] + (p.fuente ? `<br><span class="sub">${esc(p.fuente)}</span>` : '')
+    const origen = p.origen === 'mesa_silla' ? '<span class="chip-est">Mesa + silla</span>' : p.origen ? ORIGEN_MAT[p.origen] + (p.fuente ? `<br><span class="sub">${esc(p.fuente)}</span>` : '') + (igvDe(p) ? `<span class="sub">${esc(igvDe(p))}</span>` : '')
       : usaGeneral ? `<span class="chip-est">${general.precio == null ? 'Sin precio de referencia' : 'Usa el general'}</span>` : '<span class="chip-est alerta">Sin precio de referencia</span>';
     const antiguo = p.antiguo && p.origen !== 'manual' ? `<br><span class="sub">Valor antiguo (sin material): ${soles(p.antiguo.precio)} <button class="x" type="button" data-pm-usar="${k}" data-pm-m="${m}" data-pm-v="${p.antiguo.precio}">Usar</button></span>` : '';
     return `<tr${general ? ' class="fila-talla"' : ''}>
@@ -276,7 +279,7 @@ function pintarPreciosMaterial(lt, kit, tallasKit) {
   const filaKit = kit && PM.kit ? fila('kit', `Kit de mobiliario (mesa + silla) · ${MATERIALES[PM.kit.material] || ''} – precio por kit`, PM.kit.origen === 'mesa_silla' ? 'se calcula con mesa + silla de cada talla' : 'vale para todas las tallas') : '';
   document.getElementById('exp-precios').innerHTML = `
     <div class="panel-cab"><h3>Precios unitarios de mercado (sin IGV) · ${esc(MATERIALES[P.material])}</h3></div>
-    <p class="sub pad">Precios del material de cada mueble. Vacía = la mediana del catálogo de precios referenciales de ese material (mesa, silla y armario) o «sin precio de referencia»: escríbelo a mano. Los valores antiguos (sin material) no se usan; «Usar» los copia como precio manual. Una talla sin precio usa el precio general de su tipo.</p>
+    <p class="sub pad">Precios del material de cada mueble, todos sin IGV. Vacía = la mediana del catálogo de precios referenciales de ese material (mesa, silla y armario; por talla si la fuente tiene grado, y la referencia por defecto del material si la hay) o «sin precio de referencia»: escríbelo a mano. Los valores antiguos (sin material) no se usan; «Usar» los copia como precio manual. Una talla sin precio usa el precio general de su tipo.</p>
     <div class="tabla-wrap borde-0"><table class="tabla"><thead><tr><th>Bien</th><th class="num">Precio (S/)</th><th>Origen</th></tr></thead><tbody>${filaKit}${filas || '<tr><td colspan="3" class="vacio">Ningún mueble en la propuesta.</td></tr>'}</tbody></table></div>
     ${kit ? '<p class="sub pad">Precio del kit: el escrito; si no, mesa + silla de su talla (del mismo material); si no hay, el kit del catálogo de ese material.</p>' : ''}`;
 }
@@ -301,7 +304,7 @@ function pintarMaterial() {
   const incl = ITEMS.filter(x => P.muebles_criterio.includes(x.k) && P.incluir[x.k]);
   const celda = (y, t) => { const p = y.precios[t] || {};
     return `<td class="num"><input class="precio-in" data-pm-k="${t}" data-pm-m="${y.material}" type="number" min="0" step="0.01" inputmode="decimal" value="${p.origen === 'manual' ? p.precio : ''}" placeholder="${p.precio ?? 'sin precio'}" aria-label="${esc(ITEMS.find(x => x.k === t).n)} (${esc(y.nombre)})">
-      <span class="sub">${p.origen === 'manual' ? 'manual' : p.origen === 'catalogo_ref' ? `catálogo (${p.n} ${p.n === 1 ? 'fuente' : 'fuentes'})` : 'sin precio de referencia'}</span></td>`; };
+      <span class="sub">${p.origen === 'manual' ? 'manual · sin IGV' : p.origen === 'catalogo_ref' ? `catálogo (${p.n} ${p.n === 1 ? 'fuente' : 'fuentes'})${p.igv === 'con' ? ' · con IGV ÷ 1.18' : ''}` : 'sin precio de referencia'}</span></td>`; };
   const celdaKit = y => { const k = y.precios.kit || {};
     const origen = k.origen === 'manual' ? 'manual' : k.origen === 'mesa_silla' ? 'mesa + silla' : k.origen === 'catalogo_ref' ? `catálogo: ${esc(k.fuente)}` : 'sin precio de referencia';
     const pend = (k.pendientes || []).map(x => `<span class="sub aviso-celda">No se usa ${esc(x.fuente)}: ${esc(x.motivo)}. Corrígelo en «Precios referenciales».</span>`).join('');
@@ -313,7 +316,9 @@ function pintarMaterial() {
     <div class="form-grid pad"><div class="campo"><label for="exp-mat-prop">Material de la propuesta</label>
       <select id="exp-mat-prop"><option value="" ${conMat ? '' : 'selected'}>Sin material (precios antiguos)</option>${mats.map(m => `<option value="${m}" ${P.material === m ? 'selected' : ''}>${esc(MATERIALES[m])}</option>`).join('')}</select>
       <span class="sub">Alimenta las Bases OxI, la Oferta (uso interno) y el documento equivalente. Para elegir uno, antes completa sus precios en el comparativo.</span></div></div>
+    ${pintarOrigenPrecio()}
     ${P.errores.length ? `<div class="avisos pad">${P.errores.map(t => `<div class="aviso alerta" role="alert">${esc(t)}</div>`).join('')}</div>` : ''}
+    ${(P.avisos || []).length ? `<div class="avisos pad">${P.avisos.map(t => `<div class="aviso" role="note">${esc(t)}</div>`).join('')}</div>` : ''}
     ${P.cuadra ? '' : '<div class="avisos pad"><div class="aviso alerta" role="alert">La suma de los componentes no iguala el total: revisa la estructura.</div></div>'}
     <div class="tabla-wrap borde-0"><table class="tabla"><thead><tr><th>Mueble</th><th>Propuesta</th><th>Material</th><th class="num">Monto excluido</th></tr></thead><tbody>${filas}</tbody></table></div>
     ${kitNiv}
@@ -322,11 +327,27 @@ function pintarMaterial() {
     <tbody>${incl.map(x => `<tr><td>${esc(x.n)}</td>${P.por_material.map(y => celda(y, x.k)).join('')}</tr>`).join('') || '<tr><td colspan="4" class="vacio">Ningún mueble en la propuesta.</td></tr>'}
       ${P.kit ? `<tr><td><b>Precio por kit</b><br><span class="sub">El escrito, mesa + silla si las dos tienen precio, o el kit del catálogo de ese material</span></td>${P.por_material.map(celdaKit).join('')}</tr>` : ''}
       ${P.kit ? fila('Kit sin IGV (promedio por kit)', y => soles(y.kit_sin_igv)) + fila('IGV del kit', y => soles(y.kit_igv)) + fila('Kit con IGV', y => soles(y.kit_con_igv))
-        + `<tr><td>Mediana del catálogo (kit sin IGV, material y nivel)</td>${P.por_material.map(y => `<td class="num">${y.mediana ? `${soles(y.mediana.precio)}<span class="sub">${y.mediana.n} ${y.mediana.n === 1 ? 'fuente' : 'fuentes'}${y.mediana.n < 3 ? ' · menos de 3' : ''}</span>` : '<span class="sub">sin fuentes</span>'}</td>`).join('')}</tr>` : ''}
+        + `<tr><td>Mediana del catálogo (kit sin IGV, material y nivel)</td>${P.por_material.map(y => `<td class="num">${y.mediana ? `${soles(y.mediana.precio)}<span class="sub">${y.mediana.n} ${y.mediana.n === 1 ? 'fuente' : 'fuentes'}${y.mediana.n < 3 ? ' · menos de 3' : ''}</span>${y.mediana.fuente ? `<span class="sub">${esc(y.mediana.fuente)}</span>` : ''}` : '<span class="sub">sin fuentes</span>'}</td>`).join('')}</tr>` : ''}
       ${fila('<b>Total del expediente (IOARR)</b>', y => `<b>${soles(y.total)}</b>`)}
       ${fila('Diferencia frente al más económico', y => y.dif_pct == null ? '—' : y.dif_pct === 0 ? 'el más económico' : `+${y.dif_pct} %`)}
     </tbody></table></div>
     <p class="sub pad">Los precios del comparativo se guardan por material. Vacío = la mediana del catálogo de precios referenciales de ese material, si la hay. Un material sin todos sus precios no se mezcla con otro.</p>`;
+}
+
+// Origen del precio (catálogo o cotizaciones) y lo que falta para el 07-C definitivo
+function pintarOrigenPrecio() {
+  const O = datos.origen_precio;
+  if (!O) return '';
+  const E = O.estado, tr = O.transporte_catalogo;
+  const items = E?.items?.length ? `<div class="tabla-wrap"><table class="tabla"><thead><tr><th>Ítem del 07-C</th><th class="num">Cotizaciones vigentes</th><th class="num">Promedio sin IGV</th><th>Para el definitivo</th></tr></thead><tbody>
+    ${E.items.map(x => `<tr><td>${esc(x.nombre)}</td><td class="num">${ent(x.proveedores)}</td><td class="num">${soles(x.promedio)}</td><td>${x.ok ? `<span class="chip-est ok">${x.proveedores >= E.min_cotizaciones ? 'Listo' : 'Con justificación'}</span>` : `<span class="chip-est pend">Faltan ${E.min_cotizaciones - x.proveedores} o justificación</span>`}</td></tr>`).join('')}</tbody></table></div>` : '';
+  return `<div class="form-grid pad borde-sup">
+      <div class="campo"><label for="exp-origen-precio">Origen del precio</label>
+        <select id="exp-origen-precio">${Object.entries(O.opciones).map(([k, t]) => `<option value="${k}" ${O.origen === k ? 'selected' : ''}>${esc(t)}</option>`).join('')}</select>
+        <span class="sub">Con el catálogo, el costo del 07-C es una <b>estimación preliminar</b>. Con cotizaciones, cada ítem toma el promedio sin IGV de las cotizaciones vigentes del legajo («Documento equivalente») de este nivel.</span></div>
+      ${tr ? `<div class="campo"><label>Transporte por pieza en el catálogo</label><output class="bx-calc">${soles(tr.precio)}</output><span class="sub">${esc(tr.fuente)} · solo como referencia: el transporte de Costos se escribe en la estructura.</span></div>` : ''}
+    </div>
+    ${E ? `<div class="avisos pad"><div class="aviso${E.preliminar ? '' : ' ok'}" role="note"><b>${esc(E.etiqueta)}.</b> ${E.definitivo ? 'El Formato 07-C se puede exportar como definitivo (Documentos).' : 'Para exportar el Formato 07-C definitivo falta: ' + esc(E.bloqueos.join(' '))}</div></div>${O.origen === 'cotizaciones' ? items : ''}` : ''}`;
 }
 
 // ─── Estructura de costos del 07-C (sin utilidad) y kit ─────────────────────
@@ -569,6 +590,7 @@ export function enlazarExpediente(el, abrirNuevo) {
     if (e.target.id === 'est-cc') { clearTimeout(tGuardar); guardar({ estructura: { cc_aplica: e.target.value } }); }
     // Material y muebles de la propuesta
     if (e.target.id === 'exp-mat-prop') { clearTimeout(tGuardar); guardar({ estructura: { material_propuesta: e.target.value } }); }
+    if (e.target.id === 'exp-origen-precio') { clearTimeout(tGuardar); guardar({ estructura: { origen_precio: e.target.value } }); }
     if (e.target.dataset.matTipo) { clearTimeout(tGuardar); guardar({ estructura: { materiales: { [e.target.dataset.matTipo]: e.target.value === datos.propuesta.material ? null : e.target.value } } }); }
     if (e.target.dataset.incl) { clearTimeout(tGuardar); guardar({ estructura: { incluir: { [e.target.dataset.incl]: e.target.checked } } }); }
     if (e.target.dataset.kitNiv) { clearTimeout(tGuardar); guardar({ estructura: { kit_niveles: { [e.target.dataset.kitNiv]: e.target.checked } } }); }
