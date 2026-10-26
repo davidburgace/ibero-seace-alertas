@@ -317,6 +317,14 @@ api.post('/proyectos/:id/duplicar', async (req, res, next) => {
       const { error: eI } = await supabase.from('ioarr_expediente_costos').insert({ ...resto, proyecto_id: data.id });
       if (eI) throw eI;
     }
+    // …y la referencia elegida en «Precios referenciales» (modo, fuente, material, atípicos, año base)
+    const { data: ref, error: eR } = await supabase.from('ioarr_precios_ref_proyecto').select('*').eq('proyecto_id', p.id).maybeSingle();
+    if (eR && !/does not exist|schema cache/i.test(eR.message || '')) throw eR;
+    if (ref) {
+      const { proyecto_id: _, actualizado_en: __, ...resto } = ref;
+      const { error: eI } = await supabase.from('ioarr_precios_ref_proyecto').insert({ ...resto, proyecto_id: data.id });
+      if (eI) throw eI;
+    }
     // La copia conserva lo verificado sobre otras inversiones
     const { mapa } = await leerDuplicidad(supabase, p.id), filas = Object.entries(mapa).map(([c, d]) => aFila(data.id, c, d, req.usuario.id));
     for (let i = 0; i < filas.length; i += LOTE) {

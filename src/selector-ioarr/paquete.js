@@ -22,6 +22,8 @@ import { fichaActivos, modeloVidaUtil, checklistColegio, colegioDe, riesgoDuplic
  *   dup        { [cod]: duplicidad } (otra inversión vigente o reciente)
  *   inv        inventario verificado por código de local (con archivos y req_ficha)
  *   comun      { precios, estructura, uit } para costear
+ *   preciosNivel  opcional { [nivel]: precios } que reemplazan a comun.precios en la IOARR de ese nivel
+ *                 (origen del precio «cotizaciones»: el promedio del legajo de cada nivel)
  *   datosDoc   datos de Documentos (limpiarDatosDoc), con colegios
  *   final      true: solo los colegios con el checklist de inventario y baja completo (07-C final)
  *   modo       'por_nivel' (siempre, ver niveles.js)
@@ -32,7 +34,7 @@ import { fichaActivos, modeloVidaUtil, checklistColegio, colegioDe, riesgoDuplic
  *   Pcompleto: los criterios sin quitar los muebles excluidos (para el monto excluido, en gris);
  *   preciosMaterial: la misma IOARR costeada con los precios de cada material (comparativo).
  */
-export function calcularPaquete({ D, P, codigos, dup = {}, inv = {}, comun, datosDoc = {}, final = false, modo = 'por_nivel', anioRef = new Date().getFullYear(), propuesta = null }) {
+export function calcularPaquete({ D, P, codigos, dup = {}, inv = {}, comun: comunBase, datosDoc = {}, final = false, modo = 'por_nivel', anioRef = new Date().getFullYear(), propuesta = null, preciosNivel = null }) {
   // Los locales con otra inversión vigente o reciente que se excluyeron no entran a la propuesta
   const sep0 = separarLocales(D, codigos, dup), excluidos = sep0.excluidos;
   const colegios = datosDoc.colegios || {};
@@ -55,6 +57,9 @@ export function calcularPaquete({ D, P, codigos, dup = {}, inv = {}, comun, dato
   // Niveles de toda la selección: en el 07-C final, un nivel con todos sus colegios bloqueados queda vacío
   const enList = new Set(list);
   const G = porNivel(D, P, sep.list).map(g => ({ ...g, list: g.list.filter(i => enList.has(i)) })), Cn = Object.fromEntries(G.map(g => [g.nivel, g.C]));
+  // Precios por nivel (origen «cotizaciones»: el legajo de cada nivel). La IOARR única toma los de su
+  // nivel solo si hay uno; con varios niveles juntos, los comunes (no se mezclan legajos)
+  const comun = G.length === 1 && preciosNivel?.[G[0].nivel] ? { ...comunBase, precios: preciosNivel[G[0].nivel] } : comunBase;
   const Runa = costear({ D, C, list, ...comun, inventario: inventarioUna(inv, D, Cn), ajustes: ajustesDe(null), capacidades: capacidadesDe(null) });
   // Los tres escenarios de cantidad lado a lado (IOARR única, con la misma estructura y precios)
   const escenarios = ESCENARIOS.map(e => {
@@ -66,7 +71,8 @@ export function calcularPaquete({ D, P, codigos, dup = {}, inv = {}, comun, dato
     return { k: e.k, n: e.n, pct: e.k === 'malo_regular' ? textoPct(P, G.map(g => g.nivel)) : null, actual: e.k === P.escenario, rep: R.totales.rep, kits: R.totales.kits, cd: R.totales.cd, total: R.totales.total,
       partidas: Object.fromEntries(R.partidas.map(x => [x.k, x.excluido ? null : x.rep])), aulas: R.totales.aul };
   });
-  const Rniv = costear({ ...comun, grupos: G.map(g => ({ clave: g.nivel, D: g.D, C: g.C, list: g.list, inventario: inventarioNivel(inv, D, g.nivel), ajustes: ajustesDe(g.nivel), capacidades: capacidadesDe(g.nivel) })) });
+  const Rniv = costear({ ...comun, grupos: G.map(g => ({ clave: g.nivel, D: g.D, C: g.C, list: g.list, inventario: inventarioNivel(inv, D, g.nivel), ajustes: ajustesDe(g.nivel), capacidades: capacidadesDe(g.nivel),
+    precios: preciosNivel?.[g.nivel] || null })) });
   // Cada 07-C es de un solo nivel. Sin locales no hay niveles: se muestra una IOARR vacía
   const ioarrs = !G.length
     ? [{ nivel: null, nombre: 'Todos los niveles', R: Runa, D, C, list, inv: inventarioUna(inv, D, Cn) }]
@@ -104,11 +110,12 @@ export function calcularPaquete({ D, P, codigos, dup = {}, inv = {}, comun, dato
   }
   // Propuesta: monto de los muebles excluidos y la IOARR con cada material (costos.js)
   if (propuesta) {
-    const gruposDe = Pq => porNivel(D, Pq, sep.list).map(g => ({ clave: g.nivel, D: g.D, C: g.C, list: g.list.filter(i => enList.has(i)),
-      inventario: inventarioNivel(inv, D, g.nivel), ajustes: ajustesDe(g.nivel), capacidades: capacidadesDe(g.nivel) }));
+    // conNivel: con los precios del nivel (cotizaciones); el comparativo por material usa los de cada material
+    const gruposDe = (Pq, conNivel = false) => porNivel(D, Pq, sep.list).map(g => ({ clave: g.nivel, D: g.D, C: g.C, list: g.list.filter(i => enList.has(i)),
+      inventario: inventarioNivel(inv, D, g.nivel), ajustes: ajustesDe(g.nivel), capacidades: capacidadesDe(g.nivel), precios: conNivel ? preciosNivel?.[g.nivel] || null : null }));
     const deNivel = (Rx, x) => x.nivel ? Rx.grupos?.[x.nivel] : null;
     if (propuesta.excluidos?.length && propuesta.Pcompleto) {
-      const Rf = costear({ ...comun, grupos: gruposDe(propuesta.Pcompleto) });
+      const Rf = costear({ ...comun, grupos: gruposDe(propuesta.Pcompleto, true) });
       for (const x of ioarrs) {
         const R = deNivel(Rf, x);
         x.excluidosMuebles = !R ? [] : R.partidas.filter(pt => propuesta.excluidos.includes(pt.k) && !pt.excluido && pt.rep > 0).map(pt => ({ k: pt.k, n: pt.n, rep: pt.rep, parcial: pt.parcial }));

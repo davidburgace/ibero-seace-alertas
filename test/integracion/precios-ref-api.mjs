@@ -37,9 +37,19 @@ const archivo = (contenido, nombre, tipo) => { const fd = new FormData(); fd.app
 test('catálogo con la precarga: normalizado, estadísticos sin el propio y posición del propio', async () => {
   const { status, json } = await pedir('GET', '/precios-ref');
   assert.equal(status, 200, JSON.stringify(json));
-  assert.equal(json.registros.length, 5);
-  assert.equal(json.registros.filter(r => r.comparable && !r.propio).length, 3);   // Loreto, Huánuco 2025 (sin IGV, 036) y San Juan (memoria de costos)
-  assert.deepEqual(json.estadisticos.map(g => [g.material, g.nivel, g.n, g.mediana, g.pocas]), [['madera', 'por_confirmar', 1, 624, true], ['metal-madera', 'Primaria', 1, 467.5, true], ['metal-polipropileno', 'Secundaria', 1, 411.85, true]]);
+  assert.equal(json.registros.length, 14);
+  // Loreto, Huánuco 2025 (sin IGV, 036), San Juan (memoria de costos), el kit de Huicungo y Huánuco 2025 derivado (atípico)
+  assert.equal(json.registros.filter(r => r.comparable && !r.propio).length, 5);
+  assert.deepEqual(json.registros.filter(r => r.excluido).map(r => r.fuente), ['Huánuco 2023', 'Propio', 'Huánuco 2025'].sort((a, b) => json.registros.findIndex(r => r.fuente === a && r.excluido) - json.registros.findIndex(r => r.fuente === b && r.excluido)));
+  // Sin el propio, el histórico (Huánuco 2023) ni el atípico (Huánuco 2025 derivado, 12,379 kits)
+  assert.deepEqual(json.estadisticos.map(g => [g.material, g.nivel, g.n, g.mediana, g.pocas]), [['madera', 'por_confirmar', 1, 624, true], ['metal-madera', 'Primaria', 2, 519.98, true], ['metal-polipropileno', 'Secundaria', 1, 411.85, true]]);
+  // Con el interruptor, el atípico entra (Secundaria, 479.50 con IGV → 406.36)
+  const con = (await pedir('GET', '/precios-ref?atipicos=1')).json;
+  assert.ok(con.estadisticos.some(g => g.material === 'metal-madera' && g.nivel === 'Secundaria' && g.mediana === 406.36));
+  // Factor 1.00 (no hay factores registrados): Huánuco 2025 es de otro año que el base → «sin ajuste de precios»
+  const h = json.registros.find(r => r.id === 'c0a7a10e-0000-4000-8000-000000000003');
+  assert.deepEqual([h.factor, h.anio_origen, h.anio_base, h.sin_ajuste, h.precio_actualizado], [1, 2025, 2025, false, 467.5]);
+  assert.equal(json.registros.find(r => r.fuente === 'Loreto 2026').sin_ajuste, true);
   assert.ok('madera' in json.opciones.materiales);
   assert.equal(json.propio.precio_kit_sin_igv, 850);
   assert.match(json.estadisticos[0].propio.texto, /36\.22 % sobre la mediana/);
@@ -89,11 +99,12 @@ test('importar CSV: reporte por fila sin importar nada; luego revisar e importar
 test('proyecto: referencia (mediana), monto del convenio estimado y riesgo del precio propio', async () => {
   const { status, json } = await pedir('GET', `/proyectos/${PID}/precios-ref`);
   assert.equal(status, 200, JSON.stringify(json));
-  assert.deepEqual(json.seleccion, { modo: 'mediana', registro_id: null, material: 'todos' });
+  assert.deepEqual(json.seleccion, { modo: 'defecto', registro_id: null, material: 'todos', incluir_atipicos: false, comparar_anio_base: true, anio_base: 2025 });
   const P = json.ioarrs.find(x => x.nivel === 'P');
-  // Primaria: mesa 450, Huánuco 2025 467.50 (nivel por confirmar), Tacna 600, Loreto 624, Puno 700. San Juan es de Secundaria: no entra
-  assert.deepEqual(P.referencia.registros.length, 5);
-  assert.equal(P.referencia.precio, 600);
+  // «Por defecto» sin material = la mediana. Primaria: mesa 450, Huánuco 2025 467.50, Huicungo 572.46, Tacna 600,
+  // Loreto 624 (nivel por confirmar), Puno 700. San Juan es de Secundaria: no entra
+  assert.deepEqual(P.referencia.registros.length, 6);
+  assert.equal(P.referencia.precio, 586.23);
   assert.ok(json.ioarrs.find(x => x.nivel === 'S').referencia.registros.includes('c0a7a10e-0000-4000-8000-000000000004'));
   assert.ok(P.estimado.convenio > 0 && P.propio.convenio > P.estimado.convenio);
   assert.equal(P.riesgo.fuera, 'encima');
@@ -114,9 +125,22 @@ test('proyecto: referencia (mediana), monto del convenio estimado y riesgo del p
   const m = await pedir('PUT', `/proyectos/${PID}/precios-ref`, { modo: 'registro', registro_id: 'c0a7a10e-0000-4000-8000-000000000001', material: 'metal-madera' });
   assert.equal(m.status, 400);
   assert.match(m.json.error, /es de madera, no de metal y madera/);
-  // Mediana de metal y madera: mesa 450, Huánuco 2025 467.50 (IGV confirmado arriba), Tacna 600 y Puno 700 (CSV)
+  // Mediana de metal y madera: mesa 450, Huánuco 2025 467.50 (IGV confirmado arriba), Huicungo 572.46, Tacna 600 y Puno 700 (CSV)
   const mm = await pedir('PUT', `/proyectos/${PID}/precios-ref`, { modo: 'mediana', material: 'metal-madera' });
-  assert.equal(mm.json.ioarrs.find(x => x.nivel === 'P').referencia.precio, 533.75);
+  assert.equal(mm.json.ioarrs.find(x => x.nivel === 'P').referencia.precio, 572.46);
+  // Por defecto, Metal/Madera es Huicungo 2026 (el kit derivado); el volumen (455 kits) frente al del expediente se avisa
+  const df = await pedir('PUT', `/proyectos/${PID}/precios-ref`, { modo: 'defecto', material: 'metal-madera' });
+  const dP = df.json.ioarrs.find(x => x.nivel === 'P');
+  assert.equal(dP.referencia.precio, 572.46);
+  assert.deepEqual(dP.referencia.registros, ['c0a7a10e-0000-4000-8000-00000000000d']);
+  assert.ok(dP.avisos.some(a => /Referencia por defecto de metal y madera: Huicungo 2026/.test(a)));
+  assert.ok(dP.avisos.some(a => /No comparable por volumen/.test(a)) === (Math.max(455, dP.kits) / Math.min(455, dP.kits) > 5));
+  // Para la IOARR de Secundaria, avisa que Huicungo es de Primaria
+  assert.ok(df.json.ioarrs.find(x => x.nivel === 'S').avisos.some(a => /es de Primaria; la IOARR es de Secundaria/.test(a)));
+  // Incluir atípicos: Huánuco 2025 derivado entra a la mediana de Secundaria
+  const at = await pedir('PUT', `/proyectos/${PID}/precios-ref`, { modo: 'mediana', material: 'metal-madera', incluir_atipicos: true });
+  assert.ok(at.json.ioarrs.find(x => x.nivel === 'S').referencia.registros.includes('c0a7a10e-0000-4000-8000-00000000000e'));
+  assert.equal(at.json.seleccion.incluir_atipicos, true);
   const u = await pedir('PUT', `/proyectos/${PID}/precios-ref`, { modo: 'registro', registro_id: 'c0a7a10e-0000-4000-8000-000000000001', material: 'madera' });
   assert.equal(u.status, 200);
   assert.equal(u.json.ioarrs.find(x => x.nivel === 'P').referencia.precio, 624);

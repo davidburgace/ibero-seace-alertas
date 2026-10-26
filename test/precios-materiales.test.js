@@ -46,11 +46,21 @@ test('estadísticos por material y nivel sin el precio propio', () => {
   assert.ok(!estadisticos(PRECARGA).some(g => g.max === 850));
 });
 
-test('importación CSV: el CSV del pedido (otras columnas) y filas con errores no importan nada; reporte por fila', () => {
-  const delPedido = 'fuente,cui,entidad,region,anio,nivel,unidad,material,precio,incluye_igv,confianza,tipo,notas\nLoreto 2026,,Gobierno Regional Loreto,Loreto,2026,,kit,madera,624.00,false,alta,publicado,Precio por kit sin IGV';
+test('importación CSV: el CSV del pedido (fuente, precio, tipo…) se acepta; filas con errores no importan nada; reporte por fila', () => {
+  // Formato del pedido: «precio» por «monto», sin tipo de documento (queda por confirmar), nivel vacío = por confirmar
+  const delPedido = 'fuente,cui,entidad,region,anio,nivel,grado,unidad,material,precio,incluye_igv,confianza,tipo,estado,volumen_kits,notas\n'
+    + 'Loreto 2026,2717248,Gobierno Regional Loreto,Loreto,2026,,,kit,madera,624.00,false,alta,publicado,vigente,,Precio por kit sin IGV\n'
+    + 'Huicungo 2026,,Municipalidad Distrital de Huicungo,San Martín,2026,Primaria,1-2,mesa,metal-madera,370.00,true,media,publicado,vigente,455,Precio unitario del 07-C\n'
+    + 'Propio,,,,2026,,,kit,metal-polipropileno,850.00,false,alta,propio,vigente,,Excluir de estadísticos';
   const r1 = validarCsv(delPedido);
-  assert.equal(r1.ok, false);
-  assert.match(r1.errores[0].errores[0], /Faltan columnas: tipo_documento, monto/);
+  assert.ok(r1.ok, JSON.stringify(r1.errores));
+  assert.deepEqual(r1.registros.map(r => [r.fuente, r.tipo_documento, r.tipo, r.nivel, r.grado, r.monto, r.volumen_kits]),
+    [['Loreto 2026', 'por_confirmar', 'publicado', 'por_confirmar', null, 624, null], ['Huicungo 2026', 'por_confirmar', 'publicado', 'Primaria', '1-2', 370, 455], ['Propio', 'propio', 'propio', 'por_confirmar', null, 850, null]]);
+  // La fila de Huánuco 2023 del pedido: «mobiliario» no es una unidad y el IGV por confirmar se acepta (no se calcula)
+  const conError = delPedido + '\nHuánuco 2023,2586976,Gobierno Regional Huánuco,Huánuco,2023,Primaria,,mobiliario,metal-madera,267.50,por_confirmar,baja,publicado,histórico,,Promedio de 4 cotizaciones';
+  const r0 = validarCsv(conError);
+  assert.equal(r0.ok, false, 'con una fila con errores no se importa nada');
+  assert.deepEqual(r0.errores, [{ fila: 5, errores: ['unidad no válido: «mobiliario» (kit, mesa, silla, carpeta, armario, transporte, pieza, otro)'] }]);
   const cab = plantillaCsv().replace(/^\uFEFF/, '').split('\n')[0];   // la plantilla lleva BOM para Excel
   const cols = cab.split(',');
   const fila = o => cols.map(c => o[c] ?? '').join(',');
@@ -177,20 +187,24 @@ test('kit por nivel: se puede apagar en un nivel (los demás siguen con kit)', (
   if (R(con, 'S')) { assert.ok(R(sinP, 'S').kit, 'Secundaria sigue con kit'); assert.equal(enKit(R(sinP, 'S')), enKit(R(con, 'S'))); }
 });
 
-test('precio por kit del catálogo por material (precarga): Madera → Loreto, Metal/Madera → Huánuco 2025, Metal/Polipropileno → San Juan', () => {
+test('precio por kit del catálogo por material (precarga): Madera → Loreto, Metal/Madera → Huicungo 2026 (por defecto), Metal/Polipropileno → San Juan', () => {
   const K = preciosKit(PRECARGA);
   assert.deepEqual([K.madera.precio, K.madera.n], [624, 1]);
   assert.match(K.madera.fuente, /Loreto/);
   assert.deepEqual([K['metal-polipropileno'].precio, K['metal-polipropileno'].n], [411.85, 1], 'San Juan, sin el precio propio (850)');
   assert.match(K['metal-polipropileno'].fuente, /La Libertad.*2711098/);
-  // Huánuco 2025: sin IGV (confirmado, migración 036), punto medio del rango 455-480
-  assert.deepEqual([K['metal-madera'].precio, K['metal-madera'].n], [467.5, 1]);
-  assert.match(K['metal-madera'].fuente, /Huánuco, 2025/);
-  // Huánuco 2023 (por pieza, sin composición) no se usa y se dice por qué
-  assert.equal(K['metal-madera'].pendientes.length, 1);
-  assert.match(K['metal-madera'].pendientes[0].motivo, /composición/);
+  // Metal/Madera: el kit derivado de Huicungo 2026 (675.50 con IGV → 572.46 sin IGV), referencia por defecto
+  assert.deepEqual([K['metal-madera'].precio, K['metal-madera'].n, K['metal-madera'].defecto], [572.46, 1, true]);
+  assert.match(K['metal-madera'].fuente, /Huicungo.*referencia por defecto/);
+  // Huánuco 2023 (histórico) y Huánuco 2025 derivado (atípico por volumen) no entran ni como pendientes
+  assert.equal(K['metal-madera'].pendientes.length, 0);
+  // Sin Huicungo: la mediana de lo comparable (Huánuco 2025, rango sin IGV; el atípico queda fuera)
+  const sinHuicungo = PRECARGA.filter(r => r.fuente !== 'Huicungo 2026');
+  assert.deepEqual([preciosKit(sinHuicungo)['metal-madera'].precio, preciosKit(sinHuicungo)['metal-madera'].defecto], [467.5, false]);
+  // Con el interruptor, el atípico entra: mediana de 467.50 y 479.50 / 1.18 = 406.36
+  assert.equal(preciosKit(sinHuicungo, { atipicos: true })['metal-madera'].precio, 436.93);
   // Si el IGV vuelve a estar por confirmar, no se usa y se dice por qué
-  const sinDato = PRECARGA.map(r => /000000000003$/.test(r.id) ? { ...r, incluye_igv: null } : r);
+  const sinDato = sinHuicungo.map(r => /000000000003$/.test(r.id) ? { ...r, incluye_igv: null } : r);
   assert.equal(preciosKit(sinDato)['metal-madera'].precio, null);
   assert.ok(preciosKit(sinDato)['metal-madera'].pendientes.some(x => /IGV/.test(x.motivo)));
   const m36 = readFileSync(new URL('../supabase/migrations/036_ioarr_huanuco_2025_sin_igv.sql', import.meta.url), 'utf8');

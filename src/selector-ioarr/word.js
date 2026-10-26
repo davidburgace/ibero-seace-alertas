@@ -18,6 +18,7 @@ import {
 } from 'docx';
 import { FUENTES_VIDA_UTIL, AVISO_BORRADOR, CONSULTAS_OPMI } from './lineamientos.js';
 import { NOTA_FALTANTE } from './costos.js';
+import { TEXTO_PRELIMINAR } from './origen-precio.js';
 
 const AZUL = '3A63E0', GRIS = 'EEF0F4', AMARILLO = 'FFF3B0', TEXTO = '16181D', TENUE = '5C6270';
 const FUENTE = 'Calibri';
@@ -97,7 +98,12 @@ function documento(M, nombre, children, { horizontal } = {}) {
 const avisoChecklist = M => !M.bloqueados?.length ? [] : M.borrador
   ? [p(`${AVISO_BORRADOR} Colegios con el checklist incompleto (${M.bloqueados.length}): ${M.bloqueados.slice(0, 30).map(b => b.cod).join(', ')}${M.bloqueados.length > 30 ? '…' : ''}.`, { bold: true, size: 18, highlight: 'yellow', plano: true })]
   : [nota(`No se incluyen ${M.bloqueados.length === 1 ? 'el colegio' : 'los ' + M.bloqueados.length + ' colegios'} con el checklist de inventario y baja incompleto (registro en inventario y contabilidad, trámite de baja y documento de respaldo): ${M.bloqueados.slice(0, 30).map(b => b.cod).join(', ')}${M.bloqueados.length > 30 ? '…' : ''}.`)];
+// Precio del catálogo (o con ítems sin cotizar): el 07-C es una estimación preliminar
+const avisoPrecio = M => !M.precioEstado ? [] : M.precioEstado.preliminar
+  ? [p(TEXTO_PRELIMINAR, { bold: true, size: 18, highlight: 'yellow', plano: true })]
+  : [p(`Precios unitarios: promedio sin IGV de las cotizaciones vigentes (${M.precioEstado.items.map(x => `${x.nombre.toLowerCase()}: ${x.proveedores}`).join('; ')}).${M.definitivo ? ' Formato 07-C definitivo (para registrar).' : ''}`, { size: 18, plano: true })];
 const aviso = M => [
+  ...avisoPrecio(M),
   ...avisoChecklist(M),
   p('BORRADOR DE TRABAJO. No reemplaza el registro en el aplicativo del Banco de Inversiones del MEF: sirve para preparar, revisar y sustentar lo que se va a registrar. Lo marcado como «PENDIENTE» (en amarillo) falta completar.', { italics: true, color: TENUE, size: 17, plano: true }),
   // El escenario de cantidad usado, en una línea

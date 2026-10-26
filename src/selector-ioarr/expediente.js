@@ -31,6 +31,7 @@
 //     GET    /proyectos/:id/documentos              datos cargados + resumen + pendientes
 //     PATCH  /proyectos/:id/documentos              { datos }
 //     GET    /proyectos/:id/documentos/formato-07c  Word del borrador del Formato 07-C
+//            ?definitivo=1                       el definitivo: precio de cotizaciones (origen-precio.js); si no, 422
 //     GET    /proyectos/:id/documentos/memoria      Word de la memoria descriptiva
 //     GET    /proyectos/:id/documentos/verificacion Word de la lista de verificación (etapa 3)
 //   Lineamientos IOARR (lineamientos.js)
@@ -79,8 +80,10 @@ import { calc, limpiarParams, CRIT, ITEMS, textoEscenario } from './calculo.js';
 // Locales con el Regular verificado por antigüedad (para declarar el origen del % de Regular)
 const regDato = R => ({ n: R?.regularCampo?.completos || 0, de: R?.locales?.length || 0 });
 import { limpiarEstructura, preciosEfectivos, limpiarInventario, limpiarAdquisicion, censoLocal, FUENTES_PRECIO, CLAVES_PRECIO, PRECIOS_REFERENCIA, LEYENDA_REFERENCIA, NOTA_PORCENTAJES,
-  MATERIALES, TIPOS, preciosPropuesta, preciosDeMaterial, validarPropuesta, tiposPropuesta, incluido, materialDe, tienePrecio, cuadraTotales } from './costos.js';
-import { preciosUnitarios, preciosKit, referencia as referenciaCatalogo } from './catalogo-ref.js';
+  MATERIALES, TIPOS, preciosPropuesta, preciosDeMaterial, validarPropuesta, tiposPropuesta, incluido, materialDe, tienePrecio, cuadraTotales, ORIGENES_PRECIO } from './costos.js';
+import { preciosUnitarios, preciosKit, referencia as referenciaCatalogo, opcionesSel, NIVEL_DE } from './catalogo-ref.js';
+import { preciosDeCotizaciones, estadoPrecio, ETIQUETA_PRELIMINAR } from './origen-precio.js';
+import { limpiarFicha as limpiarLegajo } from './documento-equivalente.js';
 import { limpiarOferta, calcularOferta } from './oferta.js';
 import { cuadroCotizaciones, viabilidadCotizaciones, BIENES_COTIZACION, MIN_PROVEEDORES } from './cotizaciones.js';
 import { generarExcelCostos } from './excel-costos.js';
@@ -323,6 +326,31 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     const n = v => v == null || v === '' ? null : Number(v);
     return (data || []).map(r => ({ ...r, monto: n(r.monto), monto_hasta: n(r.monto_hasta), monto_alternativo: n(r.monto_alternativo), composicion: r.composicion || [] }));
   }
+  // Opciones de comparación del catálogo que eligió el proyecto (atípicos, año base) y los factores
+  // de actualización (037). Sin la migración, las de por defecto.
+  async function leerOpcionesRef(p) {
+    const [s, f] = await Promise.all([
+      supabase.from('ioarr_precios_ref_proyecto').select('incluir_atipicos, comparar_anio_base, anio_base').eq('proyecto_id', p.id).maybeSingle(),
+      supabase.from('ioarr_factores_actualizacion').select('anio_origen, anio_base, factor')
+    ]);
+    if (s.error && !faltaMigracion(s.error)) throw s.error;
+    if (f.error && !faltaMigracion(f.error)) throw f.error;
+    const sel = s.error ? {} : s.data || {}, factores = f.error ? [] : f.data || [];
+    return { sel, factores, O: opcionesSel(sel, factores) };
+  }
+  // Catálogo por material para Costos: precio unitario (por tipo o talla) y precio por kit
+  const catalogoPorMaterial = (registros, O) => {
+    const unit = preciosUnitarios(registros, O), kitCat = preciosKit(registros, O);
+    return Object.fromEntries(Object.keys(MATERIALES).map(m => [m, { ...unit[m], kit: kitCat[m] }]));
+  };
+  // Legajo de cotizaciones (Documento equivalente, 034) más reciente de cada nivel: { [nivel]: datos }
+  async function leerLegajos(p) {
+    const { data, error } = await supabase.from('ioarr_de_fichas').select('nivel, datos, actualizado_en').eq('proyecto_id', p.id).order('actualizado_en', { ascending: false });
+    if (error) { if (faltaMigracion(error)) return {}; throw error; }
+    const out = {};
+    for (const f of data || []) if (!out[f.nivel]) out[f.nivel] = limpiarLegajo(f.datos);
+    return out;
+  }
   // Niveles de los locales del proyecto (para saber qué tallas necesitan precio)
   async function nivelesProyecto(p) {
     const [D, codigos] = await Promise.all([cargarRegion(p.region), leerCodigos(p.id)]);
@@ -345,7 +373,7 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
       leerDatosDoc(p)
     ]);
     if (!D) { const e = new Error('No hay datos para la región ' + p.region); e.status = 400; throw e; }
-    const registrosRef = await leerCatalogoRef();
+    const [registrosRef, optsRef] = await Promise.all([leerCatalogoRef(), leerOpcionesRef(p)]);
     const anioUit = fila?.anio_uit || anioLima();
     const uit = ok(await supabase.from('ioarr_uit').select('*').eq('anio', anioUit).maybeSingle());
 
@@ -369,8 +397,7 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     const efectivos = preciosEfectivos(estructura, detalle);
     // Con material de la propuesta: precios por material (escrito o catálogo referencial); los antiguos no se usan
     // Por material: precio unitario (mesa, silla, armario) y precio por kit del catálogo
-    const unit = preciosUnitarios(registrosRef), kitCat = preciosKit(registrosRef);
-    const catalogoRef = Object.fromEntries(Object.keys(MATERIALES).map(m => [m, { ...unit[m], kit: kitCat[m] }]));
+    const catalogoRef = catalogoPorMaterial(registrosRef, optsRef.O);
     const propuestaPrecios = estructura.material_propuesta ? preciosPropuesta(estructura, catalogoRef, efectivos) : null;
     for (const t of CLAVES_PRECIO) precios[t] = propuestaPrecios ? propuestaPrecios[t].precio : efectivos[t].precio;
     if (propuestaPrecios?.kit.precio != null) precios.kit = propuestaPrecios.kit.precio;
@@ -385,13 +412,27 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
       archivos: archivos.filter(a => a.cod_local === x.cod_local).map(sinRuta) }]));
     const comun = { precios, estructura, uit: { anio: anioUit, valor: uit?.valor ?? null } };
     const preciosMaterial = Object.fromEntries(Object.keys(MATERIALES).map(m => [m, Object.fromEntries(Object.entries(preciosDeMaterial(estructura, m, catalogoRef)).map(([k, x]) => [k, x.precio]))]));
-    const K = calcularPaquete({ D, P, codigos, dup: dup.mapa, inv, comun, datosDoc, final, modo: modoDe(p), anioRef: anioLima(), propuesta: { Pcompleto, excluidos, preciosMaterial } });
+    // Origen del precio «cotizaciones»: cada nivel con su legajo toma el promedio de sus cotizaciones vigentes
+    const origen = estructura.origen_precio, hoy = hoyLima();
+    const legajos = origen === 'cotizaciones' ? await leerLegajos(p) : {};
+    const preciosNivel = Object.fromEntries(Object.entries(legajos).map(([n, d]) => [n, preciosDeCotizaciones(precios, d.cotizaciones, { hoy, igv: estructura.igv }).precios]));
+    const K = calcularPaquete({ D, P, codigos, dup: dup.mapa, inv, comun, datosDoc, final, modo: modoDe(p), anioRef: anioLima(), propuesta: { Pcompleto, excluidos, preciosMaterial },
+      preciosNivel: Object.keys(preciosNivel).length ? preciosNivel : null });
+    // Estado del precio de cada IOARR: estimación preliminar o listo para el 07-C definitivo
+    const nivelUnico = K.ioarrs.length === 1 && !K.ioarrs[0].nivel ? Object.keys(legajos) : [];
+    for (const x of K.ioarrs) {
+      const ficha = x.nivel ? legajos[x.nivel] || null : nivelUnico.length === 1 ? legajos[nivelUnico[0]] : null;
+      x.precioEstado = estadoPrecio({ origen, metas: x.R.metas.map(m => ({ k: m.k, nombre: m.n })), ficha, hoy, igv: estructura.igv });
+      if (x.precioEstado.preliminar) x.R.avisos.unshift({ tipo: 'origen_precio', texto: origen === 'cotizaciones'
+        ? `${ETIQUETA_PRELIMINAR}: ${x.precioEstado.items.filter(y => y.promedio == null).map(y => y.nombre).join(', ') || 'algún ítem'} sin cotizaciones vigentes en el legajo; se usa el precio del catálogo o el escrito.`
+        : `${ETIQUETA_PRELIMINAR}: el costo sale del catálogo de precios referenciales (o de precios escritos a mano), no de cotizaciones.` });
+    }
     // Kit incompleto: se pidió kit y la mesa o la silla del estudiante quedó fuera de la propuesta
     const fueraKit = excluidos.filter(t => t === 'mesa' || t === 'silla');
     if (estructura.kit && fueraKit.length) for (const x of K.ioarrs) x.R.avisos.push({ tipo: 'kit', alerta: true,
       texto: `El kit queda incompleto: ${fueraKit.map(t => ITEMS.find(y => y.k === t).n.toLowerCase()).join(' y ')} no ${fueraKit.length === 1 ? 'entra' : 'entran'} a la propuesta, así que no hay kit; lo demás se costea suelto.` });
     return { ...K, datosDoc, detalle, efectivos, estructura, factores, anioUit, uit, sinMigracionEst: !!fila && !('estructura' in fila),
-      Pcompleto, excluidosPropuesta: excluidos, catalogoRef, registrosRef, propuestaPrecios };
+      Pcompleto, excluidosPropuesta: excluidos, catalogoRef, registrosRef, propuestaPrecios, optsRef, legajos };
   }
   // La IOARR pedida (?nivel=P); sin nivel o con una sola IOARR, la primera
   const elegir = elegirIoarr;
@@ -403,11 +444,16 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     const porMaterial = Object.keys(MATERIALES).map(m => {
       const pr = preciosDeMaterial(E, m, A.catalogoRef), r = x.porMaterial?.[m];
       const completo = incl.length > 0 && incl.every(t => tienePrecio(pr, t, niv, E));
-      const ref = x.nivel ? referenciaCatalogo(A.registrosRef, { nivel: x.nivel, sel: { modo: 'mediana', material: m } }) : null;
+      const ref = x.nivel ? referenciaCatalogo(A.registrosRef, { nivel: x.nivel, sel: { ...A.optsRef.sel, modo: 'mediana', material: m }, factores: A.optsRef.factores }) : null;
       return { material: m, nombre: MATERIALES[m], completo, precios: Object.fromEntries([...TIPOS, 'kit'].map(t => [t, pr[t]])),
         kit_sin_igv: completo ? r?.kit_sin_igv ?? null : null, kit_igv: completo ? r?.kit_igv ?? null : null, kit_con_igv: completo ? r?.kit_con_igv ?? null : null,
-        total: completo ? r?.total ?? null : null, mediana: ref?.n ? { precio: ref.precio, n: ref.n } : null };
+        total: completo ? r?.total ?? null : null, mediana: ref?.n ? { precio: ref.precio, n: ref.n, fuente: ref.fuente } : null };
     });
+    // Precio del catálogo de otro nivel (p. ej. de Primaria en una IOARR de Secundaria): aviso
+    const nombresNiv = niv.map(n => NIVEL_DE[n]).filter(Boolean);
+    const avisosNivel = Object.entries(A.propuestaPrecios || {}).filter(([k, y]) => y.origen === 'catalogo_ref' && y.niveles?.length && incl.includes(k.split('_')[0])
+      && !y.niveles.includes('por_confirmar') && nombresNiv.length && !y.niveles.some(n => nombresNiv.includes(n)))
+      .map(([k, y]) => `${k}: el precio del catálogo es de ${y.niveles.join(' / ')}; la IOARR es de ${nombresNiv.join(' / ')}. Revísalo antes de usarlo.`);
     const min = Math.min(...porMaterial.filter(y => y.total != null).map(y => y.total));
     for (const y of porMaterial) y.dif_pct = y.total != null && Number.isFinite(min) && min > 0 ? Math.round((y.total / min - 1) * 1000) / 10 : null;
     return {
@@ -415,7 +461,7 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
       incluir: Object.fromEntries(TIPOS.map(t => [t, incluido(E, t)])), muebles_criterio: muebles, kit: E.kit, kit_niveles: E.kit_niveles, niveles: A.niveles,
       precios: A.propuestaPrecios, por_material: porMaterial, excluidos: x.excluidosMuebles || [],
       errores: [...(incl.length ? [] : ['Incluye al menos un mueble en la propuesta.']), ...validarPropuesta(E, { catalogo: A.catalogoRef, muebles, niveles: A.niveles }).filter(t => incl.length || !/al menos un mueble/.test(t))],
-      cuadra: cuadraTotales(x.R.totales)
+      avisos: avisosNivel, cuadra: cuadraTotales(x.R.totales)
     };
   }
 
@@ -427,6 +473,7 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
       umbralVida: A.P.umbralVida, niveles: A.niveles, texto: textoEscenario(A.P, regDato(R)), campo: A.Runa.regularCampo }, escenarios: A.escenarios,
     estructura: { ...R.estructura, guardada: A.estructura }, sin_migracion_estructura: A.sinMigracionEst,
     propuesta: vistaPropuesta(A, x),
+    origen_precio: { origen: A.estructura.origen_precio, opciones: ORIGENES_PRECIO, estado: x.precioEstado || null, transporte_catalogo: A.estructura.material_propuesta ? A.catalogoRef[A.estructura.material_propuesta]?.transporte || null : null },
     metas: R.metas, lineasKit: R.lineasKit, lineasTalla: R.lineasTalla,
     partidas: R.partidas, lineas: R.lineas, muebles: A.P.muebles, totales: R.totales, distritos: R.distritos, uitCalc: R.uit, avisos: R.avisos, excluidos: R.excluidos,
     locales: R.locales.map(l => ({ cod: l.cod, nom: l.nom, dist: l.dist, prov: l.prov, rural: l.rural, est: l.est, kits: l.kits,
@@ -462,9 +509,8 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
       fila.estructura = limpiarEstructura({ ...g, ...n, precios, precios_material, materiales, incluir: fusion('incluir'), kit_niveles: fusion('kit_niveles') });
       // La propuesta debe quedar válida: al menos un mueble; con material, cada mueble incluido con material y precio
       const E = fila.estructura, muebles = mueblesCriterio(limpiarParams(p.criterios));
-      const [registros, niveles] = await Promise.all([leerCatalogoRef(), nivelesProyecto(p)]);
-      const unit = preciosUnitarios(registros), kitCat = preciosKit(registros);
-      const catalogo = Object.fromEntries(Object.keys(MATERIALES).map(m => [m, { ...unit[m], kit: kitCat[m] }]));
+      const [registros, niveles, optsRef] = await Promise.all([leerCatalogoRef(), nivelesProyecto(p), leerOpcionesRef(p)]);
+      const catalogo = catalogoPorMaterial(registros, optsRef.O);
       const errores = [...(tiposPropuesta(E, muebles).length ? [] : ['Incluye al menos un mueble en la propuesta.']),
         ...validarPropuesta(E, { catalogo, muebles, niveles }).filter(t => !/al menos un mueble/.test(t))];
       if (errores.length) return res.status(400).json({ error: 'No se guardó: ' + errores.join(' '), errores });
@@ -962,7 +1008,8 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     if (error) { if (faltaMigracion(error)) return { datos: limpiarDatosDoc({}), sinMigracion: true }; throw error; }
     return { datos: limpiarDatosDoc(data?.datos || {}), sinMigracion: false };
   }
-  const modeloDe = (A, x, datos, p) => modeloIoarr(A, x, datos, p, hoyLima());
+  // El modelo lleva el estado del precio: estimación preliminar (aviso en el Word) o de cotizaciones
+  const modeloDe = (A, x, datos, p) => Object.assign(modeloIoarr(A, x, datos, p, hoyLima()), { precioEstado: x.precioEstado || null });
   async function modelo(p, nivel, opciones) {
     const [A, { datos, sinMigracion }] = await Promise.all([armar(p, opciones), leerDatosDoc(p)]);
     const x = elegir(A, nivel);
@@ -1061,10 +1108,19 @@ export function crearApiExpediente({ proyectoDelUsuario, leerCodigos, cargarRegi
     'Content-Disposition': `attachment; filename="${archivo}"; filename*=UTF-8''${encodeURIComponent(archivo)}`
   }).send(buffer);
 
+  // ?definitivo=1: solo con el precio de cotizaciones (3 vigentes por ítem o justificación escrita) y los
+  // colegios con el checklist completo; si no, 422 con lo que falta. Sin eso, el borrador de siempre.
   api.get('/proyectos/:id/documentos/formato-07c', responder(async (req, res) => {
+    const definitivo = req.query.definitivo === '1';
+    if (definitivo && req.query.borrador === '1') return res.status(400).json({ error: 'El 07-C definitivo no puede ser borrador' });
     const p = await proyecto(req), { M } = await modelo(p, req.query.nivel, opcionesDe(req));
     if (!M.ups.length) return res.status(400).json({ error: sinUps(M) });
-    enviarWord(res, await generar07C(M), `Formato_07C_borrador_${slug(p.nombre)}${sufijo(M)}_${M.fecha}.docx`);
+    if (definitivo) {
+      const E = M.precioEstado;
+      if (!E?.definitivo) return res.status(422).json({ error: 'No se puede exportar el Formato 07-C definitivo: ' + (E?.bloqueos[0] || 'falta el estado del precio'), errores: E?.bloqueos || [] });
+      M.definitivo = true;
+    }
+    enviarWord(res, await generar07C(M), `Formato_07C_${definitivo ? 'definitivo' : 'borrador'}_${slug(p.nombre)}${sufijo(M)}_${M.fecha}.docx`);
   }));
 
   api.get('/proyectos/:id/documentos/memoria', responder(async (req, res) => {

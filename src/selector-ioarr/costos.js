@@ -74,7 +74,10 @@ export const NOTA_PORCENTAJES = 'Los porcentajes (IGV, documento equivalente, su
 export const GRUPOS_PRIMARIA = TALLAS.filter(z => z.nivel === 'P').map(z => z.k);   // ['p12', 'p34', 'p56']
 export const ESTRUCTURA_DEF = { igv: 18, doc_pct: 3, sup_pct: 5, liquidacion: 15000, transporte_pieza: TRANSPORTE_REFERENCIA, kit: false, kit_dist: [1, 1, 1], precios: {},
   cc_aplica: '', cc_pct: null, cc_umbral: null, liq_modo: 'monto', liq_pct: 1,
-  material_propuesta: '', materiales: {}, incluir: {}, kit_niveles: {}, precios_material: {} };
+  material_propuesta: '', materiales: {}, incluir: {}, kit_niveles: {}, precios_material: {}, origen_precio: 'catalogo' };
+// Origen del precio del expediente: con el catálogo (o precios escritos) el 07-C es una estimación preliminar;
+// con cotizaciones, el precio de cada ítem es el promedio sin IGV de las vigentes (origen-precio.js)
+export const ORIGENES_PRECIO = { catalogo: 'Catálogo de precios referenciales', cotizaciones: 'Cotizaciones' };
 export const ROTULO_CC = 'Control concurrente (Ley 31358)';
 // Registro del Formato 07-C: una inversión masiva (varias UP) va siempre con registro completo
 export const REGISTRO_MASIVA = 'Registro completo (masiva)';
@@ -113,7 +116,8 @@ export function limpiarEstructura(e) {
     materiales: Object.fromEntries(TIPOS.filter(t => MATERIALES[x.materiales?.[t]]).map(t => [t, x.materiales[t]])),
     incluir: Object.fromEntries(TIPOS.filter(t => typeof x.incluir?.[t] === 'boolean').map(t => [t, x.incluir[t]])),
     kit_niveles: Object.fromEntries(NIVELES_KIT.filter(n => typeof x.kit_niveles?.[n] === 'boolean').map(n => [n, x.kit_niveles[n]])),
-    precios_material: Object.fromEntries(Object.keys(MATERIALES).map(m => [m, limpiarPrecios(x.precios_material?.[m])]).filter(([, v]) => Object.keys(v).length))
+    precios_material: Object.fromEntries(Object.keys(MATERIALES).map(m => [m, limpiarPrecios(x.precios_material?.[m])]).filter(([, v]) => Object.keys(v).length)),
+    origen_precio: ORIGENES_PRECIO[x.origen_precio] ? x.origen_precio : D.origen_precio
   };
 }
 function limpiarPrecios(o) {
@@ -137,14 +141,15 @@ export const incluido = (E, t) => E.incluir?.[t] !== false;
 export const tiposPropuesta = (E, muebles = TIPOS) => muebles.filter(t => incluido(E, t));
 
 /**
- * Precios de un material: escrito → catálogo referencial (solo el tipo, no la talla) → sin precio.
- * @param catalogo preciosUnitarios() de catalogo-ref.js: { [material]: { [tipo]: { precio, n, fuente } } }
+ * Precios de un material: escrito → catálogo referencial (el tipo, o la talla si la fuente tiene grado) → sin precio.
+ * Del catálogo: igv dice si la fuente lo traía con IGV ('con', convertido a sin IGV), sin IGV o mixto.
+ * @param catalogo preciosUnitarios() de catalogo-ref.js: { [material]: { [clave]: { precio, n, fuente, igv, niveles } } }
  */
 export function preciosDeMaterial(E, material, catalogo = {}) {
   const out = {}, man = E.precios_material?.[material] || {}, cat = catalogo[material] || {};
   for (const k of CLAVES_PRECIO) {
     if (man[k] != null) out[k] = { precio: man[k], origen: 'manual', material };
-    else if (k === tipoDe(k) && cat[k]?.precio != null) out[k] = { precio: cat[k].precio, origen: 'catalogo_ref', fuente: cat[k].fuente, n: cat[k].n, material };
+    else if (cat[k]?.precio != null) out[k] = { precio: cat[k].precio, origen: 'catalogo_ref', fuente: cat[k].fuente, n: cat[k].n, igv: cat[k].igv || null, niveles: cat[k].niveles || null, material };
     else out[k] = { precio: null, origen: null, material };
   }
   // Precio por kit: el escrito → mesa + silla de la talla (si las dos tienen precio) → el kit del catálogo
@@ -390,8 +395,8 @@ export function regularFicha(D, C, i, ficha, t, k, umbral) {
  * Con grupos, los % se aplican igual en cada IOARR y la liquidación se reparte entre
  * todos los locales de todas, según su costo directo: la suma de las IOARR es el total.
  */
-export function costear({ D, C, list, precios, estructura, uit, inventario, ajustes, capacidades, grupos }) {
-  const E = limpiarEstructura(estructura);
+// Precio por línea, por tipo y por kit (talla) de una tabla de precios { [clave]: number | null }
+function tablaPrecios(precios) {
   const val = k => precios?.[k] != null && Number(precios[k]) >= 0 ? Number(precios[k]) : null;
   // Precio por línea: el de la talla o, si no tiene, el de su tipo
   const pu = LINEAS.map(x => (x.talla ? val(x.k) : null) ?? val(x.tipo));
@@ -405,6 +410,14 @@ export function costear({ D, C, list, precios, estructura, uit, inventario, ajus
     const m = pu[LINEAS.findIndex(x => x.k === `mesa_${z.k}`)], s = pu[LINEAS.findIndex(x => x.k === `silla_${z.k}`)];
     return m == null || s == null ? null : m + s;
   });
+  return { pu, puGeneral, propio, puKit };
+}
+
+export function costear({ D, C, list, precios, estructura, uit, inventario, ajustes, capacidades, grupos }) {
+  const E = limpiarEstructura(estructura);
+  // Con grupos, cada IOARR puede traer sus precios (g.precios: los de sus cotizaciones); si no, los comunes
+  const T0 = tablaPrecios(precios), tablaDe = g => g.precios ? tablaPrecios(g.precios) : T0;
+  const { pu, puGeneral, propio, puKit } = T0;
   const fuentes = grupos || [{ clave: null, D, C, list, inventario, ajustes, capacidades }];
   // Muebles que entran: cada IOARR (nivel) tiene su composición; en el total, los de alguna
   const inclDe = g => g.C?.incl || TIPOS.map(() => true);
@@ -418,7 +431,8 @@ export function costear({ D, C, list, precios, estructura, uit, inventario, ajus
     const kitG = E.kit && inclDe(g)[0] && inclDe(g)[1] && (g.clave == null || E.kit_niveles[g.clave] !== false);
     const ls = g.list.map(i => localDe(g, i));
     if (kitG) repartirPrimaria(ls, E.kit_dist);
-    for (const l of ls) { l.kit = kitG; costoLocal(l, { kit: kitG, pu, puKit, E }); }
+    const Tg = tablaDe(g);
+    for (const l of ls) { l.kit = kitG; costoLocal(l, { kit: kitG, pu: Tg.pu, puKit: Tg.puKit, E }); }
     locales.push(...ls);
   }
   const kit = locales.length ? locales.some(l => l.kit) : E.kit && incl[0] && incl[1];
@@ -444,7 +458,7 @@ export function costear({ D, C, list, precios, estructura, uit, inventario, ajus
   const res = resumir(locales, { ...P, cc: ccTodos }, uit);
   if (grupos) res.grupos = Object.fromEntries(grupos.map(g => {
     const ls = locales.filter(l => l.grupo === g.clave), ig = inclDe(g);
-    return [g.clave, resumir(ls, { ...P, incl: ig, kit: ls.length ? ls.some(l => l.kit) : E.kit && ig[0] && ig[1], cc: cc[g.clave] }, uit)];
+    return [g.clave, resumir(ls, { ...P, ...tablaDe(g), incl: ig, kit: ls.length ? ls.some(l => l.kit) : E.kit && ig[0] && ig[1], cc: cc[g.clave] }, uit)];
   }));
   return res;
 }
