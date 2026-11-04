@@ -216,12 +216,23 @@ function pintarReparto() {
   }).join('');
   pintarSuma();
 }
+// ¿Las casillas y cantidades del panel difieren del reparto guardado?
+function repartoCambiado() {
+  const { porSup } = conteoAsig();
+  if (S.cuotas.size !== porSup.size) return true;
+  for (const [id, q] of S.cuotas) if (porSup.get(id) !== q) return true;
+  return false;
+}
 function pintarSuma() {
   const suma = [...S.cuotas.values()].reduce((a, b) => a + b, 0), n = S.proy?.n || 0, el = $('cRepSuma');
+  const hay = conteoAsig().porSup.size > 0, cambio = repartoCambiado(), b = $('cRepartir');
+  // Con un reparto guardado, el botón lo actualiza; sin cambios no hay nada que guardar
+  if (!b.dataset.ocupado) { b.textContent = hay ? 'Actualizar reparto' : 'Repartir por zonas'; b.disabled = !S.proy?.asig || !S.sups.length || (hay && !cambio); }
   el.className = 'sub';
   if (!S.cuotas.size) { el.textContent = `Marca los supervisores y la cantidad para cada uno (${plural(n, 'colegio', 'colegios')} en el proyecto).`; return; }
   if (suma > n) { el.className = 'err'; el.textContent = `Suma ${fmt(suma)}: el proyecto tiene ${fmt(n)} colegios. Baja ${fmt(suma - n)}.`; return; }
-  el.textContent = `Suma ${fmt(suma)} de ${fmt(n)} colegios${suma < n ? ` · ${fmt(n - suma)} quedan sin asignar` : ''}.`;
+  const pend = hay && cambio ? ' <b class="rep-pend">Cambios sin guardar: pulsa «Actualizar reparto».</b>' : '';
+  el.innerHTML = esc(`Suma ${fmt(suma)} de ${fmt(n)} colegios${suma < n ? ` · ${fmt(n - suma)} quedan sin asignar` : ''}.`) + pend;
 }
 function partesIguales() {
   const ids = [...S.cuotas.keys()];
@@ -242,7 +253,7 @@ async function repartir() {
   if (suma > P.n) { toast(`La suma (${fmt(suma)}) pasa los ${fmt(P.n)} colegios del proyecto.`); return; }
   const { porSup } = conteoAsig();
   if (porSup.size && !confirm(`Esto reemplaza el reparto actual del proyecto «${P.nombre}». ¿Seguir?`)) return;
-  const b = $('cRepartir'); b.disabled = true; b.textContent = 'Repartiendo…';
+  const b = $('cRepartir'); b.disabled = true; b.dataset.ocupado = '1'; b.textContent = 'Guardando…';
   try {
     const r = await w('repartir', { codigos: P.locales, cuotas });
     const asignaciones = {};
@@ -253,7 +264,7 @@ async function repartir() {
     toast('Reparto guardado: ' + ids.map((id, i) => `${corto(correoSup(id))} ${fmt(r.zonas[i].length)}`).join(' · ') + (r.sobran.length + r.fuera.length ? ` · ${fmt(r.sobran.length + r.fuera.length)} sin asignar` : '') + '.');
     if (S.ver !== 'todo') { S.ver = 'todo'; pintarVer(); await aplicarVer(); } else await actualizarListado();
   } catch (e) { toast(`No se pudo guardar el reparto: ${e.message}`); }
-  finally { b.disabled = false; b.textContent = 'Repartir por zonas'; }
+  finally { delete b.dataset.ocupado; pintarSuma(); }
 }
 
 // Pasar un colegio suelto a otro supervisor (desde el listado)

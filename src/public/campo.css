@@ -187,3 +187,4 @@ body.ficha-abierta{ overflow:hidden; }
   display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:6px 12px; width:max-content; max-width:calc(100vw - 32px);
   padding:10px 14px; border-radius:12px; background:var(--bg); color:var(--text); border:1px solid var(--border2); box-shadow:0 6px 20px rgba(0,0,0,.18); font-size:13px; }
 .ver-pend:not([hidden]) ~ .toast{ bottom:calc(120px + env(safe-area-inset-bottom,0px)); }
+.rep-pend{ color:var(--malo); font-weight:600; }
