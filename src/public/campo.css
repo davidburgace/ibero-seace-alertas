@@ -182,3 +182,5 @@ body.ficha-abierta{ overflow:hidden; }
 .senal-bar.ok{ border-color:rgba(46,158,91,.4); background:rgba(46,158,91,.08); color:#1f7a44; }
 .fh-ayuda{ margin:0; font-size:12.5px; line-height:1.4; }
 .fh-ayuda b{ color:var(--text); }
+/* Aviso de listado desactualizado tras cambiar supervisores */
+.ver-pend{ display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; margin-top:6px; }
