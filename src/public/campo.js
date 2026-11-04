@@ -486,7 +486,7 @@ async function elegirProyecto(id) {
 // Vuelve a toda la región (sin recargarla) y a la cantidad de colegios que el usuario tenía
 async function quitarProyecto({ rebuscar = true } = {}) {
   const habia = !!S.proy;
-  S.proy = null; S.fichas = null; S.enEquipo = {}; S.ver = 'todo'; S.verPendiente = false; store('proyecto', null); $('cProy').value = '';
+  S.proy = null; S.fichas = null; S.enEquipo = {}; S.ver = 'todo'; S.verPendiente = false; $('cVerPend').hidden = true; store('proyecto', null); $('cProy').value = '';
   $('cVerCampo').hidden = true; $('cReparto').hidden = true; $('cFichasCampo').hidden = true; $('cEquipoCampo').hidden = true;
   if (!habia) return;
   await w('limitar', { codigos: null });

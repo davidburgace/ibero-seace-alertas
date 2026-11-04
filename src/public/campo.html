@@ -41,9 +41,7 @@
     <h2 class="sr" id="c-tit">Buscar colegios cercanos</h2>
     <div class="filtros-grid campo-grid">
       <div class="campo campo-proy" id="cProyCampo" hidden><label for="cProy">Proyecto del Selector</label><select id="cProy"><option value="">Ninguno: toda la región</option></select></div>
-      <div class="campo campo-proy" id="cVerCampo" hidden><label for="cVer">Colegios del proyecto</label><select id="cVer"></select>
-        <div class="ver-pend" id="cVerPend" hidden><span class="sub">Cambiaste supervisores: el listado aún muestra el reparto anterior.</span>
-        <button class="btn btn-primary btn-sm" id="cVerAct" type="button">Actualizar listado</button></div></div>
+      <div class="campo campo-proy" id="cVerCampo" hidden><label for="cVer">Colegios del proyecto</label><select id="cVer"></select></div>
       <div class="campo campo-proy" id="cFichasCampo" hidden><span class="lbl">Fichas de verificación</span>
         <div class="acts"><button class="btn btn-ghost" id="cFichas" type="button">Mis fichas de verificación (ZIP)</button>
         <span class="sub">Excel y PDF para imprimir, de tus colegios. También puedes llenar la ficha aquí: «Llenar ficha» en cada colegio.</span></div></div>
@@ -141,6 +139,9 @@
 <!-- Ficha de verificación en la app (campo-ficha.js) -->
 <div class="ficha-hoja" id="cFicha" role="dialog" aria-modal="true" aria-label="Ficha de verificación" hidden></div>
 
+<!-- Fija abajo: el cambio de supervisor se hace en el listado, lejos de los filtros de arriba -->
+<div class="ver-pend" id="cVerPend" role="status" hidden><span>Cambiaste supervisores: el listado, el mapa y los días aún muestran el reparto anterior.</span>
+  <button class="btn btn-primary btn-sm" id="cVerAct" type="button">Actualizar listado</button></div>
 <div class="toast" id="toast" role="status" hidden></div>
 
 <script type="module" src="campo.js"></script>
