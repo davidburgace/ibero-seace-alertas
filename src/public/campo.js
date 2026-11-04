@@ -70,6 +70,7 @@ const S = {
                             //   n = colegios del proyecto en la región; nVer = los que muestra «Colegios del proyecto»
                             //   asig = { cod: supervisorId } (null = falta la migración 022); sups = { supervisorId: correo }
   ver: 'todo',              // «Colegios del proyecto»: 'todo', 'sin' (sin asignar) o el id de un supervisor
+  verPendiente: false,      // se cambió un supervisor y el listado filtrado aún no se rehízo
   sups: [],                 // proveedor: todos los usuarios con rol supervisor [{ id, email }]
   cuotas: new Map(),        // panel de reparto: supervisorId → colegios (solo los marcados)
   near: null,               // { lat, lon, n, label, gps }
@@ -161,13 +162,16 @@ function pintarVer() {
   const op = (v, t) => `<option value="${esc(v)}"${S.ver === v ? ' selected' : ''}>${esc(t)}</option>`;
   $('cVer').innerHTML = op('todo', `Todo el proyecto (${fmt(P.locales.length)})`)
     + ids.map(id => op(id, `${id === S.yo ? 'Mis colegios' : corto(correoSup(id))} (${fmt(porSup.get(id))})`)).join('')
-    + (sin ? op('sin', `Sin asignar (${fmt(sin)})`) : '');
+    + (S.ver !== 'todo' && S.ver !== 'sin' && !porSup.has(S.ver) ? op(S.ver, `${S.ver === S.yo ? 'Mis colegios' : corto(correoSup(S.ver))} (0)`) : '')
+    + (sin || S.ver === 'sin' ? op('sin', `Sin asignar (${fmt(sin)})`) : '');
+  $('cVerPend').hidden = !S.verPendiente;
   pintarEquipo();
 }
 
 // Limita la búsqueda a los colegios de «Colegios del proyecto» y busca desde el centro de esos colegios
 async function aplicarVer() {
   const P = S.proy; if (!P) return;
+  S.verPendiente = false; $('cVerPend').hidden = true;
   const r = await w('limitar', { codigos: codigosVer() });
   P.nVer = r.n; fijarMaxN();
   S.near = null; S.filas = []; S.vis = null;
@@ -253,7 +257,10 @@ async function asignarUno(cod, id, sel) {
     P.asig = g.asignaciones; P.sups = g.supervisores;
     const nom = S.filas.find(f => f.cod === cod)?.nom || `Local ${cod}`;
     toast(id ? `${nom}: ahora es de ${corto(correoSup(id))}.` : `${nom}: sin asignar.`);
-    pintarVer(); pintarReparto(); pintarInfoVisitas();
+    // Con «Colegios del proyecto» filtrado, el listado se rehace con «Actualizar listado»
+    // (no de inmediato, para poder cambiar varios colegios seguidos)
+    if (S.ver !== 'todo') S.verPendiente = true;
+    cuotasDelReparto(); pintarVer(); pintarReparto(); pintarInfoVisitas();
   } catch (e) { toast(`No se pudo cambiar el supervisor: ${e.message}`); sel.value = P.asig?.[cod] || ''; }
   finally { sel.disabled = false; }
 }
@@ -462,6 +469,7 @@ async function elegirProyecto(id) {
     if (r.fuera) toast(`${plural(r.fuera, 'código del proyecto no está', 'códigos del proyecto no están')} en el padrón de ${p.region}.`);
     // El supervisor arranca con sus colegios, si tiene; el proveedor, con todo el proyecto
     S.ver = S.rol === 'supervisor' && S.proy.asig && Object.values(S.proy.asig).includes(S.yo) ? S.yo : 'todo';
+    S.verPendiente = false;
     cuotasDelReparto(); pintarVer(); pintarReparto();
     await cargarFichas();
     await aplicarVer();
@@ -471,7 +479,7 @@ async function elegirProyecto(id) {
 // Vuelve a toda la región (sin recargarla) y a la cantidad de colegios que el usuario tenía
 async function quitarProyecto({ rebuscar = true } = {}) {
   const habia = !!S.proy;
-  S.proy = null; S.fichas = null; S.enEquipo = {}; S.ver = 'todo'; store('proyecto', null); $('cProy').value = '';
+  S.proy = null; S.fichas = null; S.enEquipo = {}; S.ver = 'todo'; S.verPendiente = false; store('proyecto', null); $('cProy').value = '';
   $('cVerCampo').hidden = true; $('cReparto').hidden = true; $('cFichasCampo').hidden = true; $('cEquipoCampo').hidden = true;
   if (!habia) return;
   await w('limitar', { codigos: null });
@@ -587,7 +595,7 @@ function pintarVisitas() {
   $('cAgrupar').disabled = !S.filas.length;
   if (!V) return;
   const n = V.dias.reduce((a, d) => a + d.puntos.length, 0);
-  $('cVisAviso').innerHTML = `<b>${fmt(n)}</b> ${n === 1 ? 'colegio' : 'colegios'} en <b>${fmt(V.dias.length)}</b> ${V.dias.length === 1 ? 'día' : 'días'} de hasta ${fmt(V.porDia)}. ${esc(AVISO_VISITAS)} El listado de arriba queda ordenado por día y parada, con la ruta de cada día en Google Maps.`;
+  $('cVisAviso').innerHTML = `<b>${fmt(n)}</b> ${n === 1 ? 'colegio' : 'colegios'} en <b>${fmt(V.dias.length)}</b> ${V.dias.length === 1 ? 'día' : 'días'} de hasta ${fmt(V.porDia)}. ${esc(AVISO_VISITAS)} El listado de abajo queda ordenado por día y parada, con la ruta de cada día en Google Maps.`;
 }
 
 async function asegurarMapa() {
@@ -642,6 +650,7 @@ function bind() {
   $('cRegion').onchange = async e => { await quitarProyecto({ rebuscar: false }); cargarRegion(e.target.value); };
   $('cProy').onchange = e => elegirProyecto(e.target.value);
   $('cVer').onchange = e => { S.ver = e.target.value; aplicarVer(); };
+  $('cVerAct').onclick = () => aplicarVer();
   $('cFichas').onclick = bajarFichas;
   $('cEquipo').onclick = llevarAlEquipo;
   document.addEventListener('click', e => { if (e.target.id === 'cSubir') sincronizar(); });
