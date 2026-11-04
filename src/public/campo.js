@@ -155,7 +155,8 @@ function pintarVer() {
   const P = S.proy, { porSup, sin } = conteoAsig();
   // El supervisor con colegios asignados baja sus fichas de verificación
   $('cFichasCampo').hidden = !(S.rol === 'supervisor' && porSup.has(S.yo));
-  const hay = !!P?.asig && (porSup.size > 0 || S.rol === 'proveedor');
+  // El supervisor solo recibe sus colegios: el filtro es para el proveedor
+  const hay = !!P?.asig && S.rol === 'proveedor';
   $('cVerCampo').hidden = !hay;
   if (!hay) return;
   const ids = [...porSup.keys()].sort((a, b) => (b === S.yo) - (a === S.yo) || correoSup(a).localeCompare(correoSup(b)));
@@ -485,8 +486,8 @@ async function elegirProyecto(id) {
     S.proy = { id: p.id, nombre: p.nombre, region: p.region, n: r.n, nVer: r.n, locales: p.locales, set: new Set(p.locales), asig: p.asignaciones ?? null, sups: p.supervisores || {} };
     store('proyecto', p.id);
     if (r.fuera) toast(`${plural(r.fuera, 'código del proyecto no está', 'códigos del proyecto no están')} en el padrón de ${p.region}.`);
-    // El supervisor arranca con sus colegios, si tiene; el proveedor, con todo el proyecto
-    S.ver = S.rol === 'supervisor' && S.proy.asig && Object.values(S.proy.asig).includes(S.yo) ? S.yo : 'todo';
+    // Todo el proyecto: al supervisor el servidor ya le manda solo sus colegios
+    S.ver = 'todo';
     S.verPendiente = false;
     cuotasDelReparto(); pintarVer(); pintarReparto();
     await cargarFichas();

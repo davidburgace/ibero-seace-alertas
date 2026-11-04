@@ -160,21 +160,26 @@ test('/api/campo/*: entran proveedor y supervisor; financista no', () => {
 
 // Supabase falso: registra los filtros de cada consulta
 const UUID = '11111111-2222-3333-4444-555555555555';
-function sbProyectos({ proyectos = [], locales = [] } = {}) {
+// asig: filas de campo_asignaciones ({ proyecto_id, supervisor_id }); null = falta la migración 022
+function sbProyectos({ proyectos = [], locales = [], asig = [] } = {}) {
   const consultas = [];
   const from = tabla => {
-    const q = { tabla, eq: {}, rango: null };
+    const q = { tabla, eq: {}, in: null, rango: null };
     consultas.push(q);
     const b = {
       select: () => b, order: () => b,
       eq: (k, v) => { q.eq[k] = v; return b; },
+      in: (k, v) => { q.in = [k, v]; return b; },
       range: (a, z) => { q.rango = [a, z]; return b; },
       maybeSingle: async () => ({ data: filtrar()[0] || null, error: null }),
       then: (ok, mal) => Promise.resolve(tabla === 'ioarr_selector_locales'
         ? { data: locales.slice(q.rango[0], q.rango[1] + 1).map(c => ({ codigo_local: c })), error: null }
-        : { data: filtrar(), error: null }).then(ok, mal)
+        : tabla === 'campo_asignaciones'
+          ? (asig == null ? { data: null, error: { code: '42P01', message: 'relation "campo_asignaciones" does not exist' } } : { data: filtrar(), error: null })
+          : { data: filtrar(), error: null }).then(ok, mal)
     };
-    const filtrar = () => proyectos.filter(p => Object.entries(q.eq).every(([k, v]) => p[k] === v));
+    const filas = () => tabla === 'campo_asignaciones' ? asig : proyectos;
+    const filtrar = () => filas().filter(p => Object.entries(q.eq).every(([k, v]) => p[k] === v) && (!q.in || q.in[1].includes(p[q.in[0]])));
     return b;
   };
   return { from, consultas };
@@ -184,12 +189,17 @@ const PROYS = [
   { id: 'otro', usuario_id: 'prov-2', nombre: 'Tacna', region: 'Tacna', locales: [{ count: 9 }] }
 ];
 
-test('campo: el proveedor ve solo sus proyectos; el supervisor, todos (sin datos de más)', async () => {
-  const prov = await listarProyectosCampo(sbProyectos({ proyectos: PROYS }), { id: 'prov-1', rol: 'proveedor' });
+const ASIG = [{ proyecto_id: UUID, supervisor_id: 'sup-1' }, { proyecto_id: UUID, supervisor_id: 'sup-1' }, { proyecto_id: 'otro', supervisor_id: 'sup-2' }];
+
+test('campo: el proveedor ve solo sus proyectos; el supervisor, solo donde tiene colegios (sin datos de más)', async () => {
+  const prov = await listarProyectosCampo(sbProyectos({ proyectos: PROYS, asig: ASIG }), { id: 'prov-1', rol: 'proveedor' });
   assert.deepEqual(prov, [{ id: UUID, nombre: 'Moquegua 2026', region: 'Moquegua', n_locales: 3 }]);
-  const sup = await listarProyectosCampo(sbProyectos({ proyectos: PROYS }), { id: 'sup-1', rol: 'supervisor' });
-  assert.equal(sup.length, 2);
+  const sup = await listarProyectosCampo(sbProyectos({ proyectos: PROYS, asig: ASIG }), { id: 'sup-1', rol: 'supervisor' });
+  assert.deepEqual(sup, [{ id: UUID, nombre: 'Moquegua 2026', region: 'Moquegua', n_locales: 3 }]);
   for (const p of sup) assert.deepEqual(Object.keys(p).sort(), ['id', 'n_locales', 'nombre', 'region']);
+  // sin colegios asignados, o sin la migración 022, no ve ninguno
+  assert.deepEqual(await listarProyectosCampo(sbProyectos({ proyectos: PROYS, asig: ASIG }), { id: 'sup-3', rol: 'supervisor' }), []);
+  assert.deepEqual(await listarProyectosCampo(sbProyectos({ proyectos: PROYS, asig: null }), { id: 'sup-1', rol: 'supervisor' }), []);
 });
 
 test('campo: abrir un proyecto trae todos sus códigos (por lotes) y respeta al dueño', async () => {
@@ -197,8 +207,10 @@ test('campo: abrir un proyecto trae todos sus códigos (por lotes) y respeta al 
   const p = await proyectoCampo(sbProyectos({ proyectos: PROYS, locales }), { id: 'prov-1', rol: 'proveedor' }, UUID);
   assert.equal(p.nombre, 'Moquegua 2026'); assert.equal(p.locales.length, 2500); assert.equal(p.locales[2499], '102499');
   assert.equal(await proyectoCampo(sbProyectos({ proyectos: PROYS }), { id: 'prov-2', rol: 'proveedor' }, UUID), null);
-  assert.ok(await proyectoCampo(sbProyectos({ proyectos: PROYS }), { id: 'sup-1', rol: 'supervisor' }, UUID));
-  assert.equal(await proyectoCampo(sbProyectos({ proyectos: PROYS }), { id: 'sup-1', rol: 'supervisor' }, 'no-es-uuid'), null);
+  assert.ok(await proyectoCampo(sbProyectos({ proyectos: PROYS, asig: ASIG }), { id: 'sup-1', rol: 'supervisor' }, UUID));
+  // el supervisor no abre un proyecto donde no tiene colegios
+  assert.equal(await proyectoCampo(sbProyectos({ proyectos: PROYS, asig: ASIG }), { id: 'sup-2', rol: 'supervisor' }, UUID), null);
+  assert.equal(await proyectoCampo(sbProyectos({ proyectos: PROYS, asig: ASIG }), { id: 'sup-1', rol: 'supervisor' }, 'no-es-uuid'), null);
 });
 
 test('campo: la API solo lee proyectos; escribe visitas, el reparto entre supervisores y las fichas llenadas en la app', () => {
@@ -361,6 +373,18 @@ function sbReparto({ asig = [], sinTabla = false } = {}) {
   return { from, ops, tablas };
 }
 const PROV = { id: 'prov-1', rol: 'proveedor' };
+
+test('reparto: el supervisor recibe solo sus colegios, sin los de otros ni los sin asignar', async () => {
+  const asig = [{ codigo_local: '100001', supervisor_id: 'sup-1' }, { codigo_local: '100002', supervisor_id: 'sup-2' }];
+  const p = await proyectoCampo(sbReparto({ asig }), { id: 'sup-1', rol: 'supervisor' }, UUID);
+  assert.deepEqual(p.locales, ['100001']);
+  assert.deepEqual(p.asignaciones, { '100001': 'sup-1' });
+  assert.deepEqual(p.supervisores, { 'sup-1': 'ana@ibero.pe' });
+  // el proveedor sigue viendo todo
+  const prov = await proyectoCampo(sbReparto({ asig }), PROV, UUID);
+  assert.deepEqual(prov.locales, ['100001', '100002', '100003']);
+  assert.equal(Object.keys(prov.supervisores).length, 2);
+});
 
 test('reparto: el proyecto trae las asignaciones y el correo de cada supervisor', async () => {
   const p = await proyectoCampo(sbReparto({ asig: [{ codigo_local: '100001', supervisor_id: 'sup-1' }] }), PROV, UUID);
