@@ -184,6 +184,13 @@ async function aplicarVer() {
   await buscar(c);
 }
 
+// «Actualizar listado»: con todo el proyecto, la misma búsqueda (mismo centro); filtrado, el filtro de nuevo
+async function actualizarListado() {
+  if (S.ver !== 'todo') { await aplicarVer(); return; }
+  S.verPendiente = false; $('cVerPend').hidden = true;
+  if (S.near) await buscar(null, { ajustar: false }); else pintarTodo(false);
+}
+
 function pintarReparto() {
   const P = S.proy, panel = $('cReparto');
   panel.hidden = !(P && S.rol === 'proveedor');
@@ -244,7 +251,7 @@ async function repartir() {
     P.asig = g.asignaciones; P.sups = g.supervisores;
     cuotasDelReparto(); pintarVer(); pintarReparto();
     toast('Reparto guardado: ' + ids.map((id, i) => `${corto(correoSup(id))} ${fmt(r.zonas[i].length)}`).join(' · ') + (r.sobran.length + r.fuera.length ? ` · ${fmt(r.sobran.length + r.fuera.length)} sin asignar` : '') + '.');
-    if (S.ver !== 'todo') { S.ver = 'todo'; pintarVer(); await aplicarVer(); } else pintarLista();
+    if (S.ver !== 'todo') { S.ver = 'todo'; pintarVer(); await aplicarVer(); } else await actualizarListado();
   } catch (e) { toast(`No se pudo guardar el reparto: ${e.message}`); }
   finally { b.disabled = false; b.textContent = 'Repartir por zonas'; }
 }
@@ -257,9 +264,9 @@ async function asignarUno(cod, id, sel) {
     P.asig = g.asignaciones; P.sups = g.supervisores;
     const nom = S.filas.find(f => f.cod === cod)?.nom || `Local ${cod}`;
     toast(id ? `${nom}: ahora es de ${corto(correoSup(id))}.` : `${nom}: sin asignar.`);
-    // Con «Colegios del proyecto» filtrado, el listado se rehace con «Actualizar listado»
+    // El listado, el mapa y los días se rehacen con «Actualizar listado»
     // (no de inmediato, para poder cambiar varios colegios seguidos)
-    if (S.ver !== 'todo') S.verPendiente = true;
+    S.verPendiente = true;
     cuotasDelReparto(); pintarVer(); pintarReparto(); pintarInfoVisitas();
   } catch (e) { toast(`No se pudo cambiar el supervisor: ${e.message}`); sel.value = P.asig?.[cod] || ''; }
   finally { sel.disabled = false; }
@@ -650,7 +657,7 @@ function bind() {
   $('cRegion').onchange = async e => { await quitarProyecto({ rebuscar: false }); cargarRegion(e.target.value); };
   $('cProy').onchange = e => elegirProyecto(e.target.value);
   $('cVer').onchange = e => { S.ver = e.target.value; aplicarVer(); };
-  $('cVerAct').onclick = () => aplicarVer();
+  $('cVerAct').onclick = actualizarListado;
   $('cFichas').onclick = bajarFichas;
   $('cEquipo').onclick = llevarAlEquipo;
   document.addEventListener('click', e => { if (e.target.id === 'cSubir') sincronizar(); });
