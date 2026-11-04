@@ -125,7 +125,7 @@ test('llevar al equipo: el proveedor elige los colegios; límites y migraciones'
   const prov = { id: 'prov-1', rol: 'proveedor' };
   assert.deepEqual((await fichasParaEquipo(sb(), prov, UUID, '100003,999999', DEPS)).body.fichas.map(f => f.cod), ['100003']);
   assert.equal((await fichasParaEquipo(sb(), prov, UUID, '', DEPS)).status, 400);
-  assert.equal((await fichasParaEquipo(sb(), { id: 'sup-9', rol: 'supervisor' }, UUID, '', DEPS)).status, 400, 'sin colegios asignados');
+  assert.equal((await fichasParaEquipo(sb(), { id: 'sup-9', rol: 'supervisor' }, UUID, '', DEPS)).status, 404, 'sin colegios asignados: el proyecto no le aparece');
   assert.equal((await fichasParaEquipo(sb(), { id: 'prov-2', rol: 'proveedor' }, UUID, '100001', DEPS)).status, 404, 'otro proveedor');
   assert.equal((await fichasParaEquipo(sb({ sinFichas: true }), prov, UUID, '100001', DEPS)).status, 503);
   const sinFotos = await fichasParaEquipo(sb({ sinFotos: true }), prov, UUID, '100001', DEPS);

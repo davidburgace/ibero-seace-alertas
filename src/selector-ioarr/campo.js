@@ -60,12 +60,27 @@ export const AVISO_MIGRACION_CAMPO = 'Falta ejecutar supabase/migrations/011_ioa
 export const AVISO_MIGRACION_ASIGNACIONES = 'Para repartir colegios entre supervisores falta ejecutar supabase/migrations/022_campo_asignaciones.sql en Supabase';
 export const AVISO_MIGRACION_VISITAS = 'Para marcar colegios visitados falta ejecutar supabase/migrations/021_campo_visitas.sql en Supabase';
 
-// El supervisor ve todos los proyectos; los demás, solo los suyos
-const delUsuario = (q, usuario) => usuario.rol === 'supervisor' ? q : q.eq('usuario_id', usuario.id);
+// El supervisor ve solo los proyectos donde tiene colegios asignados; los demás, los suyos
+const delUsuario = (q, usuario, ids) => usuario.rol === 'supervisor' ? q.in('id', ids) : q.eq('usuario_id', usuario.id);
+
+// Proyectos con colegios asignados al supervisor (sin la migración 022, ninguno)
+export async function proyectosDelSupervisor(sb, supervisorId) {
+  const ids = new Set();
+  for (let desde = 0; ; desde += LOTE) {
+    const { data, error } = await sb.from('campo_asignaciones').select('proyecto_id')
+      .eq('supervisor_id', supervisorId).order('proyecto_id').range(desde, desde + LOTE - 1);
+    if (error) { if (faltaMigracion(error)) return []; throw error; }
+    for (const r of data) ids.add(r.proyecto_id);
+    if (data.length < LOTE) break;
+  }
+  return [...ids];
+}
 
 export async function listarProyectosCampo(sb, usuario) {
+  const ids = usuario.rol === 'supervisor' ? await proyectosDelSupervisor(sb, usuario.id) : null;
+  if (ids && !ids.length) return [];
   const { data, error } = await delUsuario(sb.from('ioarr_selector_proyectos')
-    .select('id, nombre, region, actualizado_en, locales:ioarr_selector_locales(count)'), usuario)
+    .select('id, nombre, region, actualizado_en, locales:ioarr_selector_locales(count)'), usuario, ids)
     .order('actualizado_en', { ascending: false });
   if (error) throw error;
   return data.map(p => ({ id: p.id, nombre: p.nombre, region: p.region, n_locales: p.locales?.[0]?.count ?? 0 }));
@@ -74,8 +89,10 @@ export async function listarProyectosCampo(sb, usuario) {
 // null si no existe o no le corresponde al usuario
 export async function proyectoCampo(sb, usuario, id) {
   if (!esUuid(id)) return null;
+  const ids = usuario.rol === 'supervisor' ? await proyectosDelSupervisor(sb, usuario.id) : null;
+  if (ids && !ids.includes(id)) return null;
   const { data: p, error } = await delUsuario(sb.from('ioarr_selector_proyectos')
-    .select('id, nombre, region').eq('id', id), usuario).maybeSingle();
+    .select('id, nombre, region').eq('id', id), usuario, ids).maybeSingle();
   if (error) throw error;
   if (!p) return null;
   const locales = [];
