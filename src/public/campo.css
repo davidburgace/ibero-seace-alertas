@@ -183,4 +183,7 @@ body.ficha-abierta{ overflow:hidden; }
 .fh-ayuda{ margin:0; font-size:12.5px; line-height:1.4; }
 .fh-ayuda b{ color:var(--text); }
 /* Aviso de listado desactualizado tras cambiar supervisores */
-.ver-pend{ display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; margin-top:6px; }
+.ver-pend{ position:fixed; left:50%; transform:translateX(-50%); bottom:calc(16px + env(safe-area-inset-bottom,0px)); z-index:1050;
+  display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:6px 12px; width:max-content; max-width:calc(100vw - 32px);
+  padding:10px 14px; border-radius:12px; background:var(--bg); color:var(--text); border:1px solid var(--border2); box-shadow:0 6px 20px rgba(0,0,0,.18); font-size:13px; }
+.ver-pend:not([hidden]) ~ .toast{ bottom:calc(120px + env(safe-area-inset-bottom,0px)); }
