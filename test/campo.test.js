@@ -374,6 +374,18 @@ function sbReparto({ asig = [], sinTabla = false } = {}) {
 }
 const PROV = { id: 'prov-1', rol: 'proveedor' };
 
+test('reparto: el supervisor recibe solo sus colegios, sin los de otros ni los sin asignar', async () => {
+  const asig = [{ codigo_local: '100001', supervisor_id: 'sup-1' }, { codigo_local: '100002', supervisor_id: 'sup-2' }];
+  const p = await proyectoCampo(sbReparto({ asig }), { id: 'sup-1', rol: 'supervisor' }, UUID);
+  assert.deepEqual(p.locales, ['100001']);
+  assert.deepEqual(p.asignaciones, { '100001': 'sup-1' });
+  assert.deepEqual(p.supervisores, { 'sup-1': 'ana@ibero.pe' });
+  // el proveedor sigue viendo todo
+  const prov = await proyectoCampo(sbReparto({ asig }), PROV, UUID);
+  assert.deepEqual(prov.locales, ['100001', '100002', '100003']);
+  assert.equal(Object.keys(prov.supervisores).length, 2);
+});
+
 test('reparto: el proyecto trae las asignaciones y el correo de cada supervisor', async () => {
   const p = await proyectoCampo(sbReparto({ asig: [{ codigo_local: '100001', supervisor_id: 'sup-1' }] }), PROV, UUID);
   assert.deepEqual(p.asignaciones, { '100001': 'sup-1' });

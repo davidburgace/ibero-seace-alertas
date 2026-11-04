@@ -161,7 +161,7 @@ test('acceso: el supervisor solo llena las fichas de sus colegios; el proveedor,
   assert.equal((await accesoFicha(sb, BETO, UUID, COD_U)).status, 403);
   assert.ok((await accesoFicha(sb, PROV, UUID, COD_U)).p);
   assert.equal((await accesoFicha(sb, { id: 'prov-2', rol: 'proveedor' }, UUID, COD_U)).status, 404, 'otro proveedor');
-  assert.equal((await accesoFicha(sb, ANA, UUID, '999999')).status, 404, 'colegio fuera del proyecto');
+  assert.equal((await accesoFicha(sb, ANA, UUID, '999999')).status, 403, 'colegio fuera del proyecto: para el supervisor, igual que uno ajeno');
   assert.equal((await accesoFicha(sb, ANA, UUID, 'abc')).status, 400);
 });
 

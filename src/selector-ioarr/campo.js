@@ -1,7 +1,7 @@
 // src/selector-ioarr/campo.js — API de Visitas de campo (/campo.html).
 // Proyectos del Selector IOARR (solo lectura): limitan la búsqueda por cercanía a sus colegios.
 //   GET /api/campo/proyectos      → [{ id, nombre, region, n_locales }]
-//   GET /api/campo/proyectos/:id  → { id, nombre, region, locales: [códigos],
+//   GET /api/campo/proyectos/:id  → { id, nombre, region, locales: [códigos] (el supervisor, solo los suyos),
 //                                     asignaciones: { códigoLocal: supervisorId } | null (sin la migración 022),
 //                                     supervisores: { supervisorId: correo } (los que tienen colegios del proyecto) }
 // Reparto entre supervisores (migración 022, tabla campo_asignaciones; solo el proveedor dueño del proyecto):
@@ -104,6 +104,12 @@ export async function proyectoCampo(sb, usuario, id) {
     if (data.length < LOTE) break;
   }
   const { asignaciones, supervisores } = await asignacionesProyecto(sb, p.id);
+  // El supervisor recibe solo sus colegios: ni los de otros supervisores ni los sin asignar
+  if (usuario.rol === 'supervisor') {
+    const mios = locales.filter(c => asignaciones?.[c] === usuario.id);
+    return { id: p.id, nombre: p.nombre, region: p.region, locales: mios,
+      asignaciones: Object.fromEntries(mios.map(c => [c, usuario.id])), supervisores: { [usuario.id]: supervisores[usuario.id] || '' } };
+  }
   return { id: p.id, nombre: p.nombre, region: p.region, locales, asignaciones, supervisores };
 }
 
@@ -253,8 +259,8 @@ export async function accesoFicha(sb, usuario, proyectoId, cod) {
   if (!esCodigo(cod)) return { status: 400, error: 'Código de local no válido' };
   const p = await proyectoCampo(sb, usuario, proyectoId);
   if (!p) return { status: 404, error: 'Proyecto no encontrado' };
-  if (!p.locales.includes(cod)) return { status: 404, error: 'Ese colegio no está en el proyecto' };
   if (usuario.rol === 'supervisor' && p.asignaciones?.[cod] !== usuario.id) return { status: 403, error: 'Este colegio no está asignado a ti' };
+  if (!p.locales.includes(cod)) return { status: 404, error: 'Ese colegio no está en el proyecto' };
   return { p };
 }
 
