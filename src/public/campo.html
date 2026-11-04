@@ -32,13 +32,14 @@
 
 <header>
   <h1>Visitas de <span class="accent">campo</span></h1>
-  <div class="subtitle">Busca los colegios más cercanos a tu ubicación, a un distrito o a un local —de toda la región o de un proyecto del Selector IOARR— planifica tus visitas y marca los que ya visitaste.</div>
+  <div class="subtitle" id="cSub">Busca los colegios más cercanos a tu ubicación, a un distrito o a un local —de toda la región o de un proyecto del Selector IOARR— planifica tus visitas y marca los que ya visitaste.</div>
 </header>
 
 <main>
   <div class="senal-bar" id="cSenal" role="status" aria-live="polite" hidden></div>
   <section class="cerca-panel campo-buscar" aria-labelledby="c-tit">
     <h2 class="sr" id="c-tit">Buscar colegios cercanos</h2>
+    <p class="aviso" id="cSinAsig" hidden>Aún no tienes colegios asignados. Pídele al proveedor que te asigne colegios de un proyecto; cuando lo haga, aparecerán aquí.</p>
     <div class="filtros-grid campo-grid">
       <div class="campo campo-proy" id="cProyCampo" hidden><label for="cProy">Proyecto del Selector</label><select id="cProy"><option value="">Ninguno: toda la región</option></select></div>
       <div class="campo campo-proy" id="cVerCampo" hidden><label for="cVer">Colegios del proyecto</label><select id="cVer"></select></div>
@@ -48,8 +49,8 @@
       <div class="campo campo-proy" id="cEquipoCampo" hidden><span class="lbl">Sin señal</span>
         <div class="acts"><button class="btn btn-primary" id="cEquipo" type="button">Llevar mis fichas al equipo</button>
         <span class="sub" id="cEquipoInfo"></span></div></div>
-      <div class="campo"><label for="cRegion">Región</label><select id="cRegion"></select></div>
-      <div class="campo"><label for="cN">Colegios a visitar</label><input id="cN" type="number" min="1" max="200" step="1" value="20" inputmode="numeric" title="Hasta 200 en toda la región; con un proyecto, hasta todos sus colegios"></div>
+      <div class="campo" id="cRegionCampo"><label for="cRegion">Región</label><select id="cRegion"></select></div>
+      <div class="campo" id="cNCampo"><label for="cN">Colegios a visitar</label><input id="cN" type="number" min="1" max="200" step="1" value="20" inputmode="numeric" title="Hasta 200 en toda la región; con un proyecto, hasta todos sus colegios"></div>
       <div class="campo campo-ubic">
         <span class="lbl">Centro de la búsqueda</span>
         <button class="btn btn-primary" id="cUbic" type="button">Usar mi ubicación</button>

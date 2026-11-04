@@ -229,9 +229,15 @@ test('campo: el worker limita la búsqueda a los colegios del proyecto', () => {
 });
 
 // ─── Colegios visitados ─────────────────────────────────────────────────────
-function sbVisitas(filas = [], { error = null } = {}) {
+// asig: códigos asignados a sup-1 (campo_asignaciones)
+function sbVisitas(filas = [], { error = null, asig = null } = {}) {
   const ops = [];
   const from = tabla => {
+    if (tabla === 'campo_asignaciones') {
+      const b = { select: () => b, eq: () => b, order: () => b, range: () => b,
+        then: (ok, mal) => Promise.resolve({ data: (asig || []).map(c => ({ codigo_local: c })), error: null }).then(ok, mal) };
+      return b;
+    }
     assert.equal(tabla, 'campo_visitas');
     const q = { eq: {}, rango: null, borrar: false };
     const b = {
@@ -259,23 +265,29 @@ test('visitas: fecha de hoy en Perú y validación de la fecha', () => {
   for (const f of ['2026-10-23', '2019-12-31', '2026-02-30', '22/10/2026', 'x']) assert.equal(fechaVisita(f, '2026-10-22'), null, f);
 });
 
-test('visitas: listar trae todas (por lotes) y marca las propias', async () => {
+test('visitas: listar trae todas (por lotes) y marca las propias; el supervisor, solo las de sus colegios', async () => {
   const filas = Array.from({ length: 1500 }, (_, i) => ({ codigo_local: String(200000 + i), fecha: '2026-10-20', visitado_por: i % 2 ? 'sup-1' : 'otro', visitado_por_email: 'x@ibero.pe' }));
-  const m = await listarVisitas(sbVisitas(filas), SUP);
+  const m = await listarVisitas(sbVisitas(filas), { id: 'prov-1', rol: 'proveedor' });
   assert.equal(Object.keys(m).length, 1500);
-  assert.deepEqual(m['200001'], { fecha: '2026-10-20', por: 'x@ibero.pe', mia: true });
-  assert.equal(m['200000'].mia, false);
+  assert.deepEqual(m['200001'], { fecha: '2026-10-20', por: 'x@ibero.pe', mia: false });
+  const s = await listarVisitas(sbVisitas(filas, { asig: ['200000', '200001', '201499'] }), SUP);
+  assert.deepEqual(Object.keys(s).sort(), ['200000', '200001', '201499']);
+  assert.equal(s['200001'].mia, true); assert.equal(s['200000'].mia, false);
+  assert.deepEqual(await listarVisitas(sbVisitas(filas), SUP), {}, 'sin colegios asignados');
 });
 
 test('visitas: marcar guarda quién y cuándo; valida código y fecha', async () => {
-  const sb = sbVisitas();
+  const sb = sbVisitas([], { asig: ['276008'] });
   const r = await marcarVisita(sb, SUP, '276008', { fecha: '2026-10-01' });
   assert.equal(r.status, 200); assert.deepEqual(r.body, { codigo: '276008', fecha: '2026-10-01', por: 'sup@ibero.pe', mia: true });
   assert.equal(sb.ops[0].o.onConflict, 'codigo_local');
   assert.equal(sb.ops[0].upsert.visitado_por, 'sup-1');
   assert.equal((await marcarVisita(sb, SUP, 'abc')).status, 400);
   assert.equal((await marcarVisita(sb, SUP, '276008', { fecha: '2099-01-01' })).status, 400);
+  // el supervisor no marca un colegio que no le asignaron; el proveedor, cualquiera
+  assert.equal((await marcarVisita(sb, SUP, '276009')).status, 403);
   assert.equal(sb.ops.length, 1);
+  assert.equal((await marcarVisita(sb, { id: 'prov-1', rol: 'proveedor' }, '276009')).status, 200);
 });
 
 test('visitas: el supervisor solo desmarca lo suyo; el proveedor, cualquiera', async () => {

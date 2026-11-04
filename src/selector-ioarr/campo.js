@@ -11,8 +11,9 @@
 //       las pide; el proveedor dueño, de todos (?paquete=<supervisorId>|sin para uno). Lo arma fichasZip (router.js)
 //       reemplazar = true: el reparto completo (borra el anterior); si no, cambia solo esos colegios (null = sin asignar)
 // Colegios visitados (migración 021, tabla campo_visitas; una fila por local):
-//   GET    /api/campo/visitas          → { códigoLocal: { fecha, por, mia } }
-//   PUT    /api/campo/visitas/:codigo  → marca el local como visitado ({ fecha? } 'AAAA-MM-DD', por defecto hoy en Perú)
+//   GET    /api/campo/visitas          → { códigoLocal: { fecha, por, mia } } (el supervisor, solo de sus colegios)
+//   PUT    /api/campo/visitas/:codigo  → marca el local como visitado ({ fecha? } 'AAAA-MM-DD', por defecto hoy en Perú);
+//                                        el supervisor, solo sus colegios asignados
 //   DELETE /api/campo/visitas/:codigo  → lo desmarca (el supervisor, solo lo que marcó él; el proveedor, cualquiera)
 // Ficha de verificación en la app (migración 023, tabla campo_fichas; ver ficha-digital.js). El supervisor, solo
 // en sus colegios asignados; el proveedor, en los de sus proyectos. La revisión la hace el proveedor en Expediente → Fichas.
@@ -74,6 +75,19 @@ export async function proyectosDelSupervisor(sb, supervisorId) {
     if (data.length < LOTE) break;
   }
   return [...ids];
+}
+
+// Colegios asignados al supervisor, en todos sus proyectos (sin la migración 022, ninguno)
+export async function codigosDelSupervisor(sb, supervisorId) {
+  const cods = new Set();
+  for (let desde = 0; ; desde += LOTE) {
+    const { data, error } = await sb.from('campo_asignaciones').select('codigo_local')
+      .eq('supervisor_id', supervisorId).order('codigo_local').range(desde, desde + LOTE - 1);
+    if (error) { if (faltaMigracion(error)) return cods; throw error; }
+    for (const r of data) cods.add(r.codigo_local);
+    if (data.length < LOTE) break;
+  }
+  return cods;
 }
 
 export async function listarProyectosCampo(sb, usuario) {
@@ -208,13 +222,14 @@ export function fechaVisita(f, hoy = hoyPeru()) {
   return f >= '2020-01-01' && f <= hoy ? f : null;
 }
 
+// El supervisor ve solo las visitas de sus colegios asignados
 export async function listarVisitas(sb, usuario) {
-  const mapa = {};
+  const mapa = {}, mios = usuario.rol === 'supervisor' ? await codigosDelSupervisor(sb, usuario.id) : null;
   for (let desde = 0; ; desde += LOTE) {
     const { data, error } = await sb.from('campo_visitas').select('codigo_local, fecha, visitado_por, visitado_por_email')
       .order('codigo_local').range(desde, desde + LOTE - 1);
     if (error) throw error;
-    for (const v of data) mapa[v.codigo_local] = { fecha: v.fecha, por: v.visitado_por_email || '', mia: v.visitado_por === usuario.id };
+    for (const v of data) if (!mios || mios.has(v.codigo_local)) mapa[v.codigo_local] = { fecha: v.fecha, por: v.visitado_por_email || '', mia: v.visitado_por === usuario.id };
     if (data.length < LOTE) break;
   }
   return mapa;
@@ -225,6 +240,7 @@ export async function marcarVisita(sb, usuario, codigo, { fecha } = {}) {
   if (!esCodigo(codigo)) return { status: 400, body: { error: 'Código de local no válido' } };
   const f = fechaVisita(fecha);
   if (!f) return { status: 400, body: { error: 'Fecha de visita no válida: usa AAAA-MM-DD, desde 2020 y no después de hoy' } };
+  if (usuario.rol === 'supervisor' && !(await codigosDelSupervisor(sb, usuario.id)).has(codigo)) return { status: 403, body: { error: 'Este colegio no está asignado a ti' } };
   const fila = { codigo_local: codigo, fecha: f, visitado_por: usuario.id, visitado_por_email: usuario.email || null, actualizado_en: new Date().toISOString() };
   const { error } = await sb.from('campo_visitas').upsert(fila, { onConflict: 'codigo_local' });
   if (error) throw error;

@@ -188,3 +188,6 @@ body.ficha-abierta{ overflow:hidden; }
   padding:10px 14px; border-radius:12px; background:var(--bg); color:var(--text); border:1px solid var(--border2); box-shadow:0 6px 20px rgba(0,0,0,.18); font-size:13px; }
 .ver-pend:not([hidden]) ~ .toast{ bottom:calc(120px + env(safe-area-inset-bottom,0px)); }
 .rep-pend{ color:var(--malo); font-weight:600; }
+/* Supervisor sin colegios asignados: solo el aviso */
+.sin-colegios .campo-grid, .sin-colegios .campo-filtros, .sin-colegios .campo-buscar .filtros-bar,
+.sin-colegios #cVisitas, .sin-colegios .vista-tabs, .sin-colegios #cCuerpo{ display:none !important; }
