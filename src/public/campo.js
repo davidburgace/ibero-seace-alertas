@@ -95,6 +95,11 @@ async function boot() {
     const prov = u.rol === 'proveedor';
     $('lnkInicio').hidden = !prov;
     if (!prov) $('lnkLogo').removeAttribute('href');
+    // El supervisor trabaja solo con sus colegios: sin región ni cantidad (las pone su proyecto)
+    if (u.rol === 'supervisor') {
+      $('cRegionCampo').hidden = true; $('cNCampo').hidden = true;
+      $('cSub').textContent = 'Tus colegios asignados, ordenados por cercanía a tu ubicación, a un distrito o a un local: planifica tus visitas, llena las fichas y marca los que ya visitaste.';
+    }
   }
   $('cN').value = limitarN(store('n') ?? 20);
   $('cPorDia').value = limitarPorDia(store('porDia') ?? 8);
@@ -115,6 +120,11 @@ async function boot() {
   sincronizar();
   const p = store('proyecto');
   if (p && S.proys.some(x => x.id === p)) { $('cProy').value = p; await elegirProyecto(p); return; }
+  // El supervisor abre su primer proyecto; sin colegios asignados, solo el aviso
+  if (S.rol === 'supervisor') {
+    if (S.proys.length) { $('cProy').value = S.proys[0].id; await elegirProyecto(S.proys[0].id); return; }
+    document.body.classList.add('sin-colegios'); $('cSinAsig').hidden = false; return;
+  }
   const r = store('region');
   await cargarRegion(S.idx.regiones.some(g => g.nombre === r) ? r : (S.idx.regiones.find(g => g.nombre === 'Moquegua') || S.idx.regiones[0]).nombre);
 }
@@ -125,7 +135,8 @@ async function cargarProyectos() {
   catch (e) { console.warn('Proyectos', e); S.proys = []; }
   $('cProyCampo').hidden = !S.proys.length;
   $('cFichasCampo').hidden = true;
-  $('cProy').innerHTML = '<option value="">Ninguno: toda la región</option>' + S.proys.map(p =>
+  // «Ninguno» (toda la región) es solo para el proveedor
+  $('cProy').innerHTML = (S.rol === 'supervisor' ? '' : '<option value="">Ninguno: toda la región</option>') + S.proys.map(p =>
     `<option value="${esc(p.id)}">${esc(p.nombre)} · ${esc(p.region)} · ${plural(p.n_locales, 'colegio', 'colegios')}</option>`).join('');
 }
 
