@@ -12,7 +12,7 @@
 import express from 'express';
 import { createClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
-import nodemailer from 'nodemailer';
+import { enviarCorreo, correoConfigurado, AVISO_CORREO } from './correo.js';
 import multer from 'multer';
 import * as XLSX from 'xlsx';
 
@@ -262,21 +262,14 @@ function renderInfraEmail(ops) {
 
 async function sendInfraDigest() {
   if (!supabase) return { ok: false, message: 'Supabase no configurado' };
-  if (!process.env.SMTP_HOST) return { ok: false, message: 'SMTP no configurado' };
+  if (!correoConfigurado()) return { ok: false, message: AVISO_CORREO };
   const { data: ops } = await supabase.from('infra_oportunidades').select('*')
     .order('ai_score', { ascending: false, nullsFirst: false }).limit(30);
   const { data: vendors } = await supabase.from('vendors').select('*');
   const recipients = (vendors || []).map(v => v.email).filter(Boolean).join(',');
   if (!recipients) return { ok: false, message: 'No hay vendedores configurados' };
-  const transport = nodemailer.createTransport({
-    host: process.env.SMTP_HOST, port: Number(process.env.SMTP_PORT || 587),
-    secure: String(process.env.SMTP_SECURE || 'false') === 'true',
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-    connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 15000
-  });
-  await transport.verify();
-  const info = await transport.sendMail({
-    from: process.env.MAIL_FROM || process.env.SMTP_USER, to: recipients,
+  const info = await enviarCorreo({
+    to: recipients,
     subject: `🏗️ ${(ops || []).length} oportunidades Infra (OxI/APP) — Radar Ibero`,
     html: renderInfraEmail(ops || [])
   });
