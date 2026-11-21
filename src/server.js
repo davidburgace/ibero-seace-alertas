@@ -3,7 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import cron from 'node-cron';
 import { createClient } from '@supabase/supabase-js';
-import nodemailer from 'nodemailer';
+import { enviarCorreo, correoConfigurado, proveedorCorreo, AVISO_CORREO } from './correo.js';
 import OpenAI from 'openai';
 import multer from 'multer';
 import pdfParse from 'pdf-parse/lib/pdf-parse.js';
@@ -332,19 +332,10 @@ async function sendDigest() {
   if (!opportunities || !opportunities.length) return { ok: false, message: 'No hay oportunidades nuevas' };
 
   const vendors = await table('vendors');
-  if (!process.env.SMTP_HOST) return { ok: false, message: 'SMTP no configurado' };
-  const transport = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT || 587),
-    secure: String(process.env.SMTP_SECURE || 'false') === 'true',
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-    connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 15000
-  });
+  if (!correoConfigurado()) return { ok: false, message: AVISO_CORREO };
   const recipients = vendors.map(v => v.email).filter(Boolean).join(',');
   if (!recipients) return { ok: false, message: 'No hay vendedores configurados' };
-  await transport.verify();
-  const info = await transport.sendMail({
-    from: process.env.MAIL_FROM || process.env.SMTP_USER,
+  const info = await enviarCorreo({
     to: recipients,
     subject: `🎯 ${opportunities.length} oportunidades SEACE — Radar Ibero`,
     html: renderEmail(opportunities)
@@ -386,7 +377,7 @@ const RECORDATORIO_VENTANA_MIN = Number(process.env.RECORDATORIO_VENTANA_MIN || 
 
 async function sendMeetingReminders() {
   if (!supabase) return { ok: false, message: 'Supabase no configurado' };
-  if (!process.env.SMTP_HOST) return { ok: false, message: 'SMTP no configurado' };
+  if (!correoConfigurado()) return { ok: false, message: AVISO_CORREO };
 
   const ahora = new Date();
   const limite = new Date(ahora.getTime() + RECORDATORIO_VENTANA_MIN * 60000);
@@ -399,15 +390,6 @@ async function sendMeetingReminders() {
   if (errorReuniones) throw errorReuniones;
   if (!reuniones || !reuniones.length) return { ok: true, message: 'No hay reuniones próximas por recordar', enviados: 0 };
 
-  const transportRecordatorios = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT || 587),
-    secure: String(process.env.SMTP_SECURE || 'false') === 'true',
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-    connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 15000
-  });
-  await transportRecordatorios.verify();
-
   let enviados = 0;
   const errores = [];
   for (const r of reuniones) {
@@ -418,9 +400,8 @@ async function sendMeetingReminders() {
       continue;
     }
     try {
-      await transportRecordatorios.sendMail({
-        from: process.env.MAIL_FROM || process.env.SMTP_USER,
-        to: emails.join(','),
+      await enviarCorreo({
+        to: emails,
         subject: `⏰ Recordatorio: ${r.titulo}`,
         html: renderRecordatorioEmail(r)
       });
@@ -459,7 +440,7 @@ function renderInvitacionEmail(r) {
 
 async function sendReunionInvitation(id) {
   if (!supabase) return { ok: false, message: 'Supabase no configurado' };
-  if (!process.env.SMTP_HOST) return { ok: false, message: 'SMTP no configurado' };
+  if (!correoConfigurado()) return { ok: false, message: AVISO_CORREO };
   const { data: r, error: errorReunion } = await supabase.from('reuniones').select('*').eq('id', id).single();
   if (errorReunion) throw errorReunion;
   if (!r) return { ok: false, message: 'Reunión no encontrada' };
@@ -467,17 +448,8 @@ async function sendReunionInvitation(id) {
   const emails = participantes.map(p => p.email).filter(Boolean);
   if (!emails.length) return { ok: false, message: 'La reunión no tiene participantes con correo' };
 
-  const transportInvitacion = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT || 587),
-    secure: String(process.env.SMTP_SECURE || 'false') === 'true',
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-    connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 15000
-  });
-  await transportInvitacion.verify();
-  await transportInvitacion.sendMail({
-    from: process.env.MAIL_FROM || process.env.SMTP_USER,
-    to: emails.join(','),
+  await enviarCorreo({
+    to: emails,
     subject: `📅 Invitación: ${r.titulo}`,
     html: renderInvitacionEmail(r)
   });
@@ -487,7 +459,7 @@ async function sendReunionInvitation(id) {
 // ─── Rutas ─────────────────────────────────────────────────────────────────────
 app.get('/', (_, res) => res.json({ ok: true, app: 'SEACE Radar — Grupo Ibero Perú', mode: MODE, version: VERSION }));
 
-app.get('/api/health', (_, res) => res.json({ ok: true, supabase: !!supabase, openai: !!process.env.OPENAI_API_KEY, smtp: !!process.env.SMTP_HOST, mode: MODE, version: VERSION }));
+app.get('/api/health', (_, res) => res.json({ ok: true, supabase: !!supabase, openai: !!process.env.OPENAI_API_KEY, smtp: correoConfigurado(), correo: proveedorCorreo(), mode: MODE, version: VERSION }));
 
 app.get('/api/bootstrap', async (_, res, next) => {
   try { res.json({ keywords: await table('keywords'), vendors: await table('vendors'), opportunities: await table('opportunities'), contactos: await table('contactos_frecuentes') }); }
@@ -888,18 +860,8 @@ app.get('/api/admin/usuarios', async (req, res, next) => {
     res.json({ ok: true, yo: req.usuario.id, usuarios: await listarUsuarios(supabase) });
   } catch(e) { next(e); }
 });
-// Invitaciones: se envían con el mismo SMTP de las alertas
-async function enviarCorreoSmtp({ to, subject, html }) {
-  if (!process.env.SMTP_HOST) throw new Error('SMTP no configurado');
-  const transport = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT || 587),
-    secure: String(process.env.SMTP_SECURE || 'false') === 'true',
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-    connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 15000
-  });
-  await transport.sendMail({ from: process.env.MAIL_FROM || process.env.SMTP_USER, to, subject, html });
-}
+// Invitaciones: se envían por el mismo canal de las alertas (src/correo.js)
+const enviarCorreoSmtp = c => enviarCorreo(c);
 const URL_APP = FRONTEND_URL.split(',')[0].replace(/\/$/, '');
 
 app.post('/api/admin/usuarios', async (req, res, next) => {
