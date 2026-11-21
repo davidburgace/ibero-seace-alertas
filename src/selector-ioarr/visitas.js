@@ -2,17 +2,26 @@
 // Lo usan el Web Worker (servido en /selector-ioarr/visitas.js), el Excel del servidor y las pruebas.
 //
 // Método (aproximado, en línea recta; no incluye carreteras ni tiempos de viaje):
-//   1. Agrupar con capacidad fija: se toma el local sin asignar más alejado del centro
-//      de todos, y se le suman los locales sin asignar más cercanos al centro del grupo
-//      que se va formando, hasta llenar el día.
-//   2. Ruta de cada día por vecino más cercano: empieza en el extremo del grupo
-//      (el local más alejado de su centro) y sigue siempre al más cercano sin visitar.
-//   3. Los días se ordenan igual, por vecino más cercano entre sus centros, para que
-//      días seguidos queden cerca.
+//   1. Armado con capacidad fija: el día 1 empieza en el colegio más cercano al origen (la
+//      ubicación del usuario o el centro elegido) y suma los más cercanos al centro del día que
+//      se va formando; cada día siguiente empieza cerca de donde terminó el anterior.
+//   2. Compactar: se intercambian colegios entre días mientras cada día quede más junto.
+//   3. Los días se ordenan desde el origen hacia afuera, y cada día sigue la ruta del vecino
+//      más cercano, empezando cerca de donde terminó el anterior.
 import { haversine, localConCoord } from './cercania.js';
 
 export const POR_DIA_DEF = 8, POR_DIA_MIN = 1, POR_DIA_MAX = 50;
 export const AVISO_VISITAS = 'Agrupación aproximada por cercanía geográfica. Las distancias son en línea recta y no incluyen carreteras ni tiempos de viaje.';
+
+// Distancia máxima entre dos colegios del mismo día (km). 0 = sin límite
+export const MAX_KM_DEF = 10, MAX_KM_MAX = 500;
+export function limitarMaxKm(v) {
+  if (v === '' || v == null) return MAX_KM_DEF;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0) return MAX_KM_DEF;
+  return n === 0 ? 0 : Math.min(MAX_KM_MAX, Math.max(1, Math.round(n)));
+}
+const tope = maxKm => (maxKm > 0 ? maxKm : Infinity);
 
 export function limitarPorDia(v) {
   const n = Math.round(Number(v));
@@ -38,41 +47,96 @@ function ruta(ps, inicio) {
 }
 const largo = ps => ps.reduce((a, p, i) => i ? a + dist(ps[i - 1], p) : 0, 0);
 
+// Compactar: intercambia colegios entre días mientras baje la suma de las distancias de cada
+// colegio al centro de su día (cada día conserva su cantidad). Corrige los colegios sueltos
+// que el armado deja para los últimos días.
+const MAX_PASADAS = 40, MAX_PARES = 6e7;
+function compactar(grupos, maxKm = Infinity) {
+  // ¿q puede entrar al día g en lugar de p sin pasar la distancia máxima?
+  const cabe = (q, g, p) => maxKm === Infinity || g.every(o => o === p || dist(o, q) <= maxKm);
+  const cs = grupos.map(centroide);
+  const dueño = new Map(); grupos.forEach((g, k) => g.forEach(p => dueño.set(p, k)));
+  const todos = grupos.flat(), n = todos.length;
+  const pasadas = Math.max(1, Math.min(MAX_PASADAS, Math.floor(MAX_PARES / Math.max(1, n * n))));
+  const recalc = k => { cs[k] = centroide(grupos[k]); };
+  for (let pas = 0; pas < pasadas; pas++) {
+    let mejoro = false;
+    for (let a = 0; a < n; a++) {
+      const p = todos[a], A = dueño.get(p);
+      for (let b = a + 1; b < n; b++) {
+        const q = todos[b], B = dueño.get(q);
+        if (A === B) continue;
+        const delta = dist(p, cs[B]) + dist(q, cs[A]) - dist(p, cs[A]) - dist(q, cs[B]);
+        if (delta < -1e-6 && cabe(q, grupos[A], p) && cabe(p, grupos[B], q)) {
+          grupos[A][grupos[A].indexOf(p)] = q; grupos[B][grupos[B].indexOf(q)] = p;
+          dueño.set(p, B); dueño.set(q, A); recalc(A); recalc(B);
+          mejoro = true; break;   // p cambió de día: sigue con el próximo colegio
+        }
+      }
+    }
+    if (!mejoro) break;
+  }
+  return grupos;
+}
+
 /**
  * @param {Array<{cod:string, lat:number, lon:number}>} puntos locales con coordenadas válidas (pueden traer más campos)
  * @param {number} porDia locales por día
+ * @param {{ origen?: {lat:number, lon:number}, maxKm?: number }} [opc] origen: desde dónde se sale (la ubicación o el centro elegido):
+ *        el día 1 empieza en el colegio más cercano al origen y los días siguientes se van alejando.
+ *        Sin origen, se empieza en el colegio más alejado del centro de todos (un extremo de la zona).
+ *        maxKm: distancia máxima entre dos colegios del mismo día (0 = sin límite); con ella, «porDia» es
+ *        un máximo y un día puede cerrarse con menos colegios.
  * @returns {Array<{dia:number, km:number, puntos:Array}>} días en orden; cada punto en orden de visita, con `orden` (1…n)
  */
-export function agruparVisitas(puntos, porDia) {
-  const cap = limitarPorDia(porDia);
+export function agruparVisitas(puntos, porDia, { origen = null, maxKm = 0 } = {}) {
+  const cap = limitarPorDia(porDia), lim = tope(maxKm);
   if (!puntos.length) return [];
-  const centro = centroide(puntos);
-  const libres = new Set(puntos), grupos = [];
+  // Orden fijo por código: el resultado no depende del orden de entrada
+  const ps = [...puntos].sort((a, b) => (a.cod < b.cod ? -1 : a.cod > b.cod ? 1 : 0));
+  const centro = centroide(ps);
+  const cercano = (ref, conj) => { let m = null, dm = Infinity; for (const p of conj) { const d = dist(ref, p); if (!m || menor(p, m, d, dm)) { m = p; dm = d; } } return m; };
+  let ini = origen && Number.isFinite(origen.lat) && Number.isFinite(origen.lon) ? origen : null;
+  if (!ini) { let e = null, de = -1; for (const p of ps) { const d = dist(centro, p); if (d > de || (d === de && p.cod < e.cod)) { e = p; de = d; } } ini = e; }
+  // 1. Armado: cada día empieza en el colegio libre más cercano a donde terminó el anterior (el
+  //    primero, al origen) y suma los libres más cercanos al centro del día que se va formando.
+  const libres = new Set(ps), grupos = [];
+  let ref = ini;
   while (libres.size) {
-    // semilla: la más alejada del centro de todos
-    let semilla = null, ds = -1;
-    for (const p of libres) { const d = dist(centro, p); if (!semilla || d > ds || (d === ds && p.cod < semilla.cod)) { semilla = p; ds = d; } }
+    const semilla = cercano(ref, libres);
     const g = [semilla]; libres.delete(semilla);
     let c = { lat: semilla.lat, lon: semilla.lon };
     while (g.length < cap && libres.size) {
-      let mejor = null, dm = Infinity;
-      for (const p of libres) { const d = dist(c, p); if (!mejor || menor(p, mejor, d, dm)) { mejor = p; dm = d; } }
-      g.push(mejor); libres.delete(mejor);
-      c = { lat: c.lat + (mejor.lat - c.lat) / g.length, lon: c.lon + (mejor.lon - c.lon) / g.length };
+      const m = cercano(c, libres);
+      // el día se cierra antes si el colegio más cercano lo separaría demasiado
+      if (g.some(p => dist(p, m) > lim)) break;
+      g.push(m); libres.delete(m);
+      c = { lat: c.lat + (m.lat - c.lat) / g.length, lon: c.lon + (m.lon - c.lon) / g.length };
     }
-    grupos.push(g);
+    grupos.push(g); ref = c;
   }
-  // Ruta dentro de cada grupo
-  const conRuta = grupos.map(g => {
-    const c = centroide(g);
-    let ini = g[0], di = -1;
-    for (const p of g) { const d = dist(c, p); if (d > di || (d === di && p.cod < ini.cod)) { ini = p; di = d; } }
-    const r = ruta(g, ini);
-    return { centro: centroide(r), puntos: r, km: largo(r) };
+  // 2. Compactar (intercambios entre días)
+  compactar(grupos, lim);
+  // 3. Orden de los días: el primero, el que tiene el colegio más cercano al origen; después, siempre
+  //    el día pendiente más cercano al centro del anterior (así se va alejando).
+  const pend = new Set(grupos.map((g, k) => k)), orden = [];
+  let k0 = 0, d0 = Infinity;
+  for (const k of pend) for (const p of grupos[k]) { const d = dist(ini, p); if (d < d0) { d0 = d; k0 = k; } }
+  orden.push(k0); pend.delete(k0);
+  while (pend.size) {
+    const c = centroide(grupos[orden.at(-1)]);
+    let km = null, dm = Infinity;
+    for (const k of pend) { const d = dist(c, centroide(grupos[k])); if (d < dm) { dm = d; km = k; } }
+    orden.push(km); pend.delete(km);
+  }
+  // 4. Ruta de cada día por vecino más cercano: el día 1 empieza en el colegio más cercano al origen;
+  //    los demás, en el más cercano a donde terminó el día anterior.
+  let desde = ini;
+  return orden.map((k, i) => {
+    const r = ruta(grupos[k], cercano(desde, grupos[k]));
+    desde = r.at(-1);
+    return { dia: i + 1, km: largo(r), puntos: r.map((p, j) => ({ ...p, orden: j + 1 })) };
   });
-  // Orden de los días: vecino más cercano entre centros, desde el primer grupo formado
-  const cs = conRuta.map((g, i) => ({ ...g.centro, cod: String(i).padStart(6, '0'), g }));
-  return ruta(cs, cs[0]).map(o => o.g).map((g, i) => ({ dia: i + 1, km: g.km, puntos: g.puntos.map((p, j) => ({ ...p, orden: j + 1 })) }));
 }
 
 // ─── Reparto entre supervisores (Visitas de campo) ──────────────────────────

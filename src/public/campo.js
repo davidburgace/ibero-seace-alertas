@@ -11,7 +11,7 @@
 // fichas (campo-equipo.js). Al volver la señal, sincronizarEquipo() sube lo pendiente y la barra lo muestra.
 import { DEF, NIVN, NIVS, NIVB, FILTRO_VACIO, coordValidas } from '/selector-ioarr/calculo.js';
 import { limitarN as limitarNBase, N_MAX, N_MAX_PROYECTO } from '/selector-ioarr/cercania.js';
-import { limitarPorDia, colorDia, tramosRutaDia, cuotasIguales, AVISO_VISITAS } from '/selector-ioarr/visitas.js';
+import { limitarPorDia, limitarMaxKm, colorDia, tramosRutaDia, cuotasIguales, AVISO_VISITAS } from '/selector-ioarr/visitas.js';
 import { crearMapa, fmtKm } from '/selector-ioarr-mapa.js';
 import { htmlListado, itemListado } from '/selector-ioarr-listado.js';
 import { abrirFicha, sincronizarEquipo, resumenEquipo } from '/campo-ficha.js';
@@ -103,6 +103,7 @@ async function boot() {
   }
   $('cN').value = limitarN(store('n') ?? 20);
   $('cPorDia').value = limitarPorDia(store('porDia') ?? 8);
+  $('cMaxKm').value = limitarMaxKm(store('maxKm') ?? '');
   try { S.idx = await fetch(BASE_DATOS + 'index.json').then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }); }
   catch { $('cInfo').innerHTML = '<span class="err">No se pudo cargar la lista de regiones. Revisa tu conexión y recarga.</span>'; return; }
   $('cRegion').innerHTML = S.idx.regiones.map(g => `<option value="${esc(g.nombre)}">${esc(g.nombre)}</option>`).join('');
@@ -577,7 +578,9 @@ function usarUbicacion() {
     const { latitude: lat, longitude: lon, accuracy } = pos.coords;
     if (!coordValidas(lat, lon)) { toast('Tu ubicación está fuera de Perú. Elige un distrito o un código de local.'); return; }
     $('cDist').value = '-1'; $('cCod').value = '';
-    buscar({ lat, lon, label: `tu ubicación${accuracy > 200 ? ` (precisión de ±${fmt(accuracy)} m)` : ''}`, gps: true });
+    // Con la ubicación, los días de visita se arman solos, empezando por el colegio más cercano
+    buscar({ lat, lon, label: `tu ubicación${accuracy > 200 ? ` (precisión de ±${fmt(accuracy)} m)` : ''}`, gps: true })
+      .then(() => { if (!S.vis && S.filas.length) return agrupar(true); });
   }, err => {
     b.disabled = false; b.textContent = txt;
     toast({ 1: 'No diste permiso para usar tu ubicación. Actívalo en el navegador o elige un distrito.', 2: 'No se pudo obtener tu ubicación. Prueba al aire libre o elige un distrito.', 3: 'La ubicación tardó demasiado. Vuelve a intentarlo o elige un distrito.' }[err.code] || 'No se pudo obtener tu ubicación.');
@@ -587,8 +590,11 @@ function usarUbicacion() {
 // ─── Días de visita ─────────────────────────────────────────────────────────
 async function agrupar(pintar = true) {
   const porDia = limitarPorDia($('cPorDia').value); $('cPorDia').value = porDia; store('porDia', porDia);
-  const R = await w('visitas', { porDia });
-  S.vis = { porDia, dias: R.dias, sinCoord: R.sinCoord };
+  const maxKm = limitarMaxKm($('cMaxKm').value); $('cMaxKm').value = maxKm; store('maxKm', maxKm);
+  // El día 1 empieza en el colegio más cercano al centro de la búsqueda (la ubicación, si se usó)
+  const origen = S.near ? { lat: S.near.lat, lon: S.near.lon } : null;
+  const R = await w('visitas', { porDia, maxKm, origen });
+  S.vis = { porDia, maxKm, dias: R.dias, sinCoord: R.sinCoord, desde: S.near?.label || '' };
   if (pintar) pintarTodo(true);
 }
 
@@ -625,7 +631,9 @@ function pintarVisitas() {
   $('cAgrupar').disabled = !S.filas.length;
   if (!V) return;
   const n = V.dias.reduce((a, d) => a + d.puntos.length, 0);
-  $('cVisAviso').innerHTML = `<b>${fmt(n)}</b> ${n === 1 ? 'colegio' : 'colegios'} en <b>${fmt(V.dias.length)}</b> ${V.dias.length === 1 ? 'día' : 'días'} de hasta ${fmt(V.porDia)}. ${esc(AVISO_VISITAS)} El listado de abajo queda ordenado por día y parada, con la ruta de cada día en Google Maps.`;
+  const lim = V.maxKm ? `, con no más de ${fmt(V.maxKm)} km entre dos colegios del mismo día` : '';
+  const desde = V.desde ? ` El día 1 empieza en el colegio más cercano ${esc(aCentro(V.desde))} y los días siguientes se van alejando.` : '';
+  $('cVisAviso').innerHTML = `<b>${fmt(n)}</b> ${n === 1 ? 'colegio' : 'colegios'} en <b>${fmt(V.dias.length)}</b> ${V.dias.length === 1 ? 'día' : 'días'} de hasta ${fmt(V.porDia)}${lim}.${desde} ${esc(AVISO_VISITAS)} El listado de abajo queda ordenado por día y parada, con la ruta de cada día en Google Maps.`;
 }
 
 async function asegurarMapa() {
@@ -731,6 +739,7 @@ function bind() {
   });
   $('cAgrupar').onclick = () => agrupar(true);
   $('cPorDia').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); agrupar(true); } });
+  $('cMaxKm').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); agrupar(true); } });
   $('cDesagrupar').onclick = () => { S.vis = null; pintarTodo(true); };
   filtrosSum();
 }

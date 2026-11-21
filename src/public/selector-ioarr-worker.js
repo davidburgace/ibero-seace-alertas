@@ -150,11 +150,11 @@ const acciones = {
   },
 
   // Días de visita de la selección (sin los excluidos por otra inversión)
-  visitas({ porDia }) {
+  visitas({ porDia, maxKm, origen }) {
     const todos = selIdx(), list = todos.filter(i => !excl.has(D.locs[i][0]));
     const { puntos, sinCoord } = puntosVisita(D, C, list);
     const sinI = ({ i, ...p }) => p;
-    return { dias: agruparVisitas(puntos, porDia).map(d => ({ ...d, puntos: d.puntos.map(sinI) })), sinCoord: sinCoord.map(sinI),
+    return { dias: agruparVisitas(puntos, porDia, { maxKm, origen }).map(d => ({ ...d, puntos: d.puntos.map(sinI) })), sinCoord: sinCoord.map(sinI),
       nExcl: todos.length - list.length, codigos: list.map(i => D.locs[i][0]) };
   },
 
