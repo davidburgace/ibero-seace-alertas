@@ -10,7 +10,7 @@ import express from 'express';
 import ExcelJS from 'exceljs';
 import { prep, calc, filtrar, FILTRO_VACIO, DEF } from '../src/selector-ioarr/calculo.js';
 import { cercanos, centroDistrito, haversine } from '../src/selector-ioarr/cercania.js';
-import { agruparVisitas, puntosVisita, limitarPorDia, generarKML, colorDia, COLORES_DIA, GRIS_DIA, AVISO_VISITAS } from '../src/selector-ioarr/visitas.js';
+import { agruparVisitas, puntosVisita, limitarPorDia, limitarMaxKm, generarKML, colorDia, COLORES_DIA, GRIS_DIA, AVISO_VISITAS } from '../src/selector-ioarr/visitas.js';
 import { generarExcelVisitas, COLUMNAS_VISITAS } from '../src/selector-ioarr/excel-visitas.js';
 
 const D = prep(JSON.parse(readFileSync(new URL('../src/public/data/selector-ioarr/2025/moquegua.json', import.meta.url), 'utf8')));
@@ -169,4 +169,56 @@ test('tramosRutaDia: más de 10 colegios se parten en tramos; uno solo va sin pa
   const [uno] = tramosRutaDia([{ cod: 'X', lat: -12, lon: -77 }]);
   assert.equal(new URL(uno.url).searchParams.get('waypoints'), null);
   assert.deepEqual(tramosRutaDia([{ cod: 'S', lat: null, lon: null }]), []);
+});
+
+// ─── Visitas de campo: desde la ubicación y con distancia máxima ────────────
+const hv = (a, b) => haversine(a.lat, a.lon, b.lat, b.lon);
+const diametro = ps => Math.max(0, ...ps.flatMap(a => ps.map(b => hv(a, b))));
+const ciento = cercanos(D, filtrar(D, C, FILTRO_VACIO()), centroDistrito(D, D.dists.findIndex(d => d[0] === 'Moquegua')), 120).idx;
+
+test('limitarMaxKm: por defecto 10, 0 = sin límite, entre 1 y 500', () => {
+  assert.equal(limitarMaxKm(''), 10); assert.equal(limitarMaxKm('x'), 10); assert.equal(limitarMaxKm(-3), 10);
+  assert.equal(limitarMaxKm(0), 0); assert.equal(limitarMaxKm(0.4), 1); assert.equal(limitarMaxKm(900), 500); assert.equal(limitarMaxKm('15'), 15);
+});
+
+test('con origen: el día 1 empieza en el colegio más cercano y los días se van alejando', () => {
+  const { puntos } = puntosVisita(D, C, ciento);
+  for (const o of [puntos[37], puntos[90], { lat: puntos[5].lat + 0.01, lon: puntos[5].lon }]) {
+    const dias = agruparVisitas(puntos, 6, { origen: o, maxKm: 10 });
+    const masCerca = Math.min(...puntos.map(p => hv(o, p)));
+    assert.ok(Math.abs(hv(o, dias[0].puntos[0]) - masCerca) < 1e-9, 'el primer colegio es el más cercano al origen');
+    // en promedio, la primera mitad de los días queda más cerca del origen que la segunda
+    const lejania = d => d.puntos.reduce((a, p) => a + hv(o, p), 0) / d.puntos.length;
+    const mitad = dias.length >> 1, prom = ds => ds.reduce((a, d) => a + lejania(d), 0) / ds.length;
+    assert.ok(prom(dias.slice(0, mitad)) < prom(dias.slice(mitad)));
+  }
+});
+
+test('distancia máxima: ningún día pasa el tope; los días pueden tener menos colegios', () => {
+  const { puntos } = puntosVisita(D, C, ciento);
+  for (const km of [5, 10, 15]) {
+    const dias = agruparVisitas(puntos, 6, { origen: puntos[0], maxKm: km });
+    for (const d of dias) { assert.ok(diametro(d.puntos) <= km + 1e-9, `día ${d.dia} con ${km} km`); assert.ok(d.puntos.length <= 6); }
+    assert.equal(dias.reduce((a, d) => a + d.puntos.length, 0), puntos.length, 'cada colegio una vez');
+  }
+});
+
+test('días compactos: con 120 colegios de a 6 y 10 km, la mitad de los días cabe en menos de 3 km', () => {
+  const { puntos } = puntosVisita(D, C, ciento);
+  const ds = agruparVisitas(puntos, 6, { origen: puntos[0], maxKm: 10 }).map(d => diametro(d.puntos)).sort((a, b) => a - b);
+  assert.ok(ds[ds.length >> 1] < 3, `mediana ${ds[ds.length >> 1]}`);
+});
+
+test('compactar: un colegio suelto vuelve al día de su zona', () => {
+  // dos zonas de 4 colegios; el armado desde el extremo las mezclaría sin los intercambios
+  const zona = (pref, lat, lon) => Array.from({ length: 4 }, (_, k) => ({ cod: pref + k, lat: lat + k * 0.002, lon }));
+  const a = zona('A', -17.0, -71.0), b = zona('B', -17.3, -71.0);
+  const dias = agruparVisitas([...a, ...b], 4, { origen: { lat: -17.15, lon: -71.0 } });
+  assert.deepEqual(dias.map(d => d.puntos.map(p => p.cod[0]).join('')).sort(), ['AAAA', 'BBBB']);
+});
+
+test('el worker de campo pasa el origen y la distancia máxima', () => {
+  const js = readFileSync(new URL('../src/public/selector-ioarr-worker.js', import.meta.url), 'utf8');
+  assert.match(js, /visitas\(\{ porDia, maxKm, origen \}\)/);
+  assert.match(js, /agruparVisitas\(puntos, porDia, \{ maxKm, origen \}\)/);
 });
