@@ -22,9 +22,21 @@ export function destinatarios(to) {
   return [...new Set(lista)];
 }
 
+// Remitente limpio: sin espacios ni saltos de línea sobrantes, sin comillas alrededor (en Render el valor
+// se guarda tal cual) y con < > aunque se hayan copiado como « » o ‹ ›
+export function limpiarRemitente(v) {
+  let s = String(v ?? '').replace(/[\r\n\t]+/g, ' ').trim();
+  while (/^(["'`“”‘’]).*\1$|^[“‘].*[”’]$/.test(s) && s.length > 1) s = s.slice(1, -1).trim();
+  s = s.replace(/[«‹]/g, '<').replace(/[»›]/g, '>').replace(/\s+/g, ' ');
+  return s;
+}
+// email@dominio o Nombre <email@dominio>
+export const remitenteValido = s => /^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(s) || /^[^<>]*<[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+>$/.test(s);
+
 async function porResend({ to, subject, html }, env, fetchImpl) {
-  const from = env.MAIL_FROM;
+  const from = limpiarRemitente(env.MAIL_FROM);
   if (!from) throw new Error('Falta MAIL_FROM: el remitente de un dominio verificado en Resend (p. ej. «Radar Ibero <radar@tu-dominio.com>»)');
+  if (!remitenteValido(from)) throw new Error(`MAIL_FROM no tiene el formato de remitente: se recibió ${JSON.stringify(String(env.MAIL_FROM))}. Debe ser, sin comillas: Radar Ibero <radar@tu-dominio.com>`);
   const ids = [];
   // Más de 50 destinatarios: un correo por grupo de 50
   for (let i = 0; i < to.length; i += MAX_DESTINATARIOS) {
@@ -48,7 +60,7 @@ async function porSmtp({ to, subject, html }, env) {
     auth: { user: env.SMTP_USER, pass: env.SMTP_PASS },
     connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 15000
   });
-  const info = await transport.sendMail({ from: env.MAIL_FROM || env.SMTP_USER, to: to.join(','), subject, html });
+  const info = await transport.sendMail({ from: limpiarRemitente(env.MAIL_FROM) || env.SMTP_USER, to: to.join(','), subject, html });
   return { proveedor: 'smtp', messageId: info.messageId || null };
 }
 
