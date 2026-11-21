@@ -194,3 +194,9 @@ body.ficha-abierta{ overflow:hidden; }
 /* Avance del plan de hoy */
 .visitas-avance{ margin:0 0 8px; font-size:14px; }
 .dia-ya{ opacity:.85; }
+.dia-luego > summary{ cursor:pointer; list-style:none; flex-wrap:wrap; }
+.dia-luego > summary::-webkit-details-marker{ display:none; }
+.dia-luego > summary::before{ content:'▸'; color:var(--accent, #4a5cf0); }
+.dia-luego[open] > summary::before{ content:'▾'; }
+.dia-luego .ver{ font-family:var(--font-body, inherit); font-size:13px; font-weight:600; color:var(--accent, #4a5cf0); }
+.dia-luego[open] .ver{ display:none; }
