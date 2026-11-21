@@ -636,17 +636,19 @@ function pintarLista() {
   if (!S.near) { $('cLista').innerHTML = '<p class="sub lst-vacio">Aún no hay búsqueda. Usa tu ubicación, elige un distrito o escribe un código de local.</p>'; return; }
   const opts = { extra: extraItem };
   if (!S.vis) { $('cLista').innerHTML = htmlListado(S.filas, opts); return; }
-  // Agrupado por día: cada día en su orden de visita, con los datos completos del listado
-  const porCod = new Map(S.filas.map(f => [f.cod, f])), total = S.vis.dias.length;
-  // Los visitados antes de armar el plan no entran a los días: van al final
+  // Plan de hoy: solo el día de hoy, en su orden de visita. Los demás pendientes no se reparten en
+  // días (el plan se arma de nuevo cada día): van en «Para los próximos días», de los más cercanos a los más lejanos
+  const porCod = new Map(S.filas.map(f => [f.cod, f]));
+  const [hoy, ...resto] = S.vis.dias, luego = resto.flatMap(d => d.puntos);
+  // Los visitados antes de armar el plan no entran: van al final
   const enPlan = new Set([...S.vis.dias.flatMap(d => d.puntos), ...S.vis.sinCoord].map(p => p.cod));
   const ya = S.visitas ? S.filas.filter(f => S.visitas[f.cod] && !enPlan.has(f.cod)) : [];
-  $('cLista').innerHTML = S.vis.dias.map(d => {
-    const rep = d.puntos.reduce((a, p) => a + p.rep, 0), nv = visitados(d.puntos);
-    return `<h3 class="dia-titulo" style="--c:${colorDia(d.dia, total)}"><span class="sw"></span>Día ${d.dia}${d.dia === 1 ? ' · hoy' : ''} <span class="sub">${plural(d.puntos.length, 'colegio', 'colegios')}${nv ? ` (${fmt(nv)} ${nv === 1 ? 'visitado' : 'visitados'})` : ''} · ~${fmtKm(d.km)} km · ${fmt(rep)} a reponer</span></h3>
-      ${botonesRuta(d)}
-      <ol class="lst">${d.puntos.map(p => itemListado({ ...porCod.get(p.cod), orden: p.orden, km: null }, { ...opts, numero: x => x.orden })).join('')}</ol>`;
-  }).join('') + (S.vis.sinCoord.length ? `<h3 class="dia-titulo">Sin coordenadas</h3><ol class="lst">${S.vis.sinCoord.map(p => itemListado({ ...porCod.get(p.cod), km: null }, { ...opts, numero: () => '–' })).join('')}</ol>` : '')
+  const rep = hoy.puntos.reduce((a, p) => a + p.rep, 0), nv = visitados(hoy.puntos);
+  $('cLista').innerHTML = `<h3 class="dia-titulo" style="--c:${colorDia(1, 1)}"><span class="sw"></span>Hoy <span class="sub">${plural(hoy.puntos.length, 'colegio', 'colegios')}${nv ? ` (${fmt(nv)} ${nv === 1 ? 'visitado' : 'visitados'})` : ''} · ~${fmtKm(hoy.km)} km · ${fmt(rep)} a reponer</span></h3>
+      ${botonesRuta(hoy)}
+      <ol class="lst">${hoy.puntos.map(p => itemListado({ ...porCod.get(p.cod), orden: p.orden, km: null }, { ...opts, numero: x => x.orden })).join('')}</ol>`
+    + (luego.length ? `<details class="dia-luego"><summary class="dia-titulo">Para los próximos días <span class="sub">${plural(luego.length, 'colegio pendiente', 'colegios pendientes')}: mañana se arma el plan del día con ellos</span> <span class="ver">Ver</span></summary><ol class="lst">${luego.map(p => itemListado({ ...porCod.get(p.cod), km: null }, { ...opts, numero: () => '–' })).join('')}</ol></details>` : '')
+    + (S.vis.sinCoord.length ? `<h3 class="dia-titulo">Sin coordenadas</h3><ol class="lst">${S.vis.sinCoord.map(p => itemListado({ ...porCod.get(p.cod), km: null }, { ...opts, numero: () => '–' })).join('')}</ol>` : '')
     + (ya.length ? `<h3 class="dia-titulo dia-ya">Ya visitados <span class="sub">${plural(ya.length, 'colegio', 'colegios')}: no entran al plan</span></h3><ol class="lst">${ya.map(f => itemListado({ ...f, km: null }, { ...opts, numero: () => '✓' })).join('')}</ol>` : '');
 }
 // «Ruta del día en Google Maps»: un enlace, o uno por tramo si el día pasa de 10 colegios
@@ -661,15 +663,15 @@ function botonesRuta(d) {
 function pintarVisitas() {
   const V = S.vis;
   $('cVisRes').hidden = !V; $('cDesagrupar').hidden = !V;
-  $('cAgrupar').textContent = V ? 'Volver a agrupar' : 'Agrupar por días';
+  $('cAgrupar').textContent = V ? 'Rehacer el plan de hoy' : 'Armar el plan de hoy';
   $('cAgrupar').disabled = !S.filas.length;
   $('cVisNota').hidden = !(S.planViejo && !V);
   if (!V) return;
-  const n = V.dias.reduce((a, d) => a + d.puntos.length, 0), A = avance();
-  $('cVisAvance').innerHTML = `<b>Pendientes: ${fmt(A.pend)}</b> de ${fmt(A.total)}${A.vis ? ` · ${fmt(A.vis)} ${A.vis === 1 ? 'visitado' : 'visitados'}` : ''} · el plan de hoy tiene <b>${plural(V.dias.length, 'día', 'días')}</b> de hasta ${fmt(V.porDia)}.`;
-  const lim = V.maxKm ? `, con no más de ${fmt(V.maxKm)} km entre dos colegios del mismo día` : '';
-  const desde = V.desde ? ` El día 1 empieza en el colegio más cercano ${esc(aCentro(V.desde))} y los días siguientes se van alejando.` : '';
-  $('cVisAviso').innerHTML = `<b>${fmt(n)}</b> ${n === 1 ? 'colegio' : 'colegios'} en <b>${fmt(V.dias.length)}</b> ${V.dias.length === 1 ? 'día' : 'días'} de hasta ${fmt(V.porDia)}${lim}.${desde} ${esc(AVISO_VISITAS)} El listado de abajo queda ordenado por día y parada, con la ruta de cada día en Google Maps. Los colegios ya visitados no entran a los días. El plan queda guardado en este equipo hasta el final del día; se rehace con «Volver a agrupar», al cambiar el centro o mañana, con los colegios que falten.`;
+  const A = avance(), hoy = V.dias[0], quedan = V.dias.length - 1;
+  $('cVisAvance').innerHTML = `<b>Pendientes: ${fmt(A.pend)}</b> de ${fmt(A.total)}${A.vis ? ` · ${fmt(A.vis)} ${A.vis === 1 ? 'visitado' : 'visitados'}` : ''} · <b>hoy: ${plural(hoy.puntos.length, 'colegio', 'colegios')}</b>${quedan ? ` · a este ritmo faltan unos ${plural(quedan, 'día', 'días')} más` : ''}.`;
+  const lim = V.maxKm ? ` y con no más de ${fmt(V.maxKm)} km entre dos de ellos` : '';
+  const desde = V.desde ? `, empezando por el más cercano ${esc(aCentro(V.desde))}` : '';
+  $('cVisAviso').innerHTML = `El plan de hoy tiene hasta ${fmt(V.porDia)} colegios cercanos entre sí${lim}${desde}, en una ruta aproximada. ${esc(AVISO_VISITAS)} Queda guardado en este equipo hasta el final del día: marcar visitas o recargar no lo cambia. Mañana se arma de nuevo con los colegios que falten (los visitados no entran; el que no alcanzaste entra solo). También se rehace con «Rehacer el plan de hoy» o al cambiar el centro.`;
 }
 
 async function asegurarMapa() {
@@ -691,7 +693,7 @@ async function pintarMapa(ajustar) {
   $('cBase').hidden = false;
   m.modoElegir(S.pick);
   if (S.vis) {
-    m.pintarVisitas(S.vis.dias, 0, ajustar);
+    m.pintarVisitas(S.vis.dias.slice(0, 1), 0, ajustar);   // solo el día de hoy
     $('cMapaInfo').textContent = 'Número = orden de visita; línea punteada = ruta aproximada.';
   } else {
     const P = S.near ? await w('puntos') : { puntos: [], centro: null };
