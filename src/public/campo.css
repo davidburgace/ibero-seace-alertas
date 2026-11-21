@@ -191,3 +191,6 @@ body.ficha-abierta{ overflow:hidden; }
 /* Supervisor sin colegios asignados: solo el aviso */
 .sin-colegios .campo-grid, .sin-colegios .campo-filtros, .sin-colegios .campo-buscar .filtros-bar,
 .sin-colegios #cVisitas, .sin-colegios .vista-tabs, .sin-colegios #cCuerpo{ display:none !important; }
+/* Avance del plan de hoy */
+.visitas-avance{ margin:0 0 8px; font-size:14px; }
+.dia-ya{ opacity:.85; }

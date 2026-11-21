@@ -82,6 +82,7 @@ const S = {
   fichas: null,             // fichas llenadas en la app del proyecto: { códigoLocal: { estado, estado_texto, nota, … } }; null = no disponible
   enEquipo: {},             // fichas del proyecto guardadas en este equipo para usar sin señal: { códigoLocal: bajada_en }
   sinSenalDesde: null,      // sin señal: hora de los datos guardados que se están mostrando
+  planViejo: false,         // había un plan guardado de otro día: se pide armar el de hoy
   mapa: null, mapaCreando: null, mapaFalla: false, pick: false, vista: 'lista'
 };
 
@@ -195,6 +196,7 @@ async function aplicarVer() {
   const c = await w('centro', { proyecto: P.nombre });
   if (c.error) { $('cInfo').textContent = c.error; pintarTodo(true); return; }
   await buscar(c);
+  restaurarPlan();
 }
 
 // «Actualizar listado»: con todo el proyecto, la misma búsqueda (mismo centro); filtrado, el filtro de nuevo
@@ -475,7 +477,7 @@ async function cambiarVisita(cod, marcar, boton) {
     // El listado no cambia hasta la próxima búsqueda (así no se reordenan los días); la próxima ya omite los visitados
     await omitirVisitados();
     toast(marcar ? `${nom}: visitado el ${fechaPe(r.fecha)}.` : `${nom}: visita desmarcada.`);
-    pintarLista(); pintarInfoVisitas();
+    pintarLista(); pintarInfoVisitas(); pintarVisitas();
   } catch (e) { toast(`No se pudo ${marcar ? 'marcar' : 'desmarcar'} la visita: ${e.message}`); boton.disabled = false; }
 }
 function pintarInfoVisitas() {
@@ -588,14 +590,42 @@ function usarUbicacion() {
 }
 
 // ─── Días de visita ─────────────────────────────────────────────────────────
+// Plan de hoy: los días se arman solo con los colegios pendientes (los visitados quedan fuera) y el
+// día 1 es hoy. Se guarda en este equipo por usuario y proyecto, y vale hasta que termina el día:
+// así no cambia si se recarga la página. Se rehace al pulsar «Volver a agrupar», al cambiar el centro
+// («Usar mi ubicación», distrito, local o mapa) o al día siguiente.
+const hoyLima = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Lima' }).format(new Date());
+const clavePlan = () => S.proy ? `plan:${S.yo || 'yo'}:${S.proy.id}:${S.ver}` : null;
 async function agrupar(pintar = true) {
   const porDia = limitarPorDia($('cPorDia').value); $('cPorDia').value = porDia; store('porDia', porDia);
   const maxKm = limitarMaxKm($('cMaxKm').value); $('cMaxKm').value = maxKm; store('maxKm', maxKm);
   // El día 1 empieza en el colegio más cercano al centro de la búsqueda (la ubicación, si se usó)
   const origen = S.near ? { lat: S.near.lat, lon: S.near.lon } : null;
-  const R = await w('visitas', { porDia, maxKm, origen });
-  S.vis = { porDia, maxKm, dias: R.dias, sinCoord: R.sinCoord, desde: S.near?.label || '' };
+  const excluir = S.visitas ? Object.keys(S.visitas) : [];
+  const R = await w('visitas', { porDia, maxKm, origen, excluir });
+  S.vis = { porDia, maxKm, dias: R.dias, sinCoord: R.sinCoord, desde: S.near?.label || '', fecha: hoyLima() };
+  S.planViejo = false;
+  const k = clavePlan(); if (k) store(k, S.vis);
   if (pintar) pintarTodo(true);
+}
+// Al abrir el proyecto: el plan de hoy guardado, si hay (sin los colegios que ya no están en el listado)
+function restaurarPlan() {
+  const k = clavePlan(), P = k ? store(k) : null;
+  S.planViejo = false;
+  if (!P?.dias) return false;
+  if (P.fecha !== hoyLima()) { S.planViejo = true; store(k, null); pintarVisitas(); return false; }
+  const hay = new Set(S.filas.map(f => f.cod));
+  const dias = P.dias.map(d => ({ ...d, puntos: d.puntos.filter(p => hay.has(p.cod)) })).filter(d => d.puntos.length).map((d, i) => ({ ...d, dia: i + 1 }));
+  if (!dias.length) return false;
+  S.vis = { ...P, dias, sinCoord: (P.sinCoord || []).filter(p => hay.has(p.cod)) };
+  pintarTodo(true);
+  return true;
+}
+// Avance: colegios pendientes del proyecto (o del listado, sin proyecto)
+function avance() {
+  const cods = S.proy ? (codigosVer() || []) : S.filas.map(f => f.cod);
+  const vis = S.visitas ? cods.filter(c => S.visitas[c]).length : 0;
+  return { total: cods.length, vis, pend: cods.length - vis };
 }
 
 // ─── Pintar ──────────────────────────────────────────────────────────────────
@@ -608,12 +638,16 @@ function pintarLista() {
   if (!S.vis) { $('cLista').innerHTML = htmlListado(S.filas, opts); return; }
   // Agrupado por día: cada día en su orden de visita, con los datos completos del listado
   const porCod = new Map(S.filas.map(f => [f.cod, f])), total = S.vis.dias.length;
+  // Los visitados antes de armar el plan no entran a los días: van al final
+  const enPlan = new Set([...S.vis.dias.flatMap(d => d.puntos), ...S.vis.sinCoord].map(p => p.cod));
+  const ya = S.visitas ? S.filas.filter(f => S.visitas[f.cod] && !enPlan.has(f.cod)) : [];
   $('cLista').innerHTML = S.vis.dias.map(d => {
     const rep = d.puntos.reduce((a, p) => a + p.rep, 0), nv = visitados(d.puntos);
-    return `<h3 class="dia-titulo" style="--c:${colorDia(d.dia, total)}"><span class="sw"></span>Día ${d.dia} <span class="sub">${plural(d.puntos.length, 'colegio', 'colegios')}${nv ? ` (${fmt(nv)} ${nv === 1 ? 'visitado' : 'visitados'})` : ''} · ~${fmtKm(d.km)} km · ${fmt(rep)} a reponer</span></h3>
+    return `<h3 class="dia-titulo" style="--c:${colorDia(d.dia, total)}"><span class="sw"></span>Día ${d.dia}${d.dia === 1 ? ' · hoy' : ''} <span class="sub">${plural(d.puntos.length, 'colegio', 'colegios')}${nv ? ` (${fmt(nv)} ${nv === 1 ? 'visitado' : 'visitados'})` : ''} · ~${fmtKm(d.km)} km · ${fmt(rep)} a reponer</span></h3>
       ${botonesRuta(d)}
       <ol class="lst">${d.puntos.map(p => itemListado({ ...porCod.get(p.cod), orden: p.orden, km: null }, { ...opts, numero: x => x.orden })).join('')}</ol>`;
-  }).join('') + (S.vis.sinCoord.length ? `<h3 class="dia-titulo">Sin coordenadas</h3><ol class="lst">${S.vis.sinCoord.map(p => itemListado({ ...porCod.get(p.cod), km: null }, { ...opts, numero: () => '–' })).join('')}</ol>` : '');
+  }).join('') + (S.vis.sinCoord.length ? `<h3 class="dia-titulo">Sin coordenadas</h3><ol class="lst">${S.vis.sinCoord.map(p => itemListado({ ...porCod.get(p.cod), km: null }, { ...opts, numero: () => '–' })).join('')}</ol>` : '')
+    + (ya.length ? `<h3 class="dia-titulo dia-ya">Ya visitados <span class="sub">${plural(ya.length, 'colegio', 'colegios')}: no entran al plan</span></h3><ol class="lst">${ya.map(f => itemListado({ ...f, km: null }, { ...opts, numero: () => '✓' })).join('')}</ol>` : '');
 }
 // «Ruta del día en Google Maps»: un enlace, o uno por tramo si el día pasa de 10 colegios
 function botonesRuta(d) {
@@ -629,11 +663,13 @@ function pintarVisitas() {
   $('cVisRes').hidden = !V; $('cDesagrupar').hidden = !V;
   $('cAgrupar').textContent = V ? 'Volver a agrupar' : 'Agrupar por días';
   $('cAgrupar').disabled = !S.filas.length;
+  $('cVisNota').hidden = !(S.planViejo && !V);
   if (!V) return;
-  const n = V.dias.reduce((a, d) => a + d.puntos.length, 0);
+  const n = V.dias.reduce((a, d) => a + d.puntos.length, 0), A = avance();
+  $('cVisAvance').innerHTML = `<b>Pendientes: ${fmt(A.pend)}</b> de ${fmt(A.total)}${A.vis ? ` · ${fmt(A.vis)} ${A.vis === 1 ? 'visitado' : 'visitados'}` : ''} · el plan de hoy tiene <b>${plural(V.dias.length, 'día', 'días')}</b> de hasta ${fmt(V.porDia)}.`;
   const lim = V.maxKm ? `, con no más de ${fmt(V.maxKm)} km entre dos colegios del mismo día` : '';
   const desde = V.desde ? ` El día 1 empieza en el colegio más cercano ${esc(aCentro(V.desde))} y los días siguientes se van alejando.` : '';
-  $('cVisAviso').innerHTML = `<b>${fmt(n)}</b> ${n === 1 ? 'colegio' : 'colegios'} en <b>${fmt(V.dias.length)}</b> ${V.dias.length === 1 ? 'día' : 'días'} de hasta ${fmt(V.porDia)}${lim}.${desde} ${esc(AVISO_VISITAS)} El listado de abajo queda ordenado por día y parada, con la ruta de cada día en Google Maps.`;
+  $('cVisAviso').innerHTML = `<b>${fmt(n)}</b> ${n === 1 ? 'colegio' : 'colegios'} en <b>${fmt(V.dias.length)}</b> ${V.dias.length === 1 ? 'día' : 'días'} de hasta ${fmt(V.porDia)}${lim}.${desde} ${esc(AVISO_VISITAS)} El listado de abajo queda ordenado por día y parada, con la ruta de cada día en Google Maps. Los colegios ya visitados no entran a los días. El plan queda guardado en este equipo hasta el final del día; se rehace con «Volver a agrupar», al cambiar el centro o mañana, con los colegios que falten.`;
 }
 
 async function asegurarMapa() {
@@ -740,7 +776,7 @@ function bind() {
   $('cAgrupar').onclick = () => agrupar(true);
   $('cPorDia').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); agrupar(true); } });
   $('cMaxKm').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); agrupar(true); } });
-  $('cDesagrupar').onclick = () => { S.vis = null; pintarTodo(true); };
+  $('cDesagrupar').onclick = () => { S.vis = null; const k = clavePlan(); if (k) store(k, null); pintarTodo(true); };
   filtrosSum();
 }
 

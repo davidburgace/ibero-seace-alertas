@@ -150,8 +150,10 @@ const acciones = {
   },
 
   // Días de visita de la selección (sin los excluidos por otra inversión)
-  visitas({ porDia, maxKm, origen }) {
-    const todos = selIdx(), list = todos.filter(i => !excl.has(D.locs[i][0]));
+  // excluir: códigos que no entran a los días (Visitas de campo: los ya visitados)
+  visitas({ porDia, maxKm, origen, excluir }) {
+    const fuera = excluir?.length ? new Set(excluir) : null;
+    const todos = selIdx(), list = todos.filter(i => !excl.has(D.locs[i][0]) && !fuera?.has(D.locs[i][0]));
     const { puntos, sinCoord } = puntosVisita(D, C, list);
     const sinI = ({ i, ...p }) => p;
     return { dias: agruparVisitas(puntos, porDia, { maxKm, origen }).map(d => ({ ...d, puntos: d.puntos.map(sinI) })), sinCoord: sinCoord.map(sinI),

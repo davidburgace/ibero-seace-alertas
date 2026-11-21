@@ -217,8 +217,9 @@ test('compactar: un colegio suelto vuelve al día de su zona', () => {
   assert.deepEqual(dias.map(d => d.puntos.map(p => p.cod[0]).join('')).sort(), ['AAAA', 'BBBB']);
 });
 
-test('el worker de campo pasa el origen y la distancia máxima', () => {
+test('el worker de campo pasa el origen y la distancia máxima, y deja fuera los visitados', () => {
   const js = readFileSync(new URL('../src/public/selector-ioarr-worker.js', import.meta.url), 'utf8');
-  assert.match(js, /visitas\(\{ porDia, maxKm, origen \}\)/);
+  assert.match(js, /visitas\(\{ porDia, maxKm, origen, excluir \}\)/);
+  assert.match(js, /!fuera\?\.has\(D\.locs\[i\]\[0\]\)/);
   assert.match(js, /agruparVisitas\(puntos, porDia, \{ maxKm, origen \}\)/);
 });
