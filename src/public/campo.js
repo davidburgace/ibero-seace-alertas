@@ -347,7 +347,9 @@ function extraFicha(f) {
   const equipo = S.enEquipo[f.cod] ? ' <span class="sub" title="Se puede abrir sin señal">· 📥 en el equipo</span>' : '';
   const chip = !x ? (equipo ? `<div class="lst-ficha">${equipo}</div>` : '') : `<div class="lst-ficha"><span class="chip-est ${x.estado === 'aprobada' ? 'ok' : x.estado === 'observada' ? 'alerta' : x.estado === 'enviada' ? 'pend' : ''}">Ficha: ${esc(x.estado_texto)}</span>${x.estado === 'observada' && x.nota ? ` <span class="sub">${esc(x.nota)}</span>` : ''}${equipo}</div>`;
   const primario = !x || x.estado === 'borrador' || x.estado === 'observada';
-  return { cuerpo: chip, acc: `<button class="btn ${primario ? 'btn-primary' : 'btn-ghost'} btn-sm" type="button" data-ficha="${esc(f.cod)}" aria-label="Ficha de verificación de ${esc(f.nom)}">${x ? BOTON_FICHA[x.estado] : 'Llenar ficha'}</button>` };
+  // La ficha en blanco en PDF, para llevarla impresa
+  const imprimir = `<div class="lst-imprimir"><button class="btn-link" type="button" data-imprimir="${esc(f.cod)}" aria-label="Ficha para imprimir de ${esc(f.nom)}">🖨 Ficha para imprimir (PDF)</button></div>`;
+  return { cuerpo: chip + imprimir, acc: `<button class="btn ${primario ? 'btn-primary' : 'btn-ghost'} btn-sm" type="button" data-ficha="${esc(f.cod)}" aria-label="Ficha de verificación de ${esc(f.nom)}">${x ? BOTON_FICHA[x.estado] : 'Llenar ficha'}</button>` };
 }
 function abrirFichaDe(cod) {
   abrirFicha({ proyecto: S.proy, cod, toast, alCambiar: (c, ficha) => {
@@ -645,20 +647,39 @@ function pintarLista() {
   const ya = S.visitas ? S.filas.filter(f => S.visitas[f.cod] && !enPlan.has(f.cod)) : [];
   const rep = hoy.puntos.reduce((a, p) => a + p.rep, 0), nv = visitados(hoy.puntos);
   $('cLista').innerHTML = `<h3 class="dia-titulo" style="--c:${colorDia(1, 1)}"><span class="sw"></span>Hoy <span class="sub">${plural(hoy.puntos.length, 'colegio', 'colegios')}${nv ? ` (${fmt(nv)} ${nv === 1 ? 'visitado' : 'visitados'})` : ''} · ~${fmtKm(hoy.km)} km · ${fmt(rep)} a reponer</span></h3>
-      ${botonesRuta(hoy)}
+      ${botonesRuta(hoy, S.proy ? `<button class="btn btn-ghost btn-sm" type="button" id="cImprimirHoy">🖨 Imprimir las fichas de hoy (PDF)</button>` : '')}
       <ol class="lst">${hoy.puntos.map(p => itemListado({ ...porCod.get(p.cod), orden: p.orden, km: null }, { ...opts, numero: x => x.orden })).join('')}</ol>`
     + (luego.length ? `<details class="dia-luego"><summary class="dia-titulo">Para los próximos días <span class="sub">${plural(luego.length, 'colegio pendiente', 'colegios pendientes')}: mañana se arma el plan del día con ellos</span> <span class="ver">Ver</span></summary><ol class="lst">${luego.map(p => itemListado({ ...porCod.get(p.cod), km: null }, { ...opts, numero: () => '–' })).join('')}</ol></details>` : '')
     + (S.vis.sinCoord.length ? `<h3 class="dia-titulo">Sin coordenadas</h3><ol class="lst">${S.vis.sinCoord.map(p => itemListado({ ...porCod.get(p.cod), km: null }, { ...opts, numero: () => '–' })).join('')}</ol>` : '')
     + (ya.length ? `<h3 class="dia-titulo dia-ya">Ya visitados <span class="sub">${plural(ya.length, 'colegio', 'colegios')}: no entran al plan</span></h3><ol class="lst">${ya.map(f => itemListado({ ...f, km: null }, { ...opts, numero: () => '✓' })).join('')}</ol>` : '');
 }
 // «Ruta del día en Google Maps»: un enlace, o uno por tramo si el día pasa de 10 colegios
-function botonesRuta(d) {
+function botonesRuta(d, extra = '') {
   const tramos = tramosRutaDia(d.puntos);
-  if (!tramos.length) return '';
+  if (!tramos.length) return extra ? `<div class="dia-ruta">${extra}</div>` : '';
   const enlace = (t, texto) => `<a class="btn btn-primary btn-sm" href="${esc(t.url)}" target="_blank" rel="noopener" aria-label="${esc(texto)} del día ${d.dia} en Google Maps">${esc(texto)}</a>`;
   return `<div class="dia-ruta">${tramos.length === 1
     ? enlace(tramos[0], 'Ruta del día en Google Maps')
-    : `<span class="sub">Ruta en Google Maps, por tramos:</span> ${tramos.map(t => enlace(t, `Paradas ${t.desde}–${t.hasta}`)).join('')}`}</div>`;
+    : `<span class="sub">Ruta en Google Maps, por tramos:</span> ${tramos.map(t => enlace(t, `Paradas ${t.desde}–${t.hasta}`)).join('')}`}${extra}</div>`;
+}
+
+// Fichas en blanco en un solo PDF (en el orden de la ruta), para imprimir. Se descarga con su nombre
+// (en tablets y celulares el navegador no siempre muestra el PDF: se abre desde Descargas)
+async function imprimirFichas(cods, boton) {
+  if (!S.proy || !cods.length) return;
+  const txt = boton.textContent;
+  boton.disabled = true; boton.textContent = cods.length > 1 ? `Armando ${fmt(cods.length)} fichas…` : 'Armando la ficha…';
+  try {
+    const r = await fetch(`/api/campo/proyectos/${encodeURIComponent(S.proy.id)}/fichas-pdf?codigos=${encodeURIComponent(cods.join(','))}`);
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || 'error ' + r.status);
+    const blob = await r.blob(), cd = r.headers.get('Content-Disposition') || '';
+    const nombre = decodeURIComponent((cd.match(/filename\*=UTF-8''([^;]+)/) || [])[1] || 'Fichas_verificacion.pdf');
+    const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: nombre });
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 120000);
+    toast(`Se bajó ${nombre}: ábrelo desde Descargas para imprimirlo.`);
+  } catch (e) {
+    toast(e instanceof TypeError ? 'Sin señal: las fichas para imprimir se bajan con conexión.' : `No se pudieron armar las fichas: ${e.message}`);
+  } finally { boton.disabled = false; boton.textContent = txt; }
 }
 function pintarVisitas() {
   const V = S.vis;
@@ -768,6 +789,9 @@ function bind() {
   $('cLista').addEventListener('click', async e => {
     const bf = e.target.closest('[data-ficha]');
     if (bf) { abrirFichaDe(bf.dataset.ficha); return; }
+    const bi = e.target.closest('[data-imprimir]');
+    if (bi) { imprimirFichas([bi.dataset.imprimir], bi); return; }
+    if (e.target.id === 'cImprimirHoy') { imprimirFichas(S.vis?.dias[0]?.puntos.map(p => p.cod) || [], e.target); return; }
     const bv = e.target.closest('[data-visita],[data-desmarcar]');
     if (bv) { cambiarVisita(bv.dataset.visita || bv.dataset.desmarcar, !!bv.dataset.visita, bv); return; }
     const b = e.target.closest('[data-vermapa]'); if (!b) return;

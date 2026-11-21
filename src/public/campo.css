@@ -200,3 +200,4 @@ body.ficha-abierta{ overflow:hidden; }
 .dia-luego[open] > summary::before{ content:'▾'; }
 .dia-luego .ver{ font-family:var(--font-body, inherit); font-size:13px; font-weight:600; color:var(--accent, #4a5cf0); }
 .dia-luego[open] .ver{ display:none; }
+.lst-imprimir{ margin-top:4px; font-size:13px; }

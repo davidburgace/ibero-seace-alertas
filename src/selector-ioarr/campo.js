@@ -7,6 +7,8 @@
 // Reparto entre supervisores (migración 022, tabla campo_asignaciones; solo el proveedor dueño del proyecto):
 //   GET /api/campo/supervisores                  → [{ id, email }] los usuarios con rol supervisor
 //   PUT /api/campo/proyectos/:id/asignaciones    { asignaciones: { códigoLocal: supervisorId | null }, reemplazar? }
+//   GET /api/campo/proyectos/:id/fichas-pdf?codigos=a,b  fichas en blanco de esos colegios en un solo PDF, en ese
+//       orden, para imprimir (el supervisor, solo de los suyos; hasta 50)
 //   GET /api/campo/proyectos/:id/fichas-zip      fichas de verificación (Excel y PDF) de los colegios del supervisor que
 //       las pide; el proveedor dueño, de todos (?paquete=<supervisorId>|sin para uno). Lo arma fichasZip (router.js)
 //       reemplazar = true: el reparto completo (borra el anterior); si no, cambia solo esos colegios (null = sin asignar)
@@ -46,7 +48,8 @@ import { limpiarFormulario, leerFichaDigital, estadosFichas, guardarFichaDigital
   esUuid as esUuidFoto, MAX_FOTOS_FICHA, MAX_FOTO, MIMES_FOTO, AVISO_MIGRACION_FOTOS,
   firmasFicha, leerFirmas, avisosFirmas, rutaFirma, CARGOS_FIRMA, MAX_FIRMA, AVISO_MIGRACION_FIRMAS, pdfFichaLlena, nombrePdfLlena } from './ficha-digital.js';
 import { BUCKET_EXPEDIENTE, mimeDe } from './archivos.js';
-import { BIENES_FICHA, RANGOS, FIRMAS, CRITERIOS, MAX_PUESTOS, TOLERANCIA } from './ficha.js';
+import { BIENES_FICHA, RANGOS, FIRMAS, CRITERIOS, MAX_PUESTOS, TOLERANCIA, generarFichaPdf } from './ficha.js';
+import { PDFDocument } from 'pdf-lib';
 
 // Lo que el formulario necesita saber de la ficha (src/public/campo-ficha.js)
 // La guía lleva solo los muebles que entran a la IOARR (los del modelo de la ficha)
@@ -462,6 +465,33 @@ export async function pdfFichaCampo(sb, usuario, proyectoId, cod, deps) {
   return { buffer: await pdfFichaLlena(sb, acc.p.id, cod, F, ficha), nombre: nombrePdfLlena(F) };
 }
 
+// ─── Fichas en blanco para imprimir (un solo PDF) ──────────────────────────
+// Las fichas de los colegios pedidos, en ese orden (el de la ruta de hoy), en un PDF: se abre y se
+// imprime de una vez. El supervisor, solo de sus colegios. deps.modelos(proyectoId, cods): los modelos
+export const MAX_FICHAS_PDF = 50;
+export async function fichasParaImprimir(sb, usuario, proyectoId, pedido, deps) {
+  const p = await proyectoCampo(sb, usuario, proyectoId);
+  if (!p) return { status: 404, error: 'Proyecto no encontrado' };
+  const del = new Set(p.locales);
+  const cods = [...new Set(String(pedido || '').split(',').map(c => c.trim()).filter(c => del.has(c)))];
+  if (!cods.length) return { status: 400, error: usuario.rol === 'supervisor' ? 'Elige colegios que estén asignados a ti' : 'Elige los colegios del proyecto' };
+  if (cods.length > MAX_FICHAS_PDF) return { status: 400, error: `Máximo ${MAX_FICHAS_PDF} fichas a la vez` };
+  const modelos = await deps.modelos(p.id, cods);
+  const pdf = await PDFDocument.create();
+  pdf.setTitle(`Fichas de verificación — ${p.nombre}`); pdf.setAuthor('Radar Ibero — Selector IOARR');
+  let n = 0;
+  for (const cod of cods) {
+    if (!modelos[cod]) continue;
+    const una = await PDFDocument.load(await generarFichaPdf(modelos[cod]));
+    for (const pag of await pdf.copyPages(una, una.getPageIndices())) pdf.addPage(pag);
+    n++;
+  }
+  if (!n) return { status: 400, error: 'Esos colegios no están en la propuesta del proyecto' };
+  const hoy = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Lima' }).format(new Date());
+  const nombre = n === 1 ? `Ficha_verificacion_${cods.find(c => modelos[c])}.pdf` : `Fichas_verificacion_${n}_colegios_${hoy}.pdf`;
+  return { buffer: Buffer.from(await pdf.save()), nombre, n };
+}
+
 // ─── Fichas al equipo (sin señal) ───────────────────────────────────────────
 export const MAX_FICHAS_EQUIPO = 300;
 export async function fichasParaEquipo(sb, usuario, proyectoId, pedido, deps) {
@@ -575,6 +605,17 @@ export function crearApiCampo(sb = supabase, deps = {}) {
     if (r.error) return { status: r.status, body: { error: r.error } };
     res.set({ 'Content-Type': 'application/pdf', 'Cache-Control': 'no-store', 'Content-Disposition': `attachment; filename="${r.nombre}"` }).send(r.buffer);
   }));
+
+  // ?codigos=a,b,c (en el orden de la ruta). Se descarga para imprimir
+  api.get('/proyectos/:id/fichas-pdf', async (req, res, next) => {
+    try {
+      if (!deps.fichas) return res.status(503).json({ error: 'Las fichas no están disponibles' });
+      const r = await fichasParaImprimir(sb, req.usuario, req.params.id, req.query.codigos, deps.fichas);
+      if (r.error) return res.status(r.status).json({ error: r.error });
+      res.set({ 'Content-Type': 'application/pdf', 'Cache-Control': 'no-store',
+        'Content-Disposition': `attachment; filename="${r.nombre}"; filename*=UTF-8''${encodeURIComponent(r.nombre)}` }).send(r.buffer);
+    } catch (e) { next(e); }
+  });
 
   api.get('/proyectos/:id/fichas-zip', async (req, res, next) => {
     try {
