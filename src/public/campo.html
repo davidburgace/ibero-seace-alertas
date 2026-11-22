@@ -88,6 +88,7 @@
         <span class="sub" id="cRepSuma" aria-live="polite"></span>
         <div class="acts">
           <button class="btn btn-ghost btn-sm" id="cRepIguales" type="button">Partes iguales</button>
+          <button class="btn btn-ghost btn-sm" id="cRepMapa" type="button" title="Cada supervisor con un color. Con cambios sin guardar, muestra cómo quedaría">Ver en el mapa</button>
           <button class="btn btn-primary" id="cRepartir" type="button">Repartir por zonas</button>
         </div>
       </div>
@@ -134,6 +135,10 @@
             <button type="button" class="chip" data-ver="todos" aria-pressed="false">Todos</button>
           </div>
           <button class="btn btn-ghost btn-sm" id="cBase" type="button" hidden>Ver calles</button>
+        </div>
+        <div class="rep-mapa" id="cRepMapaBar" hidden>
+          <div class="rep-leyenda" id="cRepLeyenda"></div>
+          <button class="btn btn-ghost btn-sm" id="cRepMapaCerrar" type="button">Cerrar el reparto</button>
         </div>
         <p class="mapa-aviso" id="cAviso" hidden></p>
         <div class="mapa-locales" id="cMapa" role="region" aria-label="Mapa de los colegios"></div>
