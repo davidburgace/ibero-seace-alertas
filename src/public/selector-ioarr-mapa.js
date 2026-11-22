@@ -60,6 +60,22 @@ export async function crearMapa(box, { onPunto, onSel }) {
   const grupo = L.layerGroup().addTo(map);
   const marcas = new Map();          // código de local → marcador (para enfocarlo desde el listado)
   let elegir = false;
+  // Encuadrar con el mapa oculto (celular, pestaña «Listado») lo calcula con tamaño 0 y corta los
+  // puntos: se guarda y se hace al mostrarse (invalidar)
+  let pendiente = null;
+  const visible = () => box.clientWidth > 0 && box.clientHeight > 0;
+  const encuadrar = pts => {
+    if (!visible()) { pendiente = pts; return; }
+    pendiente = null; map.fitBounds(pts, { padding: [30, 30], maxZoom: 16 });
+  };
+  // Etiquetas de km de los tramos: se ocultan si el tramo, a este zoom, es muy corto para que no tapen los puntos
+  let tramos = [];
+  const TRAMO_MIN_PX = 70;
+  const verTramos = () => { for (const t of tramos) {
+    const px = map.latLngToContainerPoint(t.a).distanceTo(map.latLngToContainerPoint(t.b));
+    t.m.getElement()?.classList.toggle('oculto', px < TRAMO_MIN_PX);
+  } };
+  map.on('zoomend', verTramos);
   map.setView(...PERU);
   map.on('click', e => { if (elegir) onPunto(e.latlng.lat, e.latlng.lng); });
   box.addEventListener('click', e => {
@@ -95,7 +111,7 @@ export async function crearMapa(box, { onPunto, onSel }) {
           .bindTooltip(etiquetaCentro).addTo(grupo);
         pts.push([centro.lat, centro.lon]);
       }
-      if (ajustar && pts.length) map.fitBounds(pts, { padding: [30, 30], maxZoom: 16 });
+      if (ajustar && pts.length) encuadrar(pts);
     },
     // Días de visita: puntos numerados por orden y la ruta aproximada de cada día.
     // activo: 0 = todos los días; n = resalta el día n (los demás quedan en gris)
@@ -103,7 +119,7 @@ export async function crearMapa(box, { onPunto, onSel }) {
     // kmTramos: en los días resaltados, etiqueta con los km (en línea recta) en la mitad de cada tramo
     pintarVisitas(dias, activo, ajustar, total = dias.length, { kmTramos = false } = {}) {
       map.invalidateSize();
-      grupo.clearLayers(); marcas.clear();
+      grupo.clearLayers(); marcas.clear(); tramos = [];
       const pts = [];
       for (const d of dias) {
         const resaltado = !activo || activo === d.dia;
@@ -112,8 +128,9 @@ export async function crearMapa(box, { onPunto, onSel }) {
         if (ll.length > 1) L.polyline(ll, { color: c, weight: resaltado ? 3 : 2, opacity: resaltado ? 0.9 : 0.35, dashArray: '6 6', interactive: false }).addTo(grupo);
         if (kmTramos && resaltado) d.puntos.slice(1).forEach((b, j) => {
           const a = d.puntos[j], km = haversine(a.lat, a.lon, b.lat, b.lon);
-          L.marker([(a.lat + b.lat) / 2, (a.lon + b.lon) / 2], { interactive: false, keyboard: false, zIndexOffset: 500,
+          const m = L.marker([(a.lat + b.lat) / 2, (a.lon + b.lon) / 2], { interactive: false, keyboard: false, zIndexOffset: 500,
             icon: L.divIcon({ className: 'km-tramo', html: `<span style="border-color:${c}">${fmtKm(km)} km</span>`, iconSize: null }) }).addTo(grupo);
+          tramos.push({ m, a: [a.lat, a.lon], b: [b.lat, b.lon] });
         });
         for (const p of d.puntos) {
           const icon = L.divIcon({ className: 'pt-visita' + (resaltado ? '' : ' apagado'), html: `<span style="background:${c}">${p.orden}</span>`, iconSize: [24, 24], iconAnchor: [12, 12], popupAnchor: [0, -10] });
@@ -122,17 +139,19 @@ export async function crearMapa(box, { onPunto, onSel }) {
           if (resaltado) pts.push([p.lat, p.lon]);
         }
       }
-      if (ajustar && pts.length) map.fitBounds(pts, { padding: [30, 30], maxZoom: 16 });
+      if (ajustar && pts.length) encuadrar(pts);
+      verTramos();
     },
     // Centra el mapa en un local y abre su ventana (botón «Ver en el mapa» del listado)
     enfocar(cod) {
       const m = marcas.get(cod); if (!m) return false;
+      pendiente = null;
       map.setView(m.getLatLng(), Math.max(map.getZoom(), 16));
       m.openPopup();
       return true;
     },
-    encuadrarPeru() { map.setView(...PERU); },
+    encuadrarPeru() { pendiente = null; map.setView(...PERU); },
     cerrarPopup() { map.closePopup(); },
-    invalidar() { map.invalidateSize(); }
+    invalidar() { map.invalidateSize(); if (pendiente && visible()) encuadrar(pendiente); verTramos(); }
   };
 }
