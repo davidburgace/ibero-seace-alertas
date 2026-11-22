@@ -716,10 +716,15 @@ async function pintarMapa(ajustar) {
     return;
   }
   $('cBase').hidden = false;
+  $('cMapaVer').hidden = !S.vis;
+  $('cMapaVer').querySelectorAll('[data-ver]').forEach(b => b.setAttribute('aria-pressed', (b.dataset.ver === 'todos') === !!S.mapaTodos));
   m.modoElegir(S.pick);
   if (S.vis) {
-    m.pintarVisitas(S.vis.dias.slice(0, 1), 0, ajustar, 1, { kmTramos: true });   // solo el día de hoy, con los km de cada tramo
-    $('cMapaInfo').textContent = 'Número = orden de visita; línea punteada = ruta aproximada, con los km en línea recta de cada tramo.';
+    // El día de hoy, con los km de cada tramo; con «Todos», también los demás colegios del listado, tenues
+    const otros = S.mapaTodos ? (await w('puntos')).puntos : [];
+    m.pintarVisitas(S.vis.dias.slice(0, 1), 0, ajustar, 1, { kmTramos: true, otros });
+    $('cMapaInfo').textContent = 'Número = orden de visita; línea punteada = ruta aproximada, con los km en línea recta de cada tramo.'
+      + (S.mapaTodos ? ' Puntos naranjas = los demás colegios.' : '');
   } else {
     const P = S.near ? await w('puntos') : { puntos: [], centro: null };
     m.pintar(P.puntos, P.centro, ajustar, S.near?.gps ? 'Tu ubicación' : 'Centro de la búsqueda');
@@ -801,7 +806,16 @@ function bind() {
     const b = e.target.closest('[data-vermapa]'); if (!b) return;
     if (esCelular()) setVista('mapa'); else $('cMapa').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     if (!S.mapa) { toast('El mapa no está disponible.'); return; }
-    setTimeout(() => { if (!S.mapa.enfocar(b.dataset.vermapa)) toast('Ese colegio no está en el mapa.'); }, 50);
+    // Un colegio que no es de hoy, con el mapa en «Solo hoy»: se pasa a «Todos» para poder mostrarlo
+    const cod = b.dataset.vermapa, hoy = S.vis?.dias[0]?.puntos.some(p => p.cod === cod);
+    if (S.vis && !S.mapaTodos && !hoy) { S.mapaTodos = true; await pintarMapa(false); }
+    setTimeout(() => { if (!S.mapa.enfocar(cod)) toast('Ese colegio no está en el mapa.'); }, 50);
+  });
+  // Mapa con plan: «Solo hoy» o «Todos» (los demás colegios del listado, tenues)
+  $('cMapaVer').addEventListener('click', e => {
+    const b = e.target.closest('[data-ver]'); if (!b) return;
+    const todos = b.dataset.ver === 'todos'; if (todos === !!S.mapaTodos) return;
+    S.mapaTodos = todos; pintarMapa(true);
   });
   $('cAgrupar').onclick = () => agrupar(true);
   $('cPorDia').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); agrupar(true); } });
