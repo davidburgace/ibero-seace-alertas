@@ -648,10 +648,10 @@ function pintarLista() {
   const rep = hoy.puntos.reduce((a, p) => a + p.rep, 0), nv = visitados(hoy.puntos);
   $('cLista').innerHTML = `<h3 class="dia-titulo" style="--c:${colorDia(1, 1)}"><span class="sw"></span>Hoy <span class="sub">${plural(hoy.puntos.length, 'colegio', 'colegios')}${nv ? ` (${fmt(nv)} ${nv === 1 ? 'visitado' : 'visitados'})` : ''} · ~${fmtKm(hoy.km)} km · ${fmt(rep)} a reponer</span></h3>
       ${botonesRuta(hoy, S.proy ? `<button class="btn btn-ghost btn-sm" type="button" id="cImprimirHoy">🖨 Imprimir las fichas de hoy (PDF)</button>` : '')}
-      <ol class="lst">${hoy.puntos.map(p => itemListado({ ...porCod.get(p.cod), orden: p.orden, km: null }, { ...opts, numero: x => x.orden })).join('')}</ol>`
-    + (luego.length ? `<details class="dia-luego"><summary class="dia-titulo">Para los próximos días <span class="sub">${plural(luego.length, 'colegio pendiente', 'colegios pendientes')}: mañana se arma el plan del día con ellos</span> <span class="ver">Ver</span></summary><ol class="lst">${luego.map(p => itemListado({ ...porCod.get(p.cod), km: null }, { ...opts, numero: () => '–' })).join('')}</ol></details>` : '')
-    + (S.vis.sinCoord.length ? `<h3 class="dia-titulo">Sin coordenadas</h3><ol class="lst">${S.vis.sinCoord.map(p => itemListado({ ...porCod.get(p.cod), km: null }, { ...opts, numero: () => '–' })).join('')}</ol>` : '')
-    + (ya.length ? `<h3 class="dia-titulo dia-ya">Ya visitados <span class="sub">${plural(ya.length, 'colegio', 'colegios')}: no entran al plan</span></h3><ol class="lst">${ya.map(f => itemListado({ ...f, km: null }, { ...opts, numero: () => '✓' })).join('')}</ol>` : '');
+      <ol class="lst">${hoy.puntos.map(p => itemListado({ ...porCod.get(p.cod), orden: p.orden }, { ...opts, numero: x => x.orden })).join('')}</ol>`
+    + (luego.length ? `<details class="dia-luego"><summary class="dia-titulo">Para los próximos días <span class="sub">${plural(luego.length, 'colegio pendiente', 'colegios pendientes')}: mañana se arma el plan del día con ellos</span> <span class="ver">Ver</span></summary><ol class="lst">${luego.map(p => itemListado({ ...porCod.get(p.cod) }, { ...opts, numero: () => '–' })).join('')}</ol></details>` : '')
+    + (S.vis.sinCoord.length ? `<h3 class="dia-titulo">Sin coordenadas</h3><ol class="lst">${S.vis.sinCoord.map(p => itemListado({ ...porCod.get(p.cod) }, { ...opts, numero: () => '–' })).join('')}</ol>` : '')
+    + (ya.length ? `<h3 class="dia-titulo dia-ya">Ya visitados <span class="sub">${plural(ya.length, 'colegio', 'colegios')}: no entran al plan</span></h3><ol class="lst">${ya.map(f => itemListado({ ...f }, { ...opts, numero: () => '✓' })).join('')}</ol>` : '');
 }
 // «Ruta del día en Google Maps»: un enlace, o uno por tramo si el día pasa de 10 colegios
 function botonesRuta(d, extra = '') {
