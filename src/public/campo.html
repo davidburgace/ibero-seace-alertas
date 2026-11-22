@@ -101,6 +101,7 @@
       <p class="sub">Elige los colegios de hoy: los pendientes más cercanos al centro de la búsqueda (tu ubicación, el distrito, el local o el punto del mapa), cerca entre sí y en una ruta aproximada. Cada día se arma de nuevo con lo que falte. «Usar mi ubicación» lo arma solo.</p>
     </div>
     <div class="filtros-grid visitas-grid">
+      <div class="campo" id="cRutaCampo" hidden><label for="cRuta">Ruta de</label><select id="cRuta" title="Arma el plan de hoy solo con los colegios de ese supervisor: la ruta que le saldría a él"></select></div>
       <div class="campo"><label for="cPorDia">Colegios para hoy, máximo</label><input id="cPorDia" type="number" min="1" max="50" step="1" value="8" inputmode="numeric"></div>
       <div class="campo"><label for="cMaxKm">Distancia máxima en un día (km)</label><input id="cMaxKm" type="number" min="0" max="500" step="1" value="10" inputmode="numeric" title="Dos colegios del mismo día no quedan más lejos que esto. 0 = sin límite"></div>
       <div class="campo cerca-btns"><span class="lbl">&nbsp;</span>
@@ -113,6 +114,7 @@
     <p class="aviso" id="cVisNota" hidden>Nuevo día: pulsa «Usar mi ubicación» (o «Armar el plan de hoy») para armar el plan de hoy con los colegios que faltan visitar.</p>
     <div class="visitas-res" id="cVisRes" hidden>
       <p class="visitas-avance" id="cVisAvance" aria-live="polite"></p>
+      <p class="aviso alerta" id="cVisMezcla" hidden></p>
       <p class="aviso" role="note" id="cVisAviso"></p>
     </div>
   </section>
