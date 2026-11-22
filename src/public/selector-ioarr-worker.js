@@ -45,6 +45,12 @@ const acciones = {
     const enRegion = new Set(idx.map(i => D.locs[i][0]));
     return { zonas: r.zonas, sobran: r.sobran, fuera: codigos.filter(c => !enRegion.has(c)) };
   },
+  // Visitas de campo: puntos con coordenadas de estos códigos (mapa del reparto entre supervisores)
+  puntosDe({ codigos }) {
+    const idx = codigos.map(c => codIdx.get(c)).filter(i => i != null);
+    const { puntos, sinCoord } = puntosVisita(D, C, idx);
+    return { puntos: puntos.map(({ i, ...p }) => p), sinCoord: sinCoord.length };
+  },
   // Otra inversión vigente o reciente por local: { codLocal: { estado, codigo, excluir } }
   duplicidad({ mapa }) {
     dup = mapa || {};

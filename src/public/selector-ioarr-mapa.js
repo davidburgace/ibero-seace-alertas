@@ -149,6 +149,20 @@ export async function crearMapa(box, { onPunto, onSel }) {
       if (ajustar && pts.length) encuadrar(pts);
       verTramos();
     },
+    // Puntos con un color cada uno (reparto entre supervisores): [{cod, nom, dist, lat, lon, est, rep, color, grupo}];
+    // grupo: texto que va en la ventana del punto (p. ej., el supervisor)
+    pintarColores(puntos, ajustar) {
+      map.invalidateSize();
+      grupo.clearLayers(); marcas.clear(); tramos = [];
+      const pts = [];
+      for (const p of puntos) {
+        marcas.set(p.cod, L.circleMarker([p.lat, p.lon], { radius: 6, color: '#fff', weight: 1.5, fillColor: p.color, fillOpacity: 0.95 })
+          .bindPopup(popup(p, null, true).replace('<div class="pop">', `<div class="pop"><div class="pop-dia">${esc(p.grupo || '')}</div>`), { maxWidth: 280 })
+          .addTo(grupo));
+        pts.push([p.lat, p.lon]);
+      }
+      if (ajustar && pts.length) encuadrar(pts);
+    },
     // Centra el mapa en un local y abre su ventana (botón «Ver en el mapa» del listado)
     enfocar(cod) {
       const m = marcas.get(cod); if (!m) return false;

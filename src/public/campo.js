@@ -11,7 +11,7 @@
 // fichas (campo-equipo.js). Al volver la señal, sincronizarEquipo() sube lo pendiente y la barra lo muestra.
 import { DEF, NIVN, NIVS, NIVB, FILTRO_VACIO, coordValidas } from '/selector-ioarr/calculo.js';
 import { limitarN as limitarNBase, N_MAX, N_MAX_PROYECTO, haversine } from '/selector-ioarr/cercania.js';
-import { limitarPorDia, limitarMaxKm, colorDia, tramosRutaDia, cuotasIguales, AVISO_VISITAS } from '/selector-ioarr/visitas.js';
+import { limitarPorDia, limitarMaxKm, colorDia, tramosRutaDia, cuotasIguales, AVISO_VISITAS, COLORES_DIA, GRIS_DIA } from '/selector-ioarr/visitas.js';
 import { crearMapa, fmtKm } from '/selector-ioarr-mapa.js';
 import { htmlListado, itemListado } from '/selector-ioarr-listado.js';
 import { abrirFicha, sincronizarEquipo, resumenEquipo } from '/campo-ficha.js';
@@ -209,7 +209,7 @@ async function actualizarListado() {
 function pintarReparto() {
   const P = S.proy, panel = $('cReparto');
   panel.hidden = !(P && S.rol === 'proveedor');
-  if (panel.hidden) return;
+  if (panel.hidden) { if (S.mapaRep) { S.mapaRep = null; pintarMapa(true); } return; }
   const { porSup, sin } = conteoAsig();
   $('cRepResumen').textContent = !P.asig ? '· falta la migración 022'
     : porSup.size ? `· ${plural(porSup.size, 'supervisor', 'supervisores')}${sin ? ` · ${fmt(sin)} sin asignar` : ' · todos asignados'}` : '· sin repartir';
@@ -217,7 +217,7 @@ function pintarReparto() {
     : !S.sups.length ? 'No hay usuarios con rol de supervisor de campo. Invítalos en Admin → Usuarios.' : '';
   $('cRepAviso').hidden = !aviso; $('cRepAviso').textContent = aviso;
   const ok = !aviso;
-  $('cRepSups').hidden = !ok; $('cRepartir').disabled = !ok; $('cRepIguales').disabled = !ok;
+  $('cRepSups').hidden = !ok; $('cRepartir').disabled = !ok; $('cRepIguales').disabled = !ok; $('cRepMapa').disabled = !ok;
   if (!ok) { $('cRepSuma').textContent = ''; return; }
   const vis = c => S.visitas?.[c] ? 1 : 0;
   $('cRepSups').innerHTML = S.sups.map(u => {
@@ -276,10 +276,47 @@ async function repartir() {
     const g = await guardarAsig(asignaciones, true);
     P.asig = g.asignaciones; P.sups = g.supervisores;
     cuotasDelReparto(); pintarVer(); pintarReparto();
+    if (S.mapaRep) S.mapaRep = { proy: P.id, previa: false, asig: P.asig };
     toast('Reparto guardado: ' + ids.map((id, i) => `${corto(correoSup(id))} ${fmt(r.zonas[i].length)}`).join(' · ') + (r.sobran.length + r.fuera.length ? ` · ${fmt(r.sobran.length + r.fuera.length)} sin asignar` : '') + '.');
     if (S.ver !== 'todo') { S.ver = 'todo'; pintarVer(); await aplicarVer(); } else await actualizarListado();
   } catch (e) { toast(`No se pudo guardar el reparto: ${e.message}`); }
   finally { delete b.dataset.ocupado; pintarSuma(); }
+}
+
+// ─── Reparto en el mapa ──────────────────────────────────────────────────────
+// Cada supervisor con un color (el mismo en la vista previa y en el guardado: por su lugar en la lista).
+// Si las casillas y cantidades del panel no son las del reparto guardado, muestra cómo quedaría, sin guardar.
+const colorSup = id => { const i = S.sups.findIndex(u => u.id === id); return i < 0 ? GRIS_DIA : COLORES_DIA[i % COLORES_DIA.length]; };
+async function verRepartoEnMapa() {
+  const P = S.proy; if (!P?.asig) return;
+  const hay = conteoAsig().porSup.size > 0;
+  if (hay && !repartoCambiado()) S.mapaRep = { proy: P.id, previa: false, asig: P.asig };
+  else {
+    const ids = [...S.cuotas.keys()], cuotas = ids.map(id => S.cuotas.get(id) || 0);
+    if (!ids.length || !cuotas.some(Boolean)) { toast('Marca al menos un supervisor y la cantidad de colegios que le das.'); return; }
+    if (cuotas.reduce((a, b) => a + b, 0) > P.n) { toast(`La suma pasa los ${fmt(P.n)} colegios del proyecto.`); return; }
+    const r = await w('repartir', { codigos: P.locales, cuotas }), asig = {};
+    r.zonas.forEach((z, i) => z.forEach(c => { asig[c] = ids[i]; }));
+    S.mapaRep = { proy: P.id, previa: true, asig };
+  }
+  if (S.repPuntos?.id !== P.id) S.repPuntos = { id: P.id, ...(await w('puntosDe', { codigos: P.locales })) };
+  if (esCelular()) setVista('mapa');
+  await pintarMapa(true);
+  $('cMapaInfo').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function pintarRepartoMapa(m, ajustar) {
+  const { asig, previa } = S.mapaRep, puntos = S.repPuntos?.puntos || [], cuenta = new Map();
+  m.pintarColores(puntos.map(p => {
+    const id = asig[p.cod] || null; cuenta.set(id, (cuenta.get(id) || 0) + 1);
+    return { ...p, color: id ? colorSup(id) : GRIS_DIA, grupo: id ? `Supervisor: ${corto(correoSup(id))}` : 'Sin asignar' };
+  }), ajustar);
+  const ids = S.sups.map(u => u.id).filter(id => cuenta.has(id));
+  const it = (c, txt, n) => `<span class="it"><span class="sw" style="background:${c}"></span>${esc(txt)} (${fmt(n)})</span>`;
+  const sinC = S.repPuntos?.sinCoord || 0;
+  $('cRepLeyenda').innerHTML = `<span class="tit${previa ? ' previa' : ''}">${previa ? 'Vista previa, sin guardar: pulsa «' + esc($('cRepartir').textContent) + '» para guardarla' : 'Reparto guardado'}</span>`
+    + ids.map(id => it(colorSup(id), corto(correoSup(id)), cuenta.get(id))).join('')
+    + (cuenta.has(null) ? it(GRIS_DIA, 'Sin asignar', cuenta.get(null)) : '');
+  $('cMapaInfo').textContent = `Un color por supervisor · ${plural(puntos.length, 'colegio', 'colegios')} del proyecto${sinC ? ` (${fmt(sinC)} sin coordenadas no aparecen)` : ''}.`;
 }
 
 // Pasar un colegio suelto a otro supervisor (desde el listado)
@@ -294,6 +331,8 @@ async function asignarUno(cod, id, sel) {
     // (no de inmediato, para poder cambiar varios colegios seguidos)
     S.verPendiente = true;
     cuotasDelReparto(); pintarVer(); pintarReparto(); pintarInfoVisitas();
+    // El mapa del reparto guardado sí se actualiza al momento (no mueve el encuadre)
+    if (S.mapaRep && !S.mapaRep.previa) { S.mapaRep = { proy: P.id, previa: false, asig: P.asig }; pintarMapa(false); }
   } catch (e) { toast(`No se pudo cambiar el supervisor: ${e.message}`); sel.value = P.asig?.[cod] || ''; }
   finally { sel.disabled = false; }
 }
@@ -716,6 +755,9 @@ async function pintarMapa(ajustar) {
     return;
   }
   $('cBase').hidden = false;
+  if (S.mapaRep && S.mapaRep.proy !== S.proy?.id) S.mapaRep = null;   // otro proyecto: se cierra
+  $('cRepMapaBar').hidden = !S.mapaRep;
+  if (S.mapaRep) { $('cMapaVer').hidden = true; m.modoElegir(false); pintarRepartoMapa(m, ajustar); return; }
   $('cMapaVer').hidden = !S.vis;
   $('cMapaVer').querySelectorAll('[data-ver]').forEach(b => b.setAttribute('aria-pressed', (b.dataset.ver === 'todos') === !!S.mapaTodos));
   m.modoElegir(S.pick);
@@ -768,6 +810,8 @@ function bind() {
   });
   $('cRepSups').addEventListener('input', e => { const q = e.target.closest('[data-cuota]'); if (q) { S.cuotas.set(q.dataset.cuota, Math.max(0, Math.round(+q.value || 0))); pintarSuma(); } });
   $('cRepIguales').onclick = partesIguales;
+  $('cRepMapa').onclick = () => verRepartoEnMapa().catch(e => toast(`No se pudo mostrar el reparto: ${e.message}`));
+  $('cRepMapaCerrar').onclick = () => { S.mapaRep = null; pintarMapa(true); };
   $('cRepartir').onclick = repartir;
   $('cLista').addEventListener('change', e => { const s = e.target.closest('[data-asignar]'); if (s) asignarUno(s.dataset.asignar, s.value, s); });
   $('cUbic').onclick = usarUbicacion;
