@@ -1,6 +1,6 @@
 // Selector IOARR — mapa de locales (Leaflet servido por la app en /vendor/).
 // Leaflet se carga solo al abrir el mapa; si no carga, la página sigue funcionando sin mapa.
-import { radioPunto } from '/selector-ioarr/cercania.js';
+import { radioPunto, haversine } from '/selector-ioarr/cercania.js';
 import { urlGoogleMaps } from '/selector-ioarr/calculo.js';
 import { colorDia, GRIS_DIA } from '/selector-ioarr/visitas.js';
 
@@ -100,7 +100,8 @@ export async function crearMapa(box, { onPunto, onSel }) {
     // Días de visita: puntos numerados por orden y la ruta aproximada de cada día.
     // activo: 0 = todos los días; n = resalta el día n (los demás quedan en gris)
     // total: cantidad de días del plan (puede ser mayor que los que se dibujan)
-    pintarVisitas(dias, activo, ajustar, total = dias.length) {
+    // kmTramos: en los días resaltados, etiqueta con los km (en línea recta) en la mitad de cada tramo
+    pintarVisitas(dias, activo, ajustar, total = dias.length, { kmTramos = false } = {}) {
       map.invalidateSize();
       grupo.clearLayers(); marcas.clear();
       const pts = [];
@@ -109,6 +110,11 @@ export async function crearMapa(box, { onPunto, onSel }) {
         const c = activo ? (resaltado ? (total <= 8 ? colorDia(d.dia, total) : color('--accent', '#3a63e0')) : GRIS_DIA) : colorDia(d.dia, total);
         const ll = d.puntos.map(p => [p.lat, p.lon]);
         if (ll.length > 1) L.polyline(ll, { color: c, weight: resaltado ? 3 : 2, opacity: resaltado ? 0.9 : 0.35, dashArray: '6 6', interactive: false }).addTo(grupo);
+        if (kmTramos && resaltado) d.puntos.slice(1).forEach((b, j) => {
+          const a = d.puntos[j], km = haversine(a.lat, a.lon, b.lat, b.lon);
+          L.marker([(a.lat + b.lat) / 2, (a.lon + b.lon) / 2], { interactive: false, keyboard: false, zIndexOffset: 500,
+            icon: L.divIcon({ className: 'km-tramo', html: `<span style="border-color:${c}">${fmtKm(km)} km</span>`, iconSize: null }) }).addTo(grupo);
+        });
         for (const p of d.puntos) {
           const icon = L.divIcon({ className: 'pt-visita' + (resaltado ? '' : ' apagado'), html: `<span style="background:${c}">${p.orden}</span>`, iconSize: [24, 24], iconAnchor: [12, 12], popupAnchor: [0, -10] });
           marcas.set(p.cod, L.marker([p.lat, p.lon], { icon, keyboard: true, title: `Día ${d.dia} · parada ${p.orden}: ${p.nom}`, zIndexOffset: resaltado ? 1000 : 0 })

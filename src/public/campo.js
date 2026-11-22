@@ -718,8 +718,8 @@ async function pintarMapa(ajustar) {
   $('cBase').hidden = false;
   m.modoElegir(S.pick);
   if (S.vis) {
-    m.pintarVisitas(S.vis.dias.slice(0, 1), 0, ajustar);   // solo el día de hoy
-    $('cMapaInfo').textContent = 'Número = orden de visita; línea punteada = ruta aproximada.';
+    m.pintarVisitas(S.vis.dias.slice(0, 1), 0, ajustar, 1, { kmTramos: true });   // solo el día de hoy, con los km de cada tramo
+    $('cMapaInfo').textContent = 'Número = orden de visita; línea punteada = ruta aproximada, con los km en línea recta de cada tramo.';
   } else {
     const P = S.near ? await w('puntos') : { puntos: [], centro: null };
     m.pintar(P.puntos, P.centro, ajustar, S.near?.gps ? 'Tu ubicación' : 'Centro de la búsqueda');
