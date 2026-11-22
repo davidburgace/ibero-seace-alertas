@@ -10,7 +10,7 @@
 // que necesita el listado se guardan en el equipo (localStorage, por usuario) y «Llevar mis fichas al equipo» guarda las
 // fichas (campo-equipo.js). Al volver la señal, sincronizarEquipo() sube lo pendiente y la barra lo muestra.
 import { DEF, NIVN, NIVS, NIVB, FILTRO_VACIO, coordValidas } from '/selector-ioarr/calculo.js';
-import { limitarN as limitarNBase, N_MAX, N_MAX_PROYECTO } from '/selector-ioarr/cercania.js';
+import { limitarN as limitarNBase, N_MAX, N_MAX_PROYECTO, haversine } from '/selector-ioarr/cercania.js';
 import { limitarPorDia, limitarMaxKm, colorDia, tramosRutaDia, cuotasIguales, AVISO_VISITAS } from '/selector-ioarr/visitas.js';
 import { crearMapa, fmtKm } from '/selector-ioarr-mapa.js';
 import { htmlListado, itemListado } from '/selector-ioarr-listado.js';
@@ -648,11 +648,15 @@ function pintarLista() {
   const rep = hoy.puntos.reduce((a, p) => a + p.rep, 0), nv = visitados(hoy.puntos);
   $('cLista').innerHTML = `<h3 class="dia-titulo" style="--c:${colorDia(1, 1)}"><span class="sw"></span>Hoy <span class="sub">${plural(hoy.puntos.length, 'colegio', 'colegios')}${nv ? ` (${fmt(nv)} ${nv === 1 ? 'visitado' : 'visitados'})` : ''} · ~${fmtKm(hoy.km)} km · ${fmt(rep)} a reponer</span></h3>
       ${botonesRuta(hoy, S.proy ? `<button class="btn btn-ghost btn-sm" type="button" id="cImprimirHoy">🖨 Imprimir las fichas de hoy (PDF)</button>` : '')}
-      <ol class="lst">${hoy.puntos.map(p => itemListado({ ...porCod.get(p.cod), orden: p.orden }, { ...opts, numero: x => x.orden })).join('')}</ol>`
+      <ol class="lst">${hoy.puntos.map((p, j) => itemListado({ ...porCod.get(p.cod), orden: p.orden, sig: hoy.puntos[j + 1] }, { ...opts, numero: x => x.orden, km: kmAlSiguiente })).join('')}</ol>`
     + (luego.length ? `<details class="dia-luego"><summary class="dia-titulo">Para los próximos días <span class="sub">${plural(luego.length, 'colegio pendiente', 'colegios pendientes')}: mañana se arma el plan del día con ellos</span> <span class="ver">Ver</span></summary><ol class="lst">${luego.map(p => itemListado({ ...porCod.get(p.cod) }, { ...opts, numero: () => '–' })).join('')}</ol></details>` : '')
     + (S.vis.sinCoord.length ? `<h3 class="dia-titulo">Sin coordenadas</h3><ol class="lst">${S.vis.sinCoord.map(p => itemListado({ ...porCod.get(p.cod) }, { ...opts, numero: () => '–' })).join('')}</ol>` : '')
     + (ya.length ? `<h3 class="dia-titulo dia-ya">Ya visitados <span class="sub">${plural(ya.length, 'colegio', 'colegios')}: no entran al plan</span></h3><ol class="lst">${ya.map(f => itemListado({ ...f }, { ...opts, numero: () => '✓' })).join('')}</ol>` : '');
 }
+// En el plan de hoy, la esquina de cada tarjeta dice cuánto hay hasta el siguiente colegio (en línea recta);
+// el último no tiene siguiente
+const kmAlSiguiente = f => f.sig ? { km: haversine(f.lat, f.lon, f.sig.lat, f.sig.lon), txt: '→ ',
+  titulo: `Al siguiente colegio (parada ${f.sig.orden}), en línea recta` } : null;
 // «Ruta del día en Google Maps»: un enlace, o uno por tramo si el día pasa de 10 colegios
 function botonesRuta(d, extra = '') {
   const tramos = tramosRutaDia(d.puntos);

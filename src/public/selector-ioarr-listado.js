@@ -10,7 +10,10 @@ const plural = (n, uno, varios) => `${fmt(n)} ${n === 1 ? uno : varios}`;
 // filas: acción «listado» del worker (o puntos de un día de visita, con `orden`).
 // opts.numero(f): número que se muestra (por defecto f.n); opts.mapa: muestra «Ver en el mapa»;
 // opts.extra(f): { clase, cuerpo, acc } que agrega la página (campo: «Visitado» y su botón)
-export function itemListado(f, { numero = x => x.n, mapa = true, extra } = {}) {
+// opts.km(f): { km, txt, titulo } de la esquina (por defecto, la distancia al centro; null = nada)
+const kmAlCentro = f => f.km != null ? { km: f.km, txt: '', titulo: 'Distancia en línea recta al centro' } : null;
+export function itemListado(f, { numero = x => x.n, mapa = true, extra, km = kmAlCentro } = {}) {
+  const k = km(f);
   const x = extra?.(f) || {};
   const dir = f.dir ? esc(f.dir) : '<span class="sub">Sin dirección en el padrón</span>';
   const lugar = [f.cp, f.dist].filter(Boolean).map(esc).join(' · ') + (f.rural == null ? '' : ` · ${f.rural ? 'Rural' : 'Urbana'}`);
@@ -24,7 +27,7 @@ export function itemListado(f, { numero = x => x.n, mapa = true, extra } = {}) {
       <div class="sub">${lugar}</div>
       <div class="sub">${datos}</div>${x.cuerpo || ''}
     </div>
-    ${f.km != null ? `<span class="lst-km" title="Distancia en línea recta al centro">${fmtKm(f.km)} km</span>` : ''}
+    ${k ? `<span class="lst-km" title="${esc(k.titulo)}">${k.txt}${fmtKm(k.km)} km</span>` : ''}
     <div class="lst-acc">
       ${coord ? `<a class="btn btn-primary btn-sm" href="${urlComoLlegar(f.lat, f.lon)}" target="_blank" rel="noopener" aria-label="Cómo llegar a ${esc(f.nom)} (Google Maps)">Cómo llegar</a>` : '<span class="sub">Sin coordenadas</span>'}
       ${coord && mapa ? `<button class="btn btn-ghost btn-sm" type="button" data-vermapa="${esc(f.cod)}" aria-label="Ver ${esc(f.nom)} en el mapa">Ver en el mapa</button>` : ''}${x.acc || ''}
