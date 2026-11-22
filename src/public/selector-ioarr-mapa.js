@@ -117,10 +117,17 @@ export async function crearMapa(box, { onPunto, onSel }) {
     // activo: 0 = todos los días; n = resalta el día n (los demás quedan en gris)
     // total: cantidad de días del plan (puede ser mayor que los que se dibujan)
     // kmTramos: en los días resaltados, etiqueta con los km (en línea recta) en la mitad de cada tramo
-    pintarVisitas(dias, activo, ajustar, total = dias.length, { kmTramos = false } = {}) {
+    // otros: más colegios ({cod, nom, dist, lat, lon, est, rep}) que se dibujan tenues, sin número ni ruta
+    pintarVisitas(dias, activo, ajustar, total = dias.length, { kmTramos = false, otros = [] } = {}) {
       map.invalidateSize();
       grupo.clearLayers(); marcas.clear(); tramos = [];
       const pts = [];
+      const enDias = new Set(dias.flatMap(d => d.puntos.map(p => p.cod))), libre = color('--punto-libre', '#e0962b');
+      for (const p of otros) {
+        if (enDias.has(p.cod)) continue;
+        marcas.set(p.cod, L.circleMarker([p.lat, p.lon], { radius: 5, color: '#fff', weight: 1.5, fillColor: libre, fillOpacity: 0.7 })
+          .bindPopup(popup(p, null, soloLectura), { maxWidth: 280 }).addTo(grupo));
+      }
       for (const d of dias) {
         const resaltado = !activo || activo === d.dia;
         const c = activo ? (resaltado ? (total <= 8 ? colorDia(d.dia, total) : color('--accent', '#3a63e0')) : GRIS_DIA) : colorDia(d.dia, total);
