@@ -171,13 +171,16 @@ function pintarVer() {
   // El supervisor solo recibe sus colegios: el filtro es para el proveedor
   const hay = !!P?.asig && S.rol === 'proveedor';
   $('cVerCampo').hidden = !hay;
-  if (!hay) return;
+  if (!hay) { $('cRutaCampo').hidden = true; return; }
   const ids = [...porSup.keys()].sort((a, b) => (b === S.yo) - (a === S.yo) || correoSup(a).localeCompare(correoSup(b)));
   const op = (v, t) => `<option value="${esc(v)}"${S.ver === v ? ' selected' : ''}>${esc(t)}</option>`;
   $('cVer').innerHTML = op('todo', `Todo el proyecto (${fmt(P.locales.length)})`)
     + ids.map(id => op(id, `${id === S.yo ? 'Mis colegios' : corto(correoSup(id))} (${fmt(porSup.get(id))})`)).join('')
     + (S.ver !== 'todo' && S.ver !== 'sin' && !porSup.has(S.ver) ? op(S.ver, `${S.ver === S.yo ? 'Mis colegios' : corto(correoSup(S.ver))} (0)`) : '')
     + (sin || S.ver === 'sin' ? op('sin', `Sin asignar (${fmt(sin)})`) : '');
+  // «Ruta de» (panel del plan): las mismas opciones; elegir un supervisor arma su plan de hoy
+  $('cRutaCampo').hidden = !porSup.size;
+  $('cRuta').innerHTML = $('cVer').innerHTML;
   $('cVerPend').hidden = !S.verPendiente;
   pintarEquipo();
 }
@@ -685,7 +688,7 @@ function pintarLista() {
   const enPlan = new Set([...S.vis.dias.flatMap(d => d.puntos), ...S.vis.sinCoord].map(p => p.cod));
   const ya = S.visitas ? S.filas.filter(f => S.visitas[f.cod] && !enPlan.has(f.cod)) : [];
   const rep = hoy.puntos.reduce((a, p) => a + p.rep, 0), nv = visitados(hoy.puntos);
-  $('cLista').innerHTML = `<h3 class="dia-titulo" style="--c:${colorDia(1, 1)}"><span class="sw"></span>Hoy <span class="sub">${plural(hoy.puntos.length, 'colegio', 'colegios')}${nv ? ` (${fmt(nv)} ${nv === 1 ? 'visitado' : 'visitados'})` : ''} · ~${fmtKm(hoy.km)} km · ${fmt(rep)} a reponer</span></h3>
+  $('cLista').innerHTML = `<h3 class="dia-titulo" style="--c:${colorDia(1, 1)}"><span class="sw"></span>Hoy${rutaDe()} <span class="sub">${plural(hoy.puntos.length, 'colegio', 'colegios')}${nv ? ` (${fmt(nv)} ${nv === 1 ? 'visitado' : 'visitados'})` : ''} · ~${fmtKm(hoy.km)} km · ${fmt(rep)} a reponer</span></h3>
       ${botonesRuta(hoy, S.proy ? `<button class="btn btn-ghost btn-sm" type="button" id="cImprimirHoy">🖨 Imprimir las fichas de hoy (PDF)</button>` : '')}
       <ol class="lst">${hoy.puntos.map((p, j) => itemListado({ ...porCod.get(p.cod), orden: p.orden, sig: hoy.puntos[j + 1] }, { ...opts, numero: x => x.orden, km: kmAlSiguiente })).join('')}</ol>`
     + (luego.length ? `<details class="dia-luego"><summary class="dia-titulo">Para los próximos días <span class="sub">${plural(luego.length, 'colegio pendiente', 'colegios pendientes')}: mañana se arma el plan del día con ellos</span> <span class="ver">Ver</span></summary><ol class="lst">${luego.map(p => itemListado({ ...porCod.get(p.cod) }, { ...opts, numero: () => '–' })).join('')}</ol></details>` : '')
@@ -696,6 +699,8 @@ function pintarLista() {
 // el último no tiene siguiente
 const kmAlSiguiente = f => f.sig ? { km: haversine(f.lat, f.lon, f.sig.lat, f.sig.lon), txt: '→ ',
   titulo: `Al siguiente colegio (parada ${f.sig.orden}), en línea recta` } : null;
+// En el título del plan: de quién es la ruta, si el proveedor eligió un supervisor
+const rutaDe = () => S.rol === 'proveedor' && S.proy?.asig && S.ver !== 'todo' ? ` · ${S.ver === 'sin' ? 'sin asignar' : S.ver === S.yo ? 'mis colegios' : 'ruta de ' + esc(corto(correoSup(S.ver)))}` : '';
 // «Ruta del día en Google Maps»: un enlace, o uno por tramo si el día pasa de 10 colegios
 function botonesRuta(d, extra = '') {
   const tramos = tramosRutaDia(d.puntos);
@@ -727,11 +732,16 @@ async function imprimirFichas(cods, boton) {
 function pintarVisitas() {
   const V = S.vis;
   $('cVisRes').hidden = !V; $('cDesagrupar').hidden = !V;
+  if (!$('cRutaCampo').hidden) $('cRuta').value = S.ver;
   $('cAgrupar').textContent = V ? 'Rehacer el plan de hoy' : 'Armar el plan de hoy';
   $('cAgrupar').disabled = !S.filas.length;
   $('cVisNota').hidden = !(S.planViejo && !V);
   if (!V) return;
   const A = avance(), hoy = V.dias[0], quedan = V.dias.length - 1;
+  // Proveedor con todo el proyecto: el plan no mira el reparto y puede juntar colegios de varios supervisores
+  const supsHoy = S.proy?.asig && S.rol === 'proveedor' ? new Set(hoy.puntos.map(p => S.proy.asig[p.cod] || '')) : new Set();
+  $('cVisMezcla').hidden = supsHoy.size < 2;
+  if (supsHoy.size > 1) $('cVisMezcla').textContent = `El plan de hoy junta colegios de ${fmt(supsHoy.size)} ${supsHoy.has('') ? 'supervisores (o sin asignar)' : 'supervisores'}: con «Todo el proyecto» no se mira el reparto. Para simular la ruta de uno, elígelo en «Ruta de».`;
   $('cVisAvance').innerHTML = `<b>Pendientes: ${fmt(A.pend)}</b> de ${fmt(A.total)}${A.vis ? ` · ${fmt(A.vis)} ${A.vis === 1 ? 'visitado' : 'visitados'}` : ''} · <b>hoy: ${plural(hoy.puntos.length, 'colegio', 'colegios')}</b>${quedan ? ` · a este ritmo faltan unos ${plural(quedan, 'día', 'días')} más` : ''}.`;
   const lim = V.maxKm ? ` y con no más de ${fmt(V.maxKm)} km entre dos de ellos` : '';
   const desde = V.desde ? `, empezando por el más cercano ${esc(aCentro(V.desde))}` : '';
@@ -797,7 +807,13 @@ function bind() {
   $('btnSalir').onclick = () => window.radarSesion?.salir();
   $('cRegion').onchange = async e => { await quitarProyecto({ rebuscar: false }); cargarRegion(e.target.value); };
   $('cProy').onchange = e => elegirProyecto(e.target.value);
-  $('cVer').onchange = e => { S.ver = e.target.value; aplicarVer(); };
+  $('cVer').onchange = e => { S.ver = e.target.value; $('cRuta').value = S.ver; aplicarVer(); };
+  // «Ruta de»: limita el listado a ese supervisor y arma su plan de hoy (si no hay uno guardado de hoy)
+  $('cRuta').onchange = async e => {
+    S.ver = e.target.value; $('cVer').value = S.ver;
+    await aplicarVer();
+    if (!S.vis && S.filas.length) await agrupar(true);
+  };
   $('cVerAct').onclick = actualizarListado;
   $('cFichas').onclick = bajarFichas;
   $('cEquipo').onclick = llevarAlEquipo;
