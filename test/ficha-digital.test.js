@@ -381,12 +381,19 @@ test('PDF de la ficha llena: lo verificado, las aulas sin verificar, el panel fo
   assert.equal(buf.subarray(0, 5).toString(), '%PDF-');
   const t = await textoPdf(buf);
   for (const x of ['Ficha llenada en la app por ana@ibero.pe', 'enviada a revisión', 'Ana Pérez, UGEL, DNI 12345678', '15/10/2026', 'De 5 a 10', 'foto 3',
-    'Foto 1 · Fachada y letrero', 'Luis Q.', '87654321', 'Firmado en pantalla el', 'Sin firma en pantalla', 'Sin novedad', 'llenada en la app · Página 1'])
+    'Foto 1 · Fachada y letrero', 'Luis Q.', '87654321', 'Firmado en pantalla el', 'Firma y sello', 'Sin novedad', 'llenada en la app · Página 1'])
     assert.ok(t.includes(x), x);
+  assert.ok(!t.includes('Sin firma en pantalla'), 'la celda sin firma queda libre para firmar a mano');
   assert.match(t, new RegExp(`Aulas sin verificar: 2${nAulas > 2 ? ` a ${nAulas}|2, 3` : ''}`));
   // La ficha en blanco sigue igual
   const blanco = await textoPdf(await generarFichaPdf(F));
   assert.ok(blanco.includes('lo amarillo se llena en campo')); assert.ok(!blanco.includes('llenada en la app'));
+});
+
+test('PDF para firmar en papel: el borrador no dice «borrador» y deja las firmas libres', async () => {
+  const t = await textoPdf(await generarFichaPdf(modeloFicha(D, C, iU, META), { datos: limpiarFormulario(FORM), estado: 'borrador', por: 'ana@ibero.pe', fotos: [], firmas: {} }));
+  assert.ok(t.includes('Ficha llenada en la app por ana@ibero.pe')); assert.ok(t.includes('Firma y sello'));
+  assert.ok(!/borrador/i.test(t)); assert.ok(!t.includes('Firmado en pantalla')); assert.ok(!t.includes('Sin firma en pantalla'));
 });
 
 test('PDF desde campo: con las fotos y firmas del bucket; sin ficha guardada, 404', async () => {

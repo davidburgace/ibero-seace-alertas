@@ -324,6 +324,9 @@ function pintar() {
         ${campo(`fi.${k}.dni`, d.firmas[k]?.dni, { label: 'DNI', num: true })}
         ${campo(`fi.${k}.fecha`, d.firmas[k]?.fecha, { label: 'Fecha', tipo: 'date', max: hoy() })}
       </div><div data-firma="${k}">${htmlFirma(k)}</div></div>`).join('')}
+      ${F.editable ? `<div class="fh-card fh-papel"><b>¿Firman en papel?</b>
+        <ol><li>Baja la ficha llena e imprímela.</li><li>El director y el verificador la firman y sellan.</li><li>Toma aquí abajo la foto de la hoja firmada y envía a revisión.</li></ol>
+        <button class="btn btn-ghost" type="button" data-fh="pdf-firmar" title="Guarda lo llenado y baja la ficha en PDF, con los espacios para firmar a mano">🖨 Guardar y bajar para firmar (PDF)</button></div>` : ''}
       ${htmlSlot('acta', { titulo: 'Si firmaron en papel: foto del acta firmada' })}
     </section>
     </fieldset>
@@ -619,7 +622,8 @@ async function borrarFoto(id) {
 }
 
 async function bajarPdf(b) {
-  if (F.editable && F.sucio && !(await guardar({ silencioso: true }))) { F.toast('Sin conexión: el PDF necesita señal.'); return; }
+  // Una ficha nueva se guarda primero: el PDF sale de lo guardado en el servidor
+  if (F.editable && (F.sucio || !F.ficha) && !(await guardar({ silencioso: true }))) { F.toast('No se pudo guardar la ficha: el PDF necesita señal.'); return; }
   if (pendientes()) F.toast('El PDF no incluye las fotos ni firmas que aún no se subieron.');
   const txt = b.textContent; b.disabled = true; b.textContent = 'Armando…';
   try {
@@ -695,7 +699,7 @@ function enlazar() {
     if (acc === 'cerrar') { cerrar(); return; }
     if (acc === 'ver-foto') { verFoto(b.dataset.id); return; }
     if (acc === 'cerrar-visor') { cerrarVisor(); return; }
-    if (acc === 'pdf') { bajarPdf(b); return; }
+    if (acc === 'pdf' || acc === 'pdf-firmar') { bajarPdf(b); return; }
     if (!F.editable) return;
     if (acc === 'firmar') { abrirLienzo(b.dataset.cargo); return; }
     if (acc === 'firma-limpiar') { limpiarLienzo(); return; }

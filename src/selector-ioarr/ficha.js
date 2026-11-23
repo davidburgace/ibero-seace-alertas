@@ -320,11 +320,11 @@ export function generarFichaPdf(F, llena = null) {
     };
     const G = '#EEF0F4', A = '#FFF8DC', L = F.local;
     const d = llena?.datos || null, da = d?.a || {};
-    const ESTADO = { borrador: 'borrador, aún sin enviar', enviada: 'enviada a revisión', observada: 'devuelta para corregir', aprobada: 'aprobada' };
+    const ESTADO = { enviada: 'enviada a revisión', observada: 'devuelta para corregir', aprobada: 'aprobada' };
 
     texto('Ficha de verificación de mobiliario escolar — IOARR de reposición', { bold: true, size: 15, despues: 0.1 });
     texto(`Local ${L.cod} · ${L.nombre} · Proyecto «${F.proyecto.nombre}» · generada el ${F.fecha} con el Padrón ESCALE y el Censo Educativo ${F.anio || ''}${F.supervisor ? ` · Supervisor asignado: ${F.supervisor}` : ''}`, { size: 8, color: '#5C6270' });
-    if (llena) texto(`Ficha llenada en la app${llena.por ? ' por ' + llena.por : ''} · ${ESTADO[llena.estado] || llena.estado || ''}${llena.enviada_en ? ' · enviada el ' + fechaHoraPe(llena.enviada_en) : ''}${llena.estado === 'aprobada' && llena.revisada_en ? ' · aprobada el ' + fechaHoraPe(llena.revisada_en) : ''}. Lo gris viene del padrón y del censo; lo amarillo se llenó en campo.`, { italic: true, size: 8, color: '#5C6270' });
+    if (llena) texto(`Ficha llenada en la app${llena.por ? ' por ' + llena.por : ''}${ESTADO[llena.estado] ? ' · ' + ESTADO[llena.estado] : ''}${llena.enviada_en ? ' · enviada el ' + fechaHoraPe(llena.enviada_en) : ''}${llena.estado === 'aprobada' && llena.revisada_en ? ' · aprobada el ' + fechaHoraPe(llena.revisada_en) : ''}. Lo gris viene del padrón y del censo; lo amarillo se llenó en campo.`, { italic: true, size: 8, color: '#5C6270' });
     else texto('Lo gris lo llenó la app; lo amarillo se llena en campo. Para cargar los datos en la app, usa el Excel de esta misma ficha.', { italic: true, size: 8, color: '#5C6270' });
 
     titulo('A. Datos del local educativo');
@@ -401,11 +401,13 @@ export function generarFichaPdf(F, llena = null) {
 
     titulo('E. Observaciones y conformidad');
     tabla([1], null, [{ v: ['Observaciones del verificador:' + (d?.obs ? ' ' + d.obs : '')], fill: A, minAlto: d ? 30 : 70 }]);
+    // Con la ficha llena, la declaración y las firmas van juntas en una hoja: es la que se firma
+    if (d && doc.y + 40 + FIRMAS.length * 58 > limite()) doc.addPage();
     texto('Declaración: las cantidades, estados y antigüedades de esta ficha corresponden a lo constatado en el local en la fecha indicada.', { size: 8 });
     if (d) {
       // Firmas en pantalla: la imagen va en su celda, con la fecha y hora en que se firmó
       const anchos = [0.24, 0.26, 0.1, 0.28, 0.12].map(a => a * ANCHO), H = 58;
-      tabla([0.24, 0.26, 0.1, 0.28, 0.12], ['Cargo', 'Nombres y apellidos', 'DNI', 'Firma', 'Fecha'], []);
+      tabla([0.24, 0.26, 0.1, 0.28, 0.12], ['Cargo', 'Nombres y apellidos', 'DNI', 'Firma y sello', 'Fecha'], []);
       doc.moveUp(0.4);
       for (const [k, cargo] of FIRMAS) {
         const f = d.firmas?.[k] || {}, img = llena.firmas?.[k];
@@ -418,7 +420,8 @@ export function generarFichaPdf(F, llena = null) {
           doc.font('Helvetica').fontSize(8).fillColor('#16181D').text(t, x + 3, y + 3, { width: anchos[j] - 6 });
           if (j === 3) {
             if (img?.buffer) { try { doc.image(img.buffer, x + 4, y + 3, { fit: [anchos[j] - 8, H - 16], align: 'center', valign: 'center' }); } catch { /* imagen no válida */ } }
-            doc.font('Helvetica').fontSize(6).fillColor('#5C6270').text(img ? `Firmado en pantalla el ${fechaHoraPe(img.firmada_en)}` : 'Sin firma en pantalla', x + 3, y + H - 10, { width: anchos[j] - 6, lineBreak: false });
+            // Sin firma en pantalla la celda queda libre: la ficha se puede imprimir y firmar a mano
+            if (img) doc.font('Helvetica').fontSize(6).fillColor('#5C6270').text(`Firmado en pantalla el ${fechaHoraPe(img.firmada_en)}`, x + 3, y + H - 10, { width: anchos[j] - 6, lineBreak: false });
           }
           x += anchos[j];
         });
