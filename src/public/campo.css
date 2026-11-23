@@ -136,6 +136,8 @@ body.ficha-abierta{ overflow:hidden; }
 .fh-pie{ display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:8px; padding:10px 16px calc(10px + env(safe-area-inset-bottom,0px)); border-top:1px solid var(--border); background:var(--bg); }
 .fh-pie .acts{ display:flex; gap:8px; margin-left:auto; }
 .fh-pie .btn{ min-height:44px; }
+.fh-papel ol{ margin:0; padding-left:20px; font-size:13.5px; line-height:1.45; }
+.fh-papel .btn{ min-height:44px; white-space:normal; }
 @media (max-width:640px){
   .fh-brm{ grid-template-columns:repeat(3,minmax(0,1fr)); }
   .fh-pie{ flex-direction:column; align-items:stretch; }
