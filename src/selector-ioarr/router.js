@@ -119,8 +119,8 @@ const limpiarNombre = n => String(n ?? '').replace(/\s+/g, ' ').trim().slice(0, 
 const codigosValidos = arr => [...new Set((Array.isArray(arr) ? arr : []).map(String).filter(c => /^\d{4,10}$/.test(c)))];
 const esUuid = s => /^[0-9a-f-]{36}$/i.test(String(s || ''));
 
-// Los proyectos son del equipo: cualquier proveedor (la API ya exige ese rol) abre, edita o borra
-// los de todos. usuario_id queda como autor.
+// Los proyectos son del equipo: cualquier proveedor (la API ya exige ese rol) abre y edita
+// los de todos. usuario_id queda como autor: solo él puede borrarlo.
 async function proyectoDelUsuario(req) {
   if (!esUuid(req.params.id)) return null;
   const { data, error } = await supabase.from('ioarr_selector_proyectos')
@@ -350,6 +350,8 @@ api.delete('/proyectos/:id', async (req, res, next) => {
   try {
     const p = await proyectoDelUsuario(req);
     if (!p) return res.status(404).json({ error: 'Proyecto no encontrado' });
+    // Todo proveedor edita los proyectos del equipo, pero solo quien lo creó lo borra
+    if (p.usuario_id !== req.usuario.id) return res.status(403).json({ error: 'Solo quien creó el proyecto puede borrarlo' });
     await borrarArchivosProyecto(p.id);   // sustento del expediente en el bucket (las filas caen en cascada)
     const { error } = await supabase.from('ioarr_selector_proyectos').delete().eq('id', p.id);
     if (error) throw error;

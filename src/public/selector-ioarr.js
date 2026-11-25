@@ -138,7 +138,11 @@ function pintarProyectos() {
     `<option value="${p.id}">${esc(p.nombre)} · ${esc(p.region)} (${fmt(p.n_locales)})${p.mio === false ? ' — de ' + esc(p.duenio || 'otro usuario') : ''}</option>`).join('');
   $('proy').value = S.proyecto?.id || '';
   const hay = !!S.proyecto;
-  for (const id of ['btn-renombrar', 'btn-duplicar', 'btn-borrar']) $(id).disabled = !hay;
+  for (const id of ['btn-renombrar', 'btn-duplicar']) $(id).disabled = !hay;
+  // Solo quien creó el proyecto lo borra (el servidor también lo exige)
+  const ajeno = hay && S.proyectos.find(p => p.id === S.proyecto.id)?.mio === false;
+  $('btn-borrar').disabled = !hay || ajeno;
+  $('btn-borrar').title = ajeno ? 'Solo quien creó el proyecto puede borrarlo' : '';
   $('btn-nuevo').disabled = S.sinBase;
   $('proy').disabled = S.sinBase;
   $('region').disabled = hay;
