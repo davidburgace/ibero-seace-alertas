@@ -146,13 +146,12 @@ test('total declarado: si las prestaciones no lo suman, no se guarda', async () 
   assert.equal((await pedir('PATCH', `/bases/${fid}`, { datos: { total_declarado: M } })).status, 200);
 });
 
-test('solo el dueño del proyecto', async () => {
+test('los proyectos son del equipo: otro proveedor también los abre', async () => {
   usuario = { id: 'u2', email: 'otro@ejemplo.invalid' };
   try {
-    assert.equal((await pedir('GET', `/bases/${fid}`)).status, 404);
-    assert.equal((await pedir('POST', `/bases/${fid}/exportar`)).status, 404);
-    assert.equal((await pedir('GET', `/proyectos/${PID}/bases`)).status, 404);
-    assert.equal((await pedir('POST', `/bases/${fid}/duplicar`, { proyecto_id: OTRO })).status, 404);
+    assert.equal((await pedir('GET', `/bases/${fid}`)).status, 200);
+    assert.equal((await pedir('GET', `/proyectos/${PID}/bases`)).status, 200);
+    assert.equal((await pedir('GET', `/proyectos/${'0'.repeat(8)}-0000-0000-0000-${'0'.repeat(12)}/bases`)).status, 404, 'proyecto inexistente');
   } finally { usuario = { id: 'u1', email: 'formulador@ejemplo.invalid' }; }
   assert.equal((await pedir('DELETE', `/bases/${fid}`)).status, 200);
   assert.equal((await pedir('GET', `/bases/${fid}`)).status, 404);

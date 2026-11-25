@@ -710,7 +710,7 @@ function renderExpedientes(lista, p) {
         <div class="sub">Verificación: ${r.hechos} de ${r.puntos} listos${r.bloqueos ? ` · <b style="color:#b5322a">${r.bloqueos} no cumple${r.bloqueos === 1 ? '' : 'n'}</b>` : ''} · ${r.pendientes} dato${r.pendientes === 1 ? '' : 's'} pendiente${r.pendientes === 1 ? '' : 's'} del 07-C</div>
         ${dif != null && Math.abs(dif) > 0.01 ? `<div class="sub" style="color:#9a5f0c">⚠ El expediente difiere ${dif > 0 ? '+' : ''}${(dif * 100).toFixed(1)} % del monto del CUI (${soles2(p.monto_inversion)}).</div>` : ''}`
         : '<div class="sub">No se pudo calcular el avance.</div>'}
-      <div class="sub">Actualizado ${fecha(x.actualizado_en)}${x.mio ? ` · <a href="selector-ioarr.html?proyecto=${esc(x.id)}&tab=exp">Abrir el expediente</a>` : ''}</div>
+      <div class="sub">Actualizado ${fecha(x.actualizado_en)} · <a href="selector-ioarr.html?proyecto=${esc(x.id)}&tab=exp">Abrir el expediente</a></div>
     </div>`;
   }).join('') : '<p class="card-empty">Sin expediente. Arma uno en <a href="selector-ioarr.html">Selector IOARR</a> y vincúlalo con este CUI.</p>';
   return `<h3 style="margin-top:16px">📁 Expediente IOARR</h3>${cuerpo}`;

@@ -132,15 +132,15 @@ test('exportar: versión 1 y 2, con fecha y usuario; se vuelven a descargar', as
   assert.equal((await pedir('GET', `/documento-equivalente/${fid}/versiones/9/docx`)).status, 404);
 });
 
-test('quitar una cotización borra su PDF; otro usuario no ve la ficha; borrar la ficha', async () => {
+test('quitar una cotización borra su PDF; otro proveedor también la ve; borrar la ficha', async () => {
   const ruta = cots[0].archivo_ruta;
   const g = await pedir('PATCH', `/documento-equivalente/${fid}`, { datos: { cotizaciones: cots.slice(1) } });
   assert.equal(g.json.datos.cotizaciones.length, 2);
   assert.ok(!sb.bucket.has(ruta), 'el PDF de la cotización quitada se borra');
   assert.ok(g.json.validacion.errores.some(e => e.k === 'justificaciones'), 'con 2 cotizaciones pide justificación');
   usuario = { id: 'u2', email: 'otro@ejemplo.invalid' };
-  assert.equal((await pedir('GET', `/documento-equivalente/${fid}`)).status, 404);
-  assert.equal((await pedir('GET', `/proyectos/${PID}/documento-equivalente`)).status, 404);
+  assert.equal((await pedir('GET', `/documento-equivalente/${fid}`)).status, 200);
+  assert.equal((await pedir('GET', `/proyectos/${PID}/documento-equivalente`)).status, 200);
   usuario = { id: 'u1', email: 'formulador@ejemplo.invalid' };
   assert.equal((await pedir('DELETE', `/documento-equivalente/${fid}`)).status, 200);
   assert.equal((await pedir('GET', `/documento-equivalente/${fid}`)).status, 404);

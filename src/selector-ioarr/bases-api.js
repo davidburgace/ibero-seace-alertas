@@ -53,14 +53,15 @@ export function crearApiBases({ expediente, preciosRef = null }) {
   };
   const ok = ({ data, error: e }) => { if (e) throw e; return data; };
 
-  async function proyectoDe(id, usuarioId) {
+  // Proyectos del equipo: cualquier proveedor (la API ya exige ese rol)
+  async function proyectoDe(id) {
     if (!esUuid(id)) return null;
-    return ok(await supabase.from('ioarr_selector_proyectos').select('*').eq('id', id).eq('usuario_id', usuarioId).maybeSingle());
+    return ok(await supabase.from('ioarr_selector_proyectos').select('*').eq('id', id).maybeSingle());
   }
   async function fichaDe(req) {
     if (!esUuid(req.params.fid)) throw error(404, 'Ficha no encontrada');
     const f = ok(await supabase.from('ioarr_bases_fichas').select('*').eq('id', req.params.fid).maybeSingle());
-    const p = f && await proyectoDe(f.proyecto_id, req.usuario.id);
+    const p = f && await proyectoDe(f.proyecto_id);
     if (!f || !p) throw error(404, 'Ficha no encontrada');
     return { f, p };
   }
@@ -108,7 +109,7 @@ export function crearApiBases({ expediente, preciosRef = null }) {
 
   // ─── Fichas del proyecto ──────────────────────────────────────────────────
   api.get('/proyectos/:id/bases', responder(async (req, res) => {
-    const p = await proyectoDe(req.params.id, req.usuario.id);
+    const p = await proyectoDe(req.params.id);
     if (!p) throw error(404, 'Proyecto no encontrado');
     let fichas = [], sinMigracion = false;
     const r = await supabase.from('ioarr_bases_fichas').select('id, nivel, nombre, actualizado_en').eq('proyecto_id', p.id).order('creado_en');
@@ -120,7 +121,7 @@ export function crearApiBases({ expediente, preciosRef = null }) {
   }));
 
   api.post('/proyectos/:id/bases', responder(async (req, res) => {
-    const p = await proyectoDe(req.params.id, req.usuario.id);
+    const p = await proyectoDe(req.params.id);
     if (!p) throw error(404, 'Proyecto no encontrado');
     const nivel = String(req.body?.nivel || '');
     if (!NIVELES.includes(nivel)) throw error(400, 'Elige el nivel de la IOARR: Inicial, Primaria, Secundaria o Básica Especial (una ficha por nivel)');
@@ -171,7 +172,7 @@ export function crearApiBases({ expediente, preciosRef = null }) {
 
   api.post('/bases/:fid/duplicar', responder(async (req, res) => {
     const { f, p } = await fichaDe(req);
-    const destino = req.body?.proyecto_id ? await proyectoDe(req.body.proyecto_id, req.usuario.id) : p;
+    const destino = req.body?.proyecto_id ? await proyectoDe(req.body.proyecto_id) : p;
     if (!destino) throw error(404, 'Proyecto de destino no encontrado');
     const nivel = req.body?.nivel ? String(req.body.nivel) : f.nivel;
     if (!NIVELES.includes(nivel)) throw error(400, 'Nivel no válido');
