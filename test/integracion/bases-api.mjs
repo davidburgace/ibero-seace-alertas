@@ -156,3 +156,15 @@ test('los proyectos son del equipo: otro proveedor también los abre', async () 
   assert.equal((await pedir('DELETE', `/bases/${fid}`)).status, 200);
   assert.equal((await pedir('GET', `/bases/${fid}`)).status, 404);
 });
+
+test('el listado es del equipo y marca el autor; solo quien creó el proyecto lo borra', async () => {
+  const l = await pedir('GET', '/proyectos');
+  assert.equal(l.status, 200);
+  assert.deepEqual(l.json.map(p => [p.id, p.mio]).sort(), [[PID, true], [OTRO, false]].sort());
+  const r = await pedir('DELETE', `/proyectos/${OTRO}`);
+  assert.equal(r.status, 403); assert.match(r.json.error, /Solo quien creó/);
+  usuario = { id: 'u2', email: 'otro@ejemplo.invalid' };
+  try { assert.equal((await pedir('DELETE', `/proyectos/${OTRO}`)).status, 200); }
+  finally { usuario = { id: 'u1', email: 'formulador@ejemplo.invalid' }; }
+  assert.equal((await pedir('GET', `/proyectos/${OTRO}`)).status, 404, 'borrado');
+});
