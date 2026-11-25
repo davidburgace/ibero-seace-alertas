@@ -62,14 +62,15 @@ export function crearApiDocumentoEquivalente({ expediente, preciosRef = null }) 
     res.status(400).json({ error: err.code === 'LIMIT_FILE_SIZE' ? `El PDF pasa de ${MAX_ARCHIVO / 1024 / 1024} MB` : 'No se pudo recibir el archivo: ' + err.message });
   });
 
-  async function proyectoDe(id, usuarioId) {
+  // Proyectos del equipo: cualquier proveedor (la API ya exige ese rol)
+  async function proyectoDe(id) {
     if (!esUuid(id)) return null;
-    return ok(await supabase.from('ioarr_selector_proyectos').select('*').eq('id', id).eq('usuario_id', usuarioId).maybeSingle());
+    return ok(await supabase.from('ioarr_selector_proyectos').select('*').eq('id', id).maybeSingle());
   }
   async function fichaDe(req) {
     if (!esUuid(req.params.fid)) throw error(404, 'Ficha no encontrada');
     const f = ok(await supabase.from(TABLA).select('*').eq('id', req.params.fid).maybeSingle());
-    const p = f && await proyectoDe(f.proyecto_id, req.usuario.id);
+    const p = f && await proyectoDe(f.proyecto_id);
     if (!f || !p) throw error(404, 'Ficha no encontrada');
     return { f, p };
   }
@@ -131,7 +132,7 @@ export function crearApiDocumentoEquivalente({ expediente, preciosRef = null }) 
 
   // ─── Fichas del proyecto ──────────────────────────────────────────────────
   api.get('/proyectos/:id/documento-equivalente', responder(async (req, res) => {
-    const p = await proyectoDe(req.params.id, req.usuario.id);
+    const p = await proyectoDe(req.params.id);
     if (!p) throw error(404, 'Proyecto no encontrado');
     let fichas = [], sinMigracion = false;
     const r = await supabase.from(TABLA).select('id, nivel, nombre, actualizado_en').eq('proyecto_id', p.id).order('creado_en');
@@ -144,7 +145,7 @@ export function crearApiDocumentoEquivalente({ expediente, preciosRef = null }) 
   }));
 
   api.post('/proyectos/:id/documento-equivalente', responder(async (req, res) => {
-    const p = await proyectoDe(req.params.id, req.usuario.id);
+    const p = await proyectoDe(req.params.id);
     if (!p) throw error(404, 'Proyecto no encontrado');
     const nivel = String(req.body?.nivel || '');
     if (!NIVELES.includes(nivel)) throw error(400, 'Elige el nivel de la IOARR: Inicial, Primaria, Secundaria o Básica Especial (un documento por nivel)');

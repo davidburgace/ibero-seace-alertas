@@ -119,13 +119,22 @@ const limpiarNombre = n => String(n ?? '').replace(/\s+/g, ' ').trim().slice(0, 
 const codigosValidos = arr => [...new Set((Array.isArray(arr) ? arr : []).map(String).filter(c => /^\d{4,10}$/.test(c)))];
 const esUuid = s => /^[0-9a-f-]{36}$/i.test(String(s || ''));
 
+// Los proyectos son del equipo: cualquier proveedor (la API ya exige ese rol) abre, edita o borra
+// los de todos. usuario_id queda como autor.
 async function proyectoDelUsuario(req) {
   if (!esUuid(req.params.id)) return null;
   const { data, error } = await supabase.from('ioarr_selector_proyectos')
     .select('*, ioarr:ioarr_proyectos(id, cui, nombre, monto_inversion, estado, etapa_financista)')
-    .eq('id', req.params.id).eq('usuario_id', req.usuario.id).maybeSingle();
+    .eq('id', req.params.id).maybeSingle();
   if (error) throw error;
   return data;
+}
+
+async function correosDe(ids) {
+  const unicos = [...new Set(ids.filter(Boolean))];
+  if (!unicos.length) return {};
+  const { data } = await supabase.from('perfiles').select('id, email').in('id', unicos);
+  return Object.fromEntries((data || []).map(x => [x.id, x.email]));
 }
 
 async function leerCodigos(proyectoId) {
@@ -155,14 +164,16 @@ async function borrarCodigos(proyectoId, codigos) {
   }
 }
 
-// Lista de proyectos del usuario, con el número de locales
+// Lista de proyectos del equipo, con el número de locales y quién lo creó
 api.get('/proyectos', async (req, res, next) => {
   try {
     const { data, error } = await supabase.from('ioarr_selector_proyectos')
-      .select('id, nombre, region, anio_datos, actualizado_en, ioarr:ioarr_proyectos(id, cui, nombre, monto_inversion, estado, etapa_financista), locales:ioarr_selector_locales(count)')
-      .eq('usuario_id', req.usuario.id).order('actualizado_en', { ascending: false });
+      .select('id, nombre, region, anio_datos, actualizado_en, usuario_id, ioarr:ioarr_proyectos(id, cui, nombre, monto_inversion, estado, etapa_financista), locales:ioarr_selector_locales(count)')
+      .order('actualizado_en', { ascending: false });
     if (error) throw error;
-    res.json(data.map(({ locales, ...p }) => ({ ...p, n_locales: locales?.[0]?.count ?? 0 })));
+    const email = await correosDe(data.map(p => p.usuario_id));
+    res.json(data.map(({ locales, usuario_id, ...p }) => ({ ...p, n_locales: locales?.[0]?.count ?? 0,
+      mio: usuario_id === req.usuario.id, duenio: email[usuario_id] || null })));
   } catch (e) { enviarError(res, next)(e); }
 });
 
@@ -216,7 +227,7 @@ api.patch('/proyectos/:id', async (req, res, next) => {
       cambios.ioarr_proyecto_id = v;
     }
     const { data, error } = await supabase.from('ioarr_selector_proyectos').update(cambios)
-      .eq('id', p.id).eq('usuario_id', req.usuario.id).select('*, ioarr:ioarr_proyectos(id, cui, nombre, monto_inversion, estado, etapa_financista)').single();
+      .eq('id', p.id).select('*, ioarr:ioarr_proyectos(id, cui, nombre, monto_inversion, estado, etapa_financista)').single();
     if (error && 'modo_ioarr' in cambios && /modo_ioarr/.test(error.message || '')) return res.status(503).json({ error: AVISO_NIV });
     if (error) throw error;
     res.json(data);
@@ -340,7 +351,7 @@ api.delete('/proyectos/:id', async (req, res, next) => {
     const p = await proyectoDelUsuario(req);
     if (!p) return res.status(404).json({ error: 'Proyecto no encontrado' });
     await borrarArchivosProyecto(p.id);   // sustento del expediente en el bucket (las filas caen en cascada)
-    const { error } = await supabase.from('ioarr_selector_proyectos').delete().eq('id', p.id).eq('usuario_id', req.usuario.id);
+    const { error } = await supabase.from('ioarr_selector_proyectos').delete().eq('id', p.id);
     if (error) throw error;
     res.json({ ok: true });
   } catch (e) { enviarError(res, next)(e); }
@@ -461,13 +472,12 @@ export async function conteoExpedientes() {
   for (const r of data) out[r.ioarr_proyecto_id] = (out[r.ioarr_proyecto_id] || 0) + 1;
   return out;
 }
-// Expedientes de un CUI con su avance; «mio» = el usuario puede abrirlo en el Selector
+// Expedientes de un CUI con su avance; «mio» = lo creó el usuario (todo proveedor puede abrirlo)
 export async function expedientesDeIoarr(ioarrId, usuarioId) {
   if (!supabase) return [];
   const { data, error } = await supabase.from('ioarr_selector_proyectos').select(COLS_VINC).eq('ioarr_proyecto_id', ioarrId).order('actualizado_en', { ascending: false });
   if (error) { console.warn('[SELECTOR] expedientesDeIoarr:', error.message); return []; }
-  const duenios = await supabase.from('perfiles').select('id, email').in('id', [...new Set(data.map(p => p.usuario_id))]);
-  const email = Object.fromEntries((duenios.data || []).map(x => [x.id, x.email]));
+  const email = await correosDe(data.map(p => p.usuario_id));
   return Promise.all(data.map(async p => {
     let resumen = null;
     try { resumen = await expediente.resumen(p); } catch (e) { console.warn('[SELECTOR] resumen de expediente:', e.message); }

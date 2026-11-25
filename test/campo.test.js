@@ -191,9 +191,9 @@ const PROYS = [
 
 const ASIG = [{ proyecto_id: UUID, supervisor_id: 'sup-1' }, { proyecto_id: UUID, supervisor_id: 'sup-1' }, { proyecto_id: 'otro', supervisor_id: 'sup-2' }];
 
-test('campo: el proveedor ve solo sus proyectos; el supervisor, solo donde tiene colegios (sin datos de más)', async () => {
+test('campo: el proveedor ve los proyectos de todo el equipo; el supervisor, solo donde tiene colegios (sin datos de más)', async () => {
   const prov = await listarProyectosCampo(sbProyectos({ proyectos: PROYS, asig: ASIG }), { id: 'prov-1', rol: 'proveedor' });
-  assert.deepEqual(prov, [{ id: UUID, nombre: 'Moquegua 2026', region: 'Moquegua', n_locales: 3 }]);
+  assert.deepEqual(prov, [{ id: UUID, nombre: 'Moquegua 2026', region: 'Moquegua', n_locales: 3 }, { id: 'otro', nombre: 'Tacna', region: 'Tacna', n_locales: 9 }]);
   const sup = await listarProyectosCampo(sbProyectos({ proyectos: PROYS, asig: ASIG }), { id: 'sup-1', rol: 'supervisor' });
   assert.deepEqual(sup, [{ id: UUID, nombre: 'Moquegua 2026', region: 'Moquegua', n_locales: 3 }]);
   for (const p of sup) assert.deepEqual(Object.keys(p).sort(), ['id', 'n_locales', 'nombre', 'region']);
@@ -202,11 +202,11 @@ test('campo: el proveedor ve solo sus proyectos; el supervisor, solo donde tiene
   assert.deepEqual(await listarProyectosCampo(sbProyectos({ proyectos: PROYS, asig: null }), { id: 'sup-1', rol: 'supervisor' }), []);
 });
 
-test('campo: abrir un proyecto trae todos sus códigos (por lotes) y respeta al dueño', async () => {
+test('campo: abrir un proyecto trae todos sus códigos (por lotes); cualquier proveedor lo abre', async () => {
   const locales = Array.from({ length: 2500 }, (_, i) => String(100000 + i));
   const p = await proyectoCampo(sbProyectos({ proyectos: PROYS, locales }), { id: 'prov-1', rol: 'proveedor' }, UUID);
   assert.equal(p.nombre, 'Moquegua 2026'); assert.equal(p.locales.length, 2500); assert.equal(p.locales[2499], '102499');
-  assert.equal(await proyectoCampo(sbProyectos({ proyectos: PROYS }), { id: 'prov-2', rol: 'proveedor' }, UUID), null);
+  assert.equal((await proyectoCampo(sbProyectos({ proyectos: PROYS }), { id: 'prov-2', rol: 'proveedor' }, UUID)).nombre, 'Moquegua 2026', 'otro proveedor');
   assert.ok(await proyectoCampo(sbProyectos({ proyectos: PROYS, asig: ASIG }), { id: 'sup-1', rol: 'supervisor' }, UUID));
   // el supervisor no abre un proyecto donde no tiene colegios
   assert.equal(await proyectoCampo(sbProyectos({ proyectos: PROYS, asig: ASIG }), { id: 'sup-2', rol: 'supervisor' }, UUID), null);
@@ -416,10 +416,10 @@ test('reparto: reemplazar borra el anterior y guarda el nuevo; un cambio suelto 
   assert.deepEqual(r2.body.asignaciones, { '100002': 'sup-2', '100003': 'sup-1' });
 });
 
-test('reparto: solo el proveedor dueño, solo colegios del proyecto y solo a supervisores', async () => {
+test('reparto: solo un proveedor (cualquiera del equipo), solo colegios del proyecto y solo a supervisores', async () => {
   const sb = sbReparto();
   assert.equal((await guardarAsignaciones(sb, { id: 'sup-1', rol: 'supervisor' }, UUID, { asignaciones: {} })).status, 403);
-  assert.equal((await guardarAsignaciones(sb, { id: 'prov-2', rol: 'proveedor' }, UUID, { asignaciones: {} })).status, 404);
+  assert.notEqual((await guardarAsignaciones(sb, { id: 'prov-2', rol: 'proveedor' }, UUID, { asignaciones: {} })).status, 404, 'otro proveedor también reparte');
   assert.equal((await guardarAsignaciones(sb, PROV, UUID, { asignaciones: { '999999': 'sup-1' } })).status, 400);
   const r = await guardarAsignaciones(sb, PROV, UUID, { asignaciones: { '100001': 'prov-1' } });
   assert.equal(r.status, 400); assert.match(r.body.error, /supervisor/);
@@ -512,7 +512,7 @@ test('fichas en campo: el supervisor solo baja su paquete; el proveedor dueño, 
   assert.equal((await paqueteFichasCampo(sbReparto({ sinTabla: true }), { id: 'sup-1', rol: 'supervisor' }, UUID)).status, 404);
   assert.deepEqual(await paqueteFichasCampo(sb(), PROV, UUID), { paquete: null });
   assert.deepEqual(await paqueteFichasCampo(sb(), PROV, UUID, 'sup-2'), { paquete: 'sup-2' });
-  assert.equal((await paqueteFichasCampo(sb(), { id: 'prov-2', rol: 'proveedor' }, UUID)).status, 404, 'otro proveedor');
+  assert.deepEqual(await paqueteFichasCampo(sb(), { id: 'prov-2', rol: 'proveedor' }, UUID), { paquete: null }, 'otro proveedor');
 });
 
 test('fichas en campo: la ruta pasa el paquete del supervisor a fichasZip', async () => {

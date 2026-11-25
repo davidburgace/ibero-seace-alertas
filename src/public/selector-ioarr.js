@@ -130,12 +130,12 @@ async function boot() {
 
 async function listarProyectos() {
   try { S.proyectos = await api('/proyectos'); S.sinBase = false; }
-  catch (e) { S.proyectos = []; S.sinBase = e.status === 503; if (!S.sinBase) toast('No se pudieron leer tus proyectos: ' + e.message); }
+  catch (e) { S.proyectos = []; S.sinBase = e.status === 503; if (!S.sinBase) toast('No se pudieron leer los proyectos: ' + e.message); }
   pintarProyectos();
 }
 function pintarProyectos() {
   $('proy').innerHTML = '<option value="">— Borrador sin guardar —</option>' + S.proyectos.map(p =>
-    `<option value="${p.id}">${esc(p.nombre)} · ${esc(p.region)} (${fmt(p.n_locales)})</option>`).join('');
+    `<option value="${p.id}">${esc(p.nombre)} · ${esc(p.region)} (${fmt(p.n_locales)})${p.mio === false ? ' — de ' + esc(p.duenio || 'otro usuario') : ''}</option>`).join('');
   $('proy').value = S.proyecto?.id || '';
   const hay = !!S.proyecto;
   for (const id of ['btn-renombrar', 'btn-duplicar', 'btn-borrar']) $(id).disabled = !hay;

@@ -64,8 +64,8 @@ export const AVISO_MIGRACION_CAMPO = 'Falta ejecutar supabase/migrations/011_ioa
 export const AVISO_MIGRACION_ASIGNACIONES = 'Para repartir colegios entre supervisores falta ejecutar supabase/migrations/022_campo_asignaciones.sql en Supabase';
 export const AVISO_MIGRACION_VISITAS = 'Para marcar colegios visitados falta ejecutar supabase/migrations/021_campo_visitas.sql en Supabase';
 
-// El supervisor ve solo los proyectos donde tiene colegios asignados; los demás, los suyos
-const delUsuario = (q, usuario, ids) => usuario.rol === 'supervisor' ? q.in('id', ids) : q.eq('usuario_id', usuario.id);
+// El supervisor ve solo los proyectos donde tiene colegios asignados; el proveedor, todos (son del equipo)
+const delUsuario = (q, usuario, ids) => usuario.rol === 'supervisor' ? q.in('id', ids) : q;
 
 // Proyectos con colegios asignados al supervisor (sin la migración 022, ninguno)
 export async function proyectosDelSupervisor(sb, supervisorId) {
