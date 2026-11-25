@@ -15,7 +15,7 @@ const norm = t => String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLow
 const PAGE = 40;
 const corto = email => String(email || '').split('@')[0] || 'supervisor';
 
-let ctx = null, vista = null, informe = null, version = 0, pag = 0, filtro = '';
+let ctx = null, vista = null, informe = null, version = 0, pag = 0, filtro = '', filtroEstado = '';
 let rev = null;   // ficha de la app en revisión: { cod, cargando, error, d: { ficha, modelo, revision } }
 
 export async function renderFichas(c) {
@@ -79,9 +79,19 @@ function pintarInforme() {
     </div>`).join('')}</div>`;
 }
 
+// Filtro por estado del local (se combina con la búsqueda de texto)
+const ESTADOS = [
+  ['', 'Todos los estados', () => true],
+  ['verificado', 'Verificados', l => l.estado === 'verificado'],
+  ['censo', 'Solo censo', l => l.estado !== 'verificado'],
+  ['enviada', 'App: por revisar', l => l.digital?.estado === 'enviada'],
+  ['observada', 'App: devueltas', l => l.digital?.estado === 'observada'],
+];
+
 function pintarLocales() {
   const q = norm(filtro).split(/\s+/).filter(Boolean);
-  const locs = vista.locales.filter(l => !q.length || q.every(w => norm(`${l.cod} ${l.nom} ${l.dist} ${l.estado_texto} ${l.supervisor || ''} ${l.digital ? 'app ' + l.digital.estado_texto : ''}`).includes(w)));
+  const porEstado = (ESTADOS.find(x => x[0] === filtroEstado) || ESTADOS[0])[2];
+  const locs = vista.locales.filter(l => porEstado(l) && (!q.length || q.every(w => norm(`${l.cod} ${l.nom} ${l.dist} ${l.estado_texto} ${l.supervisor || ''} ${l.digital ? 'app ' + l.digital.estado_texto : ''}`).includes(w))));
   const pags = Math.max(1, Math.ceil(locs.length / PAGE));
   if (pag >= pags) pag = pags - 1;
   const desde = pag * PAGE;
@@ -93,10 +103,12 @@ function pintarLocales() {
       ${l.ficha ? `<br><span class="sub" title="${esc(l.ficha.archivo)}">Ficha importada el ${fechaPe(l.ficha.importado_en)}${l.ficha.verificador ? ' · ' + esc(l.ficha.verificador) : ''}</span>` : l.estado === 'verificado' ? '<br><span class="sub">Corregido a mano</span>' : ''}
       ${l.digital ? `<br><span class="chip-est ${CHIP_APP[l.digital.estado]}">App: ${esc(l.digital.estado_texto)}</span>${l.digital.por ? ` <span class="sub">${esc(corto(l.digital.por))}</span>` : ''}` : ''}</td>
     <td class="acciones">${l.digital && l.digital.estado !== 'borrador' ? `<button class="x" type="button" data-ficha-revisar="${esc(l.cod)}">${l.digital.estado === 'enviada' ? 'Revisar' : 'Ver'}</button> ` : ''}<button class="x" type="button" data-ficha-bajar="${esc(l.cod)}" data-formato="excel">Excel</button> <button class="x" type="button" data-ficha-bajar="${esc(l.cod)}" data-formato="pdf">PDF</button></td></tr>`).join('');
+  const opciones = ESTADOS.map(([k, t, f]) => `<option value="${k}" ${k === filtroEstado ? 'selected' : ''}>${t} (${ent(vista.locales.filter(f).length)})</option>`).join('');
   return `<div class="panel-cab"><h3>Locales de la propuesta</h3>
-      <input type="search" class="buscar" data-fichas-filtro value="${esc(filtro)}" placeholder="Buscar por código, nombre, estado o supervisor" aria-label="Buscar locales"></div>
+      <div class="fichas-filtros"><select data-fichas-estado aria-label="Filtrar por estado">${opciones}</select>
+      <input type="search" class="buscar" data-fichas-filtro value="${esc(filtro)}" placeholder="Buscar por código, nombre, estado o supervisor" aria-label="Buscar locales"></div></div>
     <div class="tabla-wrap borde-0"><table class="tabla"><thead><tr><th>Código de local</th><th>Institución educativa</th><th class="num">Aulas</th><th class="num">A reponer</th><th class="num">Verificado</th><th>Estado</th><th>Ficha</th></tr></thead>
-    <tbody>${filas || `<tr><td colspan="7" class="vacio">${vista.locales.length ? 'Ningún local coincide con la búsqueda.' : 'El proyecto no tiene locales en la propuesta.'}</td></tr>`}</tbody></table></div>
+    <tbody>${filas || `<tr><td colspan="7" class="vacio">${vista.locales.length ? 'Ningún local coincide con el filtro.' : 'El proyecto no tiene locales en la propuesta.'}</td></tr>`}</tbody></table></div>
     ${vista.excluidos ? `<p class="sub pad">${vista.excluidos === 1 ? '1 local excluido' : ent(vista.excluidos) + ' locales excluidos'} por otra inversión vigente o reciente no lleva ficha.</p>` : ''}
     ${pags > 1 ? `<div class="paginacion pad-pag"><span class="sub">${ent(desde + 1)}–${ent(Math.min(locs.length, desde + PAGE))} de ${ent(locs.length)}</span><div class="pg-btns"><button class="btn btn-ghost btn-sm" data-fichas-pag="-1" type="button" ${pag === 0 ? 'disabled' : ''}>Anterior</button><span class="mono">${pag + 1} / ${pags}</span><button class="btn btn-ghost btn-sm" data-fichas-pag="1" type="button" ${pag >= pags - 1 ? 'disabled' : ''}>Siguiente</button></div></div>` : ''}`;
 }
@@ -253,7 +265,14 @@ async function importar(input) {
 }
 
 export function enlazarFichas(el) {
-  el.addEventListener('change', e => { if (e.target.matches('[data-fichas-subir]') && ctx) importar(e.target); });
+  el.addEventListener('change', e => {
+    if (e.target.matches('[data-fichas-subir]') && ctx) importar(e.target);
+    if (e.target.matches('[data-fichas-estado]') && vista) {
+      filtroEstado = e.target.value; pag = 0;
+      document.getElementById('fichas-locales').innerHTML = pintarLocales();
+      ctx.el.querySelector('[data-fichas-estado]').focus();
+    }
+  });
   el.addEventListener('input', e => {
     if (!e.target.matches('[data-fichas-filtro]') || !vista) return;
     filtro = e.target.value; pag = 0;
