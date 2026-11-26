@@ -221,5 +221,5 @@ test('el worker de campo pasa el origen y la distancia máxima, y deja fuera los
   const js = readFileSync(new URL('../src/public/selector-ioarr-worker.js', import.meta.url), 'utf8');
   assert.match(js, /visitas\(\{ porDia, maxKm, origen, excluir \}\)/);
   assert.match(js, /!fuera\?\.has\(D\.locs\[i\]\[0\]\)/);
-  assert.match(js, /agruparVisitas\(puntos, porDia, \{ maxKm, origen \}\)/);
+  assert.match(js, /agruparVisitas\(puntos, porDia, \{ maxKm, origen, km: carretera \? kmCarretera : null \}\)/);
 });

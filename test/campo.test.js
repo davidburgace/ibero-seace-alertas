@@ -216,7 +216,7 @@ test('campo: abrir un proyecto trae todos sus códigos (por lotes); cualquier pr
 test('campo: la API solo lee proyectos; escribe visitas, el reparto entre supervisores y las fichas llenadas en la app', () => {
   const rutas = crearApiCampo(sbProyectos()).stack.filter(l => l.route)
     .map(l => `${Object.keys(l.route.methods).join(',')} ${l.route.path}`).sort();
-  assert.deepEqual(rutas, ['delete /proyectos/:id/fichas/:cod/firmas/:cargo', 'delete /proyectos/:id/fichas/:cod/fotos/:fotoId', 'delete /visitas/:codigo', 'get /proyectos', 'get /proyectos/:id', 'get /proyectos/:id/fichas', 'get /proyectos/:id/fichas-equipo', 'get /proyectos/:id/fichas-pdf', 'get /proyectos/:id/fichas-zip', 'get /proyectos/:id/fichas/:cod',
+  assert.deepEqual(rutas, ['delete /proyectos/:id/fichas/:cod/firmas/:cargo', 'delete /proyectos/:id/fichas/:cod/fotos/:fotoId', 'delete /visitas/:codigo', 'get /proyectos', 'get /proyectos/:id', 'get /proyectos/:id/carretera', 'get /proyectos/:id/fichas', 'get /proyectos/:id/fichas-equipo', 'get /proyectos/:id/fichas-pdf', 'get /proyectos/:id/fichas-zip', 'get /proyectos/:id/fichas/:cod',
     'get /proyectos/:id/fichas/:cod/firmas/:cargo', 'get /proyectos/:id/fichas/:cod/fotos/:fotoId', 'get /proyectos/:id/fichas/:cod/pdf', 'get /supervisores', 'get /visitas', 'post /proyectos/:id/fichas/:cod/enviar', 'post /proyectos/:id/fichas/:cod/fotos',
     'put /proyectos/:id/asignaciones', 'put /proyectos/:id/fichas/:cod', 'put /proyectos/:id/fichas/:cod/firmas/:cargo', 'put /visitas/:codigo']);
 });
@@ -523,5 +523,5 @@ test('fichas en campo: la ruta pasa el paquete del supervisor a fichasZip', asyn
   await capa.route.stack[0].handle({ usuario: { id: 'sup-1', rol: 'supervisor' }, params: { id: UUID }, query: { paquete: 'otro' } }, res, e => { throw e; });
   assert.deepEqual(llamadas, [[UUID, 'sup-1']]);
   assert.match(leer('src/public/campo.js'), /\/api\/campo\/proyectos\/\$\{encodeURIComponent\(P\.id\)\}\/fichas-zip/);
-  assert.match(leer('src/server.js'), /crearApiCampo\(undefined, \{ fichasZip: fichasZipProyecto, fichas: fichasCampo \}\)/);
+  assert.match(leer('src/server.js'), /crearApiCampo\(undefined, \{ fichasZip: fichasZipProyecto, fichas: fichasCampo, ubicaciones: ubicacionesLocales \}\)/);
 });

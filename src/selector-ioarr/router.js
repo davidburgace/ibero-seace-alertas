@@ -26,7 +26,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { supabase } from '../ioarr/db.js';
-import { prep, calc, limpiarParams } from './calculo.js';
+import { prep, calc, limpiarParams, coordValidas } from './calculo.js';
 import { generarExcel } from './excel.js';
 import { generarExcelVisitas } from './excel-visitas.js';
 import { agruparVisitas, puntosVisita, limitarPorDia } from './visitas.js';
@@ -73,6 +73,14 @@ export async function cargarRegion(nombre) {
   cacheRegiones.set(nombre, D);
   if (cacheRegiones.size > 3) cacheRegiones.delete(cacheRegiones.keys().next().value);
   return D;
+}
+
+// Coordenadas del padrón de esos colegios (Visitas de campo: distancias por carretera). Solo los que tienen coordenadas válidas
+export async function ubicacionesLocales(region, codigos) {
+  const D = await cargarRegion(region);
+  if (!D) return [];
+  const quiero = new Set(codigos);
+  return D.locs.filter(l => quiero.has(l[0]) && coordValidas(l[6], l[7])).map(l => ({ cod: l[0], lat: l[6], lon: l[7] }));
 }
 
 // ─── API ────────────────────────────────────────────────────────────────────

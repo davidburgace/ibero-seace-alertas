@@ -12,8 +12,10 @@ let km = new Map();     // con búsqueda por cercanía: índice de local → dis
 let centro = null;      // centro de la última consulta por cercanía
 let solo = null;        // Visitas de campo: códigos del proyecto elegido (las consultas solo ven esos locales)
 let omitir = null;      // Visitas de campo: colegios ya visitados que no se listan («Ocultar visitados»)
+let carretera = null;   // Visitas de campo: km por carretera entre colegios, Map 'codA|codB' → km | null
 
 const pct = i => C.L.reqTot[i] > 0 ? C.L.repTot[i] / C.L.reqTot[i] : null;
+const kmCarretera = (a, b) => carretera.get(a < b ? `${a}|${b}` : `${b}|${a}`);
 const selIdx = () => [...sel].map(c => codIdx.get(c)).filter(i => i != null);
 
 const acciones = {
@@ -157,12 +159,14 @@ const acciones = {
 
   // Días de visita de la selección (sin los excluidos por otra inversión)
   // excluir: códigos que no entran a los días (Visitas de campo: los ya visitados)
+  // Visitas de campo: km por carretera entre colegios ({ 'codA|codB': km | null }, código menor primero); null = no hay
+  carretera({ pares }) { carretera = pares && Object.keys(pares).length ? new Map(Object.entries(pares)) : null; return carretera?.size || 0; },
   visitas({ porDia, maxKm, origen, excluir }) {
     const fuera = excluir?.length ? new Set(excluir) : null;
     const todos = selIdx(), list = todos.filter(i => !excl.has(D.locs[i][0]) && !fuera?.has(D.locs[i][0]));
     const { puntos, sinCoord } = puntosVisita(D, C, list);
     const sinI = ({ i, ...p }) => p;
-    return { dias: agruparVisitas(puntos, porDia, { maxKm, origen }).map(d => ({ ...d, puntos: d.puntos.map(sinI) })), sinCoord: sinCoord.map(sinI),
+    return { dias: agruparVisitas(puntos, porDia, { maxKm, origen, km: carretera ? kmCarretera : null }).map(d => ({ ...d, puntos: d.puntos.map(sinI) })), sinCoord: sinCoord.map(sinI),
       nExcl: todos.length - list.length, codigos: list.map(i => D.locs[i][0]) };
   },
 

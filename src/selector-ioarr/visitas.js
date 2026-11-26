@@ -8,10 +8,14 @@
 //   2. Compactar: se intercambian colegios entre días mientras cada día quede más junto.
 //   3. Los días se ordenan desde el origen hacia afuera, y cada día sigue la ruta del vecino
 //      más cercano, empezando cerca de donde terminó el anterior.
+// Con distancias por carretera (opc.km, Visitas de campo: ver carretera.js), el armado, la distancia
+// máxima, el compactado, el orden de visita y los km usan la carretera entre colegios; los pares sin
+// dato (o sin ruta) siguen en línea recta y quedan marcados. Sin opc.km, todo es en línea recta.
 import { haversine, localConCoord } from './cercania.js';
 
 export const POR_DIA_DEF = 8, POR_DIA_MIN = 1, POR_DIA_MAX = 50;
 export const AVISO_VISITAS = 'Agrupación aproximada por cercanía geográfica. Las distancias son en línea recta y no incluyen carreteras ni tiempos de viaje.';
+export const AVISO_VISITAS_CARRETERA = 'Agrupación por distancia por carretera entre colegios (OpenRouteService, con el mapa de OpenStreetMap): no incluye tiempos de viaje, y en zonas rurales el mapa puede no tener todas las trochas.';
 
 // Distancia máxima entre dos colegios del mismo día (km). 0 = sin límite
 export const MAX_KM_DEF = 10, MAX_KM_MAX = 500;
@@ -34,26 +38,44 @@ const dist = (a, b) => haversine(a.lat, a.lon, b.lat, b.lon);
 // Desempate estable por código, para que el resultado no dependa del orden de entrada
 const menor = (a, b, da, db) => da < db || (da === db && a.cod < b.cod);
 
+// Distancias entre colegios. km(codA, codB): km por carretera, o null/undefined si no se sabe o no hay
+// ruta (entonces, en línea recta). Sin km, todo en línea recta.
+function distancias(km) {
+  if (!km) return { d: dist, porCarretera: () => false };
+  const carr = (a, b) => (a.cod != null && b.cod != null && a.cod !== b.cod ? km(a.cod, b.cod) : null);
+  return {
+    d: (a, b) => { const v = carr(a, b); return Number.isFinite(v) ? v : dist(a, b); },
+    porCarretera: (a, b) => Number.isFinite(carr(a, b))
+  };
+}
+// Promedio de las distancias de x a los colegios de g (sin x ni `sin`); 0 si no queda ninguno
+function aGrupo(D, x, g, sin = null) {
+  let s = 0, n = 0;
+  for (const o of g) if (o !== x && o !== sin) { s += D(x, o); n++; }
+  return n ? s / n : 0;
+}
+
 // Ruta por vecino más cercano desde `inicio`
-function ruta(ps, inicio) {
+function ruta(ps, inicio, D = dist) {
   const out = [inicio], resto = new Set(ps); resto.delete(inicio);
   let act = inicio;
   while (resto.size) {
     let mejor = null, dm = Infinity;
-    for (const p of resto) { const d = dist(act, p); if (!mejor || menor(p, mejor, d, dm)) { mejor = p; dm = d; } }
+    for (const p of resto) { const d = D(act, p); if (!mejor || menor(p, mejor, d, dm)) { mejor = p; dm = d; } }
     out.push(mejor); resto.delete(mejor); act = mejor;
   }
   return out;
 }
-const largo = ps => ps.reduce((a, p, i) => i ? a + dist(ps[i - 1], p) : 0, 0);
 
 // Compactar: intercambia colegios entre días mientras baje la suma de las distancias de cada
 // colegio al centro de su día (cada día conserva su cantidad). Corrige los colegios sueltos
 // que el armado deja para los últimos días.
 const MAX_PASADAS = 40, MAX_PARES = 6e7;
-function compactar(grupos, maxKm = Infinity) {
+// Con carretera (porMiembros), «el centro del día» no existe: se usa el promedio de la distancia a los
+// demás colegios del día.
+function compactar(grupos, maxKm = Infinity, D = dist, porMiembros = false) {
   // ¿q puede entrar al día g en lugar de p sin pasar la distancia máxima?
-  const cabe = (q, g, p) => maxKm === Infinity || g.every(o => o === p || dist(o, q) <= maxKm);
+  const cabe = (q, g, p) => maxKm === Infinity || g.every(o => o === p || D(o, q) <= maxKm);
   const cs = grupos.map(centroide);
   const dueño = new Map(); grupos.forEach((g, k) => g.forEach(p => dueño.set(p, k)));
   const todos = grupos.flat(), n = todos.length;
@@ -66,7 +88,9 @@ function compactar(grupos, maxKm = Infinity) {
       for (let b = a + 1; b < n; b++) {
         const q = todos[b], B = dueño.get(q);
         if (A === B) continue;
-        const delta = dist(p, cs[B]) + dist(q, cs[A]) - dist(p, cs[A]) - dist(q, cs[B]);
+        const delta = porMiembros
+          ? aGrupo(D, p, grupos[B], q) + aGrupo(D, q, grupos[A], p) - aGrupo(D, p, grupos[A]) - aGrupo(D, q, grupos[B])
+          : dist(p, cs[B]) + dist(q, cs[A]) - dist(p, cs[A]) - dist(q, cs[B]);
         if (delta < -1e-6 && cabe(q, grupos[A], p) && cabe(p, grupos[B], q)) {
           grupos[A][grupos[A].indexOf(p)] = q; grupos[B][grupos[B].indexOf(q)] = p;
           dueño.set(p, B); dueño.set(q, A); recalc(A); recalc(B);
@@ -87,10 +111,15 @@ function compactar(grupos, maxKm = Infinity) {
  *        Sin origen, se empieza en el colegio más alejado del centro de todos (un extremo de la zona).
  *        maxKm: distancia máxima entre dos colegios del mismo día (0 = sin límite); con ella, «porDia» es
  *        un máximo y un día puede cerrarse con menos colegios.
- * @returns {Array<{dia:number, km:number, puntos:Array}>} días en orden; cada punto en orden de visita, con `orden` (1…n)
+ *        km(codA, codB): km por carretera entre dos colegios (null/undefined = sin dato: en línea recta).
+ * @returns {Array<{dia, km, carretera, aprox, puntos}>} días en orden. km: largo de la ruta del día; carretera: se
+ *          usaron distancias por carretera; aprox: algún tramo va en línea recta. Cada punto en orden de visita, con
+ *          `orden` (1…n), `kmSig` (km al siguiente; null en el último), `lineaSig` (lo mismo en línea recta) y
+ *          `carrSig` (kmSig es por carretera).
  */
-export function agruparVisitas(puntos, porDia, { origen = null, maxKm = 0 } = {}) {
+export function agruparVisitas(puntos, porDia, { origen = null, maxKm = 0, km = null } = {}) {
   const cap = limitarPorDia(porDia), lim = tope(maxKm);
+  const { d: D, porCarretera } = distancias(km), conCarretera = !!km;
   if (!puntos.length) return [];
   // Orden fijo por código: el resultado no depende del orden de entrada
   const ps = [...puntos].sort((a, b) => (a.cod < b.cod ? -1 : a.cod > b.cod ? 1 : 0));
@@ -107,16 +136,20 @@ export function agruparVisitas(puntos, porDia, { origen = null, maxKm = 0 } = {}
     const g = [semilla]; libres.delete(semilla);
     let c = { lat: semilla.lat, lon: semilla.lon };
     while (g.length < cap && libres.size) {
-      const m = cercano(c, libres);
+      // Sin carretera: el libre más cercano al centro del día; con carretera, el de menor distancia
+      // promedio a los colegios del día
+      let m = null;
+      if (conCarretera) { let dm = Infinity; for (const p of libres) { const d = aGrupo(D, p, g); if (!m || menor(p, m, d, dm)) { m = p; dm = d; } } }
+      else m = cercano(c, libres);
       // el día se cierra antes si el colegio más cercano lo separaría demasiado
-      if (g.some(p => dist(p, m) > lim)) break;
+      if (g.some(p => D(p, m) > lim)) break;
       g.push(m); libres.delete(m);
       c = { lat: c.lat + (m.lat - c.lat) / g.length, lon: c.lon + (m.lon - c.lon) / g.length };
     }
     grupos.push(g); ref = c;
   }
   // 2. Compactar (intercambios entre días)
-  compactar(grupos, lim);
+  compactar(grupos, lim, D, conCarretera);
   // 3. Orden de los días: el primero, el que tiene el colegio más cercano al origen; después, siempre
   //    el día pendiente más cercano al centro del anterior (así se va alejando).
   const pend = new Set(grupos.map((g, k) => k)), orden = [];
@@ -133,11 +166,29 @@ export function agruparVisitas(puntos, porDia, { origen = null, maxKm = 0 } = {}
   //    los demás, en el más cercano a donde terminó el día anterior.
   let desde = ini;
   return orden.map((k, i) => {
-    const r = ruta(grupos[k], cercano(desde, grupos[k]));
+    const r = ruta(grupos[k], desde.cod != null ? cercanoCon(D, desde, grupos[k]) : cercano(desde, grupos[k]), D);
     desde = r.at(-1);
-    return { dia: i + 1, km: largo(r), puntos: r.map((p, j) => ({ ...p, orden: j + 1 })) };
+    let total = 0, aprox = false;
+    const pts = r.map((p, j) => {
+      const s = r[j + 1];
+      if (!s) return { ...p, orden: j + 1, kmSig: null, lineaSig: null, carrSig: false };
+      const kmSig = D(p, s), carrSig = porCarretera(p, s);
+      total += kmSig; if (!carrSig) aprox = true;
+      return { ...p, orden: j + 1, kmSig, lineaSig: dist(p, s), carrSig };
+    });
+    return { dia: i + 1, km: total, carretera: conCarretera, aprox: conCarretera && aprox, puntos: pts };
   });
 }
+
+function cercanoCon(D, ref, conj) {
+  let m = null, dm = Infinity;
+  for (const p of conj) { const d = D(ref, p); if (!m || menor(p, m, d, dm)) { m = p; dm = d; } }
+  return m;
+}
+
+// Tramo «con desvío»: por carretera es mucho más largo que en línea recta (más del doble y 5 km más, o más)
+export const conDesvio = (kmCarretera, kmLinea) => Number.isFinite(kmCarretera) && Number.isFinite(kmLinea)
+  && kmCarretera > 2 * kmLinea && kmCarretera - kmLinea >= 5;
 
 // ─── Reparto entre supervisores (Visitas de campo) ──────────────────────────
 // n colegios entre k supervisores en partes casi iguales: 200 entre 3 → [67, 67, 66]
