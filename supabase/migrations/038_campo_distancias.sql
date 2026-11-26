@@ -30,4 +30,4 @@ create index if not exists campo_distancias_cod_b on public.campo_distancias (co
 alter table public.campo_distancias enable row level security;
 
 comment on table public.campo_distancias is
-  'Km por carretera entre dos colegios (OpenRouteService), para el plan de Visitas de campo. Una fila por par (cod_a < cod_b); km null = sin ruta.';
+  'Km por carretera entre dos colegios (Visitas de campo). km null = sin ruta.';
