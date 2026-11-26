@@ -40,6 +40,14 @@ test('matrizOrs: un colegio lejos de cualquier vía se saca y sus pares quedan s
   assert.equal(m[1][1], 0);
 });
 
+test('matrizOrs: la API real responde 200 con null para el punto que no está cerca de ninguna vía', async () => {
+  // Respuesta real de api.heigit.org (26/11/2026) con un punto en el lago Titicaca en el medio
+  const f = async () => ({ ok: true, status: 200, json: async () => ({ destinations: [{ snapped_distance: 1.66 }, null, { snapped_distance: 5.5 }],
+    distances: [[0, null, 56.79], [null, null, null], [56.79, null, 0]] }) });
+  const m = await matrizOrs(fila(3), { key: 'k', fetch: f });
+  assert.deepEqual(m, [[0, null, 56.79], [null, null, null], [56.79, null, 0]]);
+});
+
 test('matrizOrs: otro error (límite de consultas) se lanza con el estado', async () => {
   const ors = orsFalso({ fallaDesde: 0 });
   await assert.rejects(matrizOrs(fila(3), { key: 'clave-ors', fetch: ors.f }), e => e.status === 429 && /429/.test(e.message));
