@@ -10,7 +10,8 @@
 // Si ORS falla a mitad de camino (límite de consultas, caída), se devuelve lo que se tenga y el resto
 // se pide la próxima vez.
 
-export const URL_ORS = 'https://api.openrouteservice.org/v2/matrix/driving-car';
+// api.openrouteservice.org se apagó en noviembre de 2026: la API sigue en api.heigit.org/openrouteservice
+export const URL_ORS = 'https://api.heigit.org/openrouteservice/v2/matrix/driving-car';
 export const MAX_COLEGIOS_CARRETERA = 200;   // por pedido (un supervisor rara vez tiene más)
 export const BLOQUE = 25;                     // colegios por bloque: dos bloques = 50 lugares = 2 500 celdas (ORS admite 3 500)
 export const AVISO_MIGRACION_CARRETERA = 'Falta ejecutar supabase/migrations/038_campo_distancias.sql en Supabase';
