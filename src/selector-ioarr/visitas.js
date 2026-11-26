@@ -44,7 +44,9 @@ function distancias(km) {
   if (!km) return { d: dist, porCarretera: () => false };
   const carr = (a, b) => (a.cod != null && b.cod != null && a.cod !== b.cod ? km(a.cod, b.cod) : null);
   return {
-    d: (a, b) => { const v = carr(a, b); return Number.isFinite(v) ? v : dist(a, b); },
+    // Nunca menos que la línea recta: ORS lleva cada colegio a la vía más cercana, y dos colegios vecinos
+    // pueden caer en el mismo punto (0 km)
+    d: (a, b) => { const v = carr(a, b), l = dist(a, b); return Number.isFinite(v) ? Math.max(v, l) : l; },
     porCarretera: (a, b) => Number.isFinite(carr(a, b))
   };
 }

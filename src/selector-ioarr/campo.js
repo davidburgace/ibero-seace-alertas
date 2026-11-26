@@ -14,7 +14,8 @@
 //       reemplazar = true: el reparto completo (borra el anterior); si no, cambia solo esos colegios (null = sin asignar)
 // Distancias por carretera entre colegios (migración 038, tabla campo_distancias; ver carretera.js):
 //   GET /api/campo/proyectos/:id/carretera[?codigos=a,b]  → { disponible, pares: { 'codA|codB': km | null }, incompleto }
-//       sin codigos, los del proyecto que ve el usuario (el supervisor, los suyos); hasta 200 colegios
+//       sin codigos, los del proyecto que ve el usuario (el supervisor, los suyos); hasta 400 colegios;
+//       solo los pares a menos de 30 km en línea recta
 // Colegios visitados (migración 021, tabla campo_visitas; una fila por local):
 //   GET    /api/campo/visitas          → { códigoLocal: { fecha, por, mia } } (el supervisor, solo de sus colegios)
 //   PUT    /api/campo/visitas/:codigo  → marca el local como visitado ({ fecha? } 'AAAA-MM-DD', por defecto hoy en Perú);

@@ -208,8 +208,9 @@ async function aplicarVer() {
 // ─── Distancias por carretera ───────────────────────────────────────────────
 // Los km por carretera entre los colegios de «Colegios del proyecto» (el supervisor: los suyos). Lo que ya
 // llegó se guarda en el equipo por proyecto (sirve sin señal) y va al worker antes de buscar; después se
-// piden al servidor los que falten. Con más de MAX_CARRETERA colegios, todo en línea recta.
-const MAX_CARRETERA = 200;
+// piden al servidor los que falten. Con más de MAX_CARRETERA colegios, todo en línea recta. Si el servidor no
+// alcanzó a pedirlos todos (ORS admite 40 consultas por minuto), se pide de nuevo al minuto.
+const MAX_CARRETERA = 400, REINTENTO_CARRETERA = 65000, MAX_REINTENTOS_CARRETERA = 8;
 const claveCarretera = () => `carretera:${S.yo || 'yo'}:${S.proy.id}`;
 async function prepararCarretera() {
   const P = S.proy;
@@ -224,7 +225,7 @@ async function prepararCarretera() {
   S.carr = { estado: Object.keys(pares).length ? 'guardado' : 'no', aviso: '' };
   return cods.length > 1 ? { proy: P.id, ver: S.ver, cods, pares } : null;
 }
-async function pedirCarretera(pedido) {
+async function pedirCarretera(pedido, intento = 0) {
   if (!pedido) return;
   const sigue = () => S.proy?.id === pedido.proy && S.ver === pedido.ver;
   const q = S.rol === 'supervisor' ? '' : '?codigos=' + encodeURIComponent(pedido.cods.join(','));
@@ -241,7 +242,11 @@ async function pedirCarretera(pedido) {
   Object.assign(pares, r.pares);
   store(claveCarretera(), { pares });
   await w('carretera', { pares });
-  S.carr = { estado: r.incompleto ? 'parcial' : 'ok', aviso: r.incompleto ? 'Faltan algunas distancias por carretera (se piden de nuevo la próxima vez): esos tramos van en línea recta.' : '' };
+  const reintentar = r.incompleto && intento < MAX_REINTENTOS_CARRETERA;
+  S.carr = { estado: r.incompleto ? 'parcial' : 'ok', aviso: !r.incompleto ? ''
+    : reintentar ? 'Todavía se están calculando algunas distancias por carretera (en un minuto se piden las que faltan): por ahora, esos tramos van en línea recta.'
+    : 'Faltan algunas distancias por carretera (se piden de nuevo la próxima vez): esos tramos van en línea recta.' };
+  if (reintentar) setTimeout(() => { if (sigue()) pedirCarretera(pedido, intento + 1); }, REINTENTO_CARRETERA);
   // Con distancias nuevas, el plan de hoy se rehace una vez con ellas
   if (nuevos && S.vis) { await agrupar(true); toast('El plan de hoy se rehízo con las distancias por carretera.'); }
   else pintarVisitas();

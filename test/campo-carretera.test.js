@@ -2,14 +2,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { matrizOrs, distanciasCarretera, carreteraProyecto, clavePar, URL_ORS, MAX_COLEGIOS_CARRETERA, AVISO_MIGRACION_CARRETERA } from '../src/selector-ioarr/carretera.js';
+import { matrizOrs, distanciasCarretera, carreteraProyecto, clavePar, URL_ORS, MAX_COLEGIOS_CARRETERA, AVISO_MIGRACION_CARRETERA, RADIO_KM, MAX_PEDIDOS_ORS } from '../src/selector-ioarr/carretera.js';
 import { agruparVisitas, conDesvio } from '../src/selector-ioarr/visitas.js';
 import { haversine } from '../src/selector-ioarr/cercania.js';
 import { crearApiCampo } from '../src/selector-ioarr/campo.js';
 import { supabaseMemoria } from './helpers/supabase-memoria.js';
 
-// Puntos en una línea, a ~1,1 km uno del otro
-const fila = (n, pre = 'C') => Array.from({ length: n }, (_, i) => ({ cod: `${pre}${String(i).padStart(3, '0')}`, lat: -17.1 - i * 0.01, lon: -70.9 }));
+// Puntos en una línea, a ~1,1 km uno del otro (paso en grados de latitud)
+const fila = (n, pre = 'C', paso = 0.01) => Array.from({ length: n }, (_, i) => ({ cod: `${pre}${String(i).padStart(3, '0')}`, lat: -17.1 - i * paso, lon: -70.9 }));
+// Cuadrícula de n colegios separados `paso` grados
+const grilla = (n, paso) => Array.from({ length: n }, (_, i) => ({ cod: 'G' + String(i).padStart(4, '0'), lat: -17 - Math.floor(i / 20) * paso, lon: -71 + (i % 20) * paso }));
+const pares = ps => { let n = 0; for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) if (haversine(ps[i].lat, ps[i].lon, ps[j].lat, ps[j].lon) <= RADIO_KM) n++; return n; };
 
 // ORS simulado: distancia = 1,5 × línea recta; `sinVia`: puntos que no están cerca de ninguna vía (error 6010)
 function orsFalso({ sinVia = [], fallaDesde = Infinity, factor = 1.5 } = {}) {
@@ -20,11 +23,12 @@ function orsFalso({ sinVia = [], fallaDesde = Infinity, factor = 1.5 } = {}) {
     const b = JSON.parse(opts.body);
     pedidos.push(b);
     assert.deepEqual(b.metrics, ['distance']); assert.equal(b.units, 'km');
-    assert.ok(b.locations.length <= 50, 'hasta 50 lugares por pedido');
+    const src = b.sources ?? b.locations.map((_, i) => i), dst = b.destinations ?? b.locations.map((_, i) => i);
+    assert.ok(src.length * dst.length <= 3500, 'hasta 3 500 celdas por pedido');
     if (pedidos.length > fallaDesde) return { ok: false, status: 429, json: async () => ({ error: 'Rate Limit Exceeded' }) };
     const malo = b.locations.findIndex(([lon, lat]) => sinVia.some(p => p.lat === lat && p.lon === lon));
     if (malo >= 0) return { ok: false, status: 404, json: async () => ({ error: { code: 6010, message: `Could not find routable point within a radius of 350.0 meters of specified coordinate ${malo}: ${b.locations[malo].join(' ')}.` } }) };
-    const distances = b.locations.map(([o1, a1]) => b.locations.map(([o2, a2]) => haversine(a1, o1, a2, o2) * factor));
+    const distances = src.map(i => dst.map(j => { const [o1, a1] = b.locations[i], [o2, a2] = b.locations[j]; return haversine(a1, o1, a2, o2) * factor; }));
     return { ok: true, status: 200, json: async () => ({ distances }) };
   };
   return { f, pedidos };
@@ -53,22 +57,47 @@ test('matrizOrs: otro error (límite de consultas) se lanza con el estado', asyn
   await assert.rejects(matrizOrs(fila(3), { key: 'clave-ors', fetch: ors.f }), e => e.status === 429 && /429/.test(e.message));
 });
 
-test('distanciasCarretera: por bloques de 25, se guarda en Supabase y no se vuelve a pedir', async () => {
-  const sb = supabaseMemoria({ campo_distancias: [] }), ps = fila(30), ors = orsFalso();
+test('distanciasCarretera: por bloques, se guarda en Supabase y no se vuelve a pedir', async () => {
+  const sb = supabaseMemoria({ campo_distancias: [] }), ps = fila(30, 'C', 0.005), ors = orsFalso();
   const r = await distanciasCarretera(sb, ps, { key: 'clave-ors', fetch: ors.f });
   assert.equal(r.incompleto, false);
   assert.equal(Object.keys(r.pares).length, 30 * 29 / 2);
-  // bloques [0-24] y [25-29]: el primero consigo mismo y los dos juntos (que ya trae los pares del segundo)
+  // dos bloques de orígenes (25 y 5), cada uno con sus destinos en un pedido
   assert.equal(ors.pedidos.length, 2);
-  const fila0 = sb.from('campo_distancias');
-  const { data } = await fila0.select('*');
+  const { data } = await sb.from('campo_distancias').select('*');
   assert.equal(data.length, 435);
   assert.ok(data.every(d => d.cod_a < d.cod_b), 'el código menor primero');
   // otra vez, con uno nuevo: solo se piden sus pares
-  const r2 = await distanciasCarretera(sb, [...ps, { cod: 'Z999', lat: -17.5, lon: -70.9 }], { key: 'clave-ors', fetch: ors.f });
+  const r2 = await distanciasCarretera(sb, [...ps, { cod: 'Z999', lat: -17.2, lon: -70.9 }], { key: 'clave-ors', fetch: ors.f });
   assert.equal(Object.keys(r2.pares).length, 31 * 30 / 2);
-  assert.equal(ors.pedidos.length, 3, 'solo los bloques con pares nuevos: un pedido más');
+  assert.ok(ors.pedidos.length <= 4, 'solo los bloques con pares nuevos');
   assert.ok(r2.pares[clavePar('Z999', 'C000')] > 0);
+  const antes = ors.pedidos.length;
+  await distanciasCarretera(sb, [...ps, { cod: 'Z999', lat: -17.2, lon: -70.9 }], { key: 'clave-ors', fetch: ors.f });
+  assert.equal(ors.pedidos.length, antes, 'con todo guardado, no se pide nada');
+});
+
+test('distanciasCarretera: solo los pares a menos de 30 km en línea recta, y no se vuelven a pedir los lejanos', async () => {
+  const sb = supabaseMemoria({ campo_distancias: [] }), ps = fila(40, 'C', 0.02), ors = orsFalso();   // 40 colegios en ~86 km
+  const r = await distanciasCarretera(sb, ps, { key: 'clave-ors', fetch: ors.f });
+  assert.equal(Object.keys(r.pares).length, pares(ps));
+  assert.ok(pares(ps) < 40 * 39 / 2);
+  assert.equal(r.pares[clavePar('C000', 'C039')], undefined, 'a 86 km: no se pide');
+  const n = ors.pedidos.length;
+  await distanciasCarretera(sb, ps, { key: 'clave-ors', fetch: ors.f });
+  assert.equal(ors.pedidos.length, n);
+});
+
+test('distanciasCarretera: 400 colegios de un supervisor, con pocos pedidos; si pasan del tope, sigue en la próxima', async () => {
+  // 400 colegios en una cuadrícula de 20 × 20 cada ~3,3 km (66 km de lado): un supervisor de una región grande
+  const ps = grilla(400, 0.03), sb = supabaseMemoria({ campo_distancias: [] }), ors = orsFalso();
+  const r = await distanciasCarretera(sb, ps, { key: 'clave-ors', fetch: ors.f, maxPedidos: 10 });
+  assert.equal(r.incompleto, true); assert.equal(ors.pedidos.length, 10);
+  let vueltas = 1, ult = r;
+  while (ult.incompleto && vueltas < 10) { ult = await distanciasCarretera(sb, ps, { key: 'clave-ors', fetch: ors.f, maxPedidos: 10 }); vueltas++; }
+  assert.equal(ult.incompleto, false);
+  assert.equal(Object.keys(ult.pares).length, pares(ps));
+  assert.ok(ors.pedidos.length <= MAX_PEDIDOS_ORS * 2, `${ors.pedidos.length} pedidos en total`);
 });
 
 test('distanciasCarretera: el colegio sin vía queda «sin ruta» (null); si ORS se corta, devuelve lo que tiene', async () => {
@@ -76,11 +105,12 @@ test('distanciasCarretera: el colegio sin vía queda «sin ruta» (null); si ORS
   const r = await distanciasCarretera(sb, ps, { key: 'clave-ors', fetch: orsFalso({ sinVia: [ps[1]] }).f });
   assert.equal(r.pares[clavePar('C000', 'C001')], null);
   assert.ok(r.pares[clavePar('C000', 'C002')] > 0);
-  // 30 colegios y ORS falla en el segundo pedido: incompleto, con el primer bloque guardado
+  // 30 colegios y ORS falla en el segundo pedido: incompleto, con lo del primer bloque guardado
   const sb2 = supabaseMemoria({ campo_distancias: [] });
-  const r2 = await distanciasCarretera(sb2, fila(30), { key: 'clave-ors', fetch: orsFalso({ fallaDesde: 1 }).f });
+  const r2 = await distanciasCarretera(sb2, fila(30, 'C', 0.005), { key: 'clave-ors', fetch: orsFalso({ fallaDesde: 1 }).f });
   assert.equal(r2.incompleto, true); assert.match(r2.error, /429/);
-  assert.equal(Object.keys(r2.pares).length, 25 * 24 / 2);
+  assert.ok(Object.keys(r2.pares).length > 0 && Object.keys(r2.pares).length < 435);
+  assert.equal((await sb2.from('campo_distancias').select('*')).data.length, Object.keys(r2.pares).length);
 });
 
 test('carreteraProyecto: sin clave, sin proyecto, demasiados colegios, sin la migración', async () => {
@@ -159,6 +189,13 @@ test('agrupar sin carretera: el mismo resultado que antes, con los km de cada tr
     assert.equal(d.carretera, false); assert.equal(d.aprox, false);
     d.puntos.slice(0, -1).forEach((p, j) => assert.ok(Math.abs(p.kmSig - haversine(p.lat, p.lon, d.puntos[j + 1].lat, d.puntos[j + 1].lon)) < 1e-9));
   }
+});
+
+test('agrupar con carretera: un tramo nunca muestra menos que la línea recta (colegios vecinos en el mismo punto de la vía)', () => {
+  const ps = [{ cod: 'A', lat: -6.78, lon: -79.54406 }, { cod: 'B', lat: -6.77974, lon: -79.54417 }];   // a 31 m
+  const [d] = agruparVisitas(ps, 8, { km: () => 0 });
+  assert.ok(d.puntos[0].carrSig);
+  assert.ok(Math.abs(d.puntos[0].kmSig - d.puntos[0].lineaSig) < 1e-9 && d.puntos[0].kmSig > 0.02);
 });
 
 test('conDesvio: más del doble y al menos 5 km más', () => {
