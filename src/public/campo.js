@@ -11,7 +11,7 @@
 // fichas (campo-equipo.js). Al volver la señal, sincronizarEquipo() sube lo pendiente y la barra lo muestra.
 import { DEF, NIVN, NIVS, NIVB, FILTRO_VACIO, coordValidas } from '/selector-ioarr/calculo.js';
 import { limitarN as limitarNBase, N_MAX, N_MAX_PROYECTO, haversine } from '/selector-ioarr/cercania.js';
-import { limitarPorDia, limitarMaxKm, colorDia, tramosRutaDia, cuotasIguales, AVISO_VISITAS, COLORES_DIA, GRIS_DIA } from '/selector-ioarr/visitas.js';
+import { limitarPorDia, limitarMaxKm, colorDia, tramosRutaDia, cuotasIguales, conDesvio, AVISO_VISITAS, AVISO_VISITAS_CARRETERA, COLORES_DIA, GRIS_DIA } from '/selector-ioarr/visitas.js';
 import { crearMapa, fmtKm } from '/selector-ioarr-mapa.js';
 import { htmlListado, itemListado } from '/selector-ioarr-listado.js';
 import { abrirFicha, sincronizarEquipo, resumenEquipo } from '/campo-ficha.js';
@@ -76,6 +76,7 @@ const S = {
   near: null,               // { lat, lon, n, label, gps }
   filas: [],                // listado actual (de más cerca a más lejos)
   vis: null,                // { porDia, dias, sinCoord }
+  carr: null,               // km por carretera de los colegios del listado: { estado: 'ok'|'parcial'|'guardado'|'no', aviso }
   rol: null, yo: null,
   visitas: null,            // { códigoLocal: { fecha, por, mia } }; null = no disponible (falta la migración 021)
   ocultar: false,           // «Ocultar visitados»: no se listan los colegios ya visitados
@@ -108,7 +109,7 @@ async function boot() {
   try { S.idx = await fetch(BASE_DATOS + 'index.json').then(r => { if (!r.ok) throw new Error(r.status); return r.json(); }); }
   catch { $('cInfo').innerHTML = '<span class="err">No se pudo cargar la lista de regiones. Revisa tu conexión y recarga.</span>'; return; }
   $('cRegion').innerHTML = S.idx.regiones.map(g => `<option value="${esc(g.nombre)}">${esc(g.nombre)}</option>`).join('');
-  $('cFuente').textContent = `Fuente: ${S.idx.fuente}. Ubicaciones y direcciones declaradas en el padrón de ESCALE; pueden tener error. Las distancias son en línea recta.`;
+  $('cFuente').textContent = `Fuente: ${S.idx.fuente}. Ubicaciones y direcciones declaradas en el padrón de ESCALE; pueden tener error. Las distancias a tu ubicación o al centro son en línea recta; en el plan de hoy, las distancias entre colegios son por carretera cuando se conocen.`;
   if ('serviceWorker' in navigator && window.isSecureContext) navigator.serviceWorker.register('/campo-sw.js', { scope: '/campo' }).catch(e => console.warn('Service worker', e));
   if (u?.sin_conexion) marcarSinSenal(Date.now());
   addEventListener('online', async () => {
@@ -191,6 +192,7 @@ async function aplicarVer() {
   S.verPendiente = false; $('cVerPend').hidden = true;
   const r = await w('limitar', { codigos: codigosVer() });
   P.nVer = r.n; fijarMaxN();
+  const pedido = await prepararCarretera();
   S.near = null; S.filas = []; S.vis = null;
   $('cDist').value = '-1'; $('cCod').value = '';
   $('cN').value = limitarN(r.n || 1);
@@ -200,6 +202,49 @@ async function aplicarVer() {
   if (c.error) { $('cInfo').textContent = c.error; pintarTodo(true); return; }
   await buscar(c);
   restaurarPlan();
+  pedirCarretera(pedido);
+}
+
+// ─── Distancias por carretera ───────────────────────────────────────────────
+// Los km por carretera entre los colegios de «Colegios del proyecto» (el supervisor: los suyos). Lo que ya
+// llegó se guarda en el equipo por proyecto (sirve sin señal) y va al worker antes de buscar; después se
+// piden al servidor los que falten. Con más de MAX_CARRETERA colegios, todo en línea recta.
+const MAX_CARRETERA = 200;
+const claveCarretera = () => `carretera:${S.yo || 'yo'}:${S.proy.id}`;
+async function prepararCarretera() {
+  const P = S.proy;
+  if (!P) { S.carr = null; await w('carretera', { pares: null }); return null; }
+  const cods = codigosVer() || [];
+  const pares = store(claveCarretera())?.pares || {};
+  await w('carretera', { pares });
+  if (cods.length > MAX_CARRETERA) {
+    S.carr = { estado: Object.keys(pares).length ? 'guardado' : 'no', aviso: `Con más de ${fmt(MAX_CARRETERA)} colegios no se calculan las distancias por carretera${S.rol === 'proveedor' ? ': elige un supervisor en «Colegios del proyecto»' : ''}.` };
+    return null;
+  }
+  S.carr = { estado: Object.keys(pares).length ? 'guardado' : 'no', aviso: '' };
+  return cods.length > 1 ? { proy: P.id, ver: S.ver, cods, pares } : null;
+}
+async function pedirCarretera(pedido) {
+  if (!pedido) return;
+  const sigue = () => S.proy?.id === pedido.proy && S.ver === pedido.ver;
+  const q = S.rol === 'supervisor' ? '' : '?codigos=' + encodeURIComponent(pedido.cods.join(','));
+  let r;
+  try { r = await api(`/api/campo/proyectos/${encodeURIComponent(pedido.proy)}/carretera${q}`); }
+  catch (e) {
+    console.warn('Carretera', e);
+    if (sigue()) { S.carr = { estado: S.carr?.estado === 'guardado' ? 'guardado' : 'no', aviso: sinSenal(e) ? '' : `No se pudieron calcular las distancias por carretera (${e.message}).` }; pintarVisitas(); }
+    return;
+  }
+  if (!sigue()) return;
+  if (!r.disponible) { S.carr = { estado: S.carr?.estado === 'guardado' ? 'guardado' : 'no', aviso: r.aviso || '' }; pintarVisitas(); return; }
+  const pares = pedido.pares, nuevos = Object.keys(r.pares).filter(k => !(k in pares)).length;
+  Object.assign(pares, r.pares);
+  store(claveCarretera(), { pares });
+  await w('carretera', { pares });
+  S.carr = { estado: r.incompleto ? 'parcial' : 'ok', aviso: r.incompleto ? 'Faltan algunas distancias por carretera (se piden de nuevo la próxima vez): esos tramos van en línea recta.' : '' };
+  // Con distancias nuevas, el plan de hoy se rehace una vez con ellas
+  if (nuevos && S.vis) { await agrupar(true); toast('El plan de hoy se rehízo con las distancias por carretera.'); }
+  else pintarVisitas();
 }
 
 // «Actualizar listado»: con todo el proyecto, la misma búsqueda (mismo centro); filtrado, el filtro de nuevo
@@ -556,7 +601,7 @@ async function elegirProyecto(id) {
 // Vuelve a toda la región (sin recargarla) y a la cantidad de colegios que el usuario tenía
 async function quitarProyecto({ rebuscar = true } = {}) {
   const habia = !!S.proy;
-  S.proy = null; S.fichas = null; S.enEquipo = {}; S.ver = 'todo'; S.verPendiente = false; $('cVerPend').hidden = true; store('proyecto', null); $('cProy').value = '';
+  S.proy = null; S.fichas = null; S.enEquipo = {}; S.carr = null; w('carretera', { pares: null }); S.ver = 'todo'; S.verPendiente = false; $('cVerPend').hidden = true; store('proyecto', null); $('cProy').value = '';
   $('cVerCampo').hidden = true; $('cReparto').hidden = true; $('cFichasCampo').hidden = true; $('cEquipoCampo').hidden = true;
   if (!habia) return;
   await w('limitar', { codigos: null });
@@ -688,17 +733,32 @@ function pintarLista() {
   const enPlan = new Set([...S.vis.dias.flatMap(d => d.puntos), ...S.vis.sinCoord].map(p => p.cod));
   const ya = S.visitas ? S.filas.filter(f => S.visitas[f.cod] && !enPlan.has(f.cod)) : [];
   const rep = hoy.puntos.reduce((a, p) => a + p.rep, 0), nv = visitados(hoy.puntos);
-  $('cLista').innerHTML = `<h3 class="dia-titulo" style="--c:${colorDia(1, 1)}"><span class="sw"></span>Hoy${rutaDe()} <span class="sub">${plural(hoy.puntos.length, 'colegio', 'colegios')}${nv ? ` (${fmt(nv)} ${nv === 1 ? 'visitado' : 'visitados'})` : ''} · ~${fmtKm(hoy.km)} km · ${fmt(rep)} a reponer</span></h3>
+  $('cLista').innerHTML = `<h3 class="dia-titulo" style="--c:${colorDia(1, 1)}"><span class="sw"></span>Hoy${rutaDe()} <span class="sub">${plural(hoy.puntos.length, 'colegio', 'colegios')}${nv ? ` (${fmt(nv)} ${nv === 1 ? 'visitado' : 'visitados'})` : ''} · ${kmDia(hoy)} · ${fmt(rep)} a reponer</span></h3>
       ${botonesRuta(hoy, S.proy ? `<button class="btn btn-ghost btn-sm" type="button" id="cImprimirHoy">🖨 Imprimir las fichas de hoy (PDF)</button>` : '')}
-      <ol class="lst">${hoy.puntos.map((p, j) => itemListado({ ...porCod.get(p.cod), orden: p.orden, sig: hoy.puntos[j + 1] }, { ...opts, numero: x => x.orden, km: kmAlSiguiente })).join('')}</ol>`
+      <ol class="lst">${hoy.puntos.map((p, j) => itemListado({ ...porCod.get(p.cod), orden: p.orden, sig: hoy.puntos[j + 1], kmSig: p.kmSig, lineaSig: p.lineaSig, carrSig: p.carrSig },
+        { ...opts, numero: x => x.orden, km: kmAlSiguiente, extra: extraHoy })).join('')}</ol>`
     + (luego.length ? `<details class="dia-luego"><summary class="dia-titulo">Para los próximos días <span class="sub">${plural(luego.length, 'colegio pendiente', 'colegios pendientes')}: mañana se arma el plan del día con ellos</span> <span class="ver">Ver</span></summary><ol class="lst">${luego.map(p => itemListado({ ...porCod.get(p.cod) }, { ...opts, numero: () => '–' })).join('')}</ol></details>` : '')
     + (S.vis.sinCoord.length ? `<h3 class="dia-titulo">Sin coordenadas</h3><ol class="lst">${S.vis.sinCoord.map(p => itemListado({ ...porCod.get(p.cod) }, { ...opts, numero: () => '–' })).join('')}</ol>` : '')
     + (ya.length ? `<h3 class="dia-titulo dia-ya">Ya visitados <span class="sub">${plural(ya.length, 'colegio', 'colegios')}: no entran al plan</span></h3><ol class="lst">${ya.map(f => itemListado({ ...f }, { ...opts, numero: () => '✓' })).join('')}</ol>` : '');
 }
-// En el plan de hoy, la esquina de cada tarjeta dice cuánto hay hasta el siguiente colegio (en línea recta);
-// el último no tiene siguiente
-const kmAlSiguiente = f => f.sig ? { km: haversine(f.lat, f.lon, f.sig.lat, f.sig.lon), txt: '→ ',
-  titulo: `Al siguiente colegio (parada ${f.sig.orden}), en línea recta` } : null;
+// En el plan de hoy, la esquina de cada tarjeta dice cuánto hay hasta el siguiente colegio: por carretera si se
+// sabe; si no, «~» y en línea recta. El último no tiene siguiente. (Un plan guardado antes no trae kmSig.)
+const kmAlSiguiente = f => {
+  if (!f.sig) return null;
+  if (f.kmSig == null) return { km: haversine(f.lat, f.lon, f.sig.lat, f.sig.lon), txt: '→ ', titulo: `Al siguiente colegio (parada ${f.sig.orden}), en línea recta` };
+  return f.carrSig
+    ? { km: f.kmSig, txt: '→ ', titulo: `Al siguiente colegio (parada ${f.sig.orden}), por carretera · en línea recta: ${fmtKm(f.lineaSig)} km` }
+    : { km: f.kmSig, txt: '→ ~', titulo: `Al siguiente colegio (parada ${f.sig.orden}), en línea recta: sin distancia por carretera` };
+};
+// Aviso en la tarjeta cuando por carretera el siguiente queda mucho más lejos que en línea recta
+function extraHoy(f) {
+  const x = extraItem(f);
+  if (f.sig && f.carrSig && conDesvio(f.kmSig, f.lineaSig))
+    x.cuerpo = (x.cuerpo || '') + `<div class="lst-desvio">⚠ Al siguiente colegio hay ${fmtKm(f.kmSig)} km por carretera, aunque en línea recta está a ${fmtKm(f.lineaSig)} km.</div>`;
+  return x;
+}
+// Km de la ruta del día: por carretera, con partes en línea recta, o todo en línea recta
+const kmDia = d => !d.carretera ? `~${fmtKm(d.km)} km en línea recta` : d.aprox ? `~${fmtKm(d.km)} km (parte en línea recta)` : `${fmtKm(d.km)} km por carretera`;
 // En el título del plan: de quién es la ruta, si el proveedor eligió un supervisor
 const rutaDe = () => S.rol === 'proveedor' && S.proy?.asig && S.ver !== 'todo' ? ` · ${S.ver === 'sin' ? 'sin asignar' : S.ver === S.yo ? 'mis colegios' : 'ruta de ' + esc(corto(correoSup(S.ver)))}` : '';
 // «Ruta del día en Google Maps»: un enlace, o uno por tramo si el día pasa de 10 colegios
@@ -743,9 +803,10 @@ function pintarVisitas() {
   $('cVisMezcla').hidden = supsHoy.size < 2;
   if (supsHoy.size > 1) $('cVisMezcla').textContent = `El plan de hoy junta colegios de ${fmt(supsHoy.size)} ${supsHoy.has('') ? 'supervisores (o sin asignar)' : 'supervisores'}: con «Todo el proyecto» no se mira el reparto. Para simular la ruta de uno, elígelo en «Ruta de».`;
   $('cVisAvance').innerHTML = `<b>Pendientes: ${fmt(A.pend)}</b> de ${fmt(A.total)}${A.vis ? ` · ${fmt(A.vis)} ${A.vis === 1 ? 'visitado' : 'visitados'}` : ''} · <b>hoy: ${plural(hoy.puntos.length, 'colegio', 'colegios')}</b>${quedan ? ` · a este ritmo faltan unos ${plural(quedan, 'día', 'días')} más` : ''}.`;
-  const lim = V.maxKm ? ` y con no más de ${fmt(V.maxKm)} km entre dos de ellos` : '';
+  const carr = !!hoy.carretera;
+  const lim = V.maxKm ? ` y con no más de ${fmt(V.maxKm)} km${carr ? ' por carretera' : ''} entre dos de ellos` : '';
   const desde = V.desde ? `, empezando por el más cercano ${esc(aCentro(V.desde))}` : '';
-  $('cVisAviso').innerHTML = `El plan de hoy tiene hasta ${fmt(V.porDia)} colegios cercanos entre sí${lim}${desde}, en una ruta aproximada. ${esc(AVISO_VISITAS)} Queda guardado en este equipo hasta el final del día: marcar visitas o recargar no lo cambia. Mañana se arma de nuevo con los colegios que falten (los visitados no entran; el que no alcanzaste entra solo). También se rehace con «Rehacer el plan de hoy» o al cambiar el centro.`;
+  $('cVisAviso').innerHTML = `El plan de hoy tiene hasta ${fmt(V.porDia)} colegios cercanos entre sí${lim}${desde}, en una ruta aproximada. ${esc(carr ? AVISO_VISITAS_CARRETERA : AVISO_VISITAS)}${S.carr?.aviso ? ' ' + esc(S.carr.aviso) : ''} Queda guardado en este equipo hasta el final del día: marcar visitas o recargar no lo cambia. Mañana se arma de nuevo con los colegios que falten (los visitados no entran; el que no alcanzaste entra solo). También se rehace con «Rehacer el plan de hoy» o al cambiar el centro.`;
 }
 
 async function asegurarMapa() {
@@ -775,7 +836,9 @@ async function pintarMapa(ajustar) {
     // El día de hoy, con los km de cada tramo; con «Todos», también los demás colegios del listado, tenues
     const otros = S.mapaTodos ? (await w('puntos')).puntos : [];
     m.pintarVisitas(S.vis.dias.slice(0, 1), 0, ajustar, 1, { kmTramos: true, otros });
-    $('cMapaInfo').textContent = 'Número = orden de visita; línea punteada = ruta aproximada, con los km en línea recta de cada tramo.'
+    $('cMapaInfo').textContent = (S.vis.dias[0]?.carretera
+      ? 'Número = orden de visita; línea punteada = orden de la ruta (no el camino), con los km por carretera de cada tramo («~» = en línea recta).'
+      : 'Número = orden de visita; línea punteada = ruta aproximada, con los km en línea recta de cada tramo.')
       + (S.mapaTodos ? ' Puntos naranjas = los demás colegios.' : '');
   } else {
     const P = S.near ? await w('puntos') : { puntos: [], centro: null };

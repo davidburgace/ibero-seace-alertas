@@ -12,6 +12,9 @@
 //   GET /api/campo/proyectos/:id/fichas-zip      fichas de verificación (Excel y PDF) de los colegios del supervisor que
 //       las pide; el proveedor dueño, de todos (?paquete=<supervisorId>|sin para uno). Lo arma fichasZip (router.js)
 //       reemplazar = true: el reparto completo (borra el anterior); si no, cambia solo esos colegios (null = sin asignar)
+// Distancias por carretera entre colegios (migración 038, tabla campo_distancias; ver carretera.js):
+//   GET /api/campo/proyectos/:id/carretera[?codigos=a,b]  → { disponible, pares: { 'codA|codB': km | null }, incompleto }
+//       sin codigos, los del proyecto que ve el usuario (el supervisor, los suyos); hasta 200 colegios
 // Colegios visitados (migración 021, tabla campo_visitas; una fila por local):
 //   GET    /api/campo/visitas          → { códigoLocal: { fecha, por, mia } } (el supervisor, solo de sus colegios)
 //   PUT    /api/campo/visitas/:codigo  → marca el local como visitado ({ fecha? } 'AAAA-MM-DD', por defecto hoy en Perú);
@@ -50,6 +53,7 @@ import { limpiarFormulario, leerFichaDigital, estadosFichas, guardarFichaDigital
 import { BUCKET_EXPEDIENTE, mimeDe } from './archivos.js';
 import { BIENES_FICHA, RANGOS, FIRMAS, CRITERIOS, MAX_PUESTOS, TOLERANCIA, generarFichaPdf } from './ficha.js';
 import { PDFDocument } from 'pdf-lib';
+import { carreteraProyecto } from './carretera.js';
 
 // Lo que el formulario necesita saber de la ficha (src/public/campo-ficha.js)
 // La guía lleva solo los muebles que entran a la IOARR (los del modelo de la ficha)
@@ -522,6 +526,8 @@ export async function fichasParaEquipo(sb, usuario, proyectoId, pedido, deps) {
 }
 
 // deps.fichasZip(res, proyectoId, paquete): arma el ZIP (src/selector-ioarr/router.js → fichasZipProyecto)
+// deps.ubicaciones(region, codigos): coordenadas del padrón (router.js → ubicacionesLocales); deps.orsKey y
+// deps.fetch, para las pruebas (por defecto, ORS_API_KEY y el fetch global)
 export function crearApiCampo(sb = supabase, deps = {}) {
   const api = express.Router();
   const fallo = (res, next) => e => faltaMigracion(e) ? res.status(503).json({ error: AVISO_MIGRACION_CAMPO }) : next(e);
@@ -535,6 +541,13 @@ export function crearApiCampo(sb = supabase, deps = {}) {
   api.get('/proyectos/:id', (req, res, next) =>
     proyectoCampo(sb, req.usuario, req.params.id)
       .then(p => p ? res.json(p) : res.status(404).json({ error: 'Proyecto no encontrado' }), fallo(res, next)));
+
+  api.get('/proyectos/:id/carretera', (req, res, next) => {
+    if (!deps.ubicaciones) return res.json({ disponible: false, pares: {} });
+    carreteraProyecto(sb, req.usuario, req.params.id, req.query.codigos,
+      { proyectoCampo, ubicaciones: deps.ubicaciones, key: deps.orsKey ?? process.env.ORS_API_KEY, fetch: deps.fetch })
+      .then(r => res.status(r.status).json(r.body), fallo(res, next));
+  });
 
   const falloAsig = (res, next) => e => faltaMigracion(e) ? res.status(503).json({ error: AVISO_MIGRACION_ASIGNACIONES }) : next(e);
   api.get('/supervisores', (req, res, next) => req.usuario.rol !== 'proveedor'

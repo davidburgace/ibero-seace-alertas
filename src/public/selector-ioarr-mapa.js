@@ -116,7 +116,8 @@ export async function crearMapa(box, { onPunto, onSel }) {
     // Días de visita: puntos numerados por orden y la ruta aproximada de cada día.
     // activo: 0 = todos los días; n = resalta el día n (los demás quedan en gris)
     // total: cantidad de días del plan (puede ser mayor que los que se dibujan)
-    // kmTramos: en los días resaltados, etiqueta con los km (en línea recta) en la mitad de cada tramo
+    // kmTramos: en los días resaltados, etiqueta con los km en la mitad de cada tramo: los del plan (kmSig, por
+    //   carretera si el día la usa; «~» = ese tramo va en línea recta) o, sin ellos, en línea recta
     // otros: más colegios ({cod, nom, dist, lat, lon, est, rep}) que se dibujan tenues, sin número ni ruta
     pintarVisitas(dias, activo, ajustar, total = dias.length, { kmTramos = false, otros = [] } = {}) {
       map.invalidateSize();
@@ -134,9 +135,9 @@ export async function crearMapa(box, { onPunto, onSel }) {
         const ll = d.puntos.map(p => [p.lat, p.lon]);
         if (ll.length > 1) L.polyline(ll, { color: c, weight: resaltado ? 3 : 2, opacity: resaltado ? 0.9 : 0.35, dashArray: '6 6', interactive: false }).addTo(grupo);
         if (kmTramos && resaltado) d.puntos.slice(1).forEach((b, j) => {
-          const a = d.puntos[j], km = haversine(a.lat, a.lon, b.lat, b.lon);
+          const a = d.puntos[j], km = a.kmSig ?? haversine(a.lat, a.lon, b.lat, b.lon), aprox = d.carretera && !a.carrSig ? '~' : '';
           const m = L.marker([(a.lat + b.lat) / 2, (a.lon + b.lon) / 2], { interactive: false, keyboard: false, zIndexOffset: 500,
-            icon: L.divIcon({ className: 'km-tramo', html: `<span style="border-color:${c}">${fmtKm(km)} km</span>`, iconSize: null }) }).addTo(grupo);
+            icon: L.divIcon({ className: 'km-tramo', html: `<span style="border-color:${c}">${aprox}${fmtKm(km)} km</span>`, iconSize: null }) }).addTo(grupo);
           tramos.push({ m, a: [a.lat, a.lon], b: [b.lat, b.lon] });
         });
         for (const p of d.puntos) {

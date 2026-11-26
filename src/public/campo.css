@@ -56,6 +56,7 @@ header{ padding-bottom:16px; }
 .lst-item.visitado{ background:var(--surface2); }
 .lst-item.visitado .lst-n{ background:var(--bueno); color:#fff; }
 .lst-visita{ font-size:13px; font-weight:600; color:var(--bueno); }
+.lst-desvio{ margin-top:4px; font-size:13px; font-weight:600; color:#9a5f0c; }
 
 /* Listado y mapa: lado a lado en escritorio; en celular, una vista a la vez */
 .vista-tabs{ display:none; }
